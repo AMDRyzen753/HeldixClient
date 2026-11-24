@@ -46,6 +46,8 @@ public final class LoaderCore {
 	private static final List<LoadedMod> LOADED = new ArrayList<>();
 	private static final List<ModInfo> MODS = new ArrayList<>();
 	private static final List<String> PROBLEMS = new CopyOnWriteArrayList<>();
+	/** Mods mit eigenen Ressourcen (pack.mcmeta in der JAR) */
+	private static final List<ModResourcePacks.ModPack> RESOURCE_PACKS = new ArrayList<>();
 	private static boolean booted;
 	private static boolean initialized;
 
@@ -78,6 +80,7 @@ public final class LoaderCore {
 			LOADED.add(new LoadedMod(meta, info));
 			MODS.add(info);
 			ModTranslations.load(candidate.file());
+			if (hasPackMeta(candidate.file())) RESOURCE_PACKS.add(new ModResourcePacks.ModPack(meta.id, meta.displayName(), candidate.file()));
 		}
 
 		// Transformer der Mods (nach denen des Loaders)
@@ -145,6 +148,18 @@ public final class LoaderCore {
 
 	public static List<ModInfo> mods() {
 		return Collections.unmodifiableList(MODS);
+	}
+
+	static List<ModResourcePacks.ModPack> resourcePacks() {
+		return Collections.unmodifiableList(RESOURCE_PACKS);
+	}
+
+	private static boolean hasPackMeta(Path jar) {
+		try (JarFile archive = new JarFile(jar.toFile())) {
+			return archive.getJarEntry("pack.mcmeta") != null;
+		} catch (Exception e) {
+			return false;
+		}
 	}
 
 	public static List<String> problems() {

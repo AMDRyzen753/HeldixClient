@@ -29,6 +29,10 @@ export interface LaunchContext {
   memoryMb: number;
   resolution: { width: number; height: number } | null;
   extraJvmArgs: string[];
+  /** zusätzliche Spielargumente, z. B. --graphicsBackend vulkan */
+  extraGameArgs?: string[];
+  /** Direkt in eine Welt oder auf einen Server starten (Quick Play) */
+  quickPlay?: { singleplayer?: string; multiplayer?: string };
   launcherName: string;
   launcherVersion: string;
 }
@@ -40,8 +44,8 @@ export function buildLaunchArguments(ctx: LaunchContext): string[] {
     is_demo_user: false,
     has_custom_resolution: ctx.resolution != null,
     has_quick_plays_support: false,
-    is_quick_play_singleplayer: false,
-    is_quick_play_multiplayer: false,
+    is_quick_play_singleplayer: Boolean(ctx.quickPlay?.singleplayer),
+    is_quick_play_multiplayer: Boolean(ctx.quickPlay?.multiplayer),
     is_quick_play_realms: false,
   };
 
@@ -68,6 +72,8 @@ export function buildLaunchArguments(ctx: LaunchContext): string[] {
     launcher_version: ctx.launcherVersion,
     resolution_width: String(ctx.resolution?.width ?? 854),
     resolution_height: String(ctx.resolution?.height ?? 480),
+    quickPlaySingleplayer: ctx.quickPlay?.singleplayer ?? '',
+    quickPlayMultiplayer: ctx.quickPlay?.multiplayer ?? '',
   };
   const fill = (arg: string) => arg.replace(/\$\{([a-zA-Z_]+)\}/g, (match, key: string) => vars[key] ?? match);
 
@@ -92,7 +98,7 @@ export function buildLaunchArguments(ctx: LaunchContext): string[] {
   if (ctx.loggingConfig && version.logging?.client) {
     args.push(version.logging.client.argument.replace('${path}', ctx.loggingConfig));
   }
-  args.push(...ctx.extraJvmArgs, version.mainClass, ...game.map(fill));
+  args.push(...ctx.extraJvmArgs, version.mainClass, ...game.map(fill), ...(ctx.extraGameArgs ?? []));
   return args;
 }
 

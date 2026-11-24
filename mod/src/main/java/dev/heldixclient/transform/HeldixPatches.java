@@ -26,6 +26,9 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 	private static final String SELECTION_LIST = "net/minecraft/client/gui/components/AbstractSelectionList";
 	private static final String TITLE = "net/minecraft/client/gui/screens/TitleScreen";
 	private static final String SCREEN = "net/minecraft/client/gui/screens/Screen";
+	private static final String GAME_RENDERER = "net/minecraft/client/renderer/GameRenderer";
+	private static final String DEBUG_OVERLAY = "net/minecraft/client/gui/components/DebugScreenOverlay";
+	private static final String FRAMERATE = "com/mojang/blaze3d/platform/FramerateLimitTracker";
 
 	private static final String G = "L" + GRAPHICS + ";";
 	private static final String L_TITLE = "L" + TITLE + ";";
@@ -34,7 +37,7 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 
 	@Override
 	public Set<String> targets() {
-		return Set.of(CAMERA, MINECRAFT, MOUSE, GRAPHICS, SELECTION_LIST, TITLE);
+		return Set.of(CAMERA, MINECRAFT, MOUSE, GRAPHICS, SELECTION_LIST, TITLE, GAME_RENDERER, DEBUG_OVERLAY, FRAMERATE);
 	}
 
 	@Override
@@ -49,6 +52,16 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 			case GRAPHICS -> graphics(node);
 			case SELECTION_LIST -> selectionList(node);
 			case TITLE -> titleScreen(node);
+			// Shader: gewählten Stil zu den Post-Effekten dieses Bildes hinzufügen
+			case GAME_RENDERER -> {
+				MethodNode update = Patches.method(node, "update", "(Lnet/minecraft/client/DeltaTracker;)V");
+				Patches.beforeReturns(update, () -> Code.begin().loadThis()
+						.invokeVirtual(GAME_RENDERER, "getRequestedPostEffects", "()Ljava/util/List;")
+						.invokeStatic(HOOKS, "postEffects", "(Ljava/util/List;)V"));
+			}
+			case DEBUG_OVERLAY -> debugOverlay(node);
+			// Hintergrund-FPS: Bildrate begrenzen, solange das Fenster nicht im Vordergrund ist
+			case FRAMERATE -> Patches.modifyReturnValue(Patches.method(node, "getFramerateLimit", "()I"), HOOKS, "framerateLimit", "(I)I");
 			default -> {
 			}
 		}
@@ -77,6 +90,14 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 		// blit(pipeline, texture, x, y, u, v, width, height, …)
 		Patches.cancelAtHead(texture, Code.begin().loadThis().loadArgs(texture, 1, 2, 3, 6, 7)
 				.invokeStatic(HOOKS, "texture", "(" + G + IDENTIFIER + "IIII)Z"));
+	}
+
+	/** F3-Menü: Zeilenhintergründe (fill mit Grau) im Heldix-Design zeichnen. */
+	private static void debugOverlay(ClassNode node) {
+		MethodNode lines = Patches.method(node, "extractLines", "(" + G + "Ljava/util/List;ZI)V");
+		// fill(x1, y1, x2, y2, color) -> Hooks.debugLine(g, x1, y1, x2, y2, color, left)
+		Patches.replaceCalls(lines, GRAPHICS, "fill", "(IIIII)V",
+				call -> Code.begin().loadArg(lines, 2).invokeStatic(HOOKS, "debugLine", "(" + G + "IIIIIZ)V"));
 	}
 
 	/** Ausgewählter Listeneintrag: Vanilla zeichnet Rahmen (1. fill) und schwarze Innenfläche (2. fill). */

@@ -1,5 +1,9 @@
 // Test: installiert eine Version und startet sie mit einem Offline-Konto.
-// Aufruf: npm run test:launch -- [version] [heldix|fabric|vanilla] [timeoutSekunden] [--autotest]
+// Aufruf: npm run test:launch -- [version] [heldix|fabric|vanilla] [timeoutSekunden] [--autotest] [--world=<Ordner>]
+//          [--graphics=vulkan|default|opengl] [--no-tuning] [--benchmark[=Sekunden]] [--shader=<stil>] [--boost] [--size=BxH]
+//
+// Grafik wie im Launcher: Standard ist Vulkan mit abgestimmten JVM-Einstellungen.
+// --benchmark (nur heldix): misst die FPS an einer festen Stelle einer festen Welt (siehe mod/autotest Benchmark).
 //
 // Ohne --autotest: Spiel bis zum Hauptmenü starten, Log prüfen, nach 15 s beenden.
 // Mit --autotest (nur heldix): zusätzlich den Heldix-Autotest (mod/autotest) installieren. Er klickt
@@ -8,17 +12,19 @@
 // Nutzt einen eigenen Testordner (<Datenordner>/test-instances).
 
 import AdmZip from 'adm-zip';
-import { copyFile, mkdir, readdir, rm } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { InstanceLoader } from '../shared/api';
+import type { GraphicsApi, InstanceLoader } from '../shared/api';
 import { CLIENT_MOD_PREFIX, DATA_DIR_NAME } from '../main/config';
 import { offlineUuid } from '../main/core/auth';
 import { InstanceStore } from '../main/core/instances';
 import { buildLaunchArguments, startGame } from '../main/core/launch';
+import { GraphicsWatch, graphicsArguments, tunedJvmArguments } from '../main/core/performance';
 import { getVersionManifest } from '../main/core/mojang';
 import { createPaths, defaultDataRoot } from '../main/core/paths';
 import { prepareGame } from '../main/core/prepare';
 import { buildActivity, parseStatusLine } from '../main/core/presence';
+import { validateQuickPlay } from '../main/core/quickplay';
 
 const READY_PATTERNS = [/Sound engine started/i, /Created: \d+x\d+x\d+ minecraft:textures\/atlas\/blocks/i];
 const FAILURE_PATTERNS = [
@@ -33,16 +39,27 @@ const FAILURE_PATTERNS = [
 async function main(): Promise<void> {
   const flags = process.argv.slice(2).filter((a) => a.startsWith('--'));
   const [versionArg, loaderArg = 'heldix', timeoutArg] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-  const autotest = flags.includes('--autotest');
+  const flag = (name: string) => flags.find((f) => f === `--${name}` || f.startsWith(`--${name}=`))?.split('=')[1];
+  const benchmarkFlag = flags.find((f) => f === '--benchmark' || f.startsWith('--benchmark='));
+  const benchmark = benchmarkFlag != null;
+  const benchmarkSeconds = Number(flag('benchmark') ?? 20);
+  const autotest = flags.includes('--autotest') || benchmark;
+  const graphicsApi = (flag('graphics') ?? 'vulkan') as GraphicsApi;
+  if (!['vulkan', 'default', 'opengl'].includes(graphicsApi)) throw new Error(`Unbekannte Grafik-API "${graphicsApi}"`);
+  const tuning = !flags.includes('--no-tuning');
+  const size = /^(\d+)x(\d+)$/.exec(flag('size') ?? (benchmark ? '1600x900' : '854x480'));
+  if (!size) throw new Error('--size erwartet z. B. 1600x900');
+  // Direktstart (Quick Play) in eine Welt aus saves/ der Testinstanz
+  const world = flags.find((f) => f.startsWith('--world='))?.slice('--world='.length);
   const paths = createPaths(process.env.HELDIX_DATA_DIR ?? defaultDataRoot(DATA_DIR_NAME));
   const versionId = versionArg || (await getVersionManifest(paths)).manifest.latest.release;
   const loader = loaderArg as InstanceLoader;
-  const timeoutSeconds = Number(timeoutArg ?? (autotest ? 600 : 240));
+  const timeoutSeconds = Number(timeoutArg ?? (benchmark ? 900 : autotest ? 600 : 240));
   const resources = path.join(__dirname, '..', '..', 'resources');
   const modRepo = path.join(__dirname, '..', '..', '..', 'mod');
-  const gameDir = path.join(paths.root, 'test-instances', `${versionId}-${loader}${autotest ? '-autotest' : ''}`);
+  const gameDir = path.join(paths.root, 'test-instances', `${versionId}-${loader}${benchmark ? '-benchmark' : autotest ? '-autotest' : ''}`);
   console.log(`Datenordner: ${paths.root}`);
-  console.log(`Teste ${versionId} (${loader}${autotest ? ', Autotest' : ''}) in ${gameDir}`);
+  console.log(`Teste ${versionId} (${loader}${benchmark ? ', Benchmark' : autotest ? ', Autotest' : ''}, Grafik ${graphicsApi}${tuning ? ', JVM abgestimmt' : ''}) in ${gameDir}`);
   if (autotest && loader !== 'heldix') throw new Error('--autotest gibt es nur für heldix');
 
   if (loader === 'heldix') {
@@ -56,7 +73,10 @@ async function main(): Promise<void> {
     await mkdir(modsDir, { recursive: true });
     await mkdir(addonsDir, { recursive: true });
     const autotestLibs = path.join(modRepo, 'autotest', 'build', 'libs');
-    const autotestJar = (await readdir(autotestLibs)).find((f) => /^heldix-autotest-.+\.jar$/.test(f));
+    // neueste JAR nehmen: nach einem Versionswechsel liegt die alte noch im Build-Ordner
+    const candidates = (await readdir(autotestLibs)).filter((f) => /^heldix-autotest-.+\.jar$/.test(f));
+    const built = await Promise.all(candidates.map(async (f) => ({ f, time: (await stat(path.join(autotestLibs, f))).mtimeMs })));
+    const autotestJar = built.sort((a, b) => b.time - a.time)[0]?.f;
     if (!autotestJar) throw new Error('mod/autotest ist nicht gebaut – erst "npm run mod" ausführen');
     for (const old of (await readdir(modsDir)).filter((f) => f.startsWith('heldix-autotest-'))) await rm(path.join(modsDir, old));
     await copyFile(path.join(autotestLibs, autotestJar), path.join(modsDir, autotestJar));
@@ -91,6 +111,19 @@ async function main(): Promise<void> {
   console.log(`Vorbereitet in ${((Date.now() - started) / 1000).toFixed(1)} s, Client-Mod: ${prepared.clientModLoaded}, Loader: ${prepared.loaderVersion ?? '-'}`);
 
   const name = 'HeldixTester';
+  const graphicsArgs = graphicsArguments(graphicsApi, prepared.clientJar);
+  const tuningArgs = tuning ? tunedJvmArguments(prepared.javaMajor, []) : [];
+  const testArgs: string[] = [];
+  if (autotest) testArgs.push('-Dheldix.autotest=true');
+  if (autotest && graphicsArgs.length) testArgs.push(`-Dheldix.autotest.backend=${graphicsApi === 'vulkan' ? 'Vulkan' : 'OpenGL'}`);
+  if (benchmark) {
+    testArgs.push('-Dheldix.benchmark=true', `-Dheldix.benchmark.seconds=${benchmarkSeconds}`);
+    if (flag('shader')) testArgs.push(`-Dheldix.benchmark.shader=${flag('shader')}`);
+    if (flags.includes('--boost')) testArgs.push('-Dheldix.benchmark.boost=true');
+  }
+  console.log(`Grafik-Argumente: ${graphicsArgs.join(' ') || '(keine)'}; JVM: ${tuningArgs.join(' ') || '(Standard)'}`);
+  const graphicsWatch = new GraphicsWatch(graphicsArgs.length ? graphicsApi : 'default');
+  const benchmarkLines: string[] = [];
   const args = buildLaunchArguments({
     paths,
     version: prepared.version,
@@ -102,8 +135,10 @@ async function main(): Promise<void> {
     loggingConfig: prepared.loggingConfig,
     account: { name, uuid: offlineUuid(name), accessToken: '0', userType: 'legacy' },
     memoryMb: 2048,
-    resolution: { width: 854, height: 480 },
-    extraJvmArgs: [...prepared.loaderJvmArgs, ...(autotest ? ['-Dheldix.autotest=true'] : [])],
+    resolution: { width: Number(size[1]), height: Number(size[2]) },
+    extraJvmArgs: [...prepared.loaderJvmArgs, ...tuningArgs, ...testArgs],
+    extraGameArgs: graphicsArgs,
+    quickPlay: world ? await validateQuickPlay(gameDir, 'world', world) : undefined,
     launcherName: 'HeldixClient',
     launcherVersion: 'test',
   });
@@ -120,6 +155,12 @@ async function main(): Promise<void> {
   const statusModes: string[] = [];
   const game = startGame(prepared.javaPath, args, prepared.gameDir, (lines) => {
     for (const line of lines) {
+      if (!graphicsWatch.backend) {
+        graphicsWatch.push(line.text);
+        if (graphicsWatch.backend) console.log(`  Grafik-API laut Minecraft: ${graphicsWatch.backend}${graphicsWatch.fellBack ? ' (Vulkan nicht verfügbar, OpenGL als Ersatz)' : ''}`);
+      }
+      const bench = /HELDIX-BENCHMARK: (.*)/.exec(line.text);
+      if (bench) benchmarkLines.push(bench[1]);
       if (/HeldixClient|Heldix|AUTOTEST|Fabric Loader|Loading Minecraft|ERROR|FATAL|Exception/i.test(line.text) || line.level === 'ERROR') {
         console.log(`  [game] ${line.text}`);
       }
@@ -161,9 +202,14 @@ async function main(): Promise<void> {
   }
   if (loader !== 'heldix' && (loaderLines.length > 0 || clientLines.length > 0)) failure ??= `${loader}-Instanz darf den Heldix Loader nicht laden`;
   if (autotest && autotestResult === null) failure ??= 'Autotest hat kein Ergebnis gemeldet';
-  if (loader === 'heldix' && !statusModes.includes('menu')) failure ??= 'HeldixClient hat keinen Status (Hauptmenü) für Discord gemeldet';
+  if (loader === 'heldix' && !world && !statusModes.includes('menu')) failure ??= 'HeldixClient hat keinen Status (Hauptmenü) für Discord gemeldet';
   if (autotest && !statusModes.includes('singleplayer')) failure ??= 'HeldixClient hat den Einzelspieler-Status nicht gemeldet';
+  if (world && !statusModes.includes('singleplayer')) failure ??= `Direktstart: Welt „${world}“ wurde nicht betreten`;
+  if (world && statusModes[0] !== 'singleplayer') failure ??= `Direktstart: zuerst kam ${statusModes[0] ?? 'nichts'} statt der Welt`;
   if (!ready) failure ??= 'Spiel hat den Ladebildschirm nicht erreicht';
+  if (graphicsWatch.crashedDuringGraphicsStart(code)) failure ??= 'Absturz beim Start der Grafik (Vulkan)';
+  if (benchmark && benchmarkLines.length === 0) failure ??= 'Benchmark hat kein Ergebnis gemeldet';
+  for (const result of benchmarkLines) console.log(`BENCHMARK ${result}`);
   if (autotest) console.log(`Screenshots: ${screenshots}`);
   if (failure) {
     console.error(`FEHLGESCHLAGEN: ${failure}`);

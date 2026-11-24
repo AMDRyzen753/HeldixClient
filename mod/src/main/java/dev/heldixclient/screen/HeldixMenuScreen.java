@@ -9,6 +9,10 @@ import dev.heldixclient.loader.HeldixLoader;
 import dev.heldixclient.addon.LoadedAddon;
 import dev.heldixclient.module.Module;
 import dev.heldixclient.module.ModuleManager;
+import dev.heldixclient.render.DebugOverlay;
+import dev.heldixclient.render.Performance;
+import dev.heldixclient.render.ShaderPreset;
+import dev.heldixclient.render.Shaders;
 import dev.heldixclient.ui.Draw;
 import dev.heldixclient.ui.Theme;
 import net.minecraft.ChatFormatting;
@@ -35,12 +39,19 @@ public class HeldixMenuScreen extends Screen {
 	private static final int BUTTON_H = 20;
 	private static final int SMALL_BUTTON_W = 96;
 	private static final int ADDON_DARK = 0xFF065F46;
+	private static final int CHIP_H = 22;
+	private static final int SECTION_H = 14;
+	private static final int SECTION_GAP = 10;
 
-	private enum Tab { MODULES, ADDONS }
+	private enum Tab { MODULES, ADDONS, GRAPHICS }
+
+	/** Schalter im Reiter Grafik */
+	private enum GraphicsToggle { FPS_BOOST, BACKGROUND_FPS }
 
 	private final Screen parent;
 	private final long openedAt = System.nanoTime();
 	private final Map<Module, Float> switchAnim = new HashMap<>();
+	private final Map<GraphicsToggle, Float> toggleAnim = new HashMap<>();
 	private long lastFrame = System.nanoTime();
 	private Tab tab = Tab.MODULES;
 	private double scroll;
@@ -81,8 +92,45 @@ public class HeldixMenuScreen extends Screen {
 			int rows = (ModuleManager.all().size() + cols - 1) / cols;
 			return rows * (CARD_H + GAP) - GAP;
 		}
+		if (tab == Tab.GRAPHICS) return graphicsHeight();
 		int rows = Math.max(1, AddonManager.addons().size());
 		return rows * (ADDON_H + GAP) - GAP + 16;
+	}
+
+	// ---------- Layout: Reiter Grafik ----------
+
+	private int chipCols() {
+		return panelW >= 340 ? 3 : 2;
+	}
+
+	private int chipW() {
+		return (panelW - PAD * 2 - GAP * (chipCols() - 1)) / chipCols();
+	}
+
+	private int chipRows() {
+		return (ShaderPreset.values().length + chipCols() - 1) / chipCols();
+	}
+
+	private int chipX(int index) {
+		return panelX + PAD + (index % chipCols()) * (chipW() + GAP);
+	}
+
+	private int chipY(int index) {
+		return contentY - (int) scroll + SECTION_H + (index / chipCols()) * (CHIP_H + GAP);
+	}
+
+	/** Oberkante der Leistungs-Schalter */
+	private int performanceY() {
+		return contentY - (int) scroll + SECTION_H + chipRows() * (CHIP_H + GAP) - GAP + SECTION_GAP + SECTION_H;
+	}
+
+	private int toggleY(GraphicsToggle toggle) {
+		return performanceY() + (toggle.ordinal() / cols) * (CARD_H + GAP);
+	}
+
+	private int graphicsHeight() {
+		int toggleRows = (GraphicsToggle.values().length + cols - 1) / cols;
+		return SECTION_H + chipRows() * (CHIP_H + GAP) - GAP + SECTION_GAP + SECTION_H + toggleRows * (CARD_H + GAP) - GAP + SECTION_GAP + 10;
 	}
 
 	private int maxScroll() {
@@ -118,7 +166,12 @@ public class HeldixMenuScreen extends Screen {
 	}
 
 	private int tabX(Tab t) {
-		return t == Tab.MODULES ? panelX + PAD : panelX + PAD + tabWidth(Tab.MODULES) + 4;
+		int x = panelX + PAD;
+		for (Tab before : Tab.values()) {
+			if (before == t) break;
+			x += tabWidth(before) + 4;
+		}
+		return x;
 	}
 
 	private int tabWidth(Tab t) {
@@ -126,7 +179,11 @@ public class HeldixMenuScreen extends Screen {
 	}
 
 	private String tabLabel(Tab t) {
-		return t == Tab.MODULES ? "Module  " + ModuleManager.all().size() : "Addons  " + AddonManager.addons().size();
+		return switch (t) {
+			case MODULES -> "Module  " + ModuleManager.all().size();
+			case ADDONS -> "Addons  " + AddonManager.addons().size();
+			case GRAPHICS -> "Grafik";
+		};
 	}
 
 	private int tabY() {
@@ -147,6 +204,19 @@ public class HeldixMenuScreen extends Screen {
 	public int[] addonsTabCenter() {
 		layout();
 		return new int[] {tabX(Tab.ADDONS) + tabWidth(Tab.ADDONS) / 2, tabY() + TAB_H / 2};
+	}
+
+	/** Mitte eines Reiters (MODULES, ADDONS, GRAPHICS) in GUI-Koordinaten (für den Autotest). */
+	public int[] tabCenter(String name) {
+		layout();
+		Tab t = Tab.valueOf(name);
+		return new int[] {tabX(t) + tabWidth(t) / 2, tabY() + TAB_H / 2};
+	}
+
+	/** Mitte der Shader-Kachel Nummer {@code index} im Reiter Grafik (für den Autotest). */
+	public int[] shaderCenter(int index) {
+		layout();
+		return new int[] {chipX(index) + chipW() / 2, chipY(index) + CHIP_H / 2};
 	}
 
 	@Override
@@ -207,6 +277,8 @@ public class HeldixMenuScreen extends Screen {
 			for (int i = 0; i < modules.size(); i++) {
 				drawCard(g, modules.get(i), cardX(i), cardY(i), mouseX, insideContent(mouseX, my) ? my : -1000, dt);
 			}
+		} else if (tab == Tab.GRAPHICS) {
+			drawGraphics(g, mouseX, insideContent(mouseX, my) ? my : -1000, dt);
 		} else {
 			drawAddons(g);
 		}
@@ -270,6 +342,78 @@ public class HeldixMenuScreen extends Screen {
 		String description = fromAddon ? module.source() : module.description();
 		g.text(font, ellipsize(description, textWidth), textX, y + 20, fromAddon ? 0xFF6EE7B7 : Theme.MUTED, false);
 
+		Draw.toggle(g, x + cardW - 28, y + (CARD_H - 10) / 2, t);
+	}
+
+	private void drawGraphics(GuiGraphicsExtractor g, int mouseX, int mouseY, float dt) {
+		int x = panelX + PAD;
+		int w = panelW - PAD * 2;
+		ShaderPreset current = Shaders.current();
+
+		// Shader-Stile
+		Component shaderHead = Component.literal("SHADER").withStyle(ChatFormatting.BOLD);
+		int headY = contentY - (int) scroll;
+		g.text(font, shaderHead, x, headY + 2, Theme.ACCENT_LIGHT, false);
+		int descX = x + font.width(shaderHead) + 8;
+		g.text(font, ellipsize(current.label() + ": " + current.description(), x + w - descX), descX, headY + 2, Theme.MUTED, false);
+		ShaderPreset[] presets = ShaderPreset.values();
+		for (int i = 0; i < presets.length; i++) {
+			int cx = chipX(i);
+			int cy = chipY(i);
+			boolean active = presets[i] == current;
+			boolean hover = Draw.inside(mouseX, mouseY, cx, cy, chipW(), CHIP_H);
+			Draw.rounded2(g, cx, cy, chipW(), CHIP_H,
+					active ? (hover ? Theme.CARD_ACTIVE_HOVER : Theme.CARD_ACTIVE) : (hover ? Theme.CARD_HOVER : Theme.CARD));
+			Draw.outline2(g, cx, cy, chipW(), CHIP_H, active ? Theme.BORDER_ACCENT : Theme.BORDER);
+			String label = ellipsize(presets[i].label(), chipW() - 12);
+			g.text(font, label, cx + (chipW() - font.width(label)) / 2, cy + 7, active ? Theme.TEXT : Theme.MUTED, false);
+		}
+
+		// Leistung
+		int perfHeadY = performanceY() - SECTION_H;
+		g.text(font, Component.literal("LEISTUNG").withStyle(ChatFormatting.BOLD), x, perfHeadY + 2, Theme.ACCENT_LIGHT, false);
+		for (GraphicsToggle toggle : GraphicsToggle.values()) {
+			drawToggle(g, toggle, cardX(toggle.ordinal()), toggleY(toggle), mouseX, mouseY, dt);
+		}
+
+		// Grafik-API (wird im Launcher eingestellt)
+		GraphicsToggle[] toggles = GraphicsToggle.values();
+		int infoY = toggleY(toggles[toggles.length - 1]) + CARD_H + SECTION_GAP;
+		String info = "Grafik-API: " + DebugOverlay.backend() + "  ·  umstellen im Launcher (Einstellungen)  ·  Details mit F3";
+		g.text(font, ellipsize(info, w), x, infoY, Theme.FAINT, false);
+	}
+
+	private boolean toggleOn(GraphicsToggle toggle) {
+		return switch (toggle) {
+			case FPS_BOOST -> Performance.boostEnabled();
+			case BACKGROUND_FPS -> HeldixConfig.get().backgroundFps;
+		};
+	}
+
+	private void drawToggle(GuiGraphicsExtractor g, GraphicsToggle toggle, int x, int y, int mouseX, int mouseY, float dt) {
+		boolean on = toggleOn(toggle);
+		boolean hover = Draw.inside(mouseX, mouseY, x, y, cardW, CARD_H);
+		float t = toggleAnim.getOrDefault(toggle, on ? 1f : 0f);
+		t += ((on ? 1f : 0f) - t) * Math.min(1f, dt * 16f);
+		toggleAnim.put(toggle, t);
+
+		Draw.rounded2(g, x, y, cardW, CARD_H, on ? (hover ? Theme.CARD_ACTIVE_HOVER : Theme.CARD_ACTIVE) : (hover ? Theme.CARD_HOVER : Theme.CARD));
+		Draw.outline2(g, x, y, cardW, CARD_H, Draw.lerp(Theme.BORDER, Theme.BORDER_ACCENT, t));
+		g.fill(x + 3, y + 1, x + cardW - 3, y + 2, Theme.HIGHLIGHT);
+		boolean boost = toggle == GraphicsToggle.FPS_BOOST;
+		String title = boost ? "FPS-Boost" : "Hintergrund-FPS";
+		String description = boost
+				? "Teure Grafik-Effekte aus"
+				: HeldixConfig.get().backgroundFpsLimit + " FPS im Hintergrund";
+		int iconX = x + 8;
+		int iconY = y + (CARD_H - 20) / 2;
+		Draw.rounded2(g, iconX, iconY, 20, 20, Draw.lerp(0x33FFFFFF, Theme.ACCENT, t));
+		Component letter = Component.literal(boost ? "F" : "H").withStyle(ChatFormatting.BOLD);
+		g.text(font, letter, iconX + (20 - font.width(letter)) / 2 + 1, iconY + 6, Theme.TEXT, false);
+		int textX = iconX + 28;
+		int textWidth = cardW - (textX - x) - 32;
+		g.text(font, ellipsize(title, textWidth), textX, y + 8, Theme.TEXT, false);
+		g.text(font, ellipsize(description, textWidth), textX, y + 20, Theme.MUTED, false);
 		Draw.toggle(g, x + cardW - 28, y + (CARD_H - 10) / 2, t);
 	}
 
@@ -363,6 +507,28 @@ public class HeldixMenuScreen extends Screen {
 				if (Draw.inside(mx, my, cardX(i), cardY(i), cardW, CARD_H)) {
 					click();
 					modules.get(i).toggle();
+					return true;
+				}
+			}
+		}
+		if (tab == Tab.GRAPHICS && insideContent(mx, my)) {
+			ShaderPreset[] presets = ShaderPreset.values();
+			for (int i = 0; i < presets.length; i++) {
+				if (Draw.inside(mx, my, chipX(i), chipY(i), chipW(), CHIP_H)) {
+					click();
+					Shaders.select(presets[i]);
+					return true;
+				}
+			}
+			for (GraphicsToggle toggle : GraphicsToggle.values()) {
+				if (Draw.inside(mx, my, cardX(toggle.ordinal()), toggleY(toggle), cardW, CARD_H)) {
+					click();
+					if (toggle == GraphicsToggle.FPS_BOOST) {
+						Performance.setBoost(!Performance.boostEnabled());
+					} else {
+						HeldixConfig.get().backgroundFps = !HeldixConfig.get().backgroundFps;
+						HeldixConfig.save();
+					}
 					return true;
 				}
 			}

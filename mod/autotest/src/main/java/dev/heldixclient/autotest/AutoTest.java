@@ -13,9 +13,14 @@ import dev.heldixclient.loader.api.event.WorldEvents;
 import dev.heldixclient.module.HudModule;
 import dev.heldixclient.module.Module;
 import dev.heldixclient.module.ModuleManager;
+import dev.heldixclient.render.DebugOverlay;
+import dev.heldixclient.render.Performance;
+import dev.heldixclient.render.ShaderPreset;
+import dev.heldixclient.render.Shaders;
 import dev.heldixclient.screen.HeldixMenuScreen;
 import dev.heldixclient.screen.HeldixNavButton;
 import dev.heldixclient.screen.HudEditorScreen;
+import net.minecraft.client.CloudStatus;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -30,6 +35,7 @@ import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.levelgen.presets.WorldPresets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,6 +64,8 @@ public final class AutoTest implements HeldixModInitializer {
 			return;
 		}
 		TestContext test = new TestContext();
+		boolean benchmark = Boolean.getBoolean("heldix.benchmark");
+		if (benchmark) Benchmark.install();
 		ClientEvents.TICK_END.register(minecraft -> test.tick());
 		WorldEvents.JOIN.register(minecraft -> joined = true);
 		WorldEvents.LEAVE.register(minecraft -> left = true);
@@ -65,7 +73,8 @@ public final class AutoTest implements HeldixModInitializer {
 
 		Thread thread = new Thread(() -> {
 			try {
-				scenario(test);
+				if (benchmark) Benchmark.run(test);
+				else scenario(test);
 				LOG.info("HELDIX-AUTOTEST: ERFOLGREICH ({} Prüfungen)", test.checks());
 			} catch (Throwable t) {
 				LOG.error("HELDIX-AUTOTEST: FEHLGESCHLAGEN – {}", t.getMessage(), t);
@@ -109,6 +118,17 @@ public final class AutoTest implements HeldixModInitializer {
 		t.check("Tasten der Mod in den Optionen", t.compute(mc -> Arrays.asList(mc.options.keyMappings).contains(HeldixClient.menuKey)));
 		t.check("Hauptmenü ist das Heldix-Hauptmenü",
 				t.compute(mc -> mc.gui.screen().children().stream().anyMatch(child -> child instanceof HeldixNavButton)));
+
+		// --- Grafik: Ressourcen der Mod, Shader, F3 -----------------------------------------
+		t.check("Ressourcenpaket der Mod ist aktiv",
+				t.compute(mc -> mc.getResourcePackRepository().getSelectedIds().contains("heldix:" + HeldixClient.MOD_ID)));
+		t.check("Shader-Stile liegen in den Ressourcen", t.compute(mc -> mc.getResourceManager()
+				.getResource(Identifier.fromNamespaceAndPath(HeldixClient.MOD_ID, "post_effect/kino.json")).isPresent()));
+		t.check("F3-Eintrag von HeldixClient angemeldet", DebugOverlay.isRegistered());
+		String backend = t.compute(mc -> DebugOverlay.backend());
+		t.log("Grafik-API " + backend);
+		String expectedBackend = System.getProperty("heldix.autotest.backend", "");
+		if (!expectedBackend.isBlank()) t.check("Grafik-API ist " + expectedBackend + " (" + backend + ")", backend.equalsIgnoreCase(expectedBackend));
 
 		// --- Heldix-Addons ----------------------------------------------------------------
 		String addons = t.compute(mc -> AddonManager.addons().stream()
@@ -213,6 +233,8 @@ public final class AutoTest implements HeldixModInitializer {
 		t.screenshot("heldix-06-zoom");
 		t.run(mc -> HeldixClient.zoomKey.setDown(false));
 
+		graphicsTest(t);
+
 		// Welt verlassen
 		t.run(mc -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));
 		t.waitFor("Welt verlassen", mc -> mc.level == null && mc.gui.screen() instanceof TitleScreen, 60);
@@ -237,6 +259,66 @@ public final class AutoTest implements HeldixModInitializer {
 		t.waitTicks(10);
 		t.screenshot("heldix-09-optionen");
 		t.setScreen(() -> titleScreen);
+	}
+
+	/** Shader-Stile, F3-Menü, FPS-Boost und Hintergrund-FPS in der Testwelt. */
+	private static void graphicsTest(TestContext t) {
+		t.setScreen(() -> new HeldixMenuScreen(null));
+		t.waitTicks(5);
+		int[] tab = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabCenter("GRAPHICS"));
+		t.click(tab[0], tab[1]);
+		int[] chip = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).shaderCenter(ShaderPreset.KINO.ordinal()));
+		t.click(chip[0], chip[1]);
+		t.check("Klick auf Shader-Kachel wählt „Kino“", t.compute(mc -> Shaders.current() == ShaderPreset.KINO));
+		t.moveMouse(chip[0], chip[1]);
+		t.waitTicks(5);
+		t.screenshot("heldix-03c-grafik");
+		// nach unten scrollen: Leistungs-Schalter und Grafik-API
+		t.run(mc -> mc.gui.screen().mouseScrolled(chip[0], chip[1], 0, -20));
+		t.waitTicks(3);
+		t.screenshot("heldix-03d-grafik-leistung");
+		t.setScreen(() -> null);
+
+		// Jeder Stil muss sich übersetzen lassen und gezeichnet werden (Vulkan und OpenGL)
+		for (ShaderPreset preset : ShaderPreset.values()) {
+			if (preset == ShaderPreset.OFF) continue;
+			t.run(mc -> Shaders.select(preset));
+			t.waitSoft(mc -> Shaders.isApplied(), 10);
+			t.check("Shader „" + preset.label() + "“ wird gezeichnet", t.compute(mc -> Shaders.isApplied()));
+			if (preset == ShaderPreset.KINO || preset == ShaderPreset.SCHWARZWEISS || preset == ShaderPreset.RETRO) {
+				t.waitTicks(3);
+				t.screenshot("heldix-11-shader-" + preset.key());
+			}
+		}
+		t.run(mc -> Shaders.select(ShaderPreset.OFF));
+		t.waitTicks(3);
+		t.check("Shader aus: kein HeldixClient-Effekt mehr", t.compute(mc -> mc.gameRenderer.getAppliedPostEffects().stream()
+				.noneMatch(id -> id.getNamespace().equals(HeldixClient.MOD_ID))));
+
+		// F3-Menü mit den Zeilen von HeldixClient
+		t.run(mc -> mc.debugEntries.setOverlayVisible(true));
+		t.waitTicks(5);
+		t.check("F3 zeigt die HeldixClient-Zeilen", t.compute(mc -> mc.debugEntries.isCurrentlyEnabled(DebugOverlay.ENTRY)));
+		t.screenshot("heldix-10-f3");
+		t.run(mc -> mc.debugEntries.setOverlayVisible(false));
+
+		// FPS-Boost: schnelle Werte an, danach exakt die alten Werte zurück
+		t.run(mc -> {
+			mc.options.cloudStatus().set(CloudStatus.FANCY);
+			mc.options.entityShadows().set(true);
+		});
+		t.run(mc -> Performance.setBoost(true));
+		t.check("FPS-Boost stellt schnelle Optionen ein", t.compute(mc -> Performance.boostEnabled()
+				&& mc.options.cloudStatus().get() == CloudStatus.FAST && !mc.options.entityShadows().get()));
+		t.run(mc -> Performance.setBoost(false));
+		t.check("FPS-Boost aus stellt die Optionen wieder her", t.compute(mc -> !Performance.boostEnabled()
+				&& mc.options.cloudStatus().get() == CloudStatus.FANCY && mc.options.entityShadows().get()));
+
+		// Hintergrund-FPS: hängt davon ab, ob das Testfenster gerade im Vordergrund ist
+		int[] fps = t.compute(mc -> new int[] {Performance.framerateLimit(260), mc.isWindowActive() ? 1 : 0, mc.getFramerateLimitTracker().getFramerateLimit()});
+		boolean active = fps[1] == 1;
+		t.log("Bildrate: Fenster " + (active ? "aktiv" : "im Hintergrund") + ", Grenze laut Minecraft " + fps[2]);
+		t.check("Hintergrund-FPS (" + (active ? "Fenster aktiv" : "Fenster inaktiv") + " → " + fps[0] + ")", active ? fps[0] == 260 : fps[0] == 30);
 	}
 
 	/** Klickt im offenen Heldix-Menü auf die erste Modul-Karte und prüft, dass sie umschaltet (und schaltet zurück). */

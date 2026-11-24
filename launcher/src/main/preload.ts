@@ -30,12 +30,16 @@ const api: HeldixApi = {
   installModrinth: (id, projectId) => ipcRenderer.invoke('modrinth:install', id, projectId),
 
   listAccounts: () => ipcRenderer.invoke('accounts:list'),
+  getSkin: () => ipcRenderer.invoke('accounts:skin'),
+  listNews: () => ipcRenderer.invoke('news:list'),
+  getNewsBody: (id) => ipcRenderer.invoke('news:body', id),
   addMicrosoftAccount: () => ipcRenderer.invoke('accounts:addMicrosoft'),
   addOfflineAccount: (name) => ipcRenderer.invoke('accounts:addOffline', name),
   removeAccount: (id) => ipcRenderer.invoke('accounts:remove', id),
   selectAccount: (id) => ipcRenderer.invoke('accounts:select', id),
 
-  launch: (instanceId) => ipcRenderer.invoke('game:launch', instanceId),
+  launch: (instanceId, target) => ipcRenderer.invoke('game:launch', instanceId, target),
+  listQuickPlay: (instanceId) => ipcRenderer.invoke('instances:quickPlay', instanceId),
   killGame: () => ipcRenderer.invoke('game:kill'),
   getGameState: () => ipcRenderer.invoke('game:state'),
   openFolder: (kind, instanceId) => ipcRenderer.invoke('folder:open', kind, instanceId),

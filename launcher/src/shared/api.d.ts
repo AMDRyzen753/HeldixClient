@@ -21,6 +21,9 @@ export interface VersionListResult {
   offline: boolean;
 }
 
+/** Grafik-API von Minecraft (ab 26.x wählbar): Vulkan, Minecraft entscheiden lassen oder OpenGL */
+export type GraphicsApi = 'vulkan' | 'default' | 'opengl';
+
 export interface Settings {
   selectedInstanceId: string | null;
   memoryMb: number;
@@ -32,6 +35,10 @@ export interface Settings {
   discordPresence: boolean;
   /** Serveradresse im Discord-Status zeigen (nur öffentliche Domains) */
   discordShowServer: boolean;
+  /** Grafik-API für Minecraft-Versionen mit Vulkan-Unterstützung */
+  graphicsApi: GraphicsApi;
+  /** abgestimmte JVM-Einstellungen (G1, kompakte Objekt-Header ab Java 25) */
+  jvmTuning: boolean;
 }
 
 // ---------- Instanzen ----------
@@ -126,7 +133,7 @@ export type GameState =
   | { state: 'idle' }
   | { state: 'preparing'; instanceId: string }
   | { state: 'running'; pid: number; instanceId: string; label: string }
-  | { state: 'exited'; code: number | null }
+  | { state: 'exited'; code: number | null; /** Hinweis des Launchers, z. B. nach einem Vulkan-Absturz */ notice?: string }
   | { state: 'error'; message: string };
 
 export interface AppInfo {
@@ -143,6 +150,42 @@ export interface AppInfo {
 }
 
 export type FolderKind = 'data' | 'instance' | 'mods' | 'addons' | 'logs' | 'saves';
+
+export interface SkinInfo {
+  /** Skin-Textur als data:-URL */
+  dataUrl: string;
+  /** schmales Modell (Alex), breites (Steve) oder null = am Bild erkennen */
+  slim: boolean | null;
+  source: 'account' | 'default';
+}
+
+export interface NewsEntry {
+  id: string;
+  title: string;
+  version: string;
+  type: 'release' | 'snapshot';
+  /** ISO-Datum */
+  date: string;
+  summary: string;
+  image: string | null;
+}
+
+export interface QuickPlayTarget {
+  kind: 'world' | 'server';
+  /** Ordnername der Welt bzw. Serveradresse */
+  id: string;
+  name: string;
+  address: string | null;
+  lastPlayed: number | null;
+  /** Bild als data:-URL */
+  icon: string | null;
+}
+
+export interface QuickPlayList {
+  /** Kann diese Minecraft-Version direkt in Welten/Server starten? */
+  supported: boolean;
+  targets: QuickPlayTarget[];
+}
 
 export type DiscordStatus =
   | { state: 'disabled' }
@@ -175,12 +218,17 @@ export interface HeldixApi {
   installModrinth(instanceId: string, projectId: string): Promise<string[]>;
 
   listAccounts(): Promise<AccountInfo[]>;
+  /** Skin des aktiven Kontos für die 3D-Figur */
+  getSkin(): Promise<SkinInfo | null>;
+  listNews(): Promise<NewsEntry[]>;
+  getNewsBody(id: string): Promise<string>;
   addMicrosoftAccount(): Promise<AccountInfo>;
   addOfflineAccount(name: string): Promise<AccountInfo>;
   removeAccount(id: string): Promise<void>;
   selectAccount(id: string): Promise<void>;
 
-  launch(instanceId?: string): Promise<void>;
+  launch(instanceId?: string, target?: Pick<QuickPlayTarget, 'kind' | 'id'>): Promise<void>;
+  listQuickPlay(instanceId: string): Promise<QuickPlayList>;
   killGame(): Promise<void>;
   getGameState(): Promise<GameState>;
   openFolder(kind: FolderKind, instanceId?: string): Promise<void>;

@@ -47,14 +47,22 @@ Eine Heldix-Mod ist eine JAR mit einer `heldix.mod.json`:
   "name": "Meine Mod",
   "version": "1.0.0",
   "minecraft": "26.3",
-  "loader": ">=2.0.0",
+  "loader": ">=2.1.0",
   "entrypoints": { "client": ["de.du.MeineMod"] },
   "transformers": ["de.du.MeinTransformer"],
-  "depends": { "heldixclient": ">=0.6.0" }
+  "depends": { "heldixclient": ">=0.7.0" }
 }
 ```
 
 Versionsangaben können `*`, `26.3`, `26.x`, `>=2.0.0`, `>1.0 <2.0` oder `26.2 || 26.3` sein. `transformers` und `depends` sind optional.
+
+**Ressourcen (ab Loader 2.1.0):** Liegt eine `pack.mcmeta` in der JAR, lädt der Loader die Mod als eingebautes Ressourcenpaket. Dann gehen Texturen, Sounds, Modelle, Shader und Post-Effekte unter `assets/<modid>/…` genauso wie in einem Ressourcenpaket. Das Paket ist immer aktiv und liegt unter den Paketen des Spielers, die es also überschreiben können. Für Minecraft 26.3:
+
+```json
+{ "pack": { "description": "Meine Mod", "min_format": 97, "max_format": 999 } }
+```
+
+Beispiel: die Shader von HeldixClient unter [mod/src/main/resources/assets/heldixclient](../mod/src/main/resources/assets/heldixclient) (`post_effect/*.json` und `shaders/post/grade.fsh`).
 
 ```java
 public class MeineMod implements HeldixModInitializer {
@@ -101,5 +109,8 @@ Seit 26.1 ist Minecraft nicht mehr obfuskiert. Loader und Mod nutzen direkt Moja
 - Screens öffnet man über `minecraft.gui.setScreen(...)`.
 - Das Sichtfeld wird in `Camera.calculateFov` berechnet.
 - Tastencodes stehen in `InputConstants`. Die linke Maustaste ist dort `MOUSE_BUTTON_LEFT` (= 1, nicht 0).
+- Gezeichnet wird über `com.mojang.renderpearl` mit zwei Backends, OpenGL und Vulkan. Das Startargument `--graphicsBackend vulkan` (oder `opengl`) legt das Backend fest; kann der PC kein Vulkan, nimmt Minecraft OpenGL. Welches läuft, verrät `RenderSystem.getDevice().getDeviceInfo().backendName()`.
+- Post-Effekte (`assets/<ns>/post_effect/*.json`) und ihre Shader (`assets/<ns>/shaders/post/*.fsh`, GLSL 330) übersetzt Minecraft für beide Backends. Uniforms stehen in std140-Blöcken; die Reihenfolge in der JSON muss der im Shader entsprechen. Angefordert werden sie jedes Bild über `GameRenderer.getRequestedPostEffects()`.
+- F3-Zeilen sind Einträge in `DebugScreenEntries`; welche sichtbar sind, steht in `minecraft.debugEntries`.
 
 Der Loader ist auf diese unverschleierten Namen ausgelegt. Für alte, obfuskierte Versionen bräuchte er zusätzlich Mappings.

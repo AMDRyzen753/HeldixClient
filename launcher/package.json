@@ -1,7 +1,7 @@
 {
   "name": "heldixclient-launcher",
   "productName": "HeldixClient",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Minecraft-Launcher mit eigenem Mod-Loader (Heldix Loader), Client-Mod und Addon-System",
   "license": "MIT",
   "author": "HeldixClient contributors",
@@ -88,7 +88,8 @@
     }
   },
   "dependencies": {
-    "adm-zip": "^0.6.1"
+    "adm-zip": "^0.6.1",
+    "skinview3d": "^3.4.2"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

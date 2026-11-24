@@ -24,7 +24,7 @@ Ein eigener Minecraft-Client nach dem Vorbild von Lunar oder Feather, bestehend 
 | --- | --- |
 | **Launcher** | Lädt Minecraft direkt von Mojang, verwaltet Instanzen und Konten und startet das Spiel. Electron + TypeScript. |
 | **Heldix Loader** | Ein eigener Mod-Loader. Er klinkt sich als Java-Agent beim Start ein, verändert Minecraft-Klassen per ASM und lädt Heldix-Mods. |
-| **HeldixClient-Mod** | Bringt die Features ins Spiel: eigenes Hauptmenü, Glas-Design für alle Menüs, HUD-Module, Zoom. |
+| **HeldixClient-Mod** | Bringt die Features ins Spiel: eigenes Hauptmenü, Glas-Design für alle Menüs, HUD-Module, Zoom, Shader und ein eigenes F3-Menü. |
 | **Heldix-Addons** | Kleine Erweiterungen über eine stabile API, die nach Minecraft-Updates ohne neuen Build weiterlaufen. |
 
 Wer lieber Fabric-Mods von Modrinth nutzt, legt im Launcher einfach eine **Fabric-Instanz** an.
@@ -36,7 +36,12 @@ Wer lieber Fabric-Mods von Modrinth nutzt, legt im Launcher einfach eine **Fabri
 - drei Loader zur Wahl: Heldix Loader, Fabric oder Vanilla
 - Fabric-Mods direkt von Modrinth installieren, inklusive Abhängigkeiten
 - Microsoft-Login; Tokens werden mit Windows-DPAPI verschlüsselt
+- Offline-Konten mit eigenem Namen (für Einzelspieler, LAN und Offline-Server), sobald ein Microsoft-Konto mit Minecraft angemeldet ist
 - passende Java-Version (8 bis 25) wird automatisch geladen
+- **Vulkan als Standard** für Heldix-Instanzen ab Minecraft 26.x (mit automatischem Rückfall auf OpenGL) und abgestimmte Java-Einstellungen
+- Aufgeräumte Startseite: große Begrüßung, ein Spielen-Button und dein Skin als drehbare 3D-Figur
+- **Weiterspielen:** zuletzt gespielte Welten und Server mit einem Klick direkt betreten (Minecraft Quick Play)
+- Neueste Minecraft-Patch-Notes mit einem Klick lesbar
 - Discord-Status („Spielt HeldixClient – Spielt auf hypixel.net“)
 - Spielkonsole mit Log
 
@@ -47,6 +52,9 @@ Wer lieber Fabric-Mods von Modrinth nutzt, legt im Launcher einfach eine **Fabri
 - HUD-Module: FPS, CPS, Ping, Koordinaten, Richtung, Biom, Keystrokes
 - HUD-Editor mit Einrasten an Rändern und anderen Elementen
 - Zoom (**C** halten, Mausrad ändert die Stärke)
+- **Shader:** acht Stile (Klar, Lebendig, Kino, Warm, Kühl, Hell, Schwarzweiß, Retro), mit Vulkan und OpenGL; HUD und Menüs bleiben unverändert
+- **Leistung:** FPS-Boost (schnelle Grafikoptionen, Ausschalten stellt alles wieder her) und weniger FPS, solange das Fenster im Hintergrund ist
+- **F3-Menü** im Heldix-Design, mit Grafik-API, Shader und Client-Version
 
 **Für Entwickler**
 - [Heldix-Mods](docs/heldix-loader.md#eine-heldix-mod-schreiben) mit Events, eigenen Tasten, Übersetzungen und eigenen Eingriffen in Minecraft-Code
@@ -84,7 +92,7 @@ npm start        # startet den Launcher im Entwicklungsmodus
 npm run dist     # erzeugt den Installer in launcher\release\
 ```
 
-Beim ersten Bauen lädt Gradle die Minecraft-Client-JAR zum Kompilieren direkt von Mojang. Sie landet nur in `mod/.gradle/` und wird nie eingecheckt oder ausgeliefert. Im Entwicklungsmodus gibt es zusätzlich Offline-Konten zum Testen.
+Beim ersten Bauen lädt Gradle die Minecraft-Client-JAR zum Kompilieren direkt von Mojang. Sie landet nur in `mod/.gradle/` und wird nie eingecheckt oder ausgeliefert.
 
 Mehr dazu, inklusive Tests und Releases, steht in [docs/entwicklung.md](docs/entwicklung.md).
 
@@ -112,6 +120,7 @@ docs/                    Dokumentation und Bilder
 | [Heldix Loader](docs/heldix-loader.md) | Wie der Loader funktioniert, seine API und wie man eine Heldix-Mod schreibt |
 | [Heldix-Addons](docs/addons.md) | Addons gegen die Heldix-API schreiben |
 | [Einrichtung](docs/einrichtung.md) | Microsoft-Login und Discord-Status für eigene Builds einrichten |
+| [Leistung](docs/leistung.md) | Vulkan, Java-Einstellungen, FPS-Boost, Shader, F3-Menü und Messwerte |
 | [Entwicklung](docs/entwicklung.md) | Bauen, Testen, Releases, neue Minecraft-Versionen, Datenordner |
 
 ## Mitmachen

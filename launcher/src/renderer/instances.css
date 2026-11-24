@@ -39,48 +39,6 @@
 .loader-badge.vanilla { color: #bbf7d0; background: rgba(74, 222, 128, 0.14); box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.32); }
 
 /* ---------- Instanz-Auswahl im Dock ---------- */
-.instance-button {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  width: 300px;
-  height: 58px;
-  padding: 0 40px 0 10px;
-  border-radius: 18px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.06);
-  text-align: left;
-  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
-}
-.instance-button:hover, .instance-button.open { border-color: var(--line-strong); background: rgba(255, 255, 255, 0.1); }
-.instance-button.open { box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2); }
-.instance-button.open .chevron { transform: rotate(0); }
-.instance-button-text { display: flex; flex-direction: column; min-width: 0; }
-.instance-button-name { font-weight: 700; font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.instance-button-meta { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.instance-panel {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 16px);
-  width: 390px;
-  padding: 10px;
-  border-radius: 22px;
-  background: var(--glass-dark);
-  border: 1px solid var(--line-strong);
-  box-shadow: var(--highlight), 0 30px 70px rgba(0, 0, 0, 0.55);
-  backdrop-filter: var(--blur);
-  z-index: 15;
-  animation: pop 0.16s ease-out;
-}
-.instance-panel-list { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
-.instance-option { display: flex; align-items: center; gap: 11px; padding: 8px; border-radius: 14px; cursor: pointer; border: 1px solid transparent; }
-.instance-option:hover { background: var(--glass-2); }
-.instance-option.selected { background: rgba(56, 189, 248, 0.15); border-color: rgba(125, 211, 252, 0.35); }
-.instance-option-text { min-width: 0; }
-.instance-option-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.instance-option-meta { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.instance-panel-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
 
 /* ---------- Übersicht ---------- */
 .instance-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; max-width: 1100px; }
@@ -99,7 +57,7 @@
   cursor: pointer;
   text-align: left;
   transition: transform 0.2s, border-color 0.2s, background 0.2s;
-  animation: fade-up 0.35s both;
+  animation: fade-up 0.35s backwards;
 }
 .instance-card:hover { transform: translateY(-3px); border-color: var(--line-strong); background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06)); }
 .instance-card.selected { border-color: rgba(125, 211, 252, 0.55); box-shadow: var(--highlight), 0 0 0 3px rgba(56, 189, 248, 0.15), var(--shadow); }

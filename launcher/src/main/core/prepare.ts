@@ -50,6 +50,10 @@ export interface PreparedGame {
   loaderJvmArgs: string[];
   /** Version des Heldix Loaders, wenn er benutzt wird */
   loaderVersion: string | null;
+  /** Client-JAR von Minecraft */
+  clientJar: string;
+  /** Java-Hauptversion der Mojang-Laufzeit (null bei eigenem Java-Pfad: unbekannt) */
+  javaMajor: number | null;
 }
 
 /** Kopiert die Loader-JAR in den Bibliotheksordner, damit das laufende Spiel nicht auf den Launcher-Ordner zugreift. */
@@ -131,5 +135,6 @@ export async function prepareGame(options: PrepareOptions): Promise<PreparedGame
   }
 
   const classpath = [...new Set([...libraries.filter((l) => l.classpath).map((l) => l.spec.dest), clientJar])];
-  return { version, javaPath, classpath, gameDir, nativesDir, legacyAssetsDir, loggingConfig, clientModLoaded, loaderJvmArgs, loaderVersion };
+  const javaMajor = options.javaOverride?.trim() ? null : (version.javaVersion?.majorVersion ?? 8);
+  return { version, javaPath, classpath, gameDir, nativesDir, legacyAssetsDir, loggingConfig, clientModLoaded, loaderJvmArgs, loaderVersion, clientJar, javaMajor };
 }

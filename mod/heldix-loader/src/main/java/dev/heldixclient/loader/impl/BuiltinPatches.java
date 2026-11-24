@@ -33,6 +33,8 @@ final class BuiltinPatches implements ClassTransformer, Opcodes {
 	private static final String L_DELTA = "Lnet/minecraft/client/DeltaTracker;";
 	private static final String L_COMPONENT = "Lnet/minecraft/network/chat/Component;";
 	private static final String L_KEYS = "[Lnet/minecraft/client/KeyMapping;";
+	private static final String PACK_REPOSITORY = "net/minecraft/server/packs/repository/PackRepository";
+	private static final String L_SOURCES = "[Lnet/minecraft/server/packs/repository/RepositorySource;";
 
 	@Override
 	public Set<String> targets() {
@@ -58,6 +60,11 @@ final class BuiltinPatches implements ClassTransformer, Opcodes {
 		patch("Mods starten", () -> Patches.afterFirstFieldWrite(
 				Patches.method(node, "<init>", "(Lnet/minecraft/client/main/GameConfig;)V"), MINECRAFT, "gameDirectory",
 				Code.begin().invokeStatic(HOOKS, "initMods", "()V")));
+		patch("Ressourcen der Mods", () -> Patches.replaceCalls(
+				Patches.method(node, "<init>", "(Lnet/minecraft/client/main/GameConfig;)V"), PACK_REPOSITORY, "<init>", "(" + L_SOURCES + ")V",
+				call -> Code.begin()
+						.invokeStatic(HOOKS, "packSources", "(" + L_SOURCES + ")" + L_SOURCES)
+						.invokeSpecial(PACK_REPOSITORY, "<init>", "(" + L_SOURCES + ")V")));
 		patch("Tick-Event", () -> Patches.beforeReturns(Patches.method(node, "tick", "()V"),
 				() -> Code.begin().loadThis().invokeStatic(HOOKS, "tickEnd", "(" + L_MINECRAFT + ")V")));
 		patch("Beenden-Event", () -> Patches.head(Patches.method(node, "close", "()V"),

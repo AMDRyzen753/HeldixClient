@@ -43,6 +43,15 @@ public final class HeldixConfig {
 		public boolean hudBackground = true;
 		/** Heldix-Design für Hauptmenü, Buttons, Listen und Hintergründe (false = Vanilla) */
 		public boolean customMenus = true;
+		/** Aktiver Shader-Stil (siehe ShaderPreset), "aus" = keiner */
+		public String shader = "aus";
+		/** FPS begrenzen, solange das Fenster nicht im Vordergrund ist */
+		public boolean backgroundFps = true;
+		public int backgroundFpsLimit = 30;
+		/** FPS-Boost aktiv: die vorherigen Werte der geänderten Grafikoptionen (null = aus) */
+		public Map<String, String> fpsBoost;
+		/** F3-Zeilen von HeldixClient wurden einmalig eingeschaltet (danach entscheidet der Spieler) */
+		public boolean debugEntrySeeded;
 	}
 
 	private HeldixConfig() {

@@ -12,6 +12,7 @@ import dev.heldixclient.loader.api.event.ClientEvents;
 import dev.heldixclient.loader.api.event.HudEvents;
 import dev.heldixclient.loader.api.event.ScreenEvents;
 import dev.heldixclient.module.ModuleManager;
+import dev.heldixclient.render.DebugOverlay;
 import dev.heldixclient.screen.HeldixMenuScreen;
 import dev.heldixclient.status.StatusReporter;
 import dev.heldixclient.ui.Draw;
@@ -57,6 +58,8 @@ public class HeldixClient implements HeldixModInitializer {
 		HudEvents.RENDER.register(HudRenderer::extract);
 		ClientEvents.TICK_END.register(HeldixClient::onTick);
 		StatusReporter.init();
+		// F3: eigener Eintrag – vor dem Laden der F3-Einstellungen, damit Minecraft ihn kennt
+		DebugOverlay.register();
 
 		// Pausemenü: direkter Zugang zum Heldix-Menü
 		ScreenEvents.AFTER_INIT.register((minecraft, screen, width, height) -> {
@@ -96,6 +99,7 @@ public class HeldixClient implements HeldixModInitializer {
 			}
 		}
 		ModuleManager.tick(mc);
+		DebugOverlay.seed(mc);
 	}
 
 	public static Identifier id(String path) {

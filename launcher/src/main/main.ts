@@ -37,8 +37,12 @@ import { installModrinth, searchModrinth } from './core/modrinth';
 import { findClientMods, findLoaderJar } from './core/mods';
 import { getVersionManifest, listInstalledVersions } from './core/mojang';
 import { createPaths, defaultDataRoot } from './core/paths';
+import { GraphicsWatch, graphicsArguments, tunedJvmArguments } from './core/performance';
 import { prepareGame } from './core/prepare';
 import { buildActivity, parseStatusLine, type GameStatus } from './core/presence';
+import { listQuickPlay, validateQuickPlay } from './core/quickplay';
+import { listNews, newsBody } from './core/news';
+import { skinFor } from './core/skins';
 import { Store, type StoredAccount } from './store';
 
 const paths = createPaths(process.env.HELDIX_DATA_DIR ?? defaultDataRoot(DATA_DIR_NAME));
@@ -50,6 +54,8 @@ let mainWindow: BrowserWindow | null = null;
 let game: RunningGame | null = null;
 let gameInstanceId: string | null = null;
 let gameState: GameState = { state: 'idle' };
+/** welche Grafik-API das laufende Spiel wirklich benutzt */
+let graphicsWatch: GraphicsWatch | null = null;
 
 function resourceDir(name: string): string {
   return app.isPackaged ? path.join(process.resourcesPath, name) : path.join(app.getAppPath(), 'resources', name);
@@ -113,6 +119,13 @@ function applyPresenceSettings(settings: Settings): void {
 function handleGameLog(lines: LogLine[]): void {
   const visible: LogLine[] = [];
   for (const line of lines) {
+    if (graphicsWatch && !graphicsWatch.backend) {
+      graphicsWatch.push(line.text);
+      if (graphicsWatch.backend) {
+        launcherLog(`Grafik-API: ${graphicsWatch.backend}`);
+        if (graphicsWatch.fellBack) launcherLog('Vulkan wird auf diesem PC nicht unterstützt – Minecraft nutzt stattdessen OpenGL.', 'WARN');
+      }
+    }
     const status = parseStatusLine(line.text);
     if (status) updatePresence({ ...presence, status });
     else visible.push(line);
@@ -150,9 +163,19 @@ const launcherLog = (text: string, level: LogLine['level'] = 'INFO') => sendLog(
 
 // ---------- Konten ----------
 
+const OFFLINE_LOCKED = 'Offline-Konten gibt es, sobald ein Microsoft-Konto mit Minecraft im Launcher angemeldet ist.';
+
+/**
+ * Offline-Konten: im Entwicklungsmodus immer. In der fertigen App erst, wenn ein Microsoft-Konto im Launcher ist –
+ * das gibt es nur mit gekauftem Minecraft (loginMinecraft prüft das Profil). So machen es auch Prism Launcher und MultiMC.
+ */
+async function offlineAllowed(): Promise<boolean> {
+  return isDev || (await store.listAccounts()).some((a) => a.type === 'microsoft');
+}
+
 async function sessionFor(account: StoredAccount): Promise<GameAccount> {
   if (account.type === 'offline') {
-    if (!isDev) throw new Error('Offline-Konten sind nur im Entwicklungsmodus erlaubt.');
+    if (!(await offlineAllowed())) throw new Error(OFFLINE_LOCKED);
     return { name: account.name, uuid: account.uuid, accessToken: '0', userType: 'legacy' };
   }
   const secrets = store.secrets(account);
@@ -211,12 +234,13 @@ async function selectedInstance(id?: string): Promise<InstanceConfig> {
 
 // ---------- Spielstart ----------
 
-async function launch(instanceId?: string): Promise<void> {
+async function launch(instanceId?: string, target?: { kind?: unknown; id?: unknown }): Promise<void> {
   if (gameState.state === 'preparing' || gameState.state === 'running') throw new Error('Das Spiel läuft bereits.');
   const settings = await store.getSettings();
   const account = await store.getActiveAccount();
   if (!account) throw new Error('Bitte zuerst ein Konto hinzufügen.');
   const instance = await selectedInstance(instanceId);
+  const quickPlay = target ? await validateQuickPlay(instances.dir(instance.id), target.kind, target.id) : undefined;
 
   setGameState({ state: 'preparing', instanceId: instance.id });
   updatePresence({ phase: 'preparing', instance, status: null });
@@ -239,6 +263,10 @@ async function launch(instanceId?: string): Promise<void> {
       onInfo: (message) => launcherLog(message),
     });
 
+    const userJvmArgs = settings.jvmArgs.split(/\s+/).filter(Boolean);
+    const tuning = settings.jvmTuning ? tunedJvmArguments(prepared.javaMajor, userJvmArgs) : [];
+    // Vulkan-Vorgabe nur für Heldix-Instanzen; Fabric und Vanilla nutzen die Einstellung im Spiel (Fabric-Mods brauchen oft OpenGL)
+    const graphics = instance.loader === 'heldix' ? graphicsArguments(settings.graphicsApi, prepared.clientJar) : [];
     const args = buildLaunchArguments({
       paths,
       version: prepared.version,
@@ -251,13 +279,20 @@ async function launch(instanceId?: string): Promise<void> {
       account: session,
       memoryMb: instance.memoryMb ?? settings.memoryMb,
       resolution: settings.resolution,
-      extraJvmArgs: [...prepared.loaderJvmArgs, ...settings.jvmArgs.split(/\s+/).filter(Boolean)],
+      extraJvmArgs: [...prepared.loaderJvmArgs, ...tuning, ...userJvmArgs],
+      extraGameArgs: graphics,
+      quickPlay,
       launcherName: LAUNCHER_NAME.replace(/\s+/g, ''),
       launcherVersion: LAUNCHER_VERSION,
     });
 
     launcherLog(`Starte ${prepared.version.id} als ${session.name}${prepared.clientModLoaded ? ` mit ${CLIENT_NAME} (Heldix Loader ${prepared.loaderVersion})` : ''}`);
     launcherLog(`Java: ${prepared.javaPath}`);
+    if (graphics.length) launcherLog(`Grafik-API angefordert: ${settings.graphicsApi === 'vulkan' ? 'Vulkan' : 'OpenGL'}`);
+    if (tuning.length) launcherLog(`Optimierte JVM-Einstellungen: ${tuning.filter((a) => a !== '-XX:+UnlockExperimentalVMOptions').join(' ')}`);
+    graphicsWatch = new GraphicsWatch(graphics.length ? settings.graphicsApi : 'default');
+    if (quickPlay?.singleplayer) launcherLog(`Direktstart in die Welt „${quickPlay.singleplayer}“`);
+    if (quickPlay?.multiplayer) launcherLog(`Direktstart auf den Server ${quickPlay.multiplayer}`);
     const running = startGame(prepared.javaPath, args, prepared.gameDir, handleGameLog);
     await new Promise<void>((resolve, reject) => {
       running.process.once('spawn', () => resolve());
@@ -276,12 +311,20 @@ async function launch(instanceId?: string): Promise<void> {
         launcherLog(`Spiel beendet (Code ${code ?? '?'})`, code === 0 ? 'INFO' : 'ERROR');
         const current = await instances.get(instance.id);
         if (current) await instances.save({ ...current, playTimeMs: current.playTimeMs + (Date.now() - startedAt) });
-        setGameState({ state: 'exited', code });
+        let notice: string | undefined;
+        if (graphicsWatch?.crashedDuringGraphicsStart(code)) {
+          // Vulkan-Treiber stürzt ab, bevor Minecraft auf OpenGL ausweichen kann: beim nächsten Mal Minecraft entscheiden lassen
+          await store.saveSettings({ graphicsApi: 'default' });
+          notice = 'Minecraft ist beim Start mit Vulkan abgestürzt. Die Grafik-API steht jetzt auf „Automatisch“ – in den Einstellungen kannst du Vulkan wieder einschalten.';
+          launcherLog(notice, 'ERROR');
+        }
+        setGameState({ state: 'exited', code, notice });
       })
       .catch((error: Error) => setGameState({ state: 'error', message: error.message }))
       .finally(() => {
         game = null;
         gameInstanceId = null;
+        graphicsWatch = null;
         updatePresence({ phase: 'launcher', status: null });
         if (mainWindow && !mainWindow.isVisible()) mainWindow.show();
       });
@@ -421,13 +464,19 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('accounts:list', () => store.listAccounts());
+  ipcMain.handle('accounts:skin', async () => {
+    const account = await store.getActiveAccount();
+    return account ? skinFor(paths, account) : null;
+  });
+  ipcMain.handle('news:list', () => listNews(paths));
+  ipcMain.handle('news:body', (_e, id: string) => newsBody(String(id)));
   ipcMain.handle('accounts:addMicrosoft', async () => {
     if (!MICROSOFT_CLIENT_ID) throw new Error('Microsoft-Login ist noch nicht eingerichtet: Client-ID in src/main/config.ts eintragen (siehe README).');
     const tokens = await interactiveMicrosoftLogin(mainWindow, MICROSOFT_CLIENT_ID, MICROSOFT_REDIRECT_URI);
     return toAccountInfo(await store.upsertMicrosoft(await loginMinecraft(tokens)));
   });
   ipcMain.handle('accounts:addOffline', async (_e, rawName: string) => {
-    if (!isDev) throw new Error('Offline-Konten sind nur im Entwicklungsmodus verfügbar.');
+    if (!(await offlineAllowed())) throw new Error(OFFLINE_LOCKED);
     const name = String(rawName).trim();
     if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) throw new Error('Name: 3–16 Zeichen, nur Buchstaben, Zahlen und _.');
     return toAccountInfo(await store.addOffline(name, offlineUuid(name)));
@@ -435,7 +484,12 @@ function registerIpc(): void {
   ipcMain.handle('accounts:remove', (_e, id: string) => store.remove(id));
   ipcMain.handle('accounts:select', (_e, id: string) => store.select(id));
 
-  ipcMain.handle('game:launch', (_e, instanceId?: string) => launch(typeof instanceId === 'string' ? instanceId : undefined));
+  ipcMain.handle('game:launch', (_e, instanceId?: string, target?: { kind?: unknown; id?: unknown }) =>
+    launch(typeof instanceId === 'string' ? instanceId : undefined, target && typeof target === 'object' ? target : undefined));
+  ipcMain.handle('instances:quickPlay', async (_e, id: string) => {
+    const instance = await instances.require(id);
+    return listQuickPlay(instances.dir(instance.id), paths.versions, instance.minecraft);
+  });
   ipcMain.handle('game:kill', () => {
     game?.process.kill();
   });

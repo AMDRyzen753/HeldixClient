@@ -1,5 +1,5 @@
 // Instanzen: Übersicht, Detailansicht (Mods, Addons, Einstellungen), Modrinth-Suche, neue Instanz
-import type { ContentItem, ContentKind, InstanceInfo, InstanceLoader, ModrinthHit, VersionInfo } from '../shared/api';
+import type { ContentItem, ContentKind, InstanceInfo, InstanceLoader, ModrinthHit, QuickPlayTarget, VersionInfo } from '../shared/api';
 import {
   $,
   api,
@@ -22,7 +22,7 @@ import {
 } from './core.js';
 
 const COLORS = ['#3b82f6', '#06b6d4', '#10b981', '#8b5cf6', '#f59e0b', '#f43f5e'];
-type DetailTab = 'mods' | 'addons' | 'settings';
+export type DetailTab = 'mods' | 'addons' | 'settings';
 
 let detailId: string | null = null;
 let detailTab: DetailTab = 'mods';
@@ -50,7 +50,11 @@ export function initInstances(showView: (view: string) => void): void {
   });
 }
 
-export async function launchInstance(id: string, showView: (view: string) => void): Promise<void> {
+export async function launchInstance(
+  id: string,
+  showView: (view: string) => void,
+  target?: Pick<QuickPlayTarget, 'kind' | 'id'>,
+): Promise<void> {
   if (!state.accounts.some((a) => a.active)) {
     toast('Bitte zuerst unten links ein Konto hinzufügen.', 'error');
     return;
@@ -59,7 +63,7 @@ export async function launchInstance(id: string, showView: (view: string) => voi
   await reloadInstances();
   showView('home');
   try {
-    await api.launch(id);
+    await api.launch(id, target);
   } catch (error) {
     toast(errorMessage(error), 'error');
   }
@@ -83,7 +87,9 @@ function renderGrid(): void {
       h('div', { class: 'instance-card-stats' },
         h('span', { text: formatRelative(instance.lastPlayed) }),
         instance.loader !== 'vanilla'
-          ? h('span', { text: `${instance.modCount} Mods${instance.loader === 'heldix' ? ` · ${instance.addonCount} Addons` : ''}` })
+          ? h('span', {
+            text: `${instance.modCount} ${instance.modCount === 1 ? 'Mod' : 'Mods'}${instance.loader === 'heldix' ? ` · ${instance.addonCount} ${instance.addonCount === 1 ? 'Addon' : 'Addons'}` : ''}`,
+          })
           : null),
       h('button', {
         class: 'card-play',
@@ -107,12 +113,15 @@ function current(): InstanceInfo | undefined {
   return state.instances.find((i) => i.id === detailId);
 }
 
-export function openDetail(id: string): void {
+export function openDetail(id: string, tab?: DetailTab): void {
   detailId = id;
   $('#instances-overview').hidden = true;
   $('#instance-detail').hidden = false;
   const instance = current();
-  switchTab(instance?.loader === 'vanilla' ? 'settings' : 'mods');
+  const fallback: DetailTab = instance?.loader === 'vanilla' ? 'settings' : 'mods';
+  // Reiter, die es für diesen Loader nicht gibt, auf den Standard umbiegen
+  const allowed = tab && !(instance?.loader === 'vanilla' && tab !== 'settings') && !(tab === 'addons' && instance?.loader !== 'heldix');
+  switchTab(allowed ? tab : fallback);
   renderDetailHead();
 }
 

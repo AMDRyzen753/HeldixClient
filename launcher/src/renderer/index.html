@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; img-src 'self' data: https://textures.minecraft.net https://cdn.modrinth.com; style-src 'self' 'unsafe-inline'; script-src 'self'">
+        content="default-src 'self'; img-src 'self' data: https://textures.minecraft.net https://cdn.modrinth.com https://launchercontent.mojang.com; style-src 'self' 'unsafe-inline'; script-src 'self'">
   <title>HeldixClient</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="instances.css">
+  <link rel="stylesheet" href="home.css">
 </head>
 <body>
 <div class="splash" id="splash">
@@ -31,7 +32,13 @@
     </div>
     <span class="titlebar-sep"></span>
     <span class="titlebar-title" id="view-title">Spielen</span>
-    <span class="titlebar-chip" id="titlebar-chip" hidden><span class="chip-dot"></span><span id="titlebar-chip-text"></span></span>
+    <div class="titlebar-tools">
+      <button class="titlebar-discord" id="home-discord" type="button" title="Discord-Status einstellen" hidden>
+        <svg viewBox="0 0 24 24"><path d="M7.5 7.5c3-1.3 6-1.3 9 0M7.5 16.5c3 1.3 6 1.3 9 0"/><path d="M16.5 7.5c1.7 2.6 2.5 5.4 2.4 8.6-.9.8-2 1.4-3.2 1.8l-1-1.6M7.5 7.5C5.8 10.1 5 12.9 5.1 16.1c.9.8 2 1.4 3.2 1.8l1-1.6"/></svg>
+        <span class="home-chip-dot"></span><span id="home-discord-text">Discord</span>
+      </button>
+      <span class="titlebar-chip" id="titlebar-chip" hidden><span class="chip-dot"></span><span id="titlebar-chip-text"></span></span>
+    </div>
   </header>
 
   <nav class="sidebar">
@@ -58,55 +65,78 @@
   <main>
     <!-- ============ Spielen ============ -->
     <section class="view active" id="view-home">
-      <div class="hero">
-        <div class="hero-card">
-          <div class="hero-brand">
-            <img src="logo.svg" alt="" class="hero-logo">
-            <div>
-              <div class="hero-name">Heldix<span>Client</span></div>
-              <div class="hero-version" id="hero-version"></div>
-            </div>
-          </div>
-          <h1 class="hero-greeting" id="hero-greeting">Willkommen zurück</h1>
-          <p class="tagline">Instanzen für jede Version, der eigene Heldix Loader mit Mods und Addons – und Fabric-Instanzen für Mods von Modrinth.</p>
-          <div class="pill"><span class="pill-dot"></span><span id="hero-pill">Bereit für Minecraft</span></div>
-        </div>
-        <div class="recent">
-          <div class="section-label">Zuletzt gespielt</div>
-          <div class="recent-list" id="hero-recent"></div>
-        </div>
-      </div>
+      <div class="home" id="home">
+        <!-- Lichtschein in der Farbe der gewählten Instanz -->
+        <div class="home-aura" aria-hidden="true"></div>
 
-      <div class="dock">
-        <div class="dock-field">
-          <span class="dock-label">Instanz</span>
-          <button class="instance-button" id="instance-button" type="button">
-            <span id="instance-button-tile"></span>
-            <span class="instance-button-text">
-              <span class="instance-button-name" id="instance-button-name">…</span>
-              <span class="instance-button-meta" id="instance-button-meta"></span>
+        <div class="home-main">
+          <div class="home-eyebrow" id="home-eyebrow">HeldixClient</div>
+          <h1 class="home-greeting">
+            <span id="home-greeting-text">Willkommen</span>
+            <button class="home-name" id="home-name" type="button" title="Konto wechseln">
+              <span id="home-name-text">zurück</span>
+              <svg viewBox="0 0 24 24" class="home-name-caret"><path d="m7 10 5 5 5-5"/></svg>
+            </button>
+          </h1>
+          <p class="home-sub" id="home-sub"></p>
+
+          <button class="play" id="play-button" type="button">
+            <span class="play-fill" id="play-fill"></span>
+            <span class="play-icon-wrap">
+              <svg viewBox="0 0 24 24" class="play-icon"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z"/></svg>
+              <svg viewBox="0 0 24 24" class="stop-icon"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/></svg>
             </span>
-            <svg class="chevron" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg>
+            <span class="play-label" id="play-label">Spielen</span>
           </button>
-          <div class="instance-panel" id="instance-panel" hidden>
-            <div class="instance-panel-list" id="instance-panel-list"></div>
-            <div class="instance-panel-actions">
-              <button class="ghost" id="panel-new-instance">Neue Instanz</button>
-              <button class="ghost" id="panel-manage">Instanzen verwalten</button>
+
+          <div class="home-status" id="launch-status">
+            <span class="status-dot" id="status-dot"></span>
+            <span class="status-text" id="status-text"></span>
+            <span class="status-sub" id="status-sub"></span>
+          </div>
+
+          <div class="picker-row">
+            <div class="picker">
+              <button class="picker-button" id="picker-button" type="button" title="Instanz wählen">
+                <span id="picker-tile"></span>
+                <span class="picker-text">
+                  <span class="picker-name" id="picker-name">Keine Instanz</span>
+                  <span class="picker-meta" id="picker-meta"></span>
+                </span>
+                <svg viewBox="0 0 24 24" class="picker-caret"><path d="m7 10 5 5 5-5"/></svg>
+              </button>
+              <div class="picker-panel" id="picker-panel" hidden>
+                <div class="picker-list" id="picker-list"></div>
+                <div class="picker-actions">
+                  <button class="ghost" id="picker-new" type="button">Neue Instanz</button>
+                  <button class="ghost" id="picker-manage" type="button">Verwalten</button>
+                </div>
+              </div>
             </div>
+            <div class="picker-tools" id="picker-tools"></div>
+          </div>
+
+          <div class="quick" id="stage-continue" hidden>
+            <span class="quick-label">Weiterspielen</span>
+            <div class="quick-list" id="continue-list"></div>
           </div>
         </div>
-        <div class="dock-status">
-          <div class="status-line"><span class="status-dot" id="status-dot"></span><span id="status-text">Lade …</span></div>
-          <div class="status-sub" id="status-sub"></div>
+
+        <!-- die eigene Figur, frei stehend -->
+        <div class="hero-figure" id="figure">
+          <div class="hero-ring" aria-hidden="true"></div>
+          <canvas class="figure-canvas" id="figure-canvas"></canvas>
+          <div class="figure-hint" id="figure-hint" hidden></div>
         </div>
-        <button class="play-button" id="play-button">
-          <span class="play-fill" id="play-fill"></span>
-          <span class="play-content">
-            <svg viewBox="0 0 24 24" class="play-icon"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z"/></svg>
-            <span id="play-label">SPIELEN</span>
-          </span>
+
+        <!-- eine einzige, dezente Neuigkeit -->
+        <button class="news-pill" id="news-pill" type="button" hidden>
+          <span class="news-pill-badge" id="news-pill-badge">Neu</span>
+          <span class="news-pill-text" id="news-pill-text"></span>
+          <svg viewBox="0 0 24 24" class="news-pill-arrow"><path d="m9 6 6 6-6 6"/></svg>
         </button>
+
+        <div class="home-progress" id="stage-progress"><span></span></div>
       </div>
     </section>
 
@@ -215,6 +245,26 @@
             <div class="memory-display"><output id="memory-value">4 GB</output><span class="memory-badge" id="memory-badge">Empfohlen</span></div>
             <input type="range" id="memory-range" min="1024" step="512">
             <div class="range-scale"><span>1 GB</span><span id="memory-max-label"></span></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div class="card-icon"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7Z"/></svg></div>
+              <div><h3>Leistung</h3><p class="hint">Grafik-API und Java-Einstellungen für mehr FPS.</p></div>
+            </div>
+            <div class="stack">
+              <span>Grafik-API</span>
+              <div class="chip-toggle segmented" id="graphics-api">
+                <button data-api="vulkan">Vulkan</button>
+                <button data-api="default">Automatisch</button>
+                <button data-api="opengl">OpenGL</button>
+              </div>
+              <p class="hint" id="graphics-hint"></p>
+            </div>
+            <label class="toggle-row">
+              <span>Optimierte Java-Einstellungen<small class="toggle-sub">G1 mit kurzen Pausen, kompakte Objekt-Header ab Java 25</small></span>
+              <input type="checkbox" class="switch" id="jvm-tuning-toggle">
+            </label>
           </div>
 
           <div class="card">
@@ -414,14 +464,16 @@
       Mit Microsoft anmelden
     </button>
     <p class="hint small" id="ms-hint" hidden>Für den Microsoft-Login fehlt noch die Azure-Client-ID (siehe README).</p>
-    <form class="offline-form" id="offline-form" hidden>
+    <form class="offline-form" id="offline-form">
       <input type="text" id="offline-name" placeholder="Spielername" maxlength="16" spellcheck="false">
-      <button class="ghost" type="submit">Offline (Dev)</button>
+      <button class="ghost" type="submit">Offline</button>
     </form>
+    <p class="hint small offline-hint" id="offline-hint"></p>
   </div>
 
   <div class="toasts" id="toasts"></div>
 </div>
+<script src="vendor/skinview3d.bundle.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

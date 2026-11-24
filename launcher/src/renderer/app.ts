@@ -1,20 +1,25 @@
-import type { AccountInfo, DiscordStatus, LogLine, Settings } from '../shared/api';
+import type { AccountInfo, DiscordStatus, InstanceInfo, LogLine, QuickPlayList, QuickPlayTarget, Settings, SkinInfo } from '../shared/api';
 import {
   $,
   api,
   emit,
   errorMessage,
-  formatRelative,
+  formatDate,
+  formatPlayTime,
   h,
+  ICONS,
   instanceTile,
   LOADER_LABELS,
   on,
   reloadInstances,
   selectedInstance,
   state,
+  svgIcon,
   toast,
 } from './core.js';
-import { initInstances, launchInstance, resetInstancesView } from './instances.js';
+import { showFigure, setFigureActive } from './figure.js';
+import { initInstances, launchInstance, openDetail, resetInstancesView, type DetailTab } from './instances.js';
+import { loadNews } from './news.js';
 
 // ---------- Navigation ----------
 const VIEW_TITLES: Record<string, string> = { home: 'Spielen', instances: 'Instanzen', settings: 'Einstellungen', console: 'Konsole' };
@@ -28,6 +33,7 @@ function showView(view: string): void {
     scrollLogToEnd();
   }
   if (view === 'instances') resetInstancesView();
+  setFigureActive(view === 'home');
 }
 document.querySelectorAll<HTMLButtonElement>('.nav-item').forEach((button) => {
   button.addEventListener('click', () => showView(button.dataset.view!));
@@ -47,7 +53,7 @@ document.addEventListener('mousemove', (event) => {
   });
 });
 
-// ---------- Startseite: Begrüßung und zuletzt gespielte Instanzen ----------
+// ---------- Startseite ----------
 function greeting(): string {
   const hour = new Date().getHours();
   if (hour < 5) return 'Gute Nacht';
@@ -56,32 +62,250 @@ function greeting(): string {
   return 'Guten Abend';
 }
 
-function renderHero(): void {
+/** Kurze Zeitangabe für Listen: "vor 5 Min.", "gestern" … */
+function shortRelative(time: number | null): string {
+  if (!time) return 'noch nie';
+  const minutes = Math.round((Date.now() - time) / 60000);
+  if (minutes < 1) return 'gerade eben';
+  if (minutes < 60) return `vor ${minutes} Min.`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `vor ${hours} Std.`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return 'gestern';
+  if (days < 30) return `vor ${days} Tagen`;
+  return formatDate(time);
+}
+
+/** Die Instanz, um die es gerade geht: während eines Spiels die laufende, sonst die ausgewählte. */
+function stageInstance(): InstanceInfo | undefined {
+  const game = state.game;
+  if (game.state === 'preparing' || game.state === 'running') {
+    return state.instances.find((i) => i.id === game.instanceId) ?? selectedInstance();
+  }
+  return selectedInstance();
+}
+
+function openInstanceTab(id: string, tab: DetailTab): void {
+  showView('instances');
+  openDetail(id, tab);
+}
+
+function openNewInstanceDialog(): void {
+  showView('instances');
+  $('#new-instance').click();
+}
+
+function loaderText(instance: InstanceInfo): string {
+  if (instance.loader === 'heldix') return state.info?.loaderVersion ? `Heldix Loader ${state.info.loaderVersion}` : 'Heldix Loader';
+  return LOADER_LABELS[instance.loader];
+}
+
+function toolButton(icon: string, title: string, onclick: () => void): HTMLElement {
+  const button = h('button', { class: 'tool', type: 'button', title, 'aria-label': title, onclick });
+  button.append(svgIcon(icon, ''));
+  return button;
+}
+
+function renderGreeting(): void {
   const active = state.accounts.find((a) => a.active);
-  $('#hero-greeting').textContent = active ? `${greeting()}, ${active.name}` : `${greeting()}!`;
-  $('#hero-version').textContent = state.info ? `Version ${state.info.version}${state.info.loaderVersion ? ` · Heldix Loader ${state.info.loaderVersion}` : ''}` : '';
-  const list = $('#hero-recent');
+  $('#home-greeting-text').textContent = `${greeting()},`;
+  $('#home-name-text').textContent = active?.name ?? 'bitte anmelden';
+  $('#home-name').title = active ? 'Konto wechseln' : 'Konto hinzufügen';
+  const info = state.info;
+  $('#home-eyebrow').textContent = info
+    ? `HeldixClient ${info.version}${info.loaderVersion ? ` · Heldix Loader ${info.loaderVersion}` : ''}`
+    : 'HeldixClient';
+}
+
+/** Instanz-Auswahl, Werkzeuge und Weiterspielen für die aktuelle Instanz. */
+function renderStage(): void {
+  const instance = stageInstance();
+  $('#home').style.setProperty('--accent', instance?.color ?? '#3b82f6');
+
+  const tile = $('#picker-tile');
+  tile.textContent = '';
+  if (instance) tile.append(instanceTile(instance, 'small'));
+  $('#picker-name').textContent = instance?.name ?? 'Keine Instanz';
+  $('#picker-meta').textContent = instance ? `Minecraft ${instance.minecraft} · ${loaderText(instance)}` : 'Lege deine erste Instanz an';
+
+  const tools = $('#picker-tools');
+  tools.textContent = '';
+  if (instance) {
+    if (instance.loader !== 'vanilla') tools.append(toolButton(ICONS.blocks, 'Mods verwalten', () => openInstanceTab(instance.id, 'mods')));
+    tools.append(
+      toolButton(ICONS.folder, 'Instanz-Ordner öffnen', () => void api.openFolder('instance', instance.id)),
+      toolButton(ICONS.sliders, 'Einstellungen der Instanz', () => openInstanceTab(instance.id, 'settings')),
+    );
+  }
+  void renderContinue(instance);
+  renderStatus();
+}
+
+// ---------- 3D-Figur ----------
+let figureFor = '';
+let figureSkin: SkinInfo | null = null;
+
+async function refreshFigure(force = false): Promise<void> {
+  const active = state.accounts.find((a) => a.active);
+  const key = active ? `${active.id}:${active.skinUrl ?? ''}` : '';
+  if (force || key !== figureFor) {
+    figureFor = key;
+    figureSkin = active ? await api.getSkin().catch(() => null) : null;
+  }
+  await showFigure(figureSkin, active?.name ?? null);
+}
+
+// ---------- Weiterspielen: Welten und Server direkt betreten (Quick Play) ----------
+let continueToken = 0;
+const continueCache = new Map<string, QuickPlayList>();
+
+/** Höchstens vier Einträge, Welten und Server gemischt. */
+function pickTargets(targets: QuickPlayTarget[]): QuickPlayTarget[] {
+  const worlds = targets.filter((t) => t.kind === 'world');
+  const servers = targets.filter((t) => t.kind === 'server');
+  const worldCount = Math.min(worlds.length, Math.max(2, 4 - servers.length));
+  return [...worlds.slice(0, worldCount), ...servers.slice(0, 4 - worldCount)];
+}
+
+/**
+ * Anzeigenamen: Server mit Minecrafts Standardnamen („Minecraft Server“) oder doppeltem Namen
+ * zeigen ihre Adresse, doppelte Weltnamen den Ordnernamen.
+ */
+function displayNames(targets: QuickPlayTarget[]): Map<QuickPlayTarget, string> {
+  const count = new Map<string, number>();
+  for (const t of targets) count.set(`${t.kind}:${t.name}`, (count.get(`${t.kind}:${t.name}`) ?? 0) + 1);
+  const names = new Map<QuickPlayTarget, string>();
+  for (const t of targets) {
+    const duplicate = (count.get(`${t.kind}:${t.name}`) ?? 0) > 1;
+    if (t.kind === 'server' && (duplicate || /^minecraft[ -]?server$/i.test(t.name.trim()))) {
+      names.set(t, (t.address ?? t.id).replace(/:25565$/, ''));
+    } else if (t.kind === 'world' && duplicate && t.id !== t.name) {
+      names.set(t, `${t.name} (${t.id})`);
+    } else {
+      names.set(t, t.name);
+    }
+  }
+  return names;
+}
+
+function renderContinueList(instance: InstanceInfo, data: QuickPlayList): void {
+  const section = $('#stage-continue');
+  const list = $('#continue-list');
   list.textContent = '';
-  const recent = [...state.instances].sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0) || b.created - a.created).slice(0, 3);
-  if (recent.length === 0) {
-    list.append(h('div', { class: 'recent-empty', text: 'Noch keine Instanzen. Lege unter „Instanzen“ eine an.' }));
+  section.hidden = !data.supported;
+  if (!data.supported) return;
+  list.classList.toggle('disabled', state.game.state === 'preparing' || state.game.state === 'running');
+  const targets = pickTargets(data.targets);
+  const label = displayNames(targets);
+  if (targets.length === 0) {
+    list.append(h('span', { class: 'quick-empty', text: 'Deine Welten und Server erscheinen hier.' }));
     return;
   }
-  const selectedId = selectedInstance()?.id;
-  for (const instance of recent) {
-    list.append(h('div', {
-      class: `recent-card${instance.id === selectedId ? ' selected' : ''}`,
-      title: 'Auswählen',
-      onclick: async () => {
-        await api.selectInstance(instance.id);
-        await reloadInstances();
+  for (const target of targets) {
+    const icon = target.icon
+      ? h('img', { class: 'quick-icon', src: target.icon, alt: '' })
+      : h('span', { class: 'quick-icon placeholder' }, svgIcon(target.kind === 'world' ? ICONS.world : ICONS.server, ''));
+    list.append(h('button', {
+      class: 'quick-item',
+      type: 'button',
+      title: target.kind === 'world'
+        ? `Direkt in „${target.name}“ starten · Einzelspieler, ${shortRelative(target.lastPlayed)}`
+        : `Direkt auf ${target.address ?? target.id} verbinden`,
+      onclick: () => {
+        if (state.game.state === 'preparing' || state.game.state === 'running') return;
+        void launchInstance(instance.id, showView, { kind: target.kind, id: target.id });
       },
-    },
-    instanceTile(instance, 'small'),
-    h('div', { class: 'recent-text' },
-      h('div', { class: 'recent-name', text: instance.name }),
-      h('div', { class: 'recent-meta', text: `${instance.minecraft} · ${LOADER_LABELS[instance.loader]}` }))));
+    }, icon, h('span', { class: 'quick-name', text: label.get(target) ?? target.name })));
   }
+}
+
+async function renderContinue(instance: InstanceInfo | undefined): Promise<void> {
+  const token = ++continueToken;
+  if (!instance) {
+    $('#stage-continue').hidden = true;
+    return;
+  }
+  // Erst den letzten bekannten Stand zeigen, dann frisch laden (kein Flackern)
+  const cached = continueCache.get(instance.id);
+  if (cached) renderContinueList(instance, cached);
+  else $('#stage-continue').hidden = true;
+  try {
+    const data = await api.listQuickPlay(instance.id);
+    continueCache.set(instance.id, data);
+    if (token === continueToken) renderContinueList(instance, data);
+  } catch {
+    if (token === continueToken) $('#stage-continue').hidden = true;
+  }
+}
+
+// ---------- Instanz-Auswahl ----------
+async function selectFromHome(id: string): Promise<void> {
+  if (state.game.state === 'preparing') return;
+  closePicker();
+  await api.selectInstance(id);
+  await reloadInstances();
+}
+
+function instanceRow(instance: InstanceInfo, selected: boolean): HTMLElement {
+  const item = h('div', {
+    class: `side-item${selected ? ' selected' : ''}`,
+    title: selected ? 'Ausgewählt' : 'Auswählen',
+    onclick: () => void selectFromHome(instance.id),
+  },
+  instanceTile(instance, 'small'),
+  h('div', { class: 'side-item-text' },
+    h('div', { class: 'side-item-name', text: instance.name }),
+    h('div', { class: 'side-item-meta', text: `${instance.minecraft} · ${LOADER_LABELS[instance.loader]} · ${shortRelative(instance.lastPlayed)}` })),
+  selected ? svgIcon(ICONS.check, 'side-item-check') : null);
+  item.style.setProperty('--item', instance.color);
+  return item;
+}
+
+const pickerPanel = $('#picker-panel');
+function closePicker(): void {
+  pickerPanel.hidden = true;
+  $('#picker-button').classList.remove('open');
+}
+$('#picker-button').addEventListener('click', (event) => {
+  event.stopPropagation();
+  if (!pickerPanel.hidden) {
+    closePicker();
+    return;
+  }
+  if (state.instances.length === 0) {
+    openNewInstanceDialog();
+    return;
+  }
+  const list = $('#picker-list');
+  list.textContent = '';
+  const selectedId = selectedInstance()?.id;
+  const sorted = [...state.instances].sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0) || b.created - a.created);
+  for (const instance of sorted) list.append(instanceRow(instance, instance.id === selectedId));
+  pickerPanel.hidden = false;
+  $('#picker-button').classList.add('open');
+});
+pickerPanel.addEventListener('click', (event) => event.stopPropagation());
+document.addEventListener('click', closePicker);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closePicker();
+});
+$('#picker-new').addEventListener('click', () => {
+  closePicker();
+  openNewInstanceDialog();
+});
+$('#picker-manage').addEventListener('click', () => {
+  closePicker();
+  showView('instances');
+});
+$('#home-name').addEventListener('click', (event) => {
+  event.stopPropagation();
+  if (popover.hidden) openAccounts($('#home-name'));
+  else closeAccounts();
+});
+
+function renderHome(): void {
+  renderGreeting();
+  renderStage();
 }
 
 // ---------- Avatare ----------
@@ -95,7 +319,7 @@ function renderAvatar(el: HTMLElement, account: AccountInfo | undefined): void {
   }
   if (account.skinUrl) {
     // Gesicht (8,8) und Hut-Ebene (40,8) aus der 64x64-Skin-Textur ausschneiden
-    const size = el.classList.contains('small') ? 32 : 38;
+    const size = el.getBoundingClientRect().width || (el.classList.contains('small') ? 32 : 38);
     const scale = size / 8;
     const url = account.skinUrl.replace(/^http:/, 'https:');
     el.style.backgroundImage = `url("${url}"), url("${url}")`;
@@ -109,78 +333,15 @@ function renderAvatar(el: HTMLElement, account: AccountInfo | undefined): void {
   el.textContent = account.name.charAt(0).toUpperCase();
 }
 
-// ---------- Instanz-Auswahl auf der Startseite ----------
-const instanceButton = $('#instance-button');
-const instancePanel = $('#instance-panel');
-
-function instanceMeta(instance = selectedInstance()): string {
-  if (!instance) return '';
-  return `Minecraft ${instance.minecraft} · ${LOADER_LABELS[instance.loader]}`;
-}
-
-function renderInstanceButton(): void {
-  const instance = selectedInstance();
-  const tileHost = $('#instance-button-tile');
-  tileHost.textContent = '';
-  if (instance) tileHost.append(instanceTile(instance, 'small'));
-  $('#instance-button-name').textContent = instance?.name ?? 'Keine Instanz';
-  $('#instance-button-meta').textContent = instance ? instanceMeta(instance) : 'Lege eine Instanz an';
-}
-
-function renderInstancePanel(): void {
-  const list = $('#instance-panel-list');
-  list.textContent = '';
-  for (const instance of state.instances) {
-    const selected = instance.id === selectedInstance()?.id;
-    list.append(h('div', {
-      class: `instance-option${selected ? ' selected' : ''}`,
-      onclick: async () => {
-        closeInstancePanel();
-        await api.selectInstance(instance.id);
-        await reloadInstances();
-      },
-    },
-    instanceTile(instance, 'small'),
-    h('div', { class: 'instance-option-text' },
-      h('div', { class: 'instance-option-name', text: instance.name }),
-      h('div', { class: 'instance-option-meta', text: `${instanceMeta(instance)} · ${formatRelative(instance.lastPlayed)}` }))));
-  }
-}
-
-function closeInstancePanel(): void {
-  instancePanel.hidden = true;
-  instanceButton.classList.remove('open');
-}
-
-instanceButton.addEventListener('click', (event) => {
-  event.stopPropagation();
-  if (instancePanel.hidden) {
-    renderInstancePanel();
-    instancePanel.hidden = false;
-    instanceButton.classList.add('open');
-  } else {
-    closeInstancePanel();
-  }
-});
-instancePanel.addEventListener('click', (event) => event.stopPropagation());
-$('#panel-manage').addEventListener('click', () => {
-  closeInstancePanel();
-  showView('instances');
-});
-$('#panel-new-instance').addEventListener('click', () => {
-  closeInstancePanel();
-  showView('instances');
-  $('#new-instance').click();
-});
-
 // ---------- Status & Spielen ----------
-function describeSelection(): string {
-  const instance = selectedInstance();
-  if (!instance) return 'Lege unter „Instanzen“ eine Instanz an.';
-  if (instance.loader === 'vanilla') return `Minecraft ${instance.minecraft} ohne Mods`;
-  const mods = `${instance.modCount} ${instance.modCount === 1 ? 'Mod' : 'Mods'}`;
-  if (instance.loader === 'fabric') return `Minecraft ${instance.minecraft} mit Fabric · ${mods}`;
-  return `Minecraft ${instance.minecraft} mit Heldix Loader · ${mods} · ${instance.addonCount} ${instance.addonCount === 1 ? 'Addon' : 'Addons'}`;
+let runningSince: number | null = null;
+
+/** "seit 12 Min." bzw. null in der ersten Minute */
+function runningFor(): string | null {
+  const minutes = runningSince ? Math.floor((Date.now() - runningSince) / 60000) : 0;
+  if (minutes < 1) return null;
+  const hours = Math.floor(minutes / 60);
+  return hours > 0 ? `seit ${hours} Std. ${minutes % 60} Min.` : `seit ${minutes} Min.`;
 }
 
 function setChip(text: string | null, busy = false): void {
@@ -190,87 +351,103 @@ function setChip(text: string | null, busy = false): void {
   if (text) $('#titlebar-chip-text').textContent = text;
 }
 
+/** Zeile unter dem Spielen-Button: nur, wenn es etwas zu sagen gibt. */
+function launchStatus(kind: 'ok' | 'busy' | 'error' | 'muted' | null, text = '', sub = ''): void {
+  const box = $('#launch-status');
+  box.style.visibility = kind ? 'visible' : 'hidden';
+  $('#status-dot').className = `status-dot${kind && kind !== 'ok' ? ` ${kind}` : ''}`;
+  $('#status-text').textContent = text;
+  $('#status-sub').textContent = sub;
+}
+
 function renderStatus(): void {
-  const dot = $('#status-dot');
-  const text = $('#status-text');
-  const sub = $('#status-sub');
+  const home = $('#home');
+  const homeSub = $('#home-sub');
   const play = $<HTMLButtonElement>('#play-button');
-  const playLabel = $('#play-label');
-  const pill = $('#hero-pill');
+  const label = $('#play-label');
   const game = state.game;
-  const instance = selectedInstance();
+  const instance = stageInstance();
 
   play.classList.remove('stop', 'busy');
   play.disabled = false;
+  home.classList.toggle('busy', game.state === 'preparing');
+  home.classList.toggle('running', game.state === 'running');
+  $<HTMLButtonElement>('#picker-button').disabled = game.state === 'preparing';
   $<HTMLButtonElement>('#kill-game').disabled = game.state !== 'running';
   setChip(null);
 
   if (game.state === 'preparing') {
     const p = state.progress;
     const percent = p && p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
-    dot.className = 'status-dot busy';
     play.classList.add('busy');
     play.disabled = true;
     play.style.setProperty('--p', `${percent}%`);
-    playLabel.textContent = p && p.total > 0 ? `${percent} %` : 'LÄDT …';
-    text.textContent = p ? p.stage : 'Vorbereiten …';
-    sub.textContent = p && p.total > 0 ? `${p.done.toLocaleString('de-DE')} von ${p.total.toLocaleString('de-DE')} Dateien` : 'Prüfe Dateien …';
-    pill.textContent = 'Minecraft wird vorbereitet';
+    $('#stage-progress').style.setProperty('--p', `${percent}%`);
+    label.textContent = p && p.total > 0 ? `Lädt … ${percent} %` : 'Lädt …';
+    launchStatus('busy', p ? p.stage : 'Vorbereiten', p && p.total > 0 ? `${p.done.toLocaleString('de-DE')} von ${p.total.toLocaleString('de-DE')} Dateien` : 'Prüfe Dateien …');
+    homeSub.textContent = `${instance?.name ?? 'Minecraft'} wird vorbereitet …`;
     setChip('Lädt …', true);
     return;
   }
   if (game.state === 'running') {
-    dot.className = 'status-dot';
-    text.textContent = `Läuft · ${game.label}`;
-    const running = state.instances.find((i) => i.id === game.instanceId);
-    sub.textContent = running?.loader === 'heldix' ? 'Viel Spaß! Mit Rechts ⇧ öffnest du im Spiel das Heldix-Menü.' : 'Viel Spaß!';
+    const since = runningFor();
     play.classList.add('stop');
-    playLabel.textContent = 'BEENDEN';
-    pill.textContent = 'Minecraft läuft';
+    label.textContent = 'Beenden';
+    launchStatus('ok', since ? `Läuft ${since}` : 'Läuft', instance?.loader === 'heldix' ? 'Rechts ⇧ öffnet im Spiel das Heldix-Menü.' : 'Viel Spaß!');
+    homeSub.textContent = `${game.label} ist gestartet – viel Spaß!`;
     setChip(`Läuft · ${game.label}`);
     return;
   }
 
-  playLabel.textContent = 'SPIELEN';
-  pill.textContent = instance ? `${instance.name} · ${instanceMeta(instance)}` : 'Bereit für Minecraft';
   const active = state.accounts.find((a) => a.active);
   if (!instance) {
-    dot.className = 'status-dot muted';
-    text.textContent = 'Keine Instanz';
-    sub.textContent = describeSelection();
-    play.disabled = true;
+    label.textContent = 'Instanz anlegen';
+    launchStatus(null);
+    homeSub.textContent = 'Leg deine erste Instanz an und los geht’s.';
     return;
   }
+  label.textContent = 'Spielen';
   if (!active) {
-    dot.className = 'status-dot muted';
-    text.textContent = 'Nicht angemeldet';
-    sub.textContent = 'Klicke unten links auf das Profil, um ein Konto hinzuzufügen.';
+    launchStatus('muted', 'Nicht angemeldet', 'Klicke oben auf „bitte anmelden“.');
+    homeSub.textContent = 'Melde dich an, dann kann es losgehen.';
     return;
   }
-  if (active.type === 'offline' && !state.info?.isDev) {
-    dot.className = 'status-dot muted';
-    text.textContent = `${active.name} ist ein Offline-Konto`;
-    sub.textContent = 'Offline-Konten gehen nur im Entwicklungsmodus. Bitte mit Microsoft anmelden.';
+  if (active.type === 'offline' && !offlineAllowed()) {
     play.disabled = true;
+    launchStatus('muted', 'Offline-Konto', 'Offline-Konten gehen, sobald ein Microsoft-Konto mit Minecraft angemeldet ist.');
+    homeSub.textContent = 'Bitte einmal mit einem Microsoft-Konto anmelden.';
     return;
   }
-  dot.className = game.state === 'error' ? 'status-dot error' : 'status-dot';
-  text.textContent = game.state === 'error' ? 'Start fehlgeschlagen' : `Bereit · ${active.name}`;
-  sub.textContent = game.state === 'error' ? game.message : describeSelection();
+  if (game.state === 'error') {
+    launchStatus('error', 'Start fehlgeschlagen', game.message);
+    homeSub.textContent = 'Der letzte Start hat nicht geklappt – Details stehen in der Konsole.';
+    return;
+  }
+  launchStatus(null);
+  homeSub.textContent = instance.lastPlayed ? `Bereit für die nächste Runde in ${instance.name}?` : `${instance.name} ist startklar.`;
 }
+
+// Laufzeit-Anzeige aktuell halten
+window.setInterval(() => {
+  if (state.game.state === 'running') renderStatus();
+}, 20000);
 
 $('#play-button').addEventListener('click', async () => {
   if (state.game.state === 'running') {
     await api.killGame();
     return;
   }
+  const instance = selectedInstance();
+  if (!instance) {
+    openNewInstanceDialog();
+    return;
+  }
   if (!state.accounts.some((a) => a.active)) {
-    openAccounts();
+    openAccounts($('#home-name'));
     toast('Bitte zuerst ein Konto hinzufügen.');
     return;
   }
-  const instance = selectedInstance();
-  if (instance) await launchInstance(instance.id, showView);
+  await launchInstance(instance.id, showView);
 });
 
 api.onProgress((progress) => {
@@ -281,42 +458,79 @@ api.onProgress((progress) => {
 api.onGameState(async (game) => {
   state.game = game;
   if (game.state === 'preparing') state.progress = null;
-  if (game.state === 'exited' && game.code !== 0 && game.code !== null) {
+  if (game.state === 'running') runningSince ??= Date.now();
+  else runningSince = null;
+  if (game.state === 'exited' && game.notice) {
+    // z. B. Vulkan-Absturz: der Launcher hat die Einstellungen angepasst
+    toast(game.notice, 'error');
+    $('#console-dot').hidden = false;
+    state.settings = await api.getSettings();
+    renderSettings();
+  } else if (game.state === 'exited' && game.code !== 0 && game.code !== null) {
     toast(`Minecraft wurde mit Fehlercode ${game.code} beendet. Details in der Konsole.`, 'error');
     $('#console-dot').hidden = false;
   }
-  renderStatus();
+  renderStage();
   if (game.state === 'running' || game.state === 'exited') await reloadInstances();
 });
 
-on('instances', () => {
-  renderInstanceButton();
-  renderStatus();
-  renderHero();
+on('instances', renderHome);
+on('settings', renderStage);
+
+// ---------- Discord-Hinweis in der Titelleiste ----------
+function renderDiscordChip(status: DiscordStatus): void {
+  const chip = $('#home-discord');
+  const configured = state.info?.discordConfigured ?? false;
+  chip.hidden = status.state === 'unconfigured' || (status.state === 'disabled' && !configured);
+  chip.dataset.state = status.state;
+  const texts: Record<DiscordStatus['state'], string> = {
+    disabled: 'Discord aus',
+    unconfigured: 'Discord',
+    connecting: 'Discord …',
+    connected: 'Discord',
+    unavailable: 'Discord geschlossen',
+    error: 'Discord: Problem',
+  };
+  $('#home-discord-text').textContent = texts[status.state];
+  chip.title = status.state === 'connected' ? 'Discord-Status ist aktiv – klicken zum Einstellen' : 'Discord-Status einstellen';
+}
+$('#home-discord').addEventListener('click', () => {
+  showView('settings');
+  $('#discord-toggle').closest('.card')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
 });
 
 // ---------- Konten ----------
 const popover = $('#account-popover');
 
-function openAccounts(): void {
+function openAccounts(anchor?: HTMLElement): void {
+  if (anchor) {
+    const rect = anchor.getBoundingClientRect();
+    popover.style.left = `${Math.round(rect.left)}px`;
+    popover.style.top = `${Math.round(rect.bottom + 10)}px`;
+    popover.style.bottom = 'auto';
+  } else {
+    popover.style.left = '';
+    popover.style.top = '';
+    popover.style.bottom = '';
+  }
   popover.hidden = false;
   renderAccounts();
+}
+
+function closeAccounts(): void {
+  popover.hidden = true;
 }
 
 $('#account-button').addEventListener('click', (event) => {
   event.stopPropagation();
   if (popover.hidden) openAccounts();
-  else popover.hidden = true;
+  else closeAccounts();
 });
 popover.addEventListener('click', (event) => event.stopPropagation());
-document.addEventListener('click', () => {
-  popover.hidden = true;
-  closeInstancePanel();
-});
+document.addEventListener('click', closeAccounts);
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
-  popover.hidden = true;
-  closeInstancePanel();
+  closeAccounts();
   document.querySelectorAll<HTMLElement>('.modal-backdrop').forEach((m) => {
     if (m.id) m.hidden = true;
     else m.remove();
@@ -343,7 +557,7 @@ function renderAccounts(): void {
     avatar,
     h('div', { class: 'account-meta' },
       h('div', { class: 'account-name', text: account.name }),
-      h('div', { class: 'account-type', text: account.type === 'microsoft' ? 'Microsoft' : 'Offline (Dev)' })),
+      h('div', { class: 'account-type', text: account.type === 'microsoft' ? 'Microsoft' : 'Offline' })),
     h('button', {
       class: 'remove-account',
       title: 'Entfernen',
@@ -360,14 +574,25 @@ function renderAccounts(): void {
   const info = state.info;
   $<HTMLButtonElement>('#add-microsoft').disabled = !info?.microsoftConfigured;
   $('#ms-hint').hidden = !!info?.microsoftConfigured;
-  $('#offline-form').hidden = !info?.isDev;
+  const allowed = offlineAllowed();
+  $('#offline-form').classList.toggle('locked', !allowed);
+  $<HTMLInputElement>('#offline-name').disabled = !allowed;
+  $<HTMLButtonElement>('#offline-form button').disabled = !allowed;
+  $('#offline-hint').textContent = allowed
+    ? 'Offline: für Einzelspieler, LAN und Server ohne Online-Modus.'
+    : 'Offline-Konten gibt es, sobald ein Microsoft-Konto mit Minecraft angemeldet ist.';
+}
+
+/** Wie im Hauptprozess: im Entwicklungsmodus immer, sonst nur mit einem Microsoft-Konto im Launcher. */
+function offlineAllowed(): boolean {
+  return !!state.info?.isDev || state.accounts.some((a) => a.type === 'microsoft');
 }
 
 async function loadAccounts(): Promise<void> {
   state.accounts = await api.listAccounts();
   renderAccounts();
-  renderStatus();
-  renderHero();
+  renderHome();
+  void refreshFigure();
 }
 
 $('#add-microsoft').addEventListener('click', async () => {
@@ -439,7 +664,31 @@ function renderSettings(): void {
   $<HTMLInputElement>('#discord-toggle').checked = s.discordPresence;
   $<HTMLInputElement>('#discord-server-toggle').checked = s.discordShowServer;
   $('#discord-server-row').classList.toggle('disabled', !s.discordPresence);
+  renderPerformance(s);
 }
+
+// ---------- Leistung ----------
+const GRAPHICS_HINTS: Record<Settings['graphicsApi'], string> = {
+  vulkan: 'Standard bei HeldixClient. Minecraft startet mit Vulkan und nimmt OpenGL, wenn dein PC kein Vulkan kann. In Minecraft 26.3 ist Vulkan noch als experimentell markiert.',
+  default: 'Minecraft entscheidet selbst (zurzeit OpenGL) und schaltet nach einem Absturz beim Start automatisch um.',
+  opengl: 'Die bewährte Grafik-API von Minecraft. Gut, falls Vulkan auf deinem PC Probleme macht.',
+};
+
+function renderPerformance(s: Settings): void {
+  document.querySelectorAll<HTMLButtonElement>('#graphics-api button').forEach((button) => {
+    button.classList.toggle('active', button.dataset.api === s.graphicsApi);
+  });
+  $('#graphics-hint').textContent = `${GRAPHICS_HINTS[s.graphicsApi]} Gilt für Heldix-Instanzen ab Minecraft 26.x; Fabric und Vanilla nutzen die Einstellung im Spiel.`;
+  $<HTMLInputElement>('#jvm-tuning-toggle').checked = s.jvmTuning;
+}
+
+document.querySelectorAll<HTMLButtonElement>('#graphics-api button').forEach((button) => {
+  button.addEventListener('click', async () => {
+    await save({ graphicsApi: button.dataset.api as Settings['graphicsApi'] });
+    renderSettings();
+  });
+});
+$('#jvm-tuning-toggle').addEventListener('change', (e) => save({ jvmTuning: (e.target as HTMLInputElement).checked }));
 
 // ---------- Discord ----------
 function renderDiscordStatus(status: DiscordStatus): void {
@@ -461,6 +710,7 @@ function renderDiscordStatus(status: DiscordStatus): void {
   const host = $('#discord-status');
   host.dataset.state = status.state;
   $('#discord-status-text').textContent = text;
+  renderDiscordChip(status);
 }
 $('#discord-toggle').addEventListener('change', (e) => save({ discordPresence: (e.target as HTMLInputElement).checked }));
 $('#discord-server-toggle').addEventListener('change', (e) => save({ discordShowServer: (e.target as HTMLInputElement).checked }));
@@ -551,6 +801,7 @@ async function init(): Promise<void> {
   renderSettings();
   await loadAccounts();
   await reloadInstances();
+  void loadNews();
   try {
     state.versions = await api.listVersions();
     if (state.versions.offline) toast('Offline: Die Versionsliste kommt aus dem Cache.');

@@ -6,6 +6,9 @@ import dev.heldixclient.loader.api.event.ScreenEvents;
 import dev.heldixclient.module.ModuleManager;
 import dev.heldixclient.module.impl.CpsModule;
 import dev.heldixclient.module.impl.ZoomModule;
+import dev.heldixclient.render.DebugOverlay;
+import dev.heldixclient.render.Performance;
+import dev.heldixclient.render.Shaders;
 import dev.heldixclient.screen.HeldixTitle;
 import dev.heldixclient.ui.WidgetStyle;
 import net.minecraft.client.Minecraft;
@@ -15,6 +18,7 @@ import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.resources.Identifier;
 
+import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 
@@ -37,6 +41,23 @@ public final class Hooks {
 
 	public static String windowTitle(String vanilla) {
 		return HeldixClient.NAME + " " + HeldixClient.version + " | " + vanilla;
+	}
+
+	// --- Grafik ----------------------------------------------------------------------------
+
+	/** GameRenderer.update: Shader-Stil als Post-Effekt anfordern. */
+	public static void postEffects(List<Identifier> requested) {
+		Shaders.request(requested);
+	}
+
+	/** FramerateLimitTracker.getFramerateLimit: weniger FPS im Hintergrund. */
+	public static int framerateLimit(int limit) {
+		return Performance.framerateLimit(limit);
+	}
+
+	/** DebugScreenOverlay.extractLines: Hintergrund einer F3-Zeile. */
+	public static void debugLine(GuiGraphicsExtractor g, int x1, int y1, int x2, int y2, int color, boolean left) {
+		DebugOverlay.line(g, x1, y1, x2, y2, color, left);
 	}
 
 	// --- Maus -------------------------------------------------------------------------------

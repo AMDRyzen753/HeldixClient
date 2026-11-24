@@ -36,6 +36,8 @@ function defaultSettings(): Settings {
     javaPath: '',
     discordPresence: true,
     discordShowServer: true,
+    graphicsApi: 'vulkan',
+    jvmTuning: true,
   };
 }
 
@@ -117,6 +119,12 @@ export class Store {
 
   async addOffline(name: string, uuid: string): Promise<StoredAccount> {
     const data = await this.readAccounts();
+    const existing = data.accounts.find((a) => a.type === 'offline' && a.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      data.activeId = existing.id;
+      await this.writeAccounts(data);
+      return existing;
+    }
     const account: StoredAccount = { id: randomUUID(), type: 'offline', name, uuid };
     data.accounts.push(account);
     data.activeId = account.id;

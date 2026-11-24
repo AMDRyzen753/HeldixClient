@@ -12,6 +12,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.packs.repository.RepositorySource;
 
 import java.util.Arrays;
 import java.util.List;
@@ -94,6 +95,11 @@ public final class LoaderHooks {
 	public static String translate(Map<String, String> storage, String key) {
 		if (storage.containsKey(key)) return null;
 		return ModTranslations.get(key);
+	}
+
+	/** Minecraft-Konstruktor: Ressourcenpakete der Mods zu den Paketquellen hinzufügen. */
+	public static RepositorySource[] packSources(RepositorySource[] vanilla) {
+		return ModResourcePacks.append(vanilla, LoaderCore.resourcePacks());
 	}
 
 	/** ClientLanguage.has: true, wenn eine Mod den Schlüssel übersetzt. */

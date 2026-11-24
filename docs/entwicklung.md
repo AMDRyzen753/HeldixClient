@@ -22,7 +22,7 @@ Das Ergebnis von `npm run dist` liegt in `launcher/release/`:
 
 Weitere Hinweise:
 - Das App-Icon kommt aus `launcher/build/icon.png`. `npm run icon` erzeugt es neu aus [logo.svg](../launcher/src/renderer/logo.svg).
-- Im Entwicklungsmodus gibt es zusätzlich **Offline-Konten (Dev)**. Damit lässt sich ohne Microsoft-Login testen. In der fertig gepackten App sind sie gesperrt.
+- Im Entwicklungsmodus gehen **Offline-Konten** immer. Damit lässt sich ohne Microsoft-Login testen. In der fertig gepackten App gibt es sie erst, wenn ein Microsoft-Konto mit Minecraft im Launcher ist (wie bei Prism Launcher). Wer das Spiel nicht gekauft hat, kann also nicht spielen.
 - Die Java-Projekte in `mod/` lassen sich in IntelliJ IDEA als Gradle-Projekt öffnen (JDK 25 auswählen).
 - Minecraft lädt Gradle zum Kompilieren selbst von Mojang ([gradle/minecraft.gradle](../mod/gradle/minecraft.gradle)). Die Dateien landen in `mod/.gradle/minecraft/` und sind vom Git ausgeschlossen.
 
@@ -32,6 +32,9 @@ Weitere Hinweise:
 cd launcher
 npm run test:launch -- 26.3 heldix              # startet offline mit Heldix Loader, HeldixClient + Addon, beendet nach dem Laden
 npm run test:launch -- 26.3 heldix --autotest   # zusätzlich der komplette Test im Spiel, mit Screenshots
+npm run test:launch -- 26.3 heldix --autotest --graphics=opengl   # derselbe Test mit OpenGL statt Vulkan
+npm run test:launch -- 26.3 heldix --benchmark=25 --graphics=vulkan   # FPS-Messung (25 s), siehe unten
+npm run test:launch -- 26.3 heldix "--world=Meine Welt"   # Direktstart (Quick Play) in eine Welt aus saves/
 npm run test:launch -- 26.3 fabric              # nur Fabric, ohne HeldixClient
 npm run test:launch -- 1.8.9 vanilla
 npm run test:discord -- <Application-ID>       # Discord-Status, Discord muss laufen
@@ -50,9 +53,13 @@ Der Starttest bricht mit Fehler ab, wenn:
 - prüft Loader, Übersetzungen, Tasten, Fenstertitel und Addons, auch ein absichtlich kaputtes Addon und eine Fabric-Attrappe im `mods`-Ordner;
 - klickt über die echte Maus-Verarbeitung von Minecraft das Heldix-Menü auf vier Wegen an;
 - erstellt eine flache Testwelt und prüft darin HUD, Chat- und Welt-Events, das Verschieben im HUD-Editor und den Zoom;
+- prüft Ressourcen der Mod, alle Shader-Stile (werden sie wirklich gezeichnet?), die F3-Zeilen, FPS-Boost (an und wieder zurück) und die Hintergrund-FPS;
+- prüft, dass Minecraft die gewünschte Grafik-API benutzt (`--graphics=vulkan|opengl|default`, Standard wie im Launcher: Vulkan);
 - macht Screenshots aller Menüs. Sie liegen danach unter `%APPDATA%\.heldixclient\test-instances\26.3-heldix-autotest\screenshots`.
 
 Während der Autotest läuft, die Maus nicht über das Spielfenster bewegen.
+
+**Der Benchmark** (`--benchmark[=Sekunden]`) erstellt immer dieselbe Welt (Seed `heldix-benchmark`), setzt die Kamera 40 Blöcke über das Gelände und dreht sie während der Messung einmal im Kreis: Sichtweite 12, keine FPS-Grenze, kein VSync, 1600×900. Ausgabe: `BENCHMARK backend=Vulkan avg=… low1=…` (Durchschnitt und 1-%-Tiefs). Weitere Schalter: `--shader=kino`, `--boost` (FPS-Boost), `--no-tuning` (ohne JVM-Abstimmung), `--size=1920x1080`. Mehrere Läufe machen, die Werte schwanken um gut 10 %.
 
 Bei jedem Push baut GitHub Actions alles einmal komplett ([.github/workflows/build.yml](../.github/workflows/build.yml)). Die Spieltests laufen dort nicht, weil sie ein Fenster mit Grafikkarte brauchen.
 
@@ -120,5 +127,5 @@ Falls der Name noch einmal geändert werden soll:
 - **Auto-Update** für Launcher, Loader und Mod über GitHub Releases
 - **Weitere Module oder Addons:** Armor-Status, Potion-HUD, eigene Crosshairs, Freelook
 - **Mod- und Addon-Katalog** im Launcher, ähnlich wie Fabric-Mods über Modrinth
-- **Ressourcen aus Mods:** Der Loader liefert bisher nur Übersetzungen aus Mod-JARs; eigene Texturen und Sounds bräuchten ein Ressourcenpaket pro Mod
+- **Shaderpacks** im Stil von OptiFine/Iris (Schatten, Reflexionen) bräuchten einen eigenen Renderer; die eingebauten Stile sind Post-Effekte
 - **Kosmetik** wie Capes braucht einen eigenen Server, der Spieler und Kosmetik zuordnet
