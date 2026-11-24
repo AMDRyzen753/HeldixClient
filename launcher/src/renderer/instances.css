@@ -338,3 +338,32 @@
 .discord-status[data-state="connected"] .discord-dot { background: var(--ok); }
 .discord-status[data-state="connecting"] .discord-dot, .discord-status[data-state="unavailable"] .discord-dot { background: var(--warn); }
 .discord-status[data-state="error"] .discord-dot, .discord-status[data-state="unconfigured"] .discord-dot { background: var(--danger); }
+
+/* ---------- Mitgelieferte Addons (Reiter „Heldix-Addons“) ---------- */
+.bundled-addons { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.bundled-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.bundled-title { color: var(--muted); font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+.bundled-sub { color: var(--faint); font-size: 12px; }
+.bundled-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 10px; }
+.bundled-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--accent-line);
+  background: linear-gradient(135deg, var(--accent-soft), transparent 70%), var(--surface);
+}
+.bundled-icon { display: grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: 10px; color: var(--accent-text); background: var(--accent-soft); }
+.bundled-icon svg { width: 20px; height: 20px; }
+.bundled-spotify { border-color: rgba(29, 185, 84, 0.45); background: linear-gradient(135deg, rgba(29, 185, 84, 0.14), transparent 70%), var(--surface); }
+.bundled-spotify .bundled-icon { color: #1ed760; background: rgba(29, 185, 84, 0.16); }
+.bundled-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.bundled-name { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text); font-weight: 700; font-size: 14px; }
+.bundled-name > span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.bundled-name .content-version, .bundled-name .tag { flex: none; }
+.bundled-desc { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.bundled-card button { flex: none; }
+.content-icon.placeholder svg { width: 20px; height: 20px; }
+.content-icon.bundled-spotify { color: #1ed760; background: rgba(29, 185, 84, 0.16); }

@@ -51,6 +51,9 @@ const ICONS = {
   quit: '<path d="M12 3.5 V11"/><path d="M7.2 6.6 A7 7 0 1 0 16.8 6.6"/>',
   play: `<path d="M8.5 5.5 V18.5 L18.5 12 Z" fill="#fff"/>`,
   pause: `<rect x="6.5" y="5" width="4" height="14" rx="1.2" ${FILL}/><rect x="13.5" y="5" width="4" height="14" rx="1.2" ${FILL}/>`,
+  'skip-next': `<path d="M5.5 6 V18 L14.5 12 Z" fill="#fff"/><rect x="16" y="5.5" width="3" height="13" rx="1.2" ${FILL}/>`,
+  'skip-previous': `<path d="M18.5 6 V18 L9.5 12 Z" fill="#fff"/><rect x="5" y="5.5" width="3" height="13" rx="1.2" ${FILL}/>`,
+  music: `<path d="M9 17.5 V5.8 L19 3.8 V15.5"/><circle cx="6.5" cy="17.5" r="2.6" ${FILL}/><circle cx="16.5" cy="15.5" r="2.6" ${FILL}/>`,
   back: '<path d="M19 12 H5.5 M11 6 L5 12 L11 18"/>',
   // Aktionen
   plus: '<path d="M12 5 V19 M5 12 H19"/>',

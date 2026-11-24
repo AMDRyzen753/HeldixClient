@@ -1,4 +1,4 @@
-// Baut Heldix Loader, Client-Mod und Beispiel-Addon (../mod) und legt die JARs in resources/ ab:
+// Baut Heldix Loader, Client-Mod und die mitgelieferten Addons (../mod) und legt die JARs in resources/ ab:
 //   resources/heldix-loader/heldix-loader-<version>.jar   (der eigene Loader, Java-Agent)
 //   resources/client-mods/heldixclient-<version>+<mc>.jar (die HeldixClient-Mod)
 //   resources/heldix-addons/*.jar                          (mitgelieferte Addons)
@@ -64,6 +64,15 @@ for (const jar of await jarsIn(libs, (f) => /^heldixclient-.+\+.+\.jar$/.test(f)
 }
 await replaceAll(path.join(resources, 'client-mods'), libs, [...newest.values()].map((v) => v.jar), 'Client-Mod');
 
-// Mitgelieferte Heldix-Addons (werden in neue Heldix-Instanzen kopiert)
-const addonLibs = path.join(modDir, 'example-addon', 'build', 'libs');
-await replaceAll(path.join(resources, 'heldix-addons'), addonLibs, await jarsIn(addonLibs, () => true), 'Addon');
+// Mitgelieferte Heldix-Addons (neue Heldix-Instanzen bekommen sie automatisch, bestehende über den Reiter „Heldix-Addons“)
+const addonTarget = path.join(resources, 'heldix-addons');
+await rm(addonTarget, { recursive: true, force: true });
+await mkdir(addonTarget, { recursive: true });
+for (const project of ['example-addon', 'spotify-addon']) {
+  const libs = path.join(modDir, project, 'build', 'libs');
+  const jars = await Promise.all((await jarsIn(libs, () => true)).map(async (jar) => ({ jar, mtimeMs: (await stat(path.join(libs, jar))).mtimeMs })));
+  const newestAddon = jars.sort((a, b) => b.mtimeMs - a.mtimeMs)[0]?.jar;
+  if (!newestAddon) throw new Error(`Addon ${project} wurde nicht gebaut`);
+  await copyFile(path.join(libs, newestAddon), path.join(addonTarget, newestAddon));
+  console.log(`Addon bereit: resources/heldix-addons/${newestAddon}`);
+}

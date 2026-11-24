@@ -944,7 +944,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			Ui.rect(g, x, y, w, ADDON_H, 10, Ui.SURFACE);
 			Ui.outline(g, x, y, w, ADDON_H, 10, (color & 0xFFFFFF) | 0x44000000);
 			Ui.rect(g, x + 10, y + 10, 26, 26, 8, (color & 0xFFFFFF) | 0x33000000);
-			Ui.icon(g, ok ? "addons" : "warning", x + 16, y + 16, 14, color);
+			Ui.icon(g, ok ? addon.icon() : "warning", x + 16, y + 16, 14, color);
 
 			String status = ok ? "Aktiv · " + addon.moduleCount() + (addon.moduleCount() == 1 ? " Modul" : " Module") : "Fehler";
 			int statusW = Ui.width(status, Ui.Font.SMALL) + 14;

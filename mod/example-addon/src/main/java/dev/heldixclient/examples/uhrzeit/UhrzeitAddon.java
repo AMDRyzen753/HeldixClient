@@ -8,28 +8,34 @@ import dev.heldixclient.api.ModuleSpec;
 import java.time.Duration;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.function.BooleanSupplier;
 
 /**
  * Beispiel-Addon für den Heldix Loader:
- * - HUD-Modul "Uhrzeit" (echte Uhrzeit)
+ * - HUD-Modul "Uhrzeit" (echte Uhrzeit, Einstellung "Sekunden" im Untermenü)
  * - HUD-Modul "Spielzeit" (Zeit seit Betreten der Welt)
  * - Modul "Begrüßung" (lokale Chatnachricht beim Betreten einer Welt)
  */
 public class UhrzeitAddon implements HeldixAddon {
 	private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss");
+	private static final DateTimeFormatter TIME_SHORT = DateTimeFormatter.ofPattern("HH:mm");
+
+	private BooleanSupplier showSeconds = () -> true;
 
 	private long worldJoinedAt;
 	private int worldsJoined;
 
 	@Override
 	public void onEnable(HeldixApi api) {
-		api.registerHudModule(ModuleSpec.of("uhrzeit", "Uhrzeit", "Echte Uhrzeit im HUD").at(4, 190),
-				canvas -> canvas.labelValue("Uhr", LocalTime.now().format(TIME)));
+		ModuleHandle clock = api.registerHudModule(ModuleSpec.of("uhrzeit", "Uhrzeit", "Echte Uhrzeit im HUD").at(4, 190).withIcon("clock"),
+				canvas -> canvas.labelValue("Uhr", LocalTime.now().format(showSeconds.getAsBoolean() ? TIME : TIME_SHORT)));
+		// Einstellung im Untermenü des Moduls (Heldix-Menü → Zahnrad), wird automatisch gespeichert
+		showSeconds = clock.addToggle("seconds", "Sekunden", "Uhrzeit mit Sekunden anzeigen", true);
 
-		api.registerHudModule(ModuleSpec.of("spielzeit", "Spielzeit", "Zeit in dieser Welt").at(4, 208),
+		api.registerHudModule(ModuleSpec.of("spielzeit", "Spielzeit", "Zeit in dieser Welt").at(4, 208).withIcon("hourglass"),
 				canvas -> canvas.labelValue("Spielzeit", format(Duration.ofMillis(worldJoinedAt == 0 ? 0 : System.currentTimeMillis() - worldJoinedAt))));
 
-		ModuleHandle greeting = api.registerModule(ModuleSpec.of("begruessung", "Begrüßung", "Gruß beim Welt-Start"));
+		ModuleHandle greeting = api.registerModule(ModuleSpec.of("begruessung", "Begrüßung", "Gruß beim Welt-Start").withIcon("chat"));
 
 		api.events().onWorldJoin(() -> {
 			worldJoinedAt = System.currentTimeMillis();

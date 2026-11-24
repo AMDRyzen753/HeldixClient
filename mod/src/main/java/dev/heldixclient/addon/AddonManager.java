@@ -44,11 +44,18 @@ public final class AddonManager {
 	record Listener<T>(LoadedAddon addon, T callback) {
 	}
 
+	/** Taste eines Addons (API 2) */
+	record Key(LoadedAddon addon, net.minecraft.client.KeyMapping mapping, Runnable onPress) {
+	}
+
 	private static final List<LoadedAddon> ADDONS = new ArrayList<>();
 	static final List<Listener<Runnable>> TICK = new ArrayList<>();
 	static final List<Listener<Runnable>> WORLD_JOIN = new ArrayList<>();
 	static final List<Listener<Runnable>> WORLD_LEAVE = new ArrayList<>();
 	static final List<Listener<Consumer<String>>> CHAT = new ArrayList<>();
+	static final List<Key> KEYS = new ArrayList<>();
+	/** älteste API-Version, für die gebaute Addons noch laufen */
+	public static final int MIN_API = 1;
 
 	private AddonManager() {
 	}
@@ -78,10 +85,36 @@ public final class AddonManager {
 			HeldixClient.LOGGER.error("Heldix-Addons: Ordner {} nicht lesbar", dir, e);
 		}
 
-		Set<String> ids = new HashSet<>();
+		// erst alle Beschreibungen lesen: liegt ein Addon in mehreren Versionen da, gewinnt die neueste
+		java.util.Map<String, LoadedAddon> newest = new java.util.HashMap<>();
 		for (Path jar : jars) {
 			LoadedAddon addon = new LoadedAddon(jar);
 			ADDONS.add(addon);
+			try {
+				addon.metadata = readMetadata(jar);
+				String id = addon.metadata.id;
+				if (id != null) {
+					LoadedAddon other = newest.get(id);
+					if (other == null || compareVersions(addon.metadata.version, other.metadata.version) > 0) newest.put(id, addon);
+				}
+			} catch (Throwable t) {
+				deactivate(addon, describe(t));
+				HeldixClient.LOGGER.error("Heldix-Addon {} konnte nicht gelesen werden", addon.fileName(), t);
+			}
+		}
+
+		Set<String> ids = new HashSet<>();
+		for (LoadedAddon addon : ADDONS) {
+			if (addon.metadata == null) continue;
+			LoadedAddon chosen = addon.metadata.id != null ? newest.get(addon.metadata.id) : null;
+			if (chosen != null && chosen != addon) {
+				boolean older = compareVersions(addon.metadata.version, chosen.metadata.version) < 0;
+				deactivate(addon, older
+						? "Ältere Version – genutzt wird " + chosen.metadata.version + " (" + chosen.fileName() + ")"
+						: "Doppelt installiert – genutzt wird " + chosen.fileName());
+				HeldixClient.LOGGER.warn("Heldix-Addon {} übersprungen: {}", addon.fileName(), addon.error());
+				continue;
+			}
 			load(addon, ids);
 		}
 		registerEvents();
@@ -90,12 +123,13 @@ public final class AddonManager {
 
 	private static void load(LoadedAddon addon, Set<String> ids) {
 		try {
-			addon.metadata = readMetadata(addon.file);
 			AddonMetadata meta = addon.metadata;
 			if (meta.id == null || !meta.id.matches("[a-z0-9_-]+")) throw new IllegalStateException("Ungültige Addon-ID: " + meta.id);
 			if (!ids.add(meta.id)) throw new IllegalStateException("Addon-ID \"" + meta.id + "\" ist doppelt installiert");
-			if (meta.api != HeldixApi.API_VERSION) {
-				throw new IllegalStateException("Gebaut für Heldix-API " + meta.api + ", unterstützt wird API " + HeldixApi.API_VERSION);
+			if (meta.api < MIN_API || meta.api > HeldixApi.API_VERSION) {
+				throw new IllegalStateException(meta.api > HeldixApi.API_VERSION
+						? "Braucht Heldix-API " + meta.api + ", dieser HeldixClient kann bis API " + HeldixApi.API_VERSION + " – bitte HeldixClient aktualisieren"
+						: "Gebaut für die veraltete Heldix-API " + meta.api + ", unterstützt wird ab API " + MIN_API);
 			}
 			if (meta.entrypoint == null || meta.entrypoint.isBlank()) throw new IllegalStateException("\"entrypoint\" fehlt");
 
@@ -113,6 +147,26 @@ public final class AddonManager {
 		} catch (Throwable t) {
 			deactivate(addon, describe(t));
 			HeldixClient.LOGGER.error("Heldix-Addon {} konnte nicht geladen werden", addon.fileName(), t);
+		}
+	}
+
+	/** Vergleicht Versionen wie "1.2.0" zahlenweise; Text dahinter (z. B. "-beta") zählt nicht. */
+	static int compareVersions(String a, String b) {
+		String[] x = (a != null ? a : "").split("[.+-]");
+		String[] y = (b != null ? b : "").split("[.+-]");
+		for (int i = 0; i < Math.max(x.length, y.length); i++) {
+			int diff = Integer.compare(number(x, i), number(y, i));
+			if (diff != 0) return diff;
+		}
+		return 0;
+	}
+
+	private static int number(String[] parts, int index) {
+		if (index >= parts.length) return 0;
+		try {
+			return Integer.parseInt(parts[index].replaceAll("\\D.*", ""));
+		} catch (NumberFormatException e) {
+			return 0;
 		}
 	}
 
@@ -164,7 +218,10 @@ public final class AddonManager {
 	}
 
 	private static void registerEvents() {
-		ClientEvents.TICK_END.register(minecraft -> runAll(TICK, "onTick"));
+		ClientEvents.TICK_END.register(minecraft -> {
+			keys();
+			runAll(TICK, "onTick");
+		});
 		WorldEvents.JOIN.register(minecraft -> runAll(WORLD_JOIN, "onWorldJoin"));
 		WorldEvents.LEAVE.register(minecraft -> runAll(WORLD_LEAVE, "onWorldLeave"));
 		ChatEvents.RECEIVE.register((message, fromPlayer) -> chat(message.getString()));
@@ -178,6 +235,19 @@ public final class AddonManager {
 				}
 			}
 		});
+	}
+
+	private static void keys() {
+		for (Key key : KEYS) {
+			while (key.mapping().consumeClick()) {
+				if (!key.addon().isActive()) continue;
+				try {
+					key.onPress().run();
+				} catch (Throwable t) {
+					reportError(key.addon(), "Taste " + key.mapping().getName(), t);
+				}
+			}
+		}
 	}
 
 	private static void chat(String text) {

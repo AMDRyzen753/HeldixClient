@@ -81,7 +81,12 @@ async function main(): Promise<void> {
   }
 
   if (withClient) {
-    await new InstanceStore(createPaths(path.join(paths.root, 'test-instances'))).installBundledAddons(gameDir, path.join(resources, 'heldix-addons'));
+    const bundled = path.join(resources, 'heldix-addons');
+    await new InstanceStore(createPaths(path.join(paths.root, 'test-instances'))).installBundledAddons(gameDir, bundled);
+    // Testläufe sollen immer den frischen Build nutzen, auch wenn sich die Versionsnummer nicht geändert hat
+    for (const jar of (await readdir(bundled)).filter((f) => f.endsWith('.jar'))) {
+      await copyFile(path.join(bundled, jar), path.join(gameDir, 'heldix-addons', jar));
+    }
   }
   const screenshots = path.join(gameDir, 'screenshots');
   if (autotest) {

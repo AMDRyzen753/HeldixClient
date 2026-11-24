@@ -19,9 +19,12 @@ import net.minecraft.util.FormattedCharSequence;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -379,6 +382,94 @@ public final class Ui {
 		g.pose().scale(1f / s, 1f / s);
 		g.blit(RenderPipelines.GUI_TEXTURED, BACKGROUND, (w - dw) / 2, (h - dh) / 2, 0, 0, dw, dh, 1600, 1000, 1600, 1000, withAlpha(0xFFFFFFFF, alpha));
 		g.pose().popMatrix();
+	}
+
+	// ======================================================================================
+	// Bilder aus Dateien (z. B. Album-Cover eines Addons)
+	// ======================================================================================
+
+	private static final int MAX_FILE_TEXTURES = 24;
+	/** Wie oft geprüft wird, ob sich eine Datei geändert hat */
+	private static final long FILE_CHECK_MS = 2000;
+
+	private static final class FileTexture {
+		final Identifier id;
+		final long modified;
+		final int width;
+		final int height;
+		long checkedAt;
+
+		FileTexture(Identifier id, long modified, int width, int height) {
+			this.id = id;
+			this.modified = modified;
+			this.width = width;
+			this.height = height;
+		}
+	}
+
+	/** zuletzt benutzte zuerst raus (access order) */
+	private static final LinkedHashMap<Path, FileTexture> FILE_TEXTURES = new LinkedHashMap<>(16, 0.75f, true);
+	/** Dateien, die nicht ladbar waren (Pfad → Änderungszeit beim Fehlschlag) */
+	private static final Map<Path, Long> FILE_FAILED = new HashMap<>();
+	private static int fileTextureCounter;
+
+	/** Zeichnet ein PNG aus einer Datei, weich skaliert. @return false, wenn die Datei fehlt oder ungültig ist */
+	public static boolean image(GuiGraphicsExtractor g, Path file, float x, float y, float w, float h, float alpha) {
+		FileTexture texture = fileTexture(file);
+		if (texture == null) return false;
+		int s = scale();
+		int x0 = Math.round(x * s);
+		int y0 = Math.round(y * s);
+		int x1 = Math.round((x + w) * s);
+		int y1 = Math.round((y + h) * s);
+		g.pose().pushMatrix();
+		g.pose().scale(1f / s, 1f / s);
+		g.blit(RenderPipelines.GUI_TEXTURED, texture.id, x0, y0, 0, 0, x1 - x0, y1 - y0, texture.width, texture.height,
+				texture.width, texture.height, withAlpha(0xFFFFFFFF, alpha));
+		g.pose().popMatrix();
+		return true;
+	}
+
+	private static FileTexture fileTexture(Path file) {
+		if (file == null) return null;
+		long now = System.currentTimeMillis();
+		FileTexture cached = FILE_TEXTURES.get(file);
+		if (cached != null && now - cached.checkedAt < FILE_CHECK_MS) return cached;
+		long modified;
+		try {
+			modified = Files.getLastModifiedTime(file).toMillis();
+		} catch (Exception e) {
+			return null;
+		}
+		if (cached != null && cached.modified == modified) {
+			cached.checkedAt = now;
+			return cached;
+		}
+		Long failed = FILE_FAILED.get(file);
+		if (failed != null && failed == modified) return null;
+		if (cached != null) {
+			FILE_TEXTURES.remove(file);
+			Minecraft.getInstance().getTextureManager().release(cached.id);
+		}
+		try (InputStream in = Files.newInputStream(file)) {
+			NativeImage image = NativeImage.read(in);
+			Identifier id = HeldixClient.id("dynamic/file_" + (++fileTextureCounter));
+			FileTexture texture = new FileTexture(id, modified, image.getWidth(), image.getHeight());
+			Minecraft.getInstance().getTextureManager().register(id, new LinearTexture(id, image));
+			texture.checkedAt = now;
+			FILE_TEXTURES.put(file, texture);
+			while (FILE_TEXTURES.size() > MAX_FILE_TEXTURES) {
+				Map.Entry<Path, FileTexture> eldest = FILE_TEXTURES.entrySet().iterator().next();
+				FILE_TEXTURES.remove(eldest.getKey());
+				Minecraft.getInstance().getTextureManager().release(eldest.getValue().id);
+			}
+			return texture;
+		} catch (Exception e) {
+			if (FILE_FAILED.size() > 64) FILE_FAILED.clear();
+			FILE_FAILED.put(file, modified);
+			HeldixClient.LOGGER.warn("Bild {} nicht ladbar: {}", file, e.toString());
+			return null;
+		}
 	}
 
 	/** Lädt ein Bild mit linearer Filterung (weich beim Skalieren), statt der pixeligen Minecraft-Filterung. */

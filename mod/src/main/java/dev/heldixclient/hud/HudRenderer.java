@@ -20,5 +20,6 @@ public final class HudRenderer {
 		for (HudModule module : ModuleManager.hud()) {
 			if (module.isEnabled()) module.extract(g, mc);
 		}
+		Notifications.render(g);
 	}
 }

@@ -1,5 +1,6 @@
 {
 	"key.category.heldixclient.main": "HeldixClient",
+	"key.category.heldixclient.addons": "Heldix-Addons",
 	"key.heldixclient.menu": "Open Heldix menu",
 	"key.heldixclient.zoom": "Zoom"
 }

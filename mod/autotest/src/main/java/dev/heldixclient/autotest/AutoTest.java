@@ -158,6 +158,13 @@ public final class AutoTest implements HeldixModInitializer {
 		t.check("Kaputtes Addon als Fehler erkannt", addons.contains("Kaputtes Test-Addon=FAILED"));
 		t.check("Module des Uhrzeit-Addons vorhanden",
 				t.compute(mc -> ModuleManager.all().stream().anyMatch(m -> "uhrzeit:uhrzeit".equals(m.id()))));
+		// Spotify-Addon nutzt API 2: eigene Einstellungen und Tasten
+		t.check("Spotify-Addon aktiv (API 2)", addons.contains("Spotify=ACTIVE"));
+		t.check("Spotify-Modul mit eigenen Einstellungen", t.compute(mc -> ModuleManager.all().stream()
+				.filter(m -> "spotify:spotify".equals(m.id()))
+				.anyMatch(m -> m.settings().stream().anyMatch(s -> s.label().equals("Cover anzeigen")))));
+		t.check("Addon-Tasten in der Steuerung", t.compute(mc -> java.util.Arrays.stream(mc.options.keyMappings)
+				.anyMatch(k -> k.getName().equals("Spotify – Abspielen/Pause"))));
 
 		t.run(mc -> mc.reloadResourcePacks());
 		t.waitSoft(mc -> mc.gui.overlay() != null, 5);
@@ -188,6 +195,9 @@ public final class AutoTest implements HeldixModInitializer {
 		t.waitTicks(10);
 		t.screenshot("heldix-02-hud");
 		t.run(mc -> mc.options.keyUp.setDown(false));
+		t.run(mc -> dev.heldixclient.hud.Notifications.show("autotest", "Einblendung", "So sehen Addon-Einblendungen aus", null));
+		t.waitTicks(8);
+		t.screenshot("heldix-02b-einblendung");
 
 		t.serverCommand("tellraw @a \"Heldix-Autotest System\"");
 		t.serverCommand("say Heldix-Autotest Say");
@@ -412,6 +422,16 @@ public final class AutoTest implements HeldixModInitializer {
 		t.moveMouse(gear[0], gear[1]);
 		t.waitTicks(5);
 		t.screenshot("heldix-03e-untermenue");
+
+		// Untermenü eines Addon-Moduls (API 2): eigene Schalter und Knöpfe des Spotify-Addons
+		Module spotify = t.compute(mc -> ModuleManager.all().stream().filter(m -> "spotify:spotify".equals(m.id())).findFirst().orElse(null));
+		if (spotify != null) {
+			t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.MODULES, spotify));
+			t.waitTicks(5);
+			t.check("Untermenü eines Addon-Moduls", "spotify:spotify".equals(t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).openModuleId())));
+			t.check("Addon-Modul hat eigenes Icon", "music".equals(spotify.icon()));
+			t.screenshot("heldix-03f-addon-einstellungen");
+		}
 
 		// HUD-Größe über die Einstellung des Moduls
 		int normalWidth = t.compute(mc -> ModuleManager.hud().getFirst().width());

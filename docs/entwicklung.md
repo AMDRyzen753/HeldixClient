@@ -64,7 +64,7 @@ Der Starttest bricht mit Fehler ab, wenn:
 
 - das Spiel abstürzt;
 - ein Eingriff des Loaders oder einer Mod fehlschlägt;
-- Loader, HeldixClient oder das Beispiel-Addon nicht geladen werden;
+- Loader, HeldixClient oder die mitgelieferten Addons nicht geladen werden;
 - HeldixClient keinen Status für Discord meldet (Hauptmenü, im Autotest auch Einzelspieler);
 - eine Fabric- oder Vanilla-Instanz fälschlich den Heldix Loader lädt.
 

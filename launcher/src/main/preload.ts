@@ -20,6 +20,8 @@ const api: HeldixApi = {
   selectInstance: (id) => ipcRenderer.invoke('instances:select', id),
 
   listContent: (id, kind) => ipcRenderer.invoke('content:list', id, kind),
+  listBundledAddons: (id) => ipcRenderer.invoke('addons:bundled', id),
+  installBundledAddon: (id, file) => ipcRenderer.invoke('addons:installBundled', id, file),
   setContentEnabled: (id, kind, file, enabled) => ipcRenderer.invoke('content:setEnabled', id, kind, file, enabled),
   removeContent: (id, kind, file) => ipcRenderer.invoke('content:remove', id, kind, file),
   addContentFiles: (id, kind, paths) => ipcRenderer.invoke('content:add', id, kind, paths),

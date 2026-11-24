@@ -4,27 +4,39 @@ import dev.heldixclient.api.HudRenderer;
 import dev.heldixclient.api.ModuleHandle;
 import dev.heldixclient.api.ModuleSpec;
 import dev.heldixclient.module.HudModule;
+import dev.heldixclient.module.Setting;
+import dev.heldixclient.ui.Ui;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BooleanSupplier;
+import java.util.function.IntSupplier;
 
 /** HUD-Modul aus einem Addon. */
 final class AddonHudModule extends HudModule implements ModuleHandle {
 	private final LoadedAddon addon;
 	private final HudRenderer renderer;
 	private final List<ToggleListener> listeners = new ArrayList<>();
+	private final List<Setting> custom = new ArrayList<>();
+	private final String icon;
 
 	AddonHudModule(LoadedAddon addon, ModuleSpec spec, HudRenderer renderer) {
 		super(addon.metadata.id + ":" + spec.id(), spec.name(), spec.description(), spec.enabledByDefault(), spec.defaultX(), spec.defaultY());
 		this.addon = addon;
 		this.renderer = renderer;
+		this.icon = spec.icon();
 	}
 
 	@Override
 	public String source() {
 		return addon.name();
+	}
+
+	@Override
+	public String icon() {
+		return icon != null && Ui.hasIcon(icon) ? icon : super.icon();
 	}
 
 	@Override
@@ -34,7 +46,7 @@ final class AddonHudModule extends HudModule implements ModuleHandle {
 
 	@Override
 	protected long draw(GuiGraphicsExtractor g, Minecraft mc, int x, int y) {
-		AddonCanvas canvas = new AddonCanvas(g, mc.font, x, y);
+		AddonCanvas canvas = new AddonCanvas(g, mc.font, x, y, isPreviewing());
 		try {
 			renderer.render(canvas);
 		} catch (Throwable t) {
@@ -50,21 +62,40 @@ final class AddonHudModule extends HudModule implements ModuleHandle {
 
 	@Override
 	protected void onEnable() {
-		notifyListeners(true);
+		AddonSettings.notifyToggle(addon, name(), listeners, true);
 	}
 
 	@Override
 	protected void onDisable() {
-		notifyListeners(false);
+		AddonSettings.notifyToggle(addon, name(), listeners, false);
 	}
 
-	private void notifyListeners(boolean enabled) {
-		for (ToggleListener listener : listeners) {
-			try {
-				listener.onToggle(enabled);
-			} catch (Throwable t) {
-				AddonManager.reportError(addon, "onToggle " + name(), t);
-			}
-		}
+	// --- Einstellungen (API 2) ----------------------------------------------------------------
+
+	@Override
+	public BooleanSupplier addToggle(String key, String label, String description, boolean defaultValue) {
+		Setting.Toggle toggle = toggle(AddonSettings.key(key), label, AddonSettings.text(description), defaultValue);
+		custom.add(toggle);
+		return toggle.get();
+	}
+
+	@Override
+	public IntSupplier addChoice(String key, String label, String description, List<String> options, int defaultIndex) {
+		AddonSettings.checkOptions(options);
+		Setting.Choice choice = choice(AddonSettings.key(key), label, AddonSettings.text(description), List.copyOf(options), defaultIndex);
+		custom.add(choice);
+		return AddonSettings.clamped(choice, options.size());
+	}
+
+	@Override
+	public void addAction(String label, String description, String button, Runnable action) {
+		custom.add(AddonSettings.action(addon, name(), label, description, button, action));
+	}
+
+	@Override
+	public List<Setting> settings() {
+		List<Setting> settings = super.settings();
+		settings.addAll(0, custom);
+		return settings;
 	}
 }

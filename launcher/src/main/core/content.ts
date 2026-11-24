@@ -1,10 +1,11 @@
 import AdmZip from 'adm-zip';
 import { copyFile, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { ContentItem, ContentKind, InstanceLoader } from '../../shared/api';
+import type { BundledAddon, ContentItem, ContentKind, InstanceLoader } from '../../shared/api';
 import { readJson, writeJson } from './fsutil';
-import { ADDON_DIR } from './instances';
 
+/** Ordner der Heldix-Addons in einer Instanz */
+export const ADDON_DIR = 'heldix-addons';
 export const MANAGED_LIST = '.heldix-managed.json';
 export const MODRINTH_INDEX = '.heldix-modrinth.json';
 
@@ -189,6 +190,63 @@ export async function addContentFiles(gameDir: string, kind: ContentKind, files:
     count++;
   }
   return count;
+}
+
+/** Vergleicht Versionen wie "1.2.0" zahlenweise (Rest wird ignoriert). */
+function compareVersions(a: string | null, b: string | null): number {
+  const parts = (v: string | null) => (v ?? '').split(/[.+-]/).map((p) => Number.parseInt(p, 10) || 0);
+  const x = parts(a);
+  const y = parts(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const diff = (x[i] ?? 0) - (y[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/** Mitgelieferte Addons des Launchers und ob (bzw. in welcher Version) sie in der Instanz liegen. */
+export async function listBundledAddons(gameDir: string, bundledDir: string | null): Promise<BundledAddon[]> {
+  if (!bundledDir) return [];
+  let files: string[] = [];
+  try {
+    files = (await readdir(bundledDir)).filter((f) => f.endsWith('.jar'));
+  } catch {
+    return [];
+  }
+  const installed = await listContent(gameDir, 'addons', 'heldix');
+  const result: BundledAddon[] = [];
+  for (const file of files) {
+    const meta = await readMeta(path.join(bundledDir, file), 'addons');
+    if (meta.error || !meta.id) continue;
+    const present = installed.find((item) => item.id === meta.id);
+    result.push({
+      file,
+      id: meta.id,
+      name: meta.name ?? meta.id,
+      version: meta.version,
+      description: meta.description,
+      state: !present ? 'available' : compareVersions(meta.version, present.version) > 0 ? 'update' : 'installed',
+      installedVersion: present?.version ?? null,
+    });
+  }
+  return result.sort((a, b) => a.name.localeCompare(b.name, 'de'));
+}
+
+/** Kopiert ein mitgeliefertes Addon in die Instanz und entfernt ältere Versionen desselben Addons. */
+export async function installBundledAddon(gameDir: string, bundledDir: string | null, file: string): Promise<string> {
+  assertContentFile(file);
+  if (!bundledDir || !file.endsWith('.jar')) throw new Error('Dieses Addon gibt es im Launcher nicht.');
+  const source = path.join(bundledDir, file);
+  const meta = await readMeta(source, 'addons');
+  if (meta.error || !meta.id) throw new Error(meta.error ?? 'Ungültiges Addon');
+  const dir = contentDir(gameDir, 'addons');
+  await mkdir(dir, { recursive: true });
+  for (const item of await listContent(gameDir, 'addons', 'heldix')) {
+    if (item.id === meta.id && item.file !== file) await rm(path.join(dir, item.file), { force: true });
+  }
+  await rm(path.join(dir, `${file}.disabled`), { force: true });
+  await copyFile(source, path.join(dir, file));
+  return meta.name ?? meta.id;
 }
 
 export async function countEnabled(gameDir: string, kind: ContentKind): Promise<number> {

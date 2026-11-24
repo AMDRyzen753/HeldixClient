@@ -81,7 +81,15 @@ public abstract class HudModule extends Module {
 		extract(g, mc, true);
 	}
 
+	private boolean previewing;
+
+	/** true, solange das Element im HUD-Editor gezeichnet wird */
+	protected boolean isPreviewing() {
+		return previewing;
+	}
+
 	private void extract(GuiGraphicsExtractor g, Minecraft mc, boolean preview) {
+		previewing = preview;
 		lastX = Math.clamp(state.x, 0, Math.max(0, g.guiWidth() - lastWidth));
 		lastY = Math.clamp(state.y, 0, Math.max(0, g.guiHeight() - lastHeight));
 		float scale = scale();

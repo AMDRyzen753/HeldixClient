@@ -1,12 +1,13 @@
 import { randomBytes } from 'node:crypto';
-import { copyFile, mkdir, readdir } from 'node:fs/promises';
+import { mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { InstanceLoader, InstancePatch, NewInstance } from '../../shared/api';
+import { ADDON_DIR, installBundledAddon, listBundledAddons } from './content';
 import { exists, readJson, writeJson } from './fsutil';
 import type { LauncherPaths } from './paths';
 
 export const INSTANCE_FILE = 'heldix-instance.json';
-export const ADDON_DIR = 'heldix-addons';
+export { ADDON_DIR };
 export const INSTANCE_COLORS = ['#3b82f6', '#06b6d4', '#10b981', '#8b5cf6', '#f59e0b', '#f43f5e'];
 
 export interface InstanceConfig {
@@ -113,16 +114,16 @@ export class InstanceStore {
     return config;
   }
 
-  /** Mitgelieferte Heldix-Addons in eine Instanz kopieren (nur beim Anlegen). */
+  /**
+   * Mitgelieferte Heldix-Addons in eine Instanz legen (beim Anlegen). Fehlende kommen dazu, ältere Versionen
+   * werden ersetzt; was schon in gleicher oder neuerer Version da ist, bleibt unverändert.
+   */
   async installBundledAddons(instanceDir: string, bundledAddonsDir: string | null): Promise<void> {
-    const target = path.join(instanceDir, ADDON_DIR);
-    await mkdir(target, { recursive: true });
+    await mkdir(path.join(instanceDir, ADDON_DIR), { recursive: true });
     if (!bundledAddonsDir) return;
     try {
-      for (const file of await readdir(bundledAddonsDir)) {
-        if (file.endsWith('.jar') && !(await exists(path.join(target, file)))) {
-          await copyFile(path.join(bundledAddonsDir, file), path.join(target, file));
-        }
+      for (const addon of await listBundledAddons(instanceDir, bundledAddonsDir)) {
+        if (addon.state !== 'installed') await installBundledAddon(instanceDir, bundledAddonsDir, addon.file);
       }
     } catch {
       // keine mitgelieferten Addons vorhanden

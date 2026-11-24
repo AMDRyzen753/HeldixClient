@@ -61,4 +61,13 @@ public final class LoadedAddon {
 	public int moduleCount() {
 		return modules.size();
 	}
+
+	/** Icon für die Addon-Liste: das eigene Icon des ersten Moduls, sonst das Puzzleteil */
+	public String icon() {
+		for (Module module : modules) {
+			String icon = module.icon();
+			if (!"addons".equals(icon) && !"cube".equals(icon)) return icon;
+		}
+		return "addons";
+	}
 }

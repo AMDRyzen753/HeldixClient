@@ -3,23 +3,35 @@ package dev.heldixclient.addon;
 import dev.heldixclient.api.ModuleHandle;
 import dev.heldixclient.api.ModuleSpec;
 import dev.heldixclient.module.Module;
+import dev.heldixclient.module.Setting;
+import dev.heldixclient.ui.Ui;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BooleanSupplier;
+import java.util.function.IntSupplier;
 
-/** Modul ohne HUD aus einem Addon (nur an/aus). */
+/** Modul ohne HUD aus einem Addon (an/aus, ab API 2 mit eigenen Einstellungen). */
 final class AddonToggleModule extends Module implements ModuleHandle {
 	private final LoadedAddon addon;
 	private final List<ToggleListener> listeners = new ArrayList<>();
+	private final List<Setting> custom = new ArrayList<>();
+	private final String icon;
 
 	AddonToggleModule(LoadedAddon addon, ModuleSpec spec) {
 		super(addon.metadata.id + ":" + spec.id(), spec.name(), spec.description(), spec.enabledByDefault(), 0, 0);
 		this.addon = addon;
+		this.icon = spec.icon();
 	}
 
 	@Override
 	public String source() {
 		return addon.name();
+	}
+
+	@Override
+	public String icon() {
+		return icon != null && Ui.hasIcon(icon) ? icon : super.icon();
 	}
 
 	@Override
@@ -34,21 +46,40 @@ final class AddonToggleModule extends Module implements ModuleHandle {
 
 	@Override
 	protected void onEnable() {
-		notifyListeners(true);
+		AddonSettings.notifyToggle(addon, name(), listeners, true);
 	}
 
 	@Override
 	protected void onDisable() {
-		notifyListeners(false);
+		AddonSettings.notifyToggle(addon, name(), listeners, false);
 	}
 
-	private void notifyListeners(boolean enabled) {
-		for (ToggleListener listener : listeners) {
-			try {
-				listener.onToggle(enabled);
-			} catch (Throwable t) {
-				AddonManager.reportError(addon, "onToggle " + name(), t);
-			}
-		}
+	// --- Einstellungen (API 2) ----------------------------------------------------------------
+
+	@Override
+	public BooleanSupplier addToggle(String key, String label, String description, boolean defaultValue) {
+		Setting.Toggle toggle = toggle(AddonSettings.key(key), label, AddonSettings.text(description), defaultValue);
+		custom.add(toggle);
+		return toggle.get();
+	}
+
+	@Override
+	public IntSupplier addChoice(String key, String label, String description, List<String> options, int defaultIndex) {
+		AddonSettings.checkOptions(options);
+		Setting.Choice choice = choice(AddonSettings.key(key), label, AddonSettings.text(description), List.copyOf(options), defaultIndex);
+		custom.add(choice);
+		return AddonSettings.clamped(choice, options.size());
+	}
+
+	@Override
+	public void addAction(String label, String description, String button, Runnable action) {
+		custom.add(AddonSettings.action(addon, name(), label, description, button, action));
+	}
+
+	@Override
+	public List<Setting> settings() {
+		List<Setting> settings = super.settings();
+		settings.addAll(custom);
+		return settings;
 	}
 }

@@ -15,5 +15,7 @@ include 'heldix-loader-fabric'
 // Heldix-API (reines Java, ohne Minecraft) und Beispiel-Addon
 include 'heldix-api'
 include 'example-addon'
+// Spotify-Addon (Musik im HUD, Steuerung per Taste; wird mit dem Launcher ausgeliefert)
+include 'spotify-addon'
 // Automatischer Test im echten Spiel (wird nicht ausgeliefert)
 include 'autotest'

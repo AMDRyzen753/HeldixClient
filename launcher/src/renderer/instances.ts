@@ -1,5 +1,5 @@
 // Instanzen: Übersicht, Detailansicht (Mods, Addons, Einstellungen), Modrinth-Suche, neue Instanz
-import type { ContentItem, ContentKind, InstanceInfo, InstanceLoader, ModrinthHit, QuickPlayTarget, ShaderpackList, VersionInfo } from '../shared/api';
+import type { BundledAddon, ContentItem, ContentKind, InstanceInfo, InstanceLoader, ModrinthHit, QuickPlayTarget, ShaderpackList, VersionInfo } from '../shared/api';
 import {
   $,
   api,
@@ -19,6 +19,7 @@ import {
   state,
   svgIcon,
   toast,
+  uiIcon,
 } from './core.js';
 
 const COLORS = ['#3b82f6', '#06b6d4', '#10b981', '#8b5cf6', '#f59e0b', '#f43f5e'];
@@ -182,7 +183,9 @@ function switchTab(tab: DetailTab): void {
   $('#tab-content').hidden = tab === 'settings' || tab === 'shaders';
   $('#tab-settings').hidden = tab !== 'settings';
   $('#tab-shaders').hidden = tab !== 'shaders';
+  $('#bundled-addons').hidden = true;
   if (tab === 'shaders') void loadShaders();
+  if (tab === 'addons') void loadBundled();
   if (tab === 'mods' || tab === 'addons') {
     const isMods = tab === 'mods';
     const heldix = current()?.loader === 'heldix';
@@ -201,6 +204,62 @@ function switchTab(tab: DetailTab): void {
           : 'Fabric-Mods als .jar hierher ziehen oder über „Mods entdecken“ direkt von Modrinth installieren. Das Leistungs-Paket bringt Sodium, Lithium & Co.';
     void loadContent();
   }
+}
+
+/** Icons der mitgelieferten Addons (Name aus dem Heldix-Icon-Set) */
+const BUNDLED_ICONS: Record<string, string> = { spotify: 'music', uhrzeit: 'clock' };
+
+/** Mitgelieferte Addons, die in dieser Instanz noch fehlen oder veraltet sind, als Karten über der Liste */
+async function loadBundled(): Promise<void> {
+  const box = $('#bundled-addons');
+  const requested = detailId;
+  if (!requested || kind() !== 'addons') return;
+  let addons: BundledAddon[] = [];
+  try {
+    addons = await api.listBundledAddons(requested);
+  } catch {
+    addons = [];
+  }
+  if (requested !== detailId || kind() !== 'addons') return;
+  box.textContent = '';
+  const offer = addons.filter((addon) => addon.state !== 'installed');
+  box.hidden = offer.length === 0;
+  if (offer.length === 0) return;
+
+  box.append(h('div', { class: 'bundled-head' },
+    h('span', { class: 'bundled-title', text: 'Mitgelieferte Addons' }),
+    h('span', { class: 'bundled-sub', text: 'Kommen mit dem Launcher – ein Klick, und sie sind beim nächsten Start dabei' })));
+  const grid = h('div', { class: 'bundled-grid' });
+  for (const addon of offer) {
+    const update = addon.state === 'update';
+    const button = h('button', { class: update ? 'ghost' : 'primary' },
+      uiIcon(update ? 'refresh' : 'download', 'btn-icon'),
+      update ? 'Aktualisieren' : 'Installieren');
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        const name = await api.installBundledAddon(requested, addon.file);
+        toast(`${name} ist installiert und beim nächsten Spielstart dabei.`, 'success');
+        await loadContent();
+        await loadBundled();
+        await reloadInstances();
+      } catch (error) {
+        button.disabled = false;
+        toast(errorMessage(error), 'error');
+      }
+    });
+    const version = update && addon.installedVersion ? `${addon.installedVersion} → ${addon.version ?? '?'}` : addon.version;
+    grid.append(h('div', { class: `bundled-card bundled-${addon.id}` },
+      h('div', { class: 'bundled-icon' }, uiIcon(BUNDLED_ICONS[addon.id] ?? 'addons')),
+      h('div', { class: 'bundled-main' },
+        h('div', { class: 'bundled-name' },
+          h('span', { text: addon.name }),
+          version ? h('span', { class: 'content-version', text: version }) : null,
+          update ? h('span', { class: 'tag tag-type', text: 'UPDATE' }) : null),
+        h('div', { class: 'bundled-desc', text: addon.description })),
+      button));
+  }
+  box.append(grid);
 }
 
 function kind(): ContentKind {
@@ -246,9 +305,12 @@ function renderContent(): void {
   }
 
   for (const item of items) {
+    const bundledIcon = !isMods && item.id ? BUNDLED_ICONS[item.id] : undefined;
     const icon = item.icon
       ? h('img', { class: 'content-icon', src: item.icon, alt: '' })
-      : h('div', { class: 'content-icon placeholder', text: item.name.charAt(0).toUpperCase() });
+      : bundledIcon
+        ? h('div', { class: `content-icon placeholder bundled-${item.id}` }, uiIcon(bundledIcon))
+        : h('div', { class: 'content-icon placeholder', text: item.name.charAt(0).toUpperCase() });
     const toggle = h('input', { type: 'checkbox', class: 'switch', title: item.enabled ? 'Ausschalten' : 'Einschalten' }) as HTMLInputElement;
     toggle.checked = item.enabled;
     toggle.disabled = item.managed;
@@ -288,6 +350,7 @@ async function removeItem(item: ContentItem): Promise<void> {
     await api.removeContent(detailId!, kind(), item.file);
     toast(`${item.name} wurde entfernt.`, 'success');
     await loadContent();
+    if (kind() === 'addons') await loadBundled();
     await reloadInstances();
   } catch (error) {
     toast(errorMessage(error), 'error');

@@ -118,6 +118,18 @@ export interface ContentItem {
 
 export type ContentKind = 'mods' | 'addons';
 
+/** Ein Addon, das der Launcher mitbringt (z. B. Spotify), mit Status in einer Instanz */
+export interface BundledAddon {
+  file: string;
+  id: string;
+  name: string;
+  version: string | null;
+  description: string;
+  /** available = noch nicht installiert, update = ältere Version installiert */
+  state: 'available' | 'installed' | 'update';
+  installedVersion: string | null;
+}
+
 /** Ein Shaderpack im Ordner shaderpacks einer Fabric-Instanz */
 export interface ShaderpackInfo {
   /** Datei- oder Ordnername */
@@ -269,6 +281,10 @@ export interface HeldixApi {
   removeContent(instanceId: string, kind: ContentKind, file: string): Promise<void>;
   /** Ohne Pfade öffnet sich ein Dateidialog */
   addContentFiles(instanceId: string, kind: ContentKind, paths?: string[]): Promise<number>;
+  /** Mitgelieferte Heldix-Addons und ob sie in der Instanz installiert sind */
+  listBundledAddons(instanceId: string): Promise<BundledAddon[]>;
+  /** Installiert bzw. aktualisiert ein mitgeliefertes Addon; gibt den Namen zurück */
+  installBundledAddon(instanceId: string, file: string): Promise<string>;
   pathForFile(file: File): string;
 
   searchModrinth(instanceId: string, query: string, offset: number): Promise<ModrinthSearchResult>;

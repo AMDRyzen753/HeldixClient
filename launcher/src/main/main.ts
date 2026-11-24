@@ -29,7 +29,7 @@ import {
   MICROSOFT_REDIRECT_URI,
 } from './config';
 import { loginMinecraft, offlineUuid, refreshMicrosoft } from './core/auth';
-import { addContentFiles, countEnabled, listContent, removeContent, setContentEnabled } from './core/content';
+import { addContentFiles, countEnabled, installBundledAddon, listBundledAddons, listContent, removeContent, setContentEnabled } from './core/content';
 import { DiscordRpc } from './core/discord';
 import { getFabricGameVersions } from './core/fabric';
 import { exists } from './core/fsutil';
@@ -523,6 +523,18 @@ function registerIpc(): void {
       sources = result.filePaths;
     }
     return addContentFiles(instances.dir(instance.id), assertKind(kind), sources);
+  });
+
+  ipcMain.handle('addons:bundled', async (_e, id: string) => {
+    const instance = await instances.require(id);
+    if (!usesHeldixClient(instance)) return [];
+    return listBundledAddons(instances.dir(instance.id), bundledAddonsDir());
+  });
+  ipcMain.handle('addons:installBundled', async (_e, id: string, file: string) => {
+    if (gameInstanceId === id) throw new Error('Bitte erst das Spiel beenden.');
+    const instance = await instances.require(id);
+    if (!usesHeldixClient(instance)) throw new Error('Heldix-Addons laufen nur in Instanzen mit HeldixClient.');
+    return installBundledAddon(instances.dir(instance.id), bundledAddonsDir(), String(file));
   });
 
   ipcMain.handle('modrinth:search', async (_e, id: string, query: string, offset: number) => {

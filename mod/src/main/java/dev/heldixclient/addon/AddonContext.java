@@ -1,6 +1,9 @@
 package dev.heldixclient.addon;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.heldixclient.HeldixClient;
+import dev.heldixclient.hud.Notifications;
+import dev.heldixclient.loader.api.KeyMappings;
 import dev.heldixclient.loader.HeldixLoader;
 import dev.heldixclient.api.AddonConfig;
 import dev.heldixclient.api.AddonInfo;
@@ -8,12 +11,14 @@ import dev.heldixclient.api.HeldixApi;
 import dev.heldixclient.api.HeldixEvents;
 import dev.heldixclient.api.HeldixLogger;
 import dev.heldixclient.api.HudRenderer;
+import dev.heldixclient.api.KeyHandle;
 import dev.heldixclient.api.ModuleHandle;
 import dev.heldixclient.api.ModuleSpec;
 import dev.heldixclient.api.PlayerInfo;
 import dev.heldixclient.module.ModuleManager;
 import dev.heldixclient.ui.Theme;
 import net.minecraft.SharedConstants;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
@@ -21,7 +26,10 @@ import net.minecraft.network.chat.TextColor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -148,5 +156,53 @@ final class AddonContext implements HeldixApi {
 	public AddonConfig config() {
 		if (config == null) config = new AddonConfigImpl(info.id());
 		return config;
+	}
+
+	// --- API 2 ------------------------------------------------------------------------------
+
+	/** Gruppe „Heldix-Addons“ in der Steuerung (erst angelegt, wenn ein Addon eine Taste registriert) */
+	private static KeyMapping.Category keyCategory;
+
+	@Override
+	public KeyHandle registerKey(String id, String name, int defaultKey, Runnable onPress) {
+		if (id == null || !id.matches("[a-z0-9_-]+")) throw new IllegalArgumentException("Tasten-ID darf nur a-z, 0-9, _ und - enthalten: " + id);
+		Objects.requireNonNull(onPress, "onPress");
+		if (keyCategory == null) keyCategory = KeyMapping.Category.register(HeldixClient.id("addons"));
+		// Der Name ist zugleich der Schlüssel in options.txt; ":" trennt dort Name und Wert
+		String label = (info.name() + " – " + (name == null || name.isBlank() ? id : name)).replace(':', ' ');
+		KeyMapping mapping = KeyMappings.register(new KeyMapping(label, InputConstants.Type.KEYBOARD, defaultKey, keyCategory));
+		AddonManager.KEYS.add(new AddonManager.Key(addon, mapping, onPress));
+		return new KeyHandle() {
+			@Override
+			public boolean isDown() {
+				return mapping.isDown();
+			}
+
+			@Override
+			public String keyName() {
+				return mapping.isUnbound() ? "" : mapping.getTranslatedKeyMessage().getString();
+			}
+		};
+	}
+
+	@Override
+	public void notify(String title, String message) {
+		notify(title, message, null);
+	}
+
+	@Override
+	public void notify(String title, String message, Path image) {
+		Notifications.show(info.id(), title, message, image);
+	}
+
+	@Override
+	public Path dataDirectory() {
+		Path dir = HeldixLoader.configDir().resolve("heldix-addons").resolve(info.id());
+		try {
+			Files.createDirectories(dir);
+		} catch (Exception e) {
+			log.warn("Ordner {} nicht anlegbar", dir, e);
+		}
+		return dir;
 	}
 }

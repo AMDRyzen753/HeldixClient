@@ -25,7 +25,7 @@ Ein eigener Minecraft-Client nach dem Vorbild von Lunar oder Feather, bestehend 
 | **Launcher** | Lädt Minecraft direkt von Mojang, verwaltet Instanzen und Konten und startet das Spiel. Electron + TypeScript. |
 | **Heldix Loader** | Ein eigener Mod-Loader. Er klinkt sich als Java-Agent beim Start ein, verändert Minecraft-Klassen per ASM und lädt Heldix-Mods. Es gibt ihn auch als Fabric-Mod, damit HeldixClient in Fabric-Instanzen mitläuft. |
 | **HeldixClient-Mod** | Bringt die Features ins Spiel: eigener Ladebildschirm, eigene Oberfläche (Startseite, Einzel-/Mehrspieler, Pausemenü, Heldix-Menü) mit eigener Schrift und eigenen Icons, HUD-Module, Zoom, Heldix-Shader und ein eigenes F3-Menü. |
-| **Heldix-Addons** | Kleine Erweiterungen über eine stabile API, die nach Minecraft-Updates ohne neuen Build weiterlaufen. |
+| **Heldix-Addons** | Kleine Erweiterungen über eine stabile API, die nach Minecraft-Updates ohne neuen Build weiterlaufen. Mitgeliefert: **Spotify** (Song mit Cover im HUD, Musik per Taste steuern) und **Uhrzeit & Spielzeit**. |
 
 Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Launcher eine **Fabric-Instanz** an. HeldixClient läuft dort mit (abschaltbar).
 
@@ -65,6 +65,7 @@ Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Laun
 - **Heldix-Shader:** acht Farbstile und eine Shader-Engine mit Bloom, Tiefenunschärfe, Nebel und Umgebungsverdeckung (SSAO), mit Vulkan und OpenGL; HUD und Menüs bleiben unverändert
 - **Leistung:** FPS-Boost (schnelle Grafikoptionen, Ausschalten stellt alles wieder her) und weniger FPS, solange das Fenster im Hintergrund ist
 - **F3-Menü** im Heldix-Design, mit Grafik-API, Shader und Client-Version
+- **Spotify-Addon:** laufender Song mit Cover und Fortschritt im HUD, Abspielen/Pause und Songwechsel per Taste (Pos1, Bild ab/auf), Einblendung bei jedem neuen Song – ohne Anmeldung, über die Windows-Mediensteuerung
 
 **Für Entwickler**
 - [Heldix-Mods](docs/heldix-loader.md#eine-heldix-mod-schreiben) mit Events, eigenen Tasten, Übersetzungen und eigenen Eingriffen in Minecraft-Code
@@ -105,7 +106,7 @@ Voraussetzungen: Windows, [Node.js](https://nodejs.org) 22 oder neuer und ein JD
 git clone https://github.com/AMDRyzen753/HeldixClient.git
 cd HeldixClient\launcher
 npm install
-npm run mod      # baut Heldix Loader, Client-Mod und Addon
+npm run mod      # baut Heldix Loader, Client-Mod und Addons
 npm start        # startet den Launcher im Entwicklungsmodus
 npm run dist     # erzeugt den Installer in launcher\release\
 ```
@@ -128,6 +129,7 @@ mod/                     Java-Projekte (Gradle, Minecraft 26.3, Java 25)
 ├── src/                 HeldixClient-Mod
 ├── heldix-api/          API für Heldix-Addons (ohne Minecraft-Abhängigkeit)
 ├── example-addon/       Beispiel-Addon „Uhrzeit & Spielzeit“
+├── spotify-addon/       Spotify-Addon (Windows-Mediensteuerung)
 └── autotest/            automatischer Test im echten Spiel
 docs/                    Dokumentation und Bilder
 ```
