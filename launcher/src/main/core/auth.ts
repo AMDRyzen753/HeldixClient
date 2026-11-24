@@ -132,9 +132,15 @@ export async function loginMinecraft(ms: MicrosoftTokens): Promise<MinecraftSess
     body: JSON.stringify({ identityToken: `XBL3.0 x=${uhs};${xsts.Token}` }),
   });
   if (loginRes.status === 403) {
-    throw new AuthError(
-      'Minecraft lehnt die App-Registrierung ab. Neue Azure-Apps müssen erst von Mojang freigeschaltet werden (siehe README).',
-    );
+    const body = await loginRes.text().catch(() => '');
+    if (/app registration|AppRegInfo/i.test(body)) {
+      // Antwort von Mojang: "Invalid app registration, see https://aka.ms/AppRegInfo for more information"
+      throw new AuthError(
+        'Mojang hat die Microsoft-Anmeldung von HeldixClient noch nicht freigeschaltet. Bis zur Freigabe klappt sie für niemanden – dein Konto ist in Ordnung.',
+      );
+    }
+    const message = /"errorMessage"\s*:\s*"([^"]+)"/.exec(body)?.[1];
+    throw new AuthError(`Minecraft lehnt die Anmeldung ab${message ? `: ${message}` : ' (403)'}.`);
   }
   if (!loginRes.ok) throw new HttpError(loginRes.url, loginRes.status, await loginRes.text().catch(() => ''));
   const mc = (await loginRes.json()) as { access_token: string; expires_in: number };

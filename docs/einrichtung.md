@@ -26,7 +26,9 @@ Neue Apps dürfen die Minecraft-Schnittstellen erst nach einer Prüfung durch Mo
 - Gefragt werden Name, Application (Client) ID, Tenant ID, eine Website und eine Begründung.
 - Die Prüfung kann einige Tage bis Wochen dauern.
 
-Bis zur Freigabe klappt die Microsoft-Anmeldung zwar, danach meldet der Launcher aber: „Minecraft lehnt die App-Registrierung ab …“.
+Bis zur Freigabe klappt die Anmeldung bei Microsoft zwar, danach meldet der Launcher aber: „Mojang hat die Microsoft-Anmeldung von HeldixClient noch nicht freigeschaltet …“. Das gilt für alle Konten, bis Mojang die App freigibt. Die Antwort kommt per E-Mail.
+
+Zum Testen bis dahin: den Launcher aus dem Quellcode starten (`npm start`). Im Entwicklungsmodus gehen Offline-Konten ohne Microsoft-Konto, also Einzelspieler, LAN und Server ohne Online-Modus. Für Server mit Online-Modus braucht es eine echte Anmeldung.
 
 ### So läuft die Anmeldung ab
 
