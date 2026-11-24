@@ -1,10 +1,12 @@
 // Test: installiert eine Version und startet sie mit einem Offline-Konto.
 // Aufruf: npm run test:launch -- [version] [heldix|fabric|vanilla] [timeoutSekunden] [--autotest] [--world=<Ordner>]
-//          [--graphics=vulkan|default|opengl] [--no-tuning] [--benchmark[=Sekunden]] [--shader=<stil>] [--boost] [--size=BxH]
+//          [--graphics=vulkan|default|opengl] [--no-tuning] [--benchmark[=Sekunden]] [--shader=<stil>] [--engine=dezent|kraeftig] [--boost] [--size=BxH]
+//          nur fabric: [--no-heldix] (ohne HeldixClient) [--perf] (Leistungs-Paket installieren) [--shaderpack=an|aus] (Iris-Pack ein/aus)
 //
 // Grafik wie im Launcher: Standard ist Vulkan mit abgestimmten JVM-Einstellungen.
 // --benchmark (nur heldix): misst die FPS an einer festen Stelle einer festen Welt (siehe mod/autotest Benchmark).
 //
+// --gui-scale=N setzt die GUI-Skalierung (0 = automatisch), z. B. um große Menüs zu prüfen.
 // Ohne --autotest: Spiel bis zum Hauptmenü starten, Log prüfen, nach 15 s beenden.
 // Mit --autotest (nur heldix): zusätzlich den Heldix-Autotest (mod/autotest) installieren. Er klickt
 // sich durch Hauptmenü, Heldix-Menü, eine Testwelt, HUD-Editor und Zoom, prüft alles und macht
@@ -12,7 +14,7 @@
 // Nutzt einen eigenen Testordner (<Datenordner>/test-instances).
 
 import AdmZip from 'adm-zip';
-import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { GraphicsApi, InstanceLoader } from '../shared/api';
 import { CLIENT_MOD_PREFIX, DATA_DIR_NAME } from '../main/config';
@@ -22,7 +24,9 @@ import { buildLaunchArguments, startGame } from '../main/core/launch';
 import { GraphicsWatch, graphicsArguments, tunedJvmArguments } from '../main/core/performance';
 import { getVersionManifest } from '../main/core/mojang';
 import { createPaths, defaultDataRoot } from '../main/core/paths';
+import { installPerformancePack } from '../main/core/modrinth';
 import { prepareGame } from '../main/core/prepare';
+import { listShaderpacks, setActiveShaderpack } from '../main/core/shaderpacks';
 import { buildActivity, parseStatusLine } from '../main/core/presence';
 import { validateQuickPlay } from '../main/core/quickplay';
 
@@ -60,9 +64,23 @@ async function main(): Promise<void> {
   const gameDir = path.join(paths.root, 'test-instances', `${versionId}-${loader}${benchmark ? '-benchmark' : autotest ? '-autotest' : ''}`);
   console.log(`Datenordner: ${paths.root}`);
   console.log(`Teste ${versionId} (${loader}${benchmark ? ', Benchmark' : autotest ? ', Autotest' : ''}, Grafik ${graphicsApi}${tuning ? ', JVM abgestimmt' : ''}) in ${gameDir}`);
-  if (autotest && loader !== 'heldix') throw new Error('--autotest gibt es nur für heldix');
+  // HeldixClient läuft in Heldix-Instanzen und (über den Heldix Loader als Fabric-Mod) in Fabric-Instanzen
+  const withClient = loader === 'heldix' || (loader === 'fabric' && !flags.includes('--no-heldix'));
+  if (autotest && !withClient) throw new Error('--autotest braucht HeldixClient (heldix oder fabric ohne --no-heldix)');
 
-  if (loader === 'heldix') {
+  if (loader === 'fabric' && flags.includes('--perf')) {
+    const result = await installPerformancePack(gameDir, versionId);
+    console.log(`Leistungs-Paket: neu ${result.installed.join(', ') || '-'}; schon da ${result.alreadyInstalled.join(', ') || '-'}; nicht verfügbar ${result.unavailable.join(', ') || '-'}`);
+  }
+  const shaderpack = flag('shaderpack');
+  if (loader === 'fabric' && shaderpack) {
+    const packs = await listShaderpacks(gameDir);
+    const pack = shaderpack === 'aus' ? null : packs.packs[0]?.file ?? null;
+    await setActiveShaderpack(gameDir, pack);
+    console.log(`Iris-Shaderpack: ${pack ?? 'aus'}`);
+  }
+
+  if (withClient) {
     await new InstanceStore(createPaths(path.join(paths.root, 'test-instances'))).installBundledAddons(gameDir, path.join(resources, 'heldix-addons'));
   }
   const screenshots = path.join(gameDir, 'screenshots');
@@ -81,9 +99,13 @@ async function main(): Promise<void> {
     for (const old of (await readdir(modsDir)).filter((f) => f.startsWith('heldix-autotest-'))) await rm(path.join(modsDir, old));
     await copyFile(path.join(autotestLibs, autotestJar), path.join(modsDir, autotestJar));
     await copyFile(path.join(modRepo, 'build', 'test-addons', 'heldix-addon-kaputt.jar'), path.join(addonsDir, 'heldix-addon-kaputt.jar'));
-    const dummy = new AdmZip();
-    dummy.addFile('fabric.mod.json', Buffer.from(JSON.stringify({ schemaVersion: 1, id: 'fabric-attrappe', version: '1.0.0' })));
-    dummy.writeZip(path.join(modsDir, 'fabric-attrappe.jar'));
+    if (loader === 'heldix') {
+      const dummy = new AdmZip();
+      dummy.addFile('fabric.mod.json', Buffer.from(JSON.stringify({ schemaVersion: 1, id: 'fabric-attrappe', version: '1.0.0' })));
+      dummy.writeZip(path.join(modsDir, 'fabric-attrappe.jar'));
+    } else {
+      await rm(path.join(modsDir, 'fabric-attrappe.jar'), { force: true });
+    }
     // Sauberer Ausgangszustand: keine alten Bilder, Welten oder verschobenen HUD-Elemente
     await rm(screenshots, { recursive: true, force: true });
     await rm(path.join(gameDir, 'saves'), { recursive: true, force: true });
@@ -100,6 +122,8 @@ async function main(): Promise<void> {
     clientModsDir: path.join(resources, 'client-mods'),
     clientModPrefix: CLIENT_MOD_PREFIX,
     loaderDir: path.join(resources, 'heldix-loader'),
+    fabricLoaderDir: path.join(resources, 'heldix-loader-fabric'),
+    heldixClient: withClient,
     onProgress: (p) => {
       if (p.stage !== lastStage || p.done === p.total) {
         if (p.total > 0) console.log(`  ${p.stage}: ${p.done}/${p.total}`);
@@ -110,8 +134,12 @@ async function main(): Promise<void> {
   });
   console.log(`Vorbereitet in ${((Date.now() - started) / 1000).toFixed(1)} s, Client-Mod: ${prepared.clientModLoaded}, Loader: ${prepared.loaderVersion ?? '-'}`);
 
+  // GUI-Skalierung (z. B. --gui-scale=2 bei --size=1920x1080 für große Menüs); ohne Angabe automatisch
+  await setGuiScale(gameDir, Number(flag('gui-scale') ?? 0));
+
   const name = 'HeldixTester';
-  const graphicsArgs = graphicsArguments(graphicsApi, prepared.clientJar);
+  // wie im Launcher: Vulkan-Vorgabe nur für Heldix-Instanzen, sonst nur mit ausdrücklichem --graphics
+  const graphicsArgs = loader === 'heldix' || flag('graphics') ? graphicsArguments(graphicsApi, prepared.clientJar) : [];
   const tuningArgs = tuning ? tunedJvmArguments(prepared.javaMajor, []) : [];
   const testArgs: string[] = [];
   if (autotest) testArgs.push('-Dheldix.autotest=true');
@@ -119,6 +147,7 @@ async function main(): Promise<void> {
   if (benchmark) {
     testArgs.push('-Dheldix.benchmark=true', `-Dheldix.benchmark.seconds=${benchmarkSeconds}`);
     if (flag('shader')) testArgs.push(`-Dheldix.benchmark.shader=${flag('shader')}`);
+    if (flag('engine')) testArgs.push(`-Dheldix.benchmark.engine=${{ aus: 0, dezent: 1, kraeftig: 2 }[flag('engine') ?? ''] ?? Number(flag('engine'))}`);
     if (flags.includes('--boost')) testArgs.push('-Dheldix.benchmark.boost=true');
   }
   console.log(`Grafik-Argumente: ${graphicsArgs.join(' ') || '(keine)'}; JVM: ${tuningArgs.join(' ') || '(Standard)'}`);
@@ -173,7 +202,11 @@ async function main(): Promise<void> {
         const activity = buildActivity({ phase: 'running', minecraft: versionId, loader, startedAt: started, status, showServer: true, clientVersion: 'test' });
         console.log(`  [discord] ${activity.details} – ${activity.state}`);
       }
-      if (!failure && FAILURE_PATTERNS.some((p) => p.test(line.text))) failure = line.text;
+      if (!failure && FAILURE_PATTERNS.some((p) => p.test(line.text))) {
+        failure = line.text;
+        // Fabric zeigt bei Mod-Konflikten ein Fenster und wartet – sofort beenden statt bis zur Zeitüberschreitung
+        if (/Incompatible mods found/i.test(line.text)) game.process.kill();
+      }
       if (/HELDIX-AUTOTEST: ERFOLGREICH/.test(line.text)) autotestResult = 'ok';
       if (/HELDIX-AUTOTEST: FEHLGESCHLAGEN/.test(line.text)) {
         autotestResult = 'failed';
@@ -195,14 +228,14 @@ async function main(): Promise<void> {
   const code = await game.exited;
   clearTimeout(timeout);
   console.log(`Prozess beendet (Code ${code})`);
-  if (loader === 'heldix') {
+  if (withClient) {
     if (loaderLines.length === 0) failure ??= 'Heldix Loader ist nicht gestartet';
     if (clientLines.length === 0) failure ??= 'HeldixClient wurde nicht geladen';
     if (addonLines.length === 0) failure ??= 'Kein Heldix-Addon geladen';
   }
-  if (loader !== 'heldix' && (loaderLines.length > 0 || clientLines.length > 0)) failure ??= `${loader}-Instanz darf den Heldix Loader nicht laden`;
+  if (!withClient && (loaderLines.length > 0 || clientLines.length > 0)) failure ??= `${loader}-Instanz ohne HeldixClient darf den Heldix Loader nicht laden`;
   if (autotest && autotestResult === null) failure ??= 'Autotest hat kein Ergebnis gemeldet';
-  if (loader === 'heldix' && !world && !statusModes.includes('menu')) failure ??= 'HeldixClient hat keinen Status (Hauptmenü) für Discord gemeldet';
+  if (withClient && !world && !statusModes.includes('menu')) failure ??= 'HeldixClient hat keinen Status (Hauptmenü) für Discord gemeldet';
   if (autotest && !statusModes.includes('singleplayer')) failure ??= 'HeldixClient hat den Einzelspieler-Status nicht gemeldet';
   if (world && !statusModes.includes('singleplayer')) failure ??= `Direktstart: Welt „${world}“ wurde nicht betreten`;
   if (world && statusModes[0] !== 'singleplayer') failure ??= `Direktstart: zuerst kam ${statusModes[0] ?? 'nichts'} statt der Welt`;
@@ -222,3 +255,17 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
+
+/** Setzt guiScale in der options.txt der Testinstanz und blendet die Tutorial-Hinweise aus (andere Optionen bleiben). */
+async function setGuiScale(gameDir: string, scale: number): Promise<void> {
+  const file = path.join(gameDir, 'options.txt');
+  let text = '';
+  try {
+    text = await readFile(file, 'utf8');
+  } catch {
+    // noch keine options.txt: Minecraft legt sie beim Start an
+  }
+  const lines = text.split(/\r?\n/).filter((line) => line && !line.startsWith('guiScale:') && !line.startsWith('tutorialStep:'));
+  lines.push(`guiScale:${Number.isFinite(scale) ? scale : 0}`, 'tutorialStep:none');
+  await writeFile(file, lines.join('\n') + '\n');
+}

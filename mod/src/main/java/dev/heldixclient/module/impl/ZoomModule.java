@@ -1,5 +1,7 @@
 package dev.heldixclient.module.impl;
 
+import dev.heldixclient.module.Setting;
+
 import dev.heldixclient.HeldixClient;
 import dev.heldixclient.config.HeldixConfig;
 import dev.heldixclient.module.Module;
@@ -41,6 +43,26 @@ public class ZoomModule extends Module {
 		if (HeldixConfig.get().zoomCinematicCamera) {
 			mc.options.smoothCamera = savedSmoothCamera;
 		}
+	}
+
+	@Override
+	public java.util.List<Setting> settings() {
+		java.util.List<Setting> settings = super.settings();
+		HeldixConfig.Data config = HeldixConfig.get();
+		settings.add(new Setting.Slider("Zoomstärke", "Startwert; beim Zoomen ändert das Mausrad die Stärke", 2, 20, 0.5,
+				() -> config.zoomFactor, value -> {
+					config.zoomFactor = (float) value;
+					HeldixConfig.save();
+				}, value -> String.format(java.util.Locale.ROOT, "%.1f×", value)));
+		settings.add(new Setting.Toggle("Weich zoomen", "Sanfter Übergang beim Zoomen", () -> config.zoomSmooth, value -> {
+			config.zoomSmooth = value;
+			HeldixConfig.save();
+		}));
+		settings.add(new Setting.Toggle("Kinokamera", "Ruhigere Maus beim Zoomen", () -> config.zoomCinematicCamera, value -> {
+			config.zoomCinematicCamera = value;
+			HeldixConfig.save();
+		}));
+		return settings;
 	}
 
 	public boolean isZooming() {

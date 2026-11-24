@@ -1,43 +1,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
   <defs>
-    <linearGradient id="hx-bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#2563eb"/>
-      <stop offset="0.55" stop-color="#0ea5e9"/>
+    <linearGradient id="hx-fill" x1="0.15" y1="1" x2="0.85" y2="0">
+      <stop offset="0" stop-color="#1d4ed8"/>
+      <stop offset="0.55" stop-color="#3b82f6"/>
       <stop offset="1" stop-color="#22d3ee"/>
     </linearGradient>
     <linearGradient id="hx-sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.32"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="hx-edge" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/>
-      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0.06"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.6" stop-color="#ffffff" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.15"/>
     </linearGradient>
-    <linearGradient id="hx-glyph" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#dff6ff"/>
-    </linearGradient>
-    <radialGradient id="hx-light" cx="0.8" cy="0.12" r="0.6">
-      <stop offset="0" stop-color="#cffafe" stop-opacity="0.75"/>
-      <stop offset="1" stop-color="#cffafe" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="hx-dark" cx="0.1" cy="0.95" r="0.55">
-      <stop offset="0" stop-color="#1e3a8a" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#1e3a8a" stop-opacity="0"/>
-    </radialGradient>
-    <clipPath id="hx-clip"><rect x="16" y="16" width="168" height="168" rx="48"/></clipPath>
     <filter id="hx-shadow" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#0b3b75" flood-opacity="0.5"/>
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0b1f4d" flood-opacity="0.5"/>
     </filter>
   </defs>
-  <rect x="16" y="16" width="168" height="168" rx="48" fill="url(#hx-bg)"/>
-  <g clip-path="url(#hx-clip)">
-    <rect x="16" y="16" width="168" height="168" fill="url(#hx-light)"/>
-    <rect x="16" y="16" width="168" height="168" fill="url(#hx-dark)"/>
-    <rect x="16" y="16" width="168" height="92" fill="url(#hx-sheen)"/>
+  <!-- Grundform: Sechseck mit runden Ecken -->
+  <path id="hx-shape" d="M82.68 22 Q100 12 117.32 22 L158.89 46 Q176.21 56 176.21 76 L176.21 124 Q176.21 144 158.89 154 L117.32 178 Q100 188 82.68 178 L41.11 154 Q23.79 144 23.79 124 L23.79 76 Q23.79 56 41.11 46 Z" fill="url(#hx-fill)"/>
+  <use href="#hx-shape" fill="url(#hx-sheen)"/>
+  <use href="#hx-shape" fill="none" stroke="url(#hx-edge)" stroke-width="2"/>
+  <!-- "H": zwei Säulen, der Querbalken steigt nach rechts an -->
+  <g filter="url(#hx-shadow)" fill="#ffffff">
+    <rect x="57" y="58" width="27" height="84" rx="7"/>
+    <rect x="116" y="58" width="27" height="84" rx="7"/>
+    <polygon points="84,106 116,85 116,110 84,131"/>
   </g>
-  <!-- "H" aus Glasstreifen: zwei Balken, halbtransparenter Querbalken darüber -->
-  <g filter="url(#hx-shadow)">
-    <rect x="57" y="55" width="27" height="90" rx="13.5" fill="url(#hx-glyph)"/>
-    <rect x="116" y="55" width="27" height="90" rx="13.5" fill="url(#hx-glyph)"/>
-    <rect x="64" y="86.5" width="72" height="27" rx="13.5" fill="#ffffff" fill-opacity="0.6"/>
-  </g>
-  <rect x="16.75" y="16.75" width="166.5" height="166.5" rx="47.25" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="1.5"/>
 </svg>

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "heldixclient",
+  "version": "${version}",
+  "name": "HeldixClient",
+  "description": "PvP-Client mit HUD-Modulen, Zoom, eigenem Menü-Design, Heldix-Shadern und Heldix-Addons. Läuft in Fabric über den Heldix Loader (heldixloader).",
+  "authors": ["HeldixClient"],
+  "license": "MIT",
+  "icon": "assets/heldixclient/icon.png",
+  "environment": "client",
+  "depends": {
+    "heldixloader": ">=${loader_version}",
+    "minecraft": "${minecraft_version}"
+  }
+}

@@ -19,6 +19,13 @@ export interface InstanceConfig {
   lastPlayed: number | null;
   playTimeMs: number;
   memoryMb: number | null;
+  /** nur Fabric: HeldixClient mitstarten (fehlt = ja) */
+  heldixClient?: boolean;
+}
+
+/** Läuft HeldixClient in dieser Instanz? */
+export function usesHeldixClient(config: Pick<InstanceConfig, 'loader' | 'heldixClient'>): boolean {
+  return config.loader === 'heldix' || (config.loader === 'fabric' && config.heldixClient !== false);
 }
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -91,7 +98,7 @@ export class InstanceStore {
     };
     const dir = this.dir(config.id);
     await mkdir(path.join(dir, 'mods'), { recursive: true });
-    if (config.loader === 'heldix') await this.installBundledAddons(dir, bundledAddonsDir);
+    if (usesHeldixClient(config)) await this.installBundledAddons(dir, bundledAddonsDir);
     await this.save(config);
     return config;
   }
@@ -101,6 +108,7 @@ export class InstanceStore {
     if (typeof patch.name === 'string' && patch.name.trim()) config.name = patch.name.trim().slice(0, 40);
     if (typeof patch.color === 'string' && INSTANCE_COLORS.includes(patch.color)) config.color = patch.color;
     if (patch.memoryMb === null || (typeof patch.memoryMb === 'number' && patch.memoryMb >= 512)) config.memoryMb = patch.memoryMb;
+    if (typeof patch.heldixClient === 'boolean' && config.loader === 'fabric') config.heldixClient = patch.heldixClient;
     await this.save(config);
     return config;
   }

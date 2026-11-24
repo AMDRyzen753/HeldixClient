@@ -10,11 +10,18 @@ import dev.heldixclient.render.DebugOverlay;
 import dev.heldixclient.render.Performance;
 import dev.heldixclient.render.Shaders;
 import dev.heldixclient.screen.HeldixTitle;
+import dev.heldixclient.screen.LoadingScreen;
+import com.mojang.renderpearl.api.pipeline.RenderPipeline;
+import net.minecraft.client.gui.screens.LoadingOverlay;
+import net.minecraft.client.renderer.texture.TextureManager;
+import java.util.function.IntSupplier;
 import dev.heldixclient.ui.WidgetStyle;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
+import dev.heldixclient.ui.Shell;
 import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.resources.Identifier;
 
@@ -41,6 +48,35 @@ public final class Hooks {
 
 	public static String windowTitle(String vanilla) {
 		return HeldixClient.NAME + " " + HeldixClient.version + " | " + vanilla;
+	}
+
+	// --- Ladebildschirm ---------------------------------------------------------------------
+
+	public static void loadingTextures(TextureManager textures) {
+		LoadingScreen.registerTextures(textures);
+	}
+
+	public static int loadingBackground(IntSupplier vanilla) {
+		return LoadingScreen.background(vanilla);
+	}
+
+	/** Erste Hälfte des Mojang-Logos: im Heldix-Design Hintergrund, Leuchten und Heldix-Logo. */
+	public static void loadingLogo(GuiGraphicsExtractor g, RenderPipeline pipeline, Identifier texture, int x, int y, float u, float v,
+			int width, int height, int regionWidth, int regionHeight, int textureWidth, int textureHeight, int color) {
+		if (LoadingScreen.active()) LoadingScreen.logo(g, color);
+		else g.blit(pipeline, texture, x, y, u, v, width, height, regionWidth, regionHeight, textureWidth, textureHeight, color);
+	}
+
+	public static void loadingLogoSecondHalf(GuiGraphicsExtractor g, RenderPipeline pipeline, Identifier texture, int x, int y, float u, float v,
+			int width, int height, int regionWidth, int regionHeight, int textureWidth, int textureHeight, int color) {
+		if (!LoadingScreen.active()) g.blit(pipeline, texture, x, y, u, v, width, height, regionWidth, regionHeight, textureWidth, textureHeight, color);
+	}
+
+	/** true = eigener Ladebalken gezeichnet, Vanilla überspringen. */
+	public static boolean loadingProgress(LoadingOverlay overlay, GuiGraphicsExtractor g, float opacity) {
+		if (!LoadingScreen.active()) return false;
+		LoadingScreen.progress(overlay, g, opacity);
+		return true;
 	}
 
 	// --- Grafik ----------------------------------------------------------------------------
@@ -127,5 +163,18 @@ public final class Hooks {
 	/** Vanilla-Hauptmenü (Heldix-Design aus): kleines Abzeichen oben links. */
 	public static void titleAfterRender(TitleScreen screen, GuiGraphicsExtractor g) {
 		if (!titleActive(screen)) HeldixClient.drawBranding(g, Minecraft.getInstance().font);
+		else TITLES.get(screen).afterRender(g, screen.width, screen.height);
+	}
+
+	// --- Menüs -----------------------------------------------------------------------------
+
+	/** Gui.setScreen: Einzel- und Mehrspieler-Menü durch die Heldix-Seiten ersetzen. */
+	public static Screen replaceScreen(Screen screen) {
+		try {
+			return Shell.replace(screen);
+		} catch (RuntimeException e) {
+			HeldixClient.LOGGER.error("Menü konnte nicht ersetzt werden", e);
+			return screen;
+		}
 	}
 }

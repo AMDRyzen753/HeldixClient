@@ -1,5 +1,6 @@
 // Gemeinsamer Zustand und Hilfsfunktionen der Oberfläche
-import type { AccountInfo, AppInfo, GameState, HeldixApi, InstanceInfo, InstanceLoader, Settings, VersionListResult } from '../shared/api';
+import type { AccountInfo, AppInfo, GameState, HeldixApi, InstanceInfo, InstanceLoader, LoaderLogos, Settings, VersionListResult } from '../shared/api';
+import { UI_ICONS } from './ui-icons.js';
 
 declare global {
   interface Window {
@@ -17,6 +18,7 @@ export const state = {
   accounts: [] as AccountInfo[],
   game: { state: 'idle' } as GameState,
   progress: null as { stage: string; done: number; total: number } | null,
+  logos: null as LoaderLogos | null,
 };
 
 export function selectedInstance(): InstanceInfo | undefined {
@@ -71,29 +73,49 @@ export function svgIcon(path: string, className = 'icon'): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('class', className);
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
   svg.innerHTML = path;
   return svg;
 }
 
+/** Icons aus dem Heldix-Icon-Set (dieselben wie im Spiel), unter den bisherigen Namen */
 export const ICONS = {
-  play: '<path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z" fill="currentColor" stroke="none"/>',
-  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
-  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
-  check: '<path d="m5 12 5 5 9-10"/>',
-  lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
-  back: '<path d="m15 6-6 6 6 6"/>',
-  close: '<path d="M6 6l12 12M18 6 6 18"/>',
-  search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
-  file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/>',
-  compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5Z"/>',
-  blocks: '<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/>',
-  puzzle: '<path d="M10 4a2 2 0 1 1 4 0v2h4v4h-2a2 2 0 1 0 0 4h2v4h-4v-2a2 2 0 1 0-4 0v2H6v-4h2a2 2 0 1 0 0-4H6V6h4Z"/>',
-  world: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9s1.3-6.3 3.8-9Z"/>',
-  server: '<rect x="4" y="4" width="16" height="7" rx="2"/><rect x="4" y="13" width="16" height="7" rx="2"/><path d="M8 7.5h.01M8 16.5h.01"/>',
-  sliders: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
+  play: UI_ICONS.play,
+  trash: UI_ICONS.trash,
+  folder: UI_ICONS.folder,
+  plus: UI_ICONS.plus,
+  download: UI_ICONS.download,
+  check: UI_ICONS.check,
+  lock: UI_ICONS.lock,
+  back: UI_ICONS['chevron-left'],
+  close: UI_ICONS.close,
+  search: UI_ICONS.search,
+  file: UI_ICONS.file,
+  compass: UI_ICONS.compass,
+  blocks: UI_ICONS.cube,
+  puzzle: UI_ICONS.addons,
+  world: UI_ICONS.world,
+  server: UI_ICONS.server,
+  sparkle: UI_ICONS.sparkles,
+  sliders: UI_ICONS.options,
 };
+
+/** SVG aus dem Heldix-Icon-Set */
+export function uiIcon(name: string, className = 'icon'): SVGSVGElement {
+  return svgIcon(UI_ICONS[name] ?? UI_ICONS.cube, className);
+}
+
+/** Füllt alle <svg data-icon="name"> im HTML mit dem passenden Icon. */
+export function hydrateIcons(root: ParentNode = document): void {
+  root.querySelectorAll<SVGSVGElement>('svg[data-icon]').forEach((svg) => {
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.innerHTML = UI_ICONS[svg.dataset.icon ?? ''] ?? '';
+  });
+}
 
 // ---------- Toasts ----------
 export function toast(message: string, kind: 'info' | 'error' | 'success' = 'info'): void {
@@ -167,10 +189,33 @@ export function formatCount(n: number): string {
   return n.toLocaleString('de-DE');
 }
 
-/** Farbige Kachel einer Instanz mit Loader-Kennbuchstaben. */
+/**
+ * Logo eines Loaders: HeldixClient (eigenes Logo), Fabric (aus der Fabric-Loader-JAR) und Minecraft (aus der Client-JAR).
+ * null, solange es nicht geladen ist – dann zeigt die Kachel ein Icon aus dem Heldix-Icon-Set.
+ */
+export function loaderLogo(loader: InstanceLoader): string | null {
+  if (loader === 'heldix') return 'logo.svg';
+  return state.logos?.[loader] ?? null;
+}
+
+/** Kachel einer Instanz mit dem Logo ihres Loaders; die Farbe der Instanz zeigt der Rahmen. */
 export function instanceTile(instance: Pick<InstanceInfo, 'color' | 'loader' | 'name'>, size: 'small' | 'medium' | 'big' = 'medium'): HTMLElement {
-  const letter = instance.loader === 'heldix' ? 'H' : instance.loader === 'fabric' ? 'F' : 'V';
-  const tile = h('div', { class: `instance-tile ${size}`, text: letter });
+  const logo = loaderLogo(instance.loader);
+  const tile = h('div', { class: `instance-tile ${size}${logo ? ` logo ${instance.loader}` : ''}`, title: LOADER_LABELS[instance.loader] },
+    logo ? h('img', { class: 'tile-logo', src: logo, alt: '' }) : uiIcon(`loader-${instance.loader}`, 'tile-icon'));
   tile.style.setProperty('--tile', instance.color);
   return tile;
+}
+
+/** Logos in der Loader-Auswahl des Dialogs „Neue Instanz“ */
+export function applyLoaderLogos(): void {
+  document.querySelectorAll<HTMLElement>('.ni-loader').forEach((button) => {
+    const loader = button.dataset.loader as InstanceLoader;
+    const logo = loaderLogo(loader);
+    const icon = button.querySelector<HTMLElement>('.ni-loader-icon');
+    if (!logo || !icon) return;
+    icon.textContent = '';
+    icon.classList.add('logo');
+    icon.append(h('img', { src: logo, alt: '' }));
+  });
 }

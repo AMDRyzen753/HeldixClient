@@ -1,6 +1,6 @@
-// Minecraft-Neuigkeiten (offizielle Java-Patch-Notes von Mojang) in der rechten Spalte der Startseite.
+// Minecraft-Neuigkeiten (offizielle Java-Patch-Notes von Mojang) im Bereich „Neuigkeiten“ der Startseite.
 import type { NewsEntry } from '../shared/api';
-import { $, api, errorMessage, formatDate, h } from './core.js';
+import { $, api, errorMessage, formatDate, h, uiIcon } from './core.js';
 
 /** Erlaubte HTML-Elemente aus Mojangs Patch Notes; alles andere wird zu reinem Text. */
 const ALLOWED = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'STRONG', 'B', 'EM', 'I', 'CODE', 'BR', 'A']);
@@ -45,7 +45,7 @@ async function openNews(entry: NewsEntry): Promise<void> {
         h('div', {},
           h('h3', { class: 'modal-title', text: entry.title }),
           h('p', { class: 'modal-sub', text: `${entry.type === 'release' ? 'Vollversion' : 'Snapshot'} · ${formatDate(entry.date)} · Patch Notes von Mojang (Englisch)` })),
-        h('button', { class: 'icon-button', title: 'Schließen', text: '×', onclick: close })),
+        h('button', { class: 'icon-button', title: 'Schließen', onclick: close }, uiIcon('close'))),
       entry.image ? h('img', { class: 'news-modal-image', src: entry.image, alt: '' }) : null,
       body));
   document.body.append(backdrop);
@@ -58,20 +58,28 @@ async function openNews(entry: NewsEntry): Promise<void> {
   }
 }
 
-/** Zeigt die neueste Meldung als dezente Pille unten auf der Startseite. */
+/** Zeigt die neuesten Meldungen im Bereich „Neuigkeiten“ der Startseite. */
 export async function loadNews(): Promise<void> {
-  const pill = $('#news-pill');
+  const panel = $('#news-panel');
+  const list = $('#news-list');
   let entries: NewsEntry[] = [];
   try {
     entries = await api.listNews();
   } catch {
-    // offline: keine Pille
+    // offline: kein Bereich
   }
-  const latest = entries[0];
-  pill.hidden = !latest;
-  if (!latest) return;
-  $('#news-pill-badge').textContent = latest.type === 'release' ? 'Neu' : 'Snapshot';
-  $('#news-pill-text').textContent = `${latest.title} · ${formatDate(latest.date)}`;
-  pill.title = latest.summary;
-  pill.onclick = () => void openNews(latest);
+  panel.hidden = entries.length === 0;
+  list.textContent = '';
+  for (const entry of entries.slice(0, 4)) {
+    const thumb = entry.image
+      ? h('img', { class: 'row-icon thumb', src: entry.image, alt: '' })
+      : h('span', { class: 'row-icon placeholder' });
+    list.append(h('button', { class: 'row-item', type: 'button', title: entry.summary, onclick: () => void openNews(entry) },
+      thumb,
+      h('span', { class: 'row-text' },
+        h('span', { class: 'row-name', text: entry.title }),
+        h('span', { class: 'row-meta' },
+          h('span', { class: `row-kind${entry.type === 'release' ? ' release' : ''}`, text: entry.type === 'release' ? 'Vollversion' : 'Snapshot' }),
+          ` · ${formatDate(entry.date)}`))));
+  }
 }

@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import type { ProgressEvent } from '../../shared/api';
 
-export const USER_AGENT = `HeldixClient/0.7.0`;
+export const USER_AGENT = `HeldixClient/0.10.0`;
 
 export type ProgressFn = (event: ProgressEvent) => void;
 

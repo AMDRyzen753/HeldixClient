@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
@@ -6,6 +6,7 @@ import type {
   AccountInfo,
   AppInfo,
   ContentKind,
+  DeveloperStatus,
   FolderKind,
   GameState,
   InstanceInfo,
@@ -31,16 +32,21 @@ import { loginMinecraft, offlineUuid, refreshMicrosoft } from './core/auth';
 import { addContentFiles, countEnabled, listContent, removeContent, setContentEnabled } from './core/content';
 import { DiscordRpc } from './core/discord';
 import { getFabricGameVersions } from './core/fabric';
-import { ADDON_DIR, InstanceStore, type InstanceConfig } from './core/instances';
+import { exists } from './core/fsutil';
+import { ADDON_DIR, InstanceStore, usesHeldixClient, type InstanceConfig } from './core/instances';
 import { buildLaunchArguments, startGame, type GameAccount, type RunningGame } from './core/launch';
-import { installModrinth, searchModrinth } from './core/modrinth';
+import { installModrinth, installPerformancePack, searchModrinth } from './core/modrinth';
 import { findClientMods, findLoaderJar } from './core/mods';
 import { getVersionManifest, listInstalledVersions } from './core/mojang';
 import { createPaths, defaultDataRoot } from './core/paths';
 import { GraphicsWatch, graphicsArguments, tunedJvmArguments } from './core/performance';
 import { prepareGame } from './core/prepare';
+import { SHADERPACK_DIR, addShaderpackFiles, installShaderpack, listShaderpacks, removeShaderpack, searchShaderpacks, setActiveShaderpack } from './core/shaderpacks';
+import { DEV_KEY_FILE, SIGNING_KEY_PATH, checkDevKey, machineCode, matchingSigningKey, signDevKey } from './core/devkey';
+import { DEV_PUBLIC_KEY } from './dev-public-key';
 import { buildActivity, parseStatusLine, type GameStatus } from './core/presence';
 import { listQuickPlay, validateQuickPlay } from './core/quickplay';
+import { loaderLogos } from './core/loaderlogos';
 import { listNews, newsBody } from './core/news';
 import { skinFor } from './core/skins';
 import { Store, type StoredAccount } from './store';
@@ -63,6 +69,7 @@ function resourceDir(name: string): string {
 const clientModsDir = () => resourceDir('client-mods');
 const bundledAddonsDir = () => resourceDir(ADDON_DIR);
 const loaderDir = () => resourceDir('heldix-loader');
+const fabricLoaderDir = () => resourceDir('heldix-loader-fabric');
 
 const LOADER_LABELS = { heldix: 'Heldix Loader', fabric: 'Fabric', vanilla: 'Vanilla' } as const;
 
@@ -166,11 +173,68 @@ const launcherLog = (text: string, level: LogLine['level'] = 'INFO') => sendLog(
 const OFFLINE_LOCKED = 'Offline-Konten gibt es, sobald ein Microsoft-Konto mit Minecraft im Launcher angemeldet ist.';
 
 /**
+ * Entwickleroptionen und ob für diesen PC ein gültiger Entwickler-Schlüssel hinterlegt ist.
+ * Sind die Optionen an und liegt der passende Signaturschlüssel des Entwicklers auf diesem PC
+ * (%USERPROFILE%\.heldixclient-dev\signing-key.pem), erstellt der Launcher den Schlüssel selbst.
+ */
+async function developerStatus(): Promise<DeveloperStatus> {
+  const settings = await store.getSettings();
+  const keyPath = path.join(paths.root, DEV_KEY_FILE);
+  const pc = machineCode();
+  let check = checkDevKey(await readFile(keyPath, 'utf8').catch(() => null), DEV_PUBLIC_KEY, pc);
+  let autoCreated = false;
+  if (settings.developerMode && !check.valid) {
+    const signingKey = matchingSigningKey(await readFile(SIGNING_KEY_PATH, 'utf8').catch(() => ''), DEV_PUBLIC_KEY);
+    if (signingKey) {
+      const key = signDevKey(signingKey, 'Entwickler', pc);
+      await writeFile(keyPath, `${JSON.stringify(key, null, 2)}\n`);
+      check = checkDevKey(JSON.stringify(key), DEV_PUBLIC_KEY, pc);
+      autoCreated = check.valid;
+    }
+  }
+  return {
+    enabled: settings.developerMode,
+    machineCode: pc,
+    keyValid: check.valid,
+    keyName: check.valid ? check.name : null,
+    reason: check.valid ? null : check.reason,
+    keyPath,
+    autoCreated,
+  };
+}
+
+/** Schlüsseldatei auswählen: Signaturschlüssel des Entwicklers oder ein für diesen PC ausgestellter Entwickler-Schlüssel. */
+async function importDeveloperKey(): Promise<DeveloperStatus | null> {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    title: 'Entwickler-Schlüssel importieren',
+    properties: ['openFile'],
+    filters: [{ name: 'Entwickler-Schlüssel', extensions: ['pem', 'key'] }],
+  });
+  const file = result.filePaths[0];
+  if (result.canceled || !file) return null;
+  const text = await readFile(file, 'utf8');
+  if (text.includes('PRIVATE KEY')) {
+    if (!matchingSigningKey(text, DEV_PUBLIC_KEY)) throw new Error('Dieser Signaturschlüssel passt nicht zu diesem Build von HeldixClient.');
+    await mkdir(path.dirname(SIGNING_KEY_PATH), { recursive: true });
+    await writeFile(SIGNING_KEY_PATH, text, { mode: 0o600 });
+  } else {
+    const check = checkDevKey(text, DEV_PUBLIC_KEY, machineCode());
+    if (!check.valid) throw new Error(check.reason);
+    await writeFile(path.join(paths.root, DEV_KEY_FILE), text);
+  }
+  await store.saveSettings({ developerMode: true });
+  return developerStatus();
+}
+
+/**
  * Offline-Konten: im Entwicklungsmodus immer. In der fertigen App erst, wenn ein Microsoft-Konto im Launcher ist –
  * das gibt es nur mit gekauftem Minecraft (loginMinecraft prüft das Profil). So machen es auch Prism Launcher und MultiMC.
+ * Ausnahme: eingeschaltete Entwickleroptionen mit gültigem Entwickler-Schlüssel für diesen PC (npm run dev-key).
  */
 async function offlineAllowed(): Promise<boolean> {
-  return isDev || (await store.listAccounts()).some((a) => a.type === 'microsoft');
+  if (isDev || (await store.listAccounts()).some((a) => a.type === 'microsoft')) return true;
+  const developer = await developerStatus();
+  return developer.enabled && developer.keyValid;
 }
 
 async function sessionFor(account: StoredAccount): Promise<GameAccount> {
@@ -199,7 +263,7 @@ function toAccountInfo(account: StoredAccount): AccountInfo {
 async function toInstanceInfo(config: InstanceConfig): Promise<InstanceInfo> {
   const dir = instances.dir(config.id);
   const [modCount, addonCount] = await Promise.all([countEnabled(dir, 'mods'), countEnabled(dir, 'addons')]);
-  return { ...config, modCount, addonCount, path: dir };
+  return { ...config, heldixClient: usesHeldixClient(config), modCount, addonCount, path: dir };
 }
 
 /** Beim Start: alte Spielordner übernehmen, Standard-Instanz anlegen, Auswahl prüfen. */
@@ -258,6 +322,8 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
       clientModsDir: clientModsDir(),
       clientModPrefix: CLIENT_MOD_PREFIX,
       loaderDir: loaderDir(),
+      fabricLoaderDir: fabricLoaderDir(),
+      heldixClient: usesHeldixClient(instance),
       javaOverride: settings.javaPath,
       onProgress: sendProgress,
       onInfo: (message) => launcherLog(message),
@@ -361,7 +427,7 @@ async function openFolder(kind: FolderKind, instanceId?: string): Promise<void> 
   let target = paths.root;
   if (kind !== 'data') {
     const dir = instances.dir((await selectedInstance(instanceId)).id);
-    const sub = { instance: '', mods: 'mods', addons: ADDON_DIR, logs: 'logs', saves: 'saves' }[kind];
+    const sub = { instance: '', mods: 'mods', addons: ADDON_DIR, logs: 'logs', saves: 'saves', shaderpacks: SHADERPACK_DIR }[kind];
     target = path.join(dir, sub);
   }
   await mkdir(target, { recursive: true });
@@ -409,7 +475,15 @@ function registerIpc(): void {
     await store.saveSettings({ selectedInstanceId: config.id });
     return toInstanceInfo(config);
   });
-  ipcMain.handle('instances:update', async (_e, id: string, patch: InstancePatch) => toInstanceInfo(await instances.update(id, patch)));
+  ipcMain.handle('instances:update', async (_e, id: string, patch: InstancePatch) => {
+    if (gameInstanceId === id && patch && 'heldixClient' in patch) throw new Error('Bitte erst das Spiel beenden.');
+    const updated = await instances.update(id, patch);
+    // HeldixClient in einer Fabric-Instanz eingeschaltet: mitgelieferte Addons dazulegen, falls noch kein Addon-Ordner da ist
+    if (patch?.heldixClient === true && usesHeldixClient(updated) && !(await exists(path.join(instances.dir(updated.id), ADDON_DIR)))) {
+      await instances.installBundledAddons(instances.dir(updated.id), bundledAddonsDir());
+    }
+    return toInstanceInfo(updated);
+  });
   ipcMain.handle('instances:delete', async (_e, id: string) => {
     if (gameInstanceId === id) throw new Error('Diese Instanz läuft gerade.');
     await instances.require(id);
@@ -455,6 +529,12 @@ function registerIpc(): void {
     const instance = await instances.require(id);
     return searchModrinth(instances.dir(instance.id), instance.minecraft, String(query ?? ''), Number(offset) || 0);
   });
+  ipcMain.handle('modrinth:performance', async (_e, id: string) => {
+    if (gameInstanceId === id) throw new Error('Bitte erst das Spiel beenden.');
+    const instance = await instances.require(id);
+    if (instance.loader !== 'fabric') throw new Error('Das Leistungs-Paket besteht aus Fabric-Mods und gibt es nur für Fabric-Instanzen.');
+    return installPerformancePack(instances.dir(instance.id), instance.minecraft, sendProgress);
+  });
   ipcMain.handle('modrinth:install', async (_e, id: string, projectId: string) => {
     const instance = await instances.require(id);
     if (instance.loader !== 'fabric') {
@@ -463,12 +543,55 @@ function registerIpc(): void {
     return installModrinth(instances.dir(instance.id), instance.minecraft, String(projectId));
   });
 
+  // Shaderpacks laufen über Iris und damit nur in Fabric-Instanzen
+  const fabricInstance = async (id: string) => {
+    const instance = await instances.require(id);
+    if (instance.loader !== 'fabric') {
+      throw new Error('Shaderpacks wie BSL brauchen Iris und laufen nur in Fabric-Instanzen. Heldix-Instanzen haben die Heldix-Shader (im Spiel: Heldix-Menü → Shader).');
+    }
+    return instance;
+  };
+  ipcMain.handle('shaders:list', async (_e, id: string) => listShaderpacks(instances.dir((await instances.require(id)).id)));
+  ipcMain.handle('shaders:search', async (_e, id: string, query: string, offset: number) => {
+    const instance = await instances.require(id);
+    return searchShaderpacks(instances.dir(instance.id), instance.minecraft, String(query ?? ''), Number(offset) || 0);
+  });
+  ipcMain.handle('shaders:install', async (_e, id: string, projectId: string) => {
+    if (gameInstanceId === id) throw new Error('Bitte erst das Spiel beenden.');
+    const instance = await fabricInstance(id);
+    return installShaderpack(instances.dir(instance.id), instance.minecraft, String(projectId), sendProgress);
+  });
+  ipcMain.handle('shaders:setActive', async (_e, id: string, file: string | null) => {
+    const instance = await fabricInstance(id);
+    await setActiveShaderpack(instances.dir(instance.id), typeof file === 'string' ? file : null);
+  });
+  ipcMain.handle('shaders:remove', async (_e, id: string, file: string) => {
+    if (gameInstanceId === id) throw new Error('Bitte erst das Spiel beenden.');
+    const instance = await fabricInstance(id);
+    await removeShaderpack(instances.dir(instance.id), String(file));
+  });
+  ipcMain.handle('shaders:add', async (_e, id: string, files?: string[]) => {
+    const instance = await fabricInstance(id);
+    let sources = Array.isArray(files) ? files : [];
+    if (sources.length === 0) {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: 'Shaderpacks hinzufügen',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Shaderpacks', extensions: ['zip'] }],
+      });
+      if (result.canceled) return 0;
+      sources = result.filePaths;
+    }
+    return addShaderpackFiles(instances.dir(instance.id), sources);
+  });
+
   ipcMain.handle('accounts:list', () => store.listAccounts());
   ipcMain.handle('accounts:skin', async () => {
     const account = await store.getActiveAccount();
     return account ? skinFor(paths, account) : null;
   });
   ipcMain.handle('news:list', () => listNews(paths));
+  ipcMain.handle('loader:logos', () => loaderLogos(paths));
   ipcMain.handle('news:body', (_e, id: string) => newsBody(String(id)));
   ipcMain.handle('accounts:addMicrosoft', async () => {
     if (!MICROSOFT_CLIENT_ID) throw new Error('Microsoft-Login ist noch nicht eingerichtet: Client-ID in src/main/config.ts eintragen (siehe README).');
@@ -481,6 +604,8 @@ function registerIpc(): void {
     if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) throw new Error('Name: 3–16 Zeichen, nur Buchstaben, Zahlen und _.');
     return toAccountInfo(await store.addOffline(name, offlineUuid(name)));
   });
+  ipcMain.handle('developer:status', () => developerStatus());
+  ipcMain.handle('developer:import', () => importDeveloperKey());
   ipcMain.handle('accounts:remove', (_e, id: string) => store.remove(id));
   ipcMain.handle('accounts:select', (_e, id: string) => store.select(id));
 
@@ -507,9 +632,9 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     title: LAUNCHER_NAME,
-    backgroundColor: '#050b18',
+    backgroundColor: '#080b12',
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#00000000', symbolColor: '#dbeafe', height: 46 },
+    titleBarOverlay: { color: '#00000000', symbolColor: '#9ba6b8', height: 44 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

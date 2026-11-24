@@ -36,7 +36,7 @@ public final class WidgetStyle {
 			case "widget/slider_handle" -> handle(g, x, y, w, h, a, false);
 			case "widget/slider_handle_highlighted" -> handle(g, x, y, w, h, a, true);
 			case "widget/scroller_background" -> g.fill(x + w / 2 - 1, y, x + w / 2 + 1, y + h, Draw.withAlpha(0x26FFFFFF, a));
-			case "widget/scroller" -> Draw.rounded(g, x + 1, y, Math.max(2, w - 2), h, Draw.withAlpha(0xA0FFFFFF, a));
+			case "widget/scroller" -> Ui.rect(g, x + 1, y, Math.max(2, w - 2), h, Math.max(1, (w - 2) / 2f), Draw.withAlpha(0x88FFFFFF, a));
 			default -> {
 				return false;
 			}
@@ -66,37 +66,38 @@ public final class WidgetStyle {
 	}
 
 	public static void selection(GuiGraphicsExtractor g, int x, int y, int w, int h, boolean focused) {
-		Draw.rounded2(g, x, y, w, h, 0x2A38BDF8);
-		Draw.outline2(g, x, y, w, h, focused ? Theme.ACCENT_LIGHT : 0x907DD3FC);
-		g.fill(x + 3, y + 1, x + w - 3, y + 2, 0x30FFFFFF);
+		Ui.rect(g, x, y, w, h, 6, 0x1F3B82F6);
+		Ui.outline(g, x, y, w, h, 6, focused ? Ui.ACCENT : Ui.ACCENT_LINE);
 	}
 
-	/** Hauptmenüs: Minecraft hat das Panorama bereits verschwommen, darüber eine leichte Blautönung. */
+	/** Menüs ohne Welt: Heldix-Hintergrund (falls eingestellt), darüber eine Abdunkelung. */
 	private static void menuBackground(GuiGraphicsExtractor g, int x, int y, int w, int h) {
-		g.fillGradient(x, y, x + w, y + h, 0x33081A3A, 0x99030A18);
+		if (dev.heldixclient.config.HeldixConfig.get().heldixBackground && net.minecraft.client.Minecraft.getInstance().level == null) {
+			Ui.background(g, g.guiWidth(), g.guiHeight(), 1f);
+		}
+		g.fillGradient(x, y, x + w, y + h, 0x8C060A13, 0xC7060A13);
 	}
 
 	private static void button(GuiGraphicsExtractor g, int x, int y, int w, int h, float a, boolean hovered, boolean enabled) {
+		float r = Math.min(6, h / 2f);
 		if (!enabled) {
-			Draw.rounded2(g, x, y, w, h, Draw.withAlpha(0x12FFFFFF, a));
-			Draw.outline2(g, x, y, w, h, Draw.withAlpha(0x1CFFFFFF, a));
+			Ui.rect(g, x, y, w, h, r, Draw.withAlpha(0x0CFFFFFF, a));
+			Ui.outline(g, x, y, w, h, r, Draw.withAlpha(0x12FFFFFF, a));
 			return;
 		}
-		Draw.rounded2(g, x, y, w, h, Draw.withAlpha(hovered ? 0x40FFFFFF : 0x24FFFFFF, a));
-		g.fill(x + 3, y + 1, x + w - 3, y + 2, Draw.withAlpha(hovered ? 0x66FFFFFF : 0x3AFFFFFF, a));
-		Draw.outline2(g, x, y, w, h, Draw.withAlpha(hovered ? Theme.ACCENT_LIGHT : 0x40FFFFFF, a));
-		if (hovered && w > 12) {
-			g.fill(x + 6, y + h - 2, x + w - 6, y + h - 1, Draw.withAlpha(0xC038BDF8, a));
-		}
+		Ui.rect(g, x, y, w, h, r, Draw.withAlpha(hovered ? 0x2EFFFFFF : 0x1AFFFFFF, a));
+		Ui.outline(g, x, y, w, h, r, Draw.withAlpha(hovered ? Ui.ACCENT_LINE : Ui.LINE_STRONG, a));
 	}
 
 	private static void field(GuiGraphicsExtractor g, int x, int y, int w, int h, float a, boolean focused) {
-		Draw.rounded2(g, x, y, w, h, Draw.withAlpha(0x70040C1C, a));
-		Draw.outline2(g, x, y, w, h, Draw.withAlpha(focused ? Theme.ACCENT_LIGHT : 0x40FFFFFF, a));
+		float r = Math.min(6, h / 2f);
+		Ui.rect(g, x, y, w, h, r, Draw.withAlpha(0x99060A13, a));
+		Ui.outline(g, x, y, w, h, r, Draw.withAlpha(focused ? Ui.ACCENT_LINE : Ui.LINE_STRONG, a));
 	}
 
 	private static void handle(GuiGraphicsExtractor g, int x, int y, int w, int h, float a, boolean hovered) {
-		Draw.rounded2(g, x, y, w, h, Draw.withAlpha(hovered ? 0xFFFFFFFF : 0xFFE0F2FE, a));
-		Draw.outline2(g, x, y, w, h, Draw.withAlpha(hovered ? Theme.ACCENT : 0x9038BDF8, a));
+		// nur Flächen (ohne Ecken-Grafik), damit der Text des Reglers darüber bleibt
+		Ui.rect(g, x + 1, y, w - 2, h, 0, Draw.withAlpha(hovered ? 0xFFFFFFFF : 0xFFDCE6F5, a));
+		Ui.rect(g, x, y + 1, w, h - 2, 0, Draw.withAlpha(hovered ? 0xFFFFFFFF : 0xFFDCE6F5, a));
 	}
 }

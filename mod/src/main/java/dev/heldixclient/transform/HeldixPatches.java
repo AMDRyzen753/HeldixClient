@@ -6,6 +6,7 @@ import dev.heldixclient.loader.api.transform.Patches;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.VarInsnNode;
 
 import java.util.Set;
 
@@ -29,6 +30,8 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 	private static final String GAME_RENDERER = "net/minecraft/client/renderer/GameRenderer";
 	private static final String DEBUG_OVERLAY = "net/minecraft/client/gui/components/DebugScreenOverlay";
 	private static final String FRAMERATE = "com/mojang/blaze3d/platform/FramerateLimitTracker";
+	private static final String LOADING = "net/minecraft/client/gui/screens/LoadingOverlay";
+	private static final String GUI = "net/minecraft/client/gui/Gui";
 
 	private static final String G = "L" + GRAPHICS + ";";
 	private static final String L_TITLE = "L" + TITLE + ";";
@@ -37,7 +40,7 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 
 	@Override
 	public Set<String> targets() {
-		return Set.of(CAMERA, MINECRAFT, MOUSE, GRAPHICS, SELECTION_LIST, TITLE, GAME_RENDERER, DEBUG_OVERLAY, FRAMERATE);
+		return Set.of(CAMERA, MINECRAFT, MOUSE, GRAPHICS, SELECTION_LIST, TITLE, GAME_RENDERER, DEBUG_OVERLAY, FRAMERATE, LOADING, GUI);
 	}
 
 	@Override
@@ -60,8 +63,16 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 						.invokeStatic(HOOKS, "postEffects", "(Ljava/util/List;)V"));
 			}
 			case DEBUG_OVERLAY -> debugOverlay(node);
+			case LOADING -> loadingOverlay(node);
 			// Hintergrund-FPS: Bildrate begrenzen, solange das Fenster nicht im Vordergrund ist
 			case FRAMERATE -> Patches.modifyReturnValue(Patches.method(node, "getFramerateLimit", "()I"), HOOKS, "framerateLimit", "(I)I");
+			// Einzel- und Mehrspieler-Menü durch die Heldix-Seiten ersetzen (auch wenn andere Mods sie öffnen)
+			case GUI -> {
+				MethodNode setScreen = Patches.method(node, "setScreen", "(L" + SCREEN + ";)V");
+				Patches.head(setScreen, Code.begin().loadArg(setScreen, 0)
+						.invokeStatic(HOOKS, "replaceScreen", "(L" + SCREEN + ";)L" + SCREEN + ";")
+						.add(new VarInsnNode(ASTORE, 1)));
+			}
 			default -> {
 			}
 		}
@@ -90,6 +101,28 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 		// blit(pipeline, texture, x, y, u, v, width, height, …)
 		Patches.cancelAtHead(texture, Code.begin().loadThis().loadArgs(texture, 1, 2, 3, 6, 7)
 				.invokeStatic(HOOKS, "texture", "(" + G + IDENTIFIER + "IIII)Z"));
+	}
+
+	/**
+	 * Ladebildschirm: Hintergrundfarbe, Mojang-Logo und Ladebalken durch das Heldix-Design ersetzen.
+	 * Die Logik (und der Rückfall auf Vanilla bei "Design: Vanilla") steckt in LoadingScreen.
+	 */
+	private static void loadingOverlay(ClassNode node) {
+		MethodNode register = Patches.method(node, "registerTextures", "(Lnet/minecraft/client/renderer/texture/TextureManager;)V");
+		MethodNode extract = Patches.method(node, "extractRenderState", "(" + G + "IIF)V");
+		MethodNode bar = Patches.method(node, "extractProgressBar", "(" + G + "IIIIF)V");
+		Patches.tail(register, Code.begin().loadArg(register, 0)
+				.invokeStatic(HOOKS, "loadingTextures", "(Lnet/minecraft/client/renderer/texture/TextureManager;)V"));
+		// BRAND_BACKGROUND.getAsInt() -> Hooks.loadingBackground(BRAND_BACKGROUND)
+		Patches.replaceCalls(extract, "java/util/function/IntSupplier", "getAsInt", "()I",
+				call -> Code.begin().invokeStatic(HOOKS, "loadingBackground", "(Ljava/util/function/IntSupplier;)I"));
+		// die zwei Hälften des Mojang-Logos
+		String blit = "(" + PIPELINE + IDENTIFIER + "IIFFIIIIIII)V";
+		Patches.replaceCalls(extract, GRAPHICS, "blit", blit,
+				call -> Code.begin().invokeStatic(HOOKS, call == 0 ? "loadingLogo" : "loadingLogoSecondHalf", "(" + G + blit.substring(1)));
+		// if (Hooks.loadingProgress(this, g, opacity)) return;
+		Patches.cancelAtHead(bar, Code.begin().loadThis().loadArg(bar, 0).loadArg(bar, 5)
+				.invokeStatic(HOOKS, "loadingProgress", "(L" + LOADING + ";" + G + "F)Z"));
 	}
 
 	/** F3-Menü: Zeilenhintergründe (fill mit Grau) im Heldix-Design zeichnen. */
@@ -133,11 +166,12 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 		// Vanilla-Menü (Design aus): Heldix-Abzeichen am Ende zeichnen
 		Patches.beforeReturns(render, () -> Code.begin().loadThis().loadArg(render, 0)
 				.invokeStatic(HOOKS, "titleAfterRender", "(" + L_TITLE + G + ")V"));
-		// if (Hooks.titleActive(this)) { Hooks.titleDecorations(this, g); super.extractRenderState(…); return; }
+		// if (Hooks.titleActive(this)) { Hooks.titleDecorations(this, g); super.extractRenderState(…); Hooks.titleAfterRender(this, g); return; }
 		Patches.head(render, Code.begin().loadThis().invokeStatic(HOOKS, "titleActive", "(" + L_TITLE + ")Z")
 				.ifTrue(Code.begin()
 						.loadThis().loadArg(render, 0).invokeStatic(HOOKS, "titleDecorations", "(" + L_TITLE + G + ")V")
 						.loadThis().loadArgs(render, 0, 1, 2, 3).invokeSpecial(SCREEN, "extractRenderState", "(" + G + "IIF)V")
+						.loadThis().loadArg(render, 0).invokeStatic(HOOKS, "titleAfterRender", "(" + L_TITLE + G + ")V")
 						.returnVoid()));
 	}
 }

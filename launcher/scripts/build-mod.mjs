@@ -46,6 +46,14 @@ const newestLoader = (await Promise.all(loaderJars.map(async (jar) => ({ jar, mt
   .sort((a, b) => b.mtimeMs - a.mtimeMs)[0].jar;
 await replaceAll(path.join(resources, 'heldix-loader'), loaderLibs, [newestLoader], 'Heldix Loader');
 
+// Heldix Loader als Fabric-Mod (für HeldixClient in Fabric-Instanzen)
+const fabricLibs = path.join(modDir, 'heldix-loader-fabric', 'build', 'libs');
+const fabricJars = await jarsIn(fabricLibs, (f) => /^heldix-loader-fabric-.+\.jar$/.test(f));
+if (fabricJars.length === 0) throw new Error('Heldix Loader (Fabric) wurde nicht gebaut');
+const newestFabric = (await Promise.all(fabricJars.map(async (jar) => ({ jar, mtimeMs: (await stat(path.join(fabricLibs, jar))).mtimeMs }))))
+  .sort((a, b) => b.mtimeMs - a.mtimeMs)[0].jar;
+await replaceAll(path.join(resources, 'heldix-loader-fabric'), fabricLibs, [newestFabric], 'Heldix Loader (Fabric)');
+
 // Client-Mod: pro Minecraft-Version nur die zuletzt gebaute JAR (alte Builds liegen evtl. noch in build/libs)
 const libs = path.join(modDir, 'build', 'libs');
 const newest = new Map();

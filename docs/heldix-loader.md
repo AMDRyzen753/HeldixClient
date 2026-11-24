@@ -27,7 +27,7 @@ Fabric-Mods im `mods`-Ordner einer Heldix-Instanz erkennt der Loader und übersp
 
 | Klasse (`dev.heldixclient.loader.…`) | Wofür |
 | --- | --- |
-| `HeldixLoader` | Version, Spiel-, Config- und Mods-Ordner, geladene Mods, Probleme beim Start |
+| `HeldixLoader` | Version, Plattform (`heldix` oder `fabric`), Spiel-, Config- und Mods-Ordner, geladene Mods, Probleme beim Start |
 | `api.HeldixModInitializer` | Einstiegspunkt einer Mod (`onInitialize()`) |
 | `api.KeyMappings` | eigene Tasten; sie erscheinen unter Optionen → Steuerung |
 | `api.event.ClientEvents` | `TICK_END`, `STOPPING` |
@@ -36,6 +36,18 @@ Fabric-Mods im `mods`-Ordner einer Heldix-Instanz erkennt der Loader und übersp
 | `api.event.WorldEvents` | `JOIN`, `LEAVE` |
 | `api.event.ChatEvents` | `RECEIVE`: empfangene Chatnachrichten |
 | `api.transform.ClassTransformer`, `Patches`, `Code` | eigene Eingriffe in Minecraft-Klassen, als Ersatz für Mixins |
+
+## Heldix Loader in Fabric
+
+Den Loader gibt es zusätzlich als Fabric-Mod `heldixloader` ([mod/heldix-loader-fabric](../mod/heldix-loader-fabric)). Damit laufen Heldix-Mods wie HeldixClient auch in Fabric-Instanzen, zusammen mit Sodium, Iris und anderen Fabric-Mods. Der Launcher legt beides in Fabric-Instanzen automatisch in den mods-Ordner (Instanz → Einstellungen → HeldixClient).
+
+So funktioniert es:
+
+- Eine Heldix-Mod, die auch in Fabric laufen soll, hat neben der `heldix.mod.json` eine `fabric.mod.json` ohne Einstiegspunkte, nur mit `"depends": { "heldixloader": ">=2.3.0" }`. Fabric lädt die JAR dann selbst; die Heldix-Einstiegspunkte ruft weiter der Heldix Loader auf.
+- Der Loader startet in Fabrics `preLaunch`, liest die `heldix.mod.json` aller geladenen Fabric-Mods und meldet ihre Transformer an.
+- Die Transformer laufen über ein Mixin-Plugin: Ein leerer Mixin (`TransformTargets`, höchste Priorität) sorgt dafür, dass Mixin nach allen anderen Mixins `postApply` aufruft. Dort wenden dieselben `ClassTransformer` ihre ASM-Eingriffe an wie beim Java-Agent.
+- Neue Ziel-Klassen müssen deshalb in [Targets.java](../mod/heldix-loader-fabric/src/main/java/dev/heldixclient/loader/fabric/Targets.java) und `TransformTargets` stehen. Fehlt eine, meldet der Loader das beim Start unter `HeldixLoader.problems()`.
+- Ressourcen (Texturen, Shader, Sprachdateien) lädt in Fabric Fabric API; `HeldixLoader.platform()` gibt `"fabric"` zurück.
 
 ## Eine Heldix-Mod schreiben
 
@@ -47,10 +59,10 @@ Eine Heldix-Mod ist eine JAR mit einer `heldix.mod.json`:
   "name": "Meine Mod",
   "version": "1.0.0",
   "minecraft": "26.3",
-  "loader": ">=2.1.0",
+  "loader": ">=2.3.0",
   "entrypoints": { "client": ["de.du.MeineMod"] },
   "transformers": ["de.du.MeinTransformer"],
-  "depends": { "heldixclient": ">=0.7.0" }
+  "depends": { "heldixclient": ">=0.10.0" }
 }
 ```
 

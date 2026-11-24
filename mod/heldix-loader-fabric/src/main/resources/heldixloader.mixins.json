@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.heldixclient.loader.fabric.mixin",
+  "plugin": "dev.heldixclient.loader.fabric.HeldixMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "TransformTargets"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

@@ -28,13 +28,24 @@ const api: HeldixApi = {
 
   searchModrinth: (id, query, offset) => ipcRenderer.invoke('modrinth:search', id, query, offset),
   installModrinth: (id, projectId) => ipcRenderer.invoke('modrinth:install', id, projectId),
+  installPerformancePack: (id) => ipcRenderer.invoke('modrinth:performance', id),
+
+  listShaderpacks: (id) => ipcRenderer.invoke('shaders:list', id),
+  searchShaderpacks: (id, query, offset) => ipcRenderer.invoke('shaders:search', id, query, offset),
+  installShaderpack: (id, projectId) => ipcRenderer.invoke('shaders:install', id, projectId),
+  setActiveShaderpack: (id, file) => ipcRenderer.invoke('shaders:setActive', id, file),
+  removeShaderpack: (id, file) => ipcRenderer.invoke('shaders:remove', id, file),
+  addShaderpackFiles: (id, paths) => ipcRenderer.invoke('shaders:add', id, paths),
 
   listAccounts: () => ipcRenderer.invoke('accounts:list'),
   getSkin: () => ipcRenderer.invoke('accounts:skin'),
   listNews: () => ipcRenderer.invoke('news:list'),
+  loaderLogos: () => ipcRenderer.invoke('loader:logos'),
   getNewsBody: (id) => ipcRenderer.invoke('news:body', id),
   addMicrosoftAccount: () => ipcRenderer.invoke('accounts:addMicrosoft'),
   addOfflineAccount: (name) => ipcRenderer.invoke('accounts:addOffline', name),
+  getDeveloperStatus: () => ipcRenderer.invoke('developer:status'),
+  importDeveloperKey: () => ipcRenderer.invoke('developer:import'),
   removeAccount: (id) => ipcRenderer.invoke('accounts:remove', id),
   selectAccount: (id) => ipcRenderer.invoke('accounts:select', id),
 

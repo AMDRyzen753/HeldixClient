@@ -25,7 +25,7 @@ import java.util.List;
 
 /**
  * F3-Menü: eigene Zeilen von HeldixClient (Version, Grafik-API, Shader, Leistung) und – mit dem
- * Heldix-Design – dunkle Glas-Hintergründe mit Akzentlinie statt der grauen Vanilla-Kästen.
+ * Heldix-Design (abschaltbar) – dunkle Glas-Hintergründe mit Akzentlinie statt der grauen Vanilla-Kästen.
  * Die Zeilen lassen sich wie alle anderen in den F3-Optionen (F3 + F6) ein- und ausschalten.
  */
 public final class DebugOverlay {
@@ -75,7 +75,7 @@ public final class DebugOverlay {
 
 	/** DebugScreenOverlay.extractLines: Hintergrund einer F3-Zeile. */
 	public static void line(GuiGraphicsExtractor g, int x1, int y1, int x2, int y2, int color, boolean left) {
-		if (!HeldixConfig.get().customMenus) {
+		if (!HeldixConfig.get().customDebugScreen) {
 			g.fill(x1, y1, x2, y2, color);
 			return;
 		}
@@ -98,7 +98,7 @@ public final class DebugOverlay {
 			displayer.addToGroup(ENTRY, List.of(
 					ChatFormatting.AQUA + "" + ChatFormatting.BOLD + "HeldixClient" + reset + " " + HeldixClient.version
 							+ gray + "  ·  Heldix Loader " + HeldixLoader.version(),
-					"Grafik-API: " + ChatFormatting.AQUA + backend() + reset + gray + "  ·  " + reset + "Shader: " + Shaders.describe(),
+					"Grafik-API: " + ChatFormatting.AQUA + backend() + reset + gray + "  ·  " + reset + "Shader: " + Shaders.describe() + (ShaderEngine.enabled() ? " + Engine" + (ShaderEngine.isApplied() ? "" : " (nicht aktiv)") : ""),
 					"FPS-Boost: " + (Performance.boostEnabled() ? "an" : "aus")
 							+ gray + "  ·  " + reset + "Hintergrund: " + (config.backgroundFps ? config.backgroundFpsLimit + " FPS" : "unbegrenzt")
 							+ gray + "  ·  " + reset + HeldixLoader.mods().size() + " Mods, " + addons + " Addons"));

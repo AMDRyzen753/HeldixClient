@@ -1,5 +1,8 @@
 package dev.heldixclient.module.impl;
 
+import dev.heldixclient.module.Setting;
+import java.util.List;
+
 import com.mojang.blaze3d.platform.InputConstants;
 
 import dev.heldixclient.module.HudModule;
@@ -39,6 +42,14 @@ public class CpsModule extends HudModule {
 
 	@Override
 	protected long draw(GuiGraphicsExtractor g, Minecraft mc, int x, int y) {
-		return drawLabelValue(g, mc.font, x, y, "CPS", left() + " | " + right());
+		String value = option("right", true) ? left() + " | " + right() : Integer.toString(left());
+		return drawLabelValue(g, mc.font, x, y, "CPS", value);
+	}
+
+	@Override
+	public List<Setting> settings() {
+		List<Setting> settings = super.settings();
+		settings.addFirst(toggle("right", "Rechte Maustaste", "Auch die Klicks der rechten Maustaste zeigen", true));
+		return settings;
 	}
 }

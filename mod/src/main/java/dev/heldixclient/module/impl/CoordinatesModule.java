@@ -1,5 +1,7 @@
 package dev.heldixclient.module.impl;
 
+import dev.heldixclient.module.Setting;
+
 import dev.heldixclient.ui.Theme;
 import dev.heldixclient.module.HudModule;
 import net.minecraft.client.Minecraft;
@@ -19,11 +21,13 @@ public class CoordinatesModule extends HudModule {
 		if (player == null) return size(0, 0);
 		Font font = mc.font;
 
-		String[][] rows = {
-				{"XYZ", String.format("%.1f %.1f %.1f", player.getX(), player.getY(), player.getZ())},
-				{"Richtung", direction(player)},
-				{"Biom", biome(mc, player.blockPosition())},
-		};
+		int decimals = (int) option("decimals", 1.0);
+		String format = "%." + decimals + "f %." + decimals + "f %." + decimals + "f";
+		java.util.List<String[]> list = new java.util.ArrayList<>();
+		list.add(new String[] {"XYZ", String.format(format, player.getX(), player.getY(), player.getZ())});
+		if (option("direction", true)) list.add(new String[] {"Richtung", direction(player)});
+		if (option("biome", true)) list.add(new String[] {"Biom", biome(mc, player.blockPosition())});
+		String[][] rows = list.toArray(new String[0][]);
 
 		int labelWidth = 0;
 		int valueWidth = 0;
@@ -44,6 +48,15 @@ public class CoordinatesModule extends HudModule {
 			lineY += lineHeight;
 		}
 		return size(width, height);
+	}
+
+	@Override
+	public java.util.List<Setting> settings() {
+		java.util.List<Setting> settings = super.settings();
+		settings.add(0, choice("decimals", "Nachkommastellen", "Genauigkeit der Position", java.util.List.of("0", "1", "2"), 1));
+		settings.add(1, toggle("direction", "Richtung", "Himmelsrichtung anzeigen", true));
+		settings.add(2, toggle("biome", "Biom", "Aktuelles Biom anzeigen", true));
+		return settings;
 	}
 
 	private static String direction(LocalPlayer player) {

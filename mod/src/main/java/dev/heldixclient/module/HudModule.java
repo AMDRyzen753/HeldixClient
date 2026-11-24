@@ -54,13 +54,74 @@ public abstract class HudModule extends Module {
 		setPosition(defaultX, defaultY);
 	}
 
+	/** Größe des Elements (Untermenü "Größe"), 1 = normal */
+	public float scale() {
+		return (float) Math.clamp(option("scale", 1.0), MIN_SCALE, MAX_SCALE);
+	}
+
+	public static final double MIN_SCALE = 0.5;
+	public static final double MAX_SCALE = 2.0;
+
+	/** Größe setzen (auf 5 % gerundet); gespeichert wird mit {@link HeldixConfig#save()}. */
+	public void setScale(double scale) {
+		double snapped = Math.round(Math.clamp(scale, MIN_SCALE, MAX_SCALE) * 20) / 20.0;
+		state.options.put("scale", String.valueOf(snapped));
+	}
+
 	/** Zeichnet das Element und merkt sich Position und Größe (für den HUD-Editor). */
 	public final void extract(GuiGraphicsExtractor g, Minecraft mc) {
+		extract(g, mc, false);
+	}
+
+	/**
+	 * Zeichnet das Element im HUD-Editor: fehlen Spieldaten (z. B. im Hauptmenü ohne Welt),
+	 * erscheint ein Platzhalter mit dem Namen, damit man es trotzdem anordnen kann.
+	 */
+	public final void extractPreview(GuiGraphicsExtractor g, Minecraft mc) {
+		extract(g, mc, true);
+	}
+
+	private void extract(GuiGraphicsExtractor g, Minecraft mc, boolean preview) {
 		lastX = Math.clamp(state.x, 0, Math.max(0, g.guiWidth() - lastWidth));
 		lastY = Math.clamp(state.y, 0, Math.max(0, g.guiHeight() - lastHeight));
-		long size = draw(g, mc, lastX, lastY);
-		lastWidth = (int) (size >> 32);
-		lastHeight = (int) size;
+		float scale = scale();
+		long size;
+		if (scale == 1f) {
+			size = drawSafely(g, mc, lastX, lastY, preview);
+		} else {
+			g.pose().pushMatrix();
+			g.pose().translate(lastX, lastY);
+			g.pose().scale(scale, scale);
+			size = drawSafely(g, mc, 0, 0, preview);
+			g.pose().popMatrix();
+		}
+		lastWidth = Math.round((int) (size >> 32) * scale);
+		lastHeight = Math.round((int) size * scale);
+	}
+
+	private long drawSafely(GuiGraphicsExtractor g, Minecraft mc, int x, int y, boolean preview) {
+		if (!preview) return draw(g, mc, x, y);
+		long size;
+		try {
+			size = draw(g, mc, x, y);
+		} catch (RuntimeException e) {
+			size = 0;
+		}
+		if ((int) (size >> 32) <= 0 || (int) size <= 0) {
+			size = drawLabelValue(g, mc.font, x, y, name(), "Vorschau", Theme.FAINT);
+		}
+		return size;
+	}
+
+	@Override
+	public java.util.List<Setting> settings() {
+		java.util.List<Setting> settings = super.settings();
+		settings.add(slider("scale", "Größe", "Wie groß das Element im HUD ist", 0.5, 2.0, 0.1, 1.0, Setting::percent));
+		settings.add(new Setting.Action("Position", "Zurück an die Standardstelle", "Zurücksetzen", () -> {
+			resetPosition();
+			HeldixConfig.save();
+		}));
+		return settings;
 	}
 
 	/**
@@ -83,13 +144,18 @@ public abstract class HudModule extends Module {
 
 	/** Standard-Darstellung: "Label Wert" in einer kleinen Box. */
 	public static long drawLabelValue(GuiGraphicsExtractor g, Font font, int x, int y, String label, String value) {
+		return drawLabelValue(g, font, x, y, label, value, Theme.TEXT);
+	}
+
+	/** Wie {@link #drawLabelValue(GuiGraphicsExtractor, Font, int, int, String, String)}, mit eigener Farbe für den Wert. */
+	public static long drawLabelValue(GuiGraphicsExtractor g, Font font, int x, int y, String label, String value, int valueColor) {
 		int labelWidth = font.width(label);
 		int width = BAR + PADDING * 2 + labelWidth + 5 + font.width(value);
 		int height = PADDING * 2 + font.lineHeight - 1;
 		background(g, x, y, width, height);
 		int textX = x + BAR + PADDING;
 		g.text(font, label, textX, y + PADDING, Theme.ACCENT_LIGHT, true);
-		g.text(font, value, textX + labelWidth + 5, y + PADDING, Theme.TEXT, true);
+		g.text(font, value, textX + labelWidth + 5, y + PADDING, valueColor, true);
 		return size(width, height);
 	}
 

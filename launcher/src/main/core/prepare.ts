@@ -5,7 +5,10 @@ import { installFabric } from './fabric';
 import { ADDON_DIR } from './instances';
 import type { ProgressFn } from './http';
 import { ensureJavaRuntime, javaComponentFor } from './java';
-import { findClientMods, findLoaderJar, latestModrinthFile, syncManagedMods, type ManagedMod } from './mods';
+import { MANAGED_LIST } from './content';
+import { fixFabricConflicts } from './modrinth';
+import { readJson } from './fsutil';
+import { findClientMods, findFabricLoaderJar, findLoaderJar, latestModrinthFile, syncManagedMods, type ManagedMod } from './mods';
 import {
   collectLibraries,
   extractNatives,
@@ -31,6 +34,10 @@ export interface PrepareOptions {
   clientModPrefix: string;
   /** Ordner mit der Heldix-Loader-JAR (heldix-loader-*.jar) */
   loaderDir: string | null;
+  /** Ordner mit dem Heldix Loader als Fabric-Mod (heldix-loader-fabric-*.jar) */
+  fabricLoaderDir?: string | null;
+  /** nur Fabric: HeldixClient mitstarten (fehlt = ja) */
+  heldixClient?: boolean;
   /** eigener Java-Pfad statt der von Mojang bereitgestellten Laufzeit */
   javaOverride?: string;
   onProgress?: ProgressFn;
@@ -75,9 +82,11 @@ export async function prepareGame(options: PrepareOptions): Promise<PreparedGame
   const info = options.onInfo ?? (() => undefined);
   await mkdir(gameDir, { recursive: true });
 
-  // Heldix-Instanzen brauchen eine gebaute HeldixClient-Mod für genau diese Minecraft-Version
+  // Heldix-Instanzen brauchen eine gebaute HeldixClient-Mod für genau diese Minecraft-Version;
+  // Fabric-Instanzen bekommen sie dazu, wenn es sie für die Version gibt
+  const wantsClient = loader === 'heldix' || (loader === 'fabric' && options.heldixClient !== false);
   const clientMod =
-    loader === 'heldix' && options.clientModsDir
+    wantsClient && options.clientModsDir
       ? (await findClientMods(options.clientModsDir, options.clientModPrefix)).find((m) => m.minecraft === versionId)
       : undefined;
   if (loader === 'heldix' && !clientMod) {
@@ -123,15 +132,37 @@ export async function prepareGame(options: PrepareOptions): Promise<PreparedGame
   }
 
   if (loader === 'fabric') {
+    const managed: ManagedMod[] = [];
     const fabricApi = await latestModrinthFile('fabric-api', versionId).catch(() => undefined);
     if (fabricApi === undefined) {
-      // Modrinth nicht erreichbar: vorhandene Mods behalten
+      // Modrinth nicht erreichbar: bisher verwaltete Fabric API behalten
       info('Fabric API konnte nicht geprüft werden, nutze die vorhandene Version.');
-      await mkdir(modsDir, { recursive: true });
+      const previous = (await readJson<string[]>(path.join(modsDir, MANAGED_LIST))) ?? [];
+      for (const file of previous.filter((f) => f.startsWith('fabric-api'))) managed.push({ filename: file });
+    } else if (fabricApi) {
+      managed.push(fabricApi);
     } else {
-      if (!fabricApi) info(`Fabric API gibt es für ${versionId} nicht, starte nur mit Fabric Loader.`);
-      await syncManagedMods(modsDir, fabricApi ? [fabricApi] : [], onProgress);
+      info(`Fabric API gibt es für ${versionId} nicht, starte nur mit Fabric Loader.`);
     }
+    // HeldixClient über den Heldix Loader als Fabric-Mod
+    if (wantsClient) {
+      const bridge = options.fabricLoaderDir ? await findFabricLoaderJar(options.fabricLoaderDir) : null;
+      if (!clientMod) {
+        info(`HeldixClient gibt es für Minecraft ${versionId} noch nicht – die Instanz startet ohne.`);
+      } else if (!bridge) {
+        info('Heldix Loader (Fabric) fehlt in dieser Launcher-Installation – die Instanz startet ohne HeldixClient.');
+      } else {
+        managed.push({ filename: path.basename(bridge.file), sourcePath: bridge.file });
+        managed.push({ filename: path.basename(clientMod.file), sourcePath: clientMod.file });
+        await mkdir(path.join(gameDir, ADDON_DIR), { recursive: true });
+        clientModLoaded = true;
+        loaderVersion = bridge.version;
+        info(`HeldixClient ${clientMod.modVersion} über Heldix Loader ${bridge.version} (als Fabric-Mod)`);
+      }
+    }
+    await syncManagedMods(modsDir, managed, onProgress);
+    // Konflikte vor dem Start lösen, statt dass Fabric mit "Incompatible mods found!" abbricht
+    for (const note of await fixFabricConflicts(gameDir)) info(note);
   }
 
   const classpath = [...new Set([...libraries.filter((l) => l.classpath).map((l) => l.spec.dest), clientJar])];

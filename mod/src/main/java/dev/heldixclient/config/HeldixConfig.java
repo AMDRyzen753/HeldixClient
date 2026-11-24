@@ -24,6 +24,8 @@ public final class HeldixConfig {
 		public boolean enabled;
 		public int x;
 		public int y;
+		/** Einstellungen des Moduls (Untermenü), als Text gespeichert */
+		public Map<String, String> options = new LinkedHashMap<>();
 
 		public ModuleState() {
 		}
@@ -52,6 +54,25 @@ public final class HeldixConfig {
 		public Map<String, String> fpsBoost;
 		/** F3-Zeilen von HeldixClient wurden einmalig eingeschaltet (danach entscheidet der Spieler) */
 		public boolean debugEntrySeeded;
+		/** Ladebildschirm im Heldix-Design */
+		public boolean customLoadingScreen = true;
+		/** F3-Menü im Heldix-Design */
+		public boolean customDebugScreen = true;
+		/** Hauptmenü und Heldix-Seiten: eigener Hintergrund statt des Minecraft-Panoramas */
+		public boolean heldixBackground = true;
+		/** HUD-Editor: Raster anzeigen und an Rändern/anderen Elementen einrasten */
+		public boolean hudGrid = true;
+		public boolean hudSnap = true;
+		/** zuletzt betretener Server (für "Weiterspielen" im Hauptmenü) */
+		public String lastServerIp;
+		public String lastServerName;
+		/** Zeitpunkt (ms) des letzten Server-Besuchs */
+		public long lastServerAt;
+		/** Heldix Shader-Engine: Stärke der Effekte (0 = aus, 1 = voll) */
+		public float bloom;
+		public float depthOfField;
+		public float fog;
+		public float ambientOcclusion;
 	}
 
 	private HeldixConfig() {
@@ -71,6 +92,9 @@ public final class HeldixConfig {
 				Data loaded = GSON.fromJson(reader, Data.class);
 				if (loaded != null) {
 					if (loaded.modules == null) loaded.modules = new LinkedHashMap<>();
+					for (ModuleState state : loaded.modules.values()) {
+						if (state.options == null) state.options = new LinkedHashMap<>();
+					}
 					data = loaded;
 				}
 			} catch (Exception e) {

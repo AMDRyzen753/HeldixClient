@@ -1,5 +1,7 @@
 package dev.heldixclient.module.impl;
 
+import dev.heldixclient.module.Setting;
+
 import dev.heldixclient.config.HeldixConfig;
 import dev.heldixclient.module.HudModule;
 import dev.heldixclient.ui.Draw;
@@ -30,16 +32,23 @@ public class KeystrokesModule extends HudModule {
 		key(g, font, o.keyLeft, x, row2, KEY, KEY);
 		key(g, font, o.keyDown, x + KEY + GAP, row2, KEY, KEY);
 		key(g, font, o.keyRight, x + (KEY + GAP) * 2, row2, KEY, KEY);
-		int row3 = row2 + KEY + GAP;
-		mouse(g, font, "LMB", CpsModule.left(), o.keyAttack.isDown(), x, row3, half, KEY);
-		mouse(g, font, "RMB", CpsModule.right(), o.keyUse.isDown(), x + half + GAP, row3, full - half - GAP, KEY);
-		int row4 = row3 + KEY + GAP;
-		boolean jump = o.keyJump.isDown();
-		box(g, x, row4, full, 10, jump);
-		int barWidth = full / 3;
-		g.fill(x + (full - barWidth) / 2, row4 + 4, x + (full + barWidth) / 2, row4 + 6, jump ? Theme.TEXT : Theme.ACCENT_LIGHT);
-
-		return size(full, row4 + 10 - y);
+		int bottom = row2 + KEY;
+		boolean showCps = option("cps", true);
+		if (option("mouse", true)) {
+			int row3 = bottom + GAP;
+			mouse(g, font, "LMB", CpsModule.left(), o.keyAttack.isDown(), x, row3, half, KEY, showCps);
+			mouse(g, font, "RMB", CpsModule.right(), o.keyUse.isDown(), x + half + GAP, row3, full - half - GAP, KEY, showCps);
+			bottom = row3 + KEY;
+		}
+		if (option("space", true)) {
+			int row4 = bottom + GAP;
+			boolean jump = o.keyJump.isDown();
+			box(g, x, row4, full, 10, jump);
+			int barWidth = full / 3;
+			g.fill(x + (full - barWidth) / 2, row4 + 4, x + (full + barWidth) / 2, row4 + 6, jump ? Theme.TEXT : Theme.ACCENT_LIGHT);
+			bottom = row4 + 10;
+		}
+		return size(full, bottom - y);
 	}
 
 	private static void key(GuiGraphicsExtractor g, Font font, KeyMapping mapping, int x, int y, int w, int h) {
@@ -50,8 +59,21 @@ public class KeystrokesModule extends HudModule {
 		g.text(font, label, x + (w - font.width(label)) / 2, y + (h - 8) / 2, Theme.TEXT, !pressed);
 	}
 
-	private static void mouse(GuiGraphicsExtractor g, Font font, String label, int cps, boolean pressed, int x, int y, int w, int h) {
+	@Override
+	public java.util.List<Setting> settings() {
+		java.util.List<Setting> settings = super.settings();
+		settings.add(0, toggle("mouse", "Maustasten", "Linke und rechte Maustaste zeigen", true));
+		settings.add(1, toggle("cps", "CPS bei den Maustasten", "Klicks pro Sekunde klein unter LMB/RMB", true));
+		settings.add(2, toggle("space", "Leertaste", "Sprung-Taste als Balken zeigen", true));
+		return settings;
+	}
+
+	private static void mouse(GuiGraphicsExtractor g, Font font, String label, int cps, boolean pressed, int x, int y, int w, int h, boolean showCps) {
 		box(g, x, y, w, h, pressed);
+		if (!showCps) {
+			g.text(font, label, x + (w - font.width(label)) / 2, y + (h - 8) / 2, Theme.TEXT, !pressed);
+			return;
+		}
 		String cpsText = cps + " CPS";
 		g.text(font, label, x + (w - font.width(label)) / 2, y + 3, Theme.TEXT, !pressed);
 		// halbe Schriftgröße für die CPS-Zeile

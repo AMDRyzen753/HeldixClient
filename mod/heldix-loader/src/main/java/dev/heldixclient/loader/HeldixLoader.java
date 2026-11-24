@@ -28,6 +28,11 @@ public final class HeldixLoader {
 		return LoaderCore.minecraftVersion();
 	}
 
+	/** Wie der Loader läuft: "heldix" (eigenständig, Java-Agent) oder "fabric" (als Fabric-Mod). */
+	public static String platform() {
+		return LoaderCore.platform();
+	}
+
 	/** Spielordner der Instanz. */
 	public static Path gameDir() {
 		return LoaderCore.gameDir();

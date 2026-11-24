@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "heldix-autotest",
+  "version": "${version}",
+  "name": "Heldix Autotest",
+  "description": "Automatischer Test im echten Spiel (nur für die Entwicklung).",
+  "environment": "client",
+  "depends": {
+    "heldixclient": "*"
+  }
+}

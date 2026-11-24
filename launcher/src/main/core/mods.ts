@@ -84,10 +84,20 @@ export interface LoaderBuild {
 }
 
 /** Findet die mitgelieferte Heldix-Loader-JAR (heldix-loader-<version>.jar), bei mehreren die neueste. */
+/** Heldix Loader als Fabric-Mod (heldix-loader-fabric-<version>.jar). */
+export async function findFabricLoaderJar(dir: string): Promise<LoaderBuild | null> {
+  try {
+    const file = (await readdir(dir)).find((f) => /^heldix-loader-fabric-.+\.jar$/.test(f));
+    return file ? { file: path.join(dir, file), version: file.slice('heldix-loader-fabric-'.length, -'.jar'.length) } : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function findLoaderJar(dir: string): Promise<LoaderBuild | null> {
   try {
     const builds = (await readdir(dir)).flatMap((file) => {
-      const match = /^heldix-loader-(.+)\.jar$/.exec(file);
+      const match = /^heldix-loader-(\d.*)\.jar$/.exec(file);
       return match ? [{ file: path.join(dir, file), version: match[1] }] : [];
     });
     const numeric = (v: string) => v.split(/[.+-]/).map((p) => Number.parseInt(p, 10) || 0);

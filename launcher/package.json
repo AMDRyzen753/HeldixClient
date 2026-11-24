@@ -1,7 +1,7 @@
 {
   "name": "heldixclient-launcher",
   "productName": "HeldixClient",
-  "version": "0.7.0",
+  "version": "0.10.0",
   "description": "Minecraft-Launcher mit eigenem Mod-Loader (Heldix Loader), Client-Mod und Addon-System",
   "license": "MIT",
   "author": "HeldixClient contributors",
@@ -20,9 +20,11 @@
     "start": "npm run build && electron .",
     "mod": "node scripts/build-mod.mjs",
     "icon": "electron scripts/render-icon.mjs",
+    "ui-assets": "electron scripts/render-ui-assets.mjs",
     "dist": "npm run mod && npm run build && electron-builder --win",
     "test:launch": "npm run build && node dist/scripts/test-launch.js",
-    "test:discord": "npm run build && node dist/scripts/test-discord.js"
+    "test:discord": "npm run build && node dist/scripts/test-discord.js",
+    "dev-key": "npm run build && node dist/scripts/dev-key.js"
   },
   "build": {
     "appId": "dev.heldixclient.launcher",
@@ -56,6 +58,13 @@
       {
         "from": "resources/heldix-loader",
         "to": "heldix-loader",
+        "filter": [
+          "*.jar"
+        ]
+      },
+      {
+        "from": "resources/heldix-loader-fabric",
+        "to": "heldix-loader-fabric",
         "filter": [
           "*.jar"
         ]

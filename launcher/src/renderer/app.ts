@@ -1,4 +1,4 @@
-import type { AccountInfo, DiscordStatus, InstanceInfo, LogLine, QuickPlayList, QuickPlayTarget, Settings, SkinInfo } from '../shared/api';
+import type { AccountInfo, DeveloperStatus, DiscordStatus, InstanceInfo, LogLine, QuickPlayList, QuickPlayTarget, Settings, SkinInfo } from '../shared/api';
 import {
   $,
   api,
@@ -7,6 +7,8 @@ import {
   formatDate,
   formatPlayTime,
   h,
+  applyLoaderLogos,
+  hydrateIcons,
   ICONS,
   instanceTile,
   LOADER_LABELS,
@@ -16,13 +18,18 @@ import {
   state,
   svgIcon,
   toast,
+  uiIcon,
 } from './core.js';
 import { showFigure, setFigureActive } from './figure.js';
 import { initInstances, launchInstance, openDetail, resetInstancesView, type DetailTab } from './instances.js';
 import { loadNews } from './news.js';
 
+// Icons im HTML (<svg data-icon="…">) aus dem Heldix-Icon-Set füllen, Logos der Loader einsetzen
+hydrateIcons();
+applyLoaderLogos();
+
 // ---------- Navigation ----------
-const VIEW_TITLES: Record<string, string> = { home: 'Spielen', instances: 'Instanzen', settings: 'Einstellungen', console: 'Konsole' };
+const VIEW_TITLES: Record<string, string> = { home: 'Start', instances: 'Instanzen', settings: 'Einstellungen', console: 'Konsole' };
 function showView(view: string): void {
   document.body.dataset.view = view;
   document.querySelectorAll<HTMLButtonElement>('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
@@ -97,12 +104,13 @@ function openNewInstanceDialog(): void {
 
 function loaderText(instance: InstanceInfo): string {
   if (instance.loader === 'heldix') return state.info?.loaderVersion ? `Heldix Loader ${state.info.loaderVersion}` : 'Heldix Loader';
+  if (instance.loader === 'fabric' && instance.heldixClient) return 'Fabric + HeldixClient';
   return LOADER_LABELS[instance.loader];
 }
 
-function toolButton(icon: string, title: string, onclick: () => void): HTMLElement {
-  const button = h('button', { class: 'tool', type: 'button', title, 'aria-label': title, onclick });
-  button.append(svgIcon(icon, ''));
+function toolButton(icon: string, label: string, title: string, onclick: () => void): HTMLElement {
+  const button = h('button', { class: 'tool', type: 'button', title, onclick });
+  button.append(svgIcon(icon, ''), label);
   return button;
 }
 
@@ -120,7 +128,7 @@ function renderGreeting(): void {
 /** Instanz-Auswahl, Werkzeuge und Weiterspielen für die aktuelle Instanz. */
 function renderStage(): void {
   const instance = stageInstance();
-  $('#home').style.setProperty('--accent', instance?.color ?? '#3b82f6');
+  $('#home').style.setProperty('--instance', instance?.color ?? '#3b82f6');
 
   const tile = $('#picker-tile');
   tile.textContent = '';
@@ -131,14 +139,69 @@ function renderStage(): void {
   const tools = $('#picker-tools');
   tools.textContent = '';
   if (instance) {
-    if (instance.loader !== 'vanilla') tools.append(toolButton(ICONS.blocks, 'Mods verwalten', () => openInstanceTab(instance.id, 'mods')));
+    if (instance.loader !== 'vanilla') tools.append(toolButton(ICONS.blocks, 'Mods', 'Mods verwalten', () => openInstanceTab(instance.id, 'mods')));
     tools.append(
-      toolButton(ICONS.folder, 'Instanz-Ordner öffnen', () => void api.openFolder('instance', instance.id)),
-      toolButton(ICONS.sliders, 'Einstellungen der Instanz', () => openInstanceTab(instance.id, 'settings')),
+      toolButton(ICONS.sparkle, 'Shader', 'Shaderpacks der Instanz', () => openInstanceTab(instance.id, 'shaders')),
+      toolButton(ICONS.folder, 'Ordner', 'Instanz-Ordner öffnen', () => void api.openFolder('instance', instance.id)),
+      toolButton(ICONS.sliders, 'Einstellungen', 'Einstellungen der Instanz', () => openInstanceTab(instance.id, 'settings')),
     );
   }
   void renderContinue(instance);
+  renderHomeInstances();
   renderStatus();
+}
+
+/** Zeile in den Listen der Startseite (Weiterspielen, Instanzen) */
+function rowItem(icon: Node, name: string, meta: string, title: string, onclick: () => void,
+  action?: { icon: string; title: string; run: () => void }, trailing?: Node | null): HTMLElement {
+  const row = h('button', { class: 'row-item', type: 'button', title, onclick },
+    icon,
+    h('span', { class: 'row-text' }, h('span', { class: 'row-name', text: name }), h('span', { class: 'row-meta', text: meta })),
+    trailing ?? null);
+  if (action) {
+    row.append(h('span', {
+      class: 'row-action',
+      title: action.title,
+      onclick: (event: Event) => {
+        event.stopPropagation();
+        action.run();
+      },
+    }, svgIcon(action.icon, '')));
+  }
+  return row;
+}
+
+/** Startseite: die zuletzt gespielten Instanzen zum schnellen Wechseln und Starten */
+function renderHomeInstances(): void {
+  const list = $('#home-instances');
+  list.textContent = '';
+  const selectedId = selectedInstance()?.id;
+  const sorted = [...state.instances].sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0) || b.created - a.created);
+  $('#home-instances-sub').textContent = state.instances.length === 1 ? '1 Instanz' : `${state.instances.length} Instanzen · zuletzt gespielt`;
+  if (sorted.length === 0) {
+    list.append(rowItem(h('span', { class: 'row-icon placeholder' }, uiIcon('plus', '')), 'Neue Instanz anlegen', 'Heldix Loader, Fabric oder Vanilla',
+      'Neue Instanz anlegen', openNewInstanceDialog));
+    return;
+  }
+  const busy = state.game.state === 'preparing' || state.game.state === 'running';
+  for (const instance of sorted.slice(0, 4)) {
+    const selected = instance.id === selectedId;
+    const tile = instanceTile(instance, 'small');
+    list.append(rowItem(tile, instance.name, `${instance.minecraft} · ${loaderText(instance)} · ${shortRelative(instance.lastPlayed)}`,
+      selected ? 'Ausgewählt' : 'Auswählen', () => void selectFromHome(instance.id),
+      busy ? undefined : { icon: ICONS.play, title: `${instance.name} spielen`, run: () => void playInstance(instance.id) },
+      selected ? svgIcon(ICONS.check, 'row-check') : null));
+  }
+}
+
+/** Instanz starten (Startseite, Liste der Instanzen) */
+async function playInstance(id: string): Promise<void> {
+  if (!state.accounts.some((a) => a.active)) {
+    openAccounts($('#home-name'));
+    toast('Bitte zuerst ein Konto hinzufügen.');
+    return;
+  }
+  await launchInstance(id, showView);
 }
 
 // ---------- 3D-Figur ----------
@@ -198,24 +261,23 @@ function renderContinueList(instance: InstanceInfo, data: QuickPlayList): void {
   const targets = pickTargets(data.targets);
   const label = displayNames(targets);
   if (targets.length === 0) {
-    list.append(h('span', { class: 'quick-empty', text: 'Deine Welten und Server erscheinen hier.' }));
+    list.append(h('div', { class: 'row-empty', text: 'Deine Welten und Server erscheinen hier, sobald du gespielt hast.' }));
     return;
   }
   for (const target of targets) {
     const icon = target.icon
-      ? h('img', { class: 'quick-icon', src: target.icon, alt: '' })
-      : h('span', { class: 'quick-icon placeholder' }, svgIcon(target.kind === 'world' ? ICONS.world : ICONS.server, ''));
-    list.append(h('button', {
-      class: 'quick-item',
-      type: 'button',
-      title: target.kind === 'world'
-        ? `Direkt in „${target.name}“ starten · Einzelspieler, ${shortRelative(target.lastPlayed)}`
-        : `Direkt auf ${target.address ?? target.id} verbinden`,
-      onclick: () => {
-        if (state.game.state === 'preparing' || state.game.state === 'running') return;
-        void launchInstance(instance.id, showView, { kind: target.kind, id: target.id });
-      },
-    }, icon, h('span', { class: 'quick-name', text: label.get(target) ?? target.name })));
+      ? h('img', { class: 'row-icon', src: target.icon, alt: '' })
+      : h('span', { class: 'row-icon placeholder' }, svgIcon(target.kind === 'world' ? ICONS.world : ICONS.server, ''));
+    const start = () => {
+      if (state.game.state === 'preparing' || state.game.state === 'running') return;
+      void launchInstance(instance.id, showView, { kind: target.kind, id: target.id });
+    };
+    const meta = target.kind === 'world'
+      ? `Einzelspieler · ${shortRelative(target.lastPlayed)}`
+      : `Server · ${(target.address ?? target.id).replace(/:25565$/, '')}`;
+    list.append(rowItem(icon, label.get(target) ?? target.name, meta,
+      target.kind === 'world' ? `Direkt in „${target.name}“ starten` : `Direkt auf ${target.address ?? target.id} verbinden`,
+      start, { icon: ICONS.play, title: 'Starten', run: start }));
   }
 }
 
@@ -293,6 +355,7 @@ $('#picker-new').addEventListener('click', () => {
   closePicker();
   openNewInstanceDialog();
 });
+$('#home-instances-all').addEventListener('click', () => showView('instances'));
 $('#picker-manage').addEventListener('click', () => {
   closePicker();
   showView('instances');
@@ -393,7 +456,7 @@ function renderStatus(): void {
     const since = runningFor();
     play.classList.add('stop');
     label.textContent = 'Beenden';
-    launchStatus('ok', since ? `Läuft ${since}` : 'Läuft', instance?.loader === 'heldix' ? 'Rechts ⇧ öffnet im Spiel das Heldix-Menü.' : 'Viel Spaß!');
+    launchStatus('ok', since ? `Läuft ${since}` : 'Läuft', instance?.heldixClient ? 'Rechts ⇧ öffnet im Spiel das Heldix-Menü.' : 'Viel Spaß!');
     homeSub.textContent = `${game.label} ist gestartet – viel Spaß!`;
     setChip(`Läuft · ${game.label}`);
     return;
@@ -541,6 +604,8 @@ function renderAccounts(): void {
   const active = state.accounts.find((a) => a.active);
   renderAvatar($('#account-avatar'), active);
   $('#avatar-status').hidden = !active;
+  $('#account-label').textContent = active?.name ?? 'Nicht angemeldet';
+  $('#account-sub').textContent = active ? (active.type === 'microsoft' ? 'Microsoft-Konto' : 'Offline-Konto') : 'Konto hinzufügen';
 
   const list = $('#account-list');
   list.textContent = '';
@@ -578,15 +643,66 @@ function renderAccounts(): void {
   $('#offline-form').classList.toggle('locked', !allowed);
   $<HTMLInputElement>('#offline-name').disabled = !allowed;
   $<HTMLButtonElement>('#offline-form button').disabled = !allowed;
-  $('#offline-hint').textContent = allowed
-    ? 'Offline: für Einzelspieler, LAN und Server ohne Online-Modus.'
-    : 'Offline-Konten gibt es, sobald ein Microsoft-Konto mit Minecraft angemeldet ist.';
+  let hint = 'Offline-Konten gibt es, sobald ein Microsoft-Konto mit Minecraft angemeldet ist.';
+  if (allowed) hint = 'Offline: für Einzelspieler, LAN und Server ohne Online-Modus.';
+  else if (developer?.enabled) hint = 'Entwickleroptionen sind an, aber für diesen PC gilt kein Entwickler-Schlüssel (Einstellungen → Entwickler).';
+  $('#offline-hint').textContent = hint;
 }
 
-/** Wie im Hauptprozess: im Entwicklungsmodus immer, sonst nur mit einem Microsoft-Konto im Launcher. */
+/** Entwickleroptionen und Entwickler-Schlüssel dieses PCs */
+let developer: DeveloperStatus | null = null;
+
+/** Wie im Hauptprozess: im Entwicklungsmodus immer, sonst mit einem Microsoft-Konto oder Entwickler-Schlüssel. */
 function offlineAllowed(): boolean {
-  return !!state.info?.isDev || state.accounts.some((a) => a.type === 'microsoft');
+  return !!state.info?.isDev || state.accounts.some((a) => a.type === 'microsoft') || (!!developer?.enabled && developer.keyValid);
 }
+
+async function loadDeveloper(): Promise<void> {
+  developer = await api.getDeveloperStatus();
+  if (developer.autoCreated) toast('Entwickler-Schlüssel für diesen PC automatisch erstellt.', 'success');
+  renderDeveloper();
+  renderAccounts();
+  renderHome();
+}
+
+function renderDeveloper(): void {
+  if (!developer) return;
+  $<HTMLInputElement>('#developer-toggle').checked = developer.enabled;
+  $('#dev-panel').hidden = !developer.enabled;
+  $('#dev-machine').textContent = developer.machineCode;
+  const status = $('#dev-status');
+  status.classList.add('dev-status');
+  status.dataset.state = developer.keyValid ? 'ok' : 'missing';
+  $('#dev-status-text').textContent = developer.keyValid
+    ? `Entwickler-Schlüssel gültig (${developer.keyName}) – Offline-Konten sind frei.`
+    : `${developer.reason ?? 'Kein Entwickler-Schlüssel.'} Importiere deinen Signaturschlüssel (signing-key.pem) – danach geht es auf diesem PC automatisch.`;
+  $('#dev-import').hidden = developer.keyValid;
+}
+
+$('#developer-toggle').addEventListener('change', async (e) => {
+  await save({ developerMode: (e.target as HTMLInputElement).checked });
+  await loadDeveloper();
+});
+$('#dev-import').addEventListener('click', async () => {
+  try {
+    const status = await api.importDeveloperKey();
+    if (!status) return;
+    await save({ developerMode: true });
+    await loadDeveloper();
+    if (developer?.keyValid && !developer.autoCreated) toast('Entwickler-Schlüssel ist gültig.', 'success');
+  } catch (error) {
+    toast(errorMessage(error), 'error');
+  }
+});
+$('#dev-recheck').addEventListener('click', async () => {
+  await loadDeveloper();
+  toast(developer?.keyValid ? 'Entwickler-Schlüssel ist gültig.' : developer?.reason ?? 'Kein Entwickler-Schlüssel.', developer?.keyValid ? 'success' : 'error');
+});
+$('#dev-copy').addEventListener('click', async () => {
+  if (!developer) return;
+  await navigator.clipboard.writeText(developer.machineCode);
+  toast('PC-Kennung kopiert.', 'success');
+});
 
 async function loadAccounts(): Promise<void> {
   state.accounts = await api.listAccounts();
@@ -660,6 +776,8 @@ function renderSettings(): void {
   const loader = info.loaderVersion ? `Heldix Loader ${info.loaderVersion}` : 'Heldix Loader';
   $('#about-text').textContent = info.isDev
     ? `Entwicklungsmodus · Offline-Konten aktiv · ${loader}`
+    : developer?.enabled && developer.keyValid
+    ? `Entwickleroptionen aktiv (${developer.keyName}) · ${loader}`
     : `${loader} · Minecraft-Dateien kommen direkt von Mojang.`;
   $<HTMLInputElement>('#discord-toggle').checked = s.discordPresence;
   $<HTMLInputElement>('#discord-server-toggle').checked = s.discordShowServer;
@@ -800,8 +918,15 @@ async function init(): Promise<void> {
   initInstances(showView);
   renderSettings();
   await loadAccounts();
+  await loadDeveloper();
   await reloadInstances();
   void loadNews();
+  // echte Logos von Fabric und Minecraft (aus den Dateien im Datenordner); danach Kacheln neu zeichnen
+  void api.loaderLogos().then((logos) => {
+    state.logos = logos;
+    applyLoaderLogos();
+    emit('instances');
+  }).catch(() => undefined);
   try {
     state.versions = await api.listVersions();
     if (state.versions.offline) toast('Offline: Die Versionsliste kommt aus dem Cache.');

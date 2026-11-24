@@ -8,6 +8,7 @@ launcher/release/
 launcher/resources/client-mods/*.jar
 launcher/resources/heldix-addons/
 launcher/resources/heldix-loader/
+launcher/resources/heldix-loader-fabric/
 
 # Mod (siehe auch mod/.gitignore)
 mod/.gradle/
@@ -23,3 +24,7 @@ mod/*/build/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Entwickler-Schlüssel (npm run dev-key) – nie einchecken
+developer*.key
+*.pem

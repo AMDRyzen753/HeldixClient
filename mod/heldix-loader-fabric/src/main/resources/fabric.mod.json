@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "heldixloader",
+  "version": "${version}",
+  "name": "Heldix Loader",
+  "description": "Der Heldix Loader als Fabric-Mod: Heldix-Mods wie HeldixClient laufen damit auch in Fabric-Instanzen.",
+  "authors": ["HeldixClient"],
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "preLaunch": ["dev.heldixclient.loader.fabric.FabricBoot"]
+  },
+  "mixins": ["heldixloader.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.17.0",
+    "minecraft": "${minecraft_version}"
+  }
+}

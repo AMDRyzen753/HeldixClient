@@ -12,131 +12,155 @@
 <body>
 <div class="splash" id="splash">
   <img src="logo.svg" alt="" class="splash-logo">
-  <div class="splash-word">Heldix<span>Client</span></div>
+  <div class="splash-word">Heldix <span>Client</span></div>
+  <div class="splash-bar"><span></span></div>
 </div>
 
-<!-- Hintergrundbild für das ganze Fenster, darüber liegen die Glasflächen -->
+<!-- dezenter Hintergrund hinter dem ganzen Fenster -->
 <div class="backdrop" aria-hidden="true">
-  <div class="backdrop-image"></div>
-  <div class="orb o1"></div>
-  <div class="orb o2"></div>
-  <div class="orb o3"></div>
-  <div class="backdrop-shade"></div>
+  <div class="backdrop-glow"></div>
 </div>
 
 <div class="app">
-  <header class="titlebar">
+  <!-- ============ Seitenleiste ============ -->
+  <nav class="sidebar">
     <div class="brand">
       <img src="logo.svg" alt="" class="logo">
-      <span class="brand-name">Heldix<span>Client</span></span>
+      <span class="brand-name">Heldix <span>Client</span></span>
     </div>
-    <span class="titlebar-sep"></span>
-    <span class="titlebar-title" id="view-title">Spielen</span>
-    <div class="titlebar-tools">
-      <button class="titlebar-discord" id="home-discord" type="button" title="Discord-Status einstellen" hidden>
-        <svg viewBox="0 0 24 24"><path d="M7.5 7.5c3-1.3 6-1.3 9 0M7.5 16.5c3 1.3 6 1.3 9 0"/><path d="M16.5 7.5c1.7 2.6 2.5 5.4 2.4 8.6-.9.8-2 1.4-3.2 1.8l-1-1.6M7.5 7.5C5.8 10.1 5 12.9 5.1 16.1c.9.8 2 1.4 3.2 1.8l1-1.6"/></svg>
-        <span class="home-chip-dot"></span><span id="home-discord-text">Discord</span>
-      </button>
-      <span class="titlebar-chip" id="titlebar-chip" hidden><span class="chip-dot"></span><span id="titlebar-chip-text"></span></span>
-    </div>
-  </header>
 
-  <nav class="sidebar">
-    <button class="nav-item active" data-view="home" data-label="Spielen">
-      <svg viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z"/></svg>
-    </button>
-    <button class="nav-item" data-view="instances" data-label="Instanzen">
-      <svg viewBox="0 0 24 24" class="stroke"><rect x="3.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.8"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.8"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.8"/></svg>
-    </button>
-    <button class="nav-item" data-view="settings" data-label="Einstellungen">
-      <svg viewBox="0 0 24 24" class="stroke"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
-    </button>
+    <div class="nav-section">Spielen</div>
+    <button class="nav-item active" data-view="home" data-label="Start"><svg data-icon="home"></svg><span>Start</span></button>
+    <button class="nav-item" data-view="instances" data-label="Instanzen"><svg data-icon="modules"></svg><span>Instanzen</span></button>
+    <div class="nav-section">Launcher</div>
+    <button class="nav-item" data-view="settings" data-label="Einstellungen"><svg data-icon="settings"></svg><span>Einstellungen</span></button>
     <button class="nav-item" data-view="console" data-label="Konsole">
-      <svg viewBox="0 0 24 24" class="stroke"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3M13 15h4"/></svg>
+      <svg data-icon="terminal"></svg><span>Konsole</span>
       <span class="badge-dot" id="console-dot" hidden></span>
     </button>
+
     <div class="spacer"></div>
+
     <button class="account-button" id="account-button" data-label="Konto">
-      <span class="avatar" id="account-avatar"></span>
-      <span class="avatar-status" id="avatar-status" hidden></span>
+      <span class="avatar-wrap">
+        <span class="avatar" id="account-avatar"></span>
+        <span class="avatar-status" id="avatar-status" hidden></span>
+      </span>
+      <span class="account-text">
+        <span class="account-label" id="account-label">Nicht angemeldet</span>
+        <span class="account-sub" id="account-sub">Konto hinzufügen</span>
+      </span>
+      <svg data-icon="chevron-right" class="account-chevron"></svg>
     </button>
   </nav>
 
+  <!-- ============ Titelleiste (ziehbar) ============ -->
+  <header class="titlebar">
+    <span class="titlebar-title" id="view-title">Start</span>
+    <div class="titlebar-tools">
+      <span class="titlebar-chip" id="titlebar-chip" hidden><span class="chip-dot"></span><span id="titlebar-chip-text"></span></span>
+      <button class="titlebar-discord" id="home-discord" type="button" title="Discord-Status einstellen" hidden>
+        <svg data-icon="chat"></svg><span class="home-chip-dot"></span><span id="home-discord-text">Discord</span>
+      </button>
+    </div>
+  </header>
+
   <main>
-    <!-- ============ Spielen ============ -->
+    <!-- ============ Start ============ -->
     <section class="view active" id="view-home">
-      <div class="home" id="home">
-        <!-- Lichtschein in der Farbe der gewählten Instanz -->
-        <div class="home-aura" aria-hidden="true"></div>
-
-        <div class="home-main">
-          <div class="home-eyebrow" id="home-eyebrow">HeldixClient</div>
-          <h1 class="home-greeting">
-            <span id="home-greeting-text">Willkommen</span>
-            <button class="home-name" id="home-name" type="button" title="Konto wechseln">
-              <span id="home-name-text">zurück</span>
-              <svg viewBox="0 0 24 24" class="home-name-caret"><path d="m7 10 5 5 5-5"/></svg>
-            </button>
-          </h1>
-          <p class="home-sub" id="home-sub"></p>
-
-          <button class="play" id="play-button" type="button">
-            <span class="play-fill" id="play-fill"></span>
-            <span class="play-icon-wrap">
-              <svg viewBox="0 0 24 24" class="play-icon"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z"/></svg>
-              <svg viewBox="0 0 24 24" class="stop-icon"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/></svg>
-            </span>
-            <span class="play-label" id="play-label">Spielen</span>
-          </button>
-
-          <div class="home-status" id="launch-status">
-            <span class="status-dot" id="status-dot"></span>
-            <span class="status-text" id="status-text"></span>
-            <span class="status-sub" id="status-sub"></span>
+      <div class="page home-page">
+        <div class="home" id="home">
+          <div class="home-art" aria-hidden="true">
+            <div class="home-art-image"></div>
+            <div class="home-aura"></div>
+            <div class="home-art-shade"></div>
           </div>
 
-          <div class="picker-row">
-            <div class="picker">
-              <button class="picker-button" id="picker-button" type="button" title="Instanz wählen">
-                <span id="picker-tile"></span>
-                <span class="picker-text">
-                  <span class="picker-name" id="picker-name">Keine Instanz</span>
-                  <span class="picker-meta" id="picker-meta"></span>
-                </span>
-                <svg viewBox="0 0 24 24" class="picker-caret"><path d="m7 10 5 5 5-5"/></svg>
+          <div class="home-main">
+            <div class="home-eyebrow" id="home-eyebrow">HeldixClient</div>
+            <h1 class="home-greeting">
+              <span id="home-greeting-text">Willkommen</span>
+              <button class="home-name" id="home-name" type="button" title="Konto wechseln">
+                <span id="home-name-text">zurück</span>
+                <svg data-icon="chevron-down" class="home-name-caret"></svg>
               </button>
-              <div class="picker-panel" id="picker-panel" hidden>
-                <div class="picker-list" id="picker-list"></div>
-                <div class="picker-actions">
-                  <button class="ghost" id="picker-new" type="button">Neue Instanz</button>
-                  <button class="ghost" id="picker-manage" type="button">Verwalten</button>
+            </h1>
+            <p class="home-sub" id="home-sub"></p>
+
+            <div class="play-row">
+              <button class="play" id="play-button" type="button">
+                <span class="play-fill" id="play-fill"></span>
+                <span class="play-icon-wrap">
+                  <svg data-icon="play" class="play-icon"></svg>
+                  <svg viewBox="0 0 24 24" class="stop-icon"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/></svg>
+                </span>
+                <span class="play-label" id="play-label">Spielen</span>
+              </button>
+
+              <div class="picker">
+                <button class="picker-button" id="picker-button" type="button" title="Instanz wählen">
+                  <span id="picker-tile"></span>
+                  <span class="picker-text">
+                    <span class="picker-name" id="picker-name">Keine Instanz</span>
+                    <span class="picker-meta" id="picker-meta"></span>
+                  </span>
+                  <svg data-icon="chevron-down" class="picker-caret"></svg>
+                </button>
+                <div class="picker-panel" id="picker-panel" hidden>
+                  <div class="picker-list" id="picker-list"></div>
+                  <div class="picker-actions">
+                    <button class="ghost" id="picker-new" type="button"><svg data-icon="plus" class="btn-icon"></svg>Neue Instanz</button>
+                    <button class="ghost" id="picker-manage" type="button"><svg data-icon="modules" class="btn-icon"></svg>Verwalten</button>
+                  </div>
                 </div>
               </div>
             </div>
+
+            <div class="home-status" id="launch-status">
+              <span class="status-dot" id="status-dot"></span>
+              <span class="status-text" id="status-text"></span>
+              <span class="status-sub" id="status-sub"></span>
+            </div>
+
             <div class="picker-tools" id="picker-tools"></div>
           </div>
 
-          <div class="quick" id="stage-continue" hidden>
-            <span class="quick-label">Weiterspielen</span>
-            <div class="quick-list" id="continue-list"></div>
+          <!-- die eigene Figur -->
+          <div class="hero-figure" id="figure">
+            <div class="hero-ring" aria-hidden="true"></div>
+            <canvas class="figure-canvas" id="figure-canvas"></canvas>
+            <div class="figure-hint" id="figure-hint" hidden></div>
           </div>
+
+          <div class="home-progress" id="stage-progress"><span></span></div>
         </div>
 
-        <!-- die eigene Figur, frei stehend -->
-        <div class="hero-figure" id="figure">
-          <div class="hero-ring" aria-hidden="true"></div>
-          <canvas class="figure-canvas" id="figure-canvas"></canvas>
-          <div class="figure-hint" id="figure-hint" hidden></div>
+        <div class="home-grid">
+          <section class="panel" id="stage-continue" hidden>
+            <div class="panel-head">
+              <div class="panel-icon"><svg data-icon="play"></svg></div>
+              <div class="panel-title"><h3>Weiterspielen</h3><span>Direkt in Welten und auf Server</span></div>
+            </div>
+            <div class="row-list" id="continue-list"></div>
+          </section>
+
+          <section class="panel" id="home-instances-panel">
+            <div class="panel-head">
+              <div class="panel-icon"><svg data-icon="modules"></svg></div>
+              <div class="panel-title"><h3>Instanzen</h3><span id="home-instances-sub">Zuletzt gespielt</span></div>
+              <button class="ghost small" id="home-instances-all" type="button">Alle</button>
+            </div>
+            <div class="row-list" id="home-instances"></div>
+          </section>
+
+          <section class="panel" id="news-panel" hidden>
+            <div class="panel-head">
+              <div class="panel-icon"><svg data-icon="news"></svg></div>
+              <div class="panel-title"><h3>Neuigkeiten</h3><span>Minecraft Patch Notes</span></div>
+            </div>
+            <div class="row-list" id="news-list"></div>
+          </section>
         </div>
-
-        <!-- eine einzige, dezente Neuigkeit -->
-        <button class="news-pill" id="news-pill" type="button" hidden>
-          <span class="news-pill-badge" id="news-pill-badge">Neu</span>
-          <span class="news-pill-text" id="news-pill-text"></span>
-          <svg viewBox="0 0 24 24" class="news-pill-arrow"><path d="m9 6 6 6-6 6"/></svg>
-        </button>
-
-        <div class="home-progress" id="stage-progress"><span></span></div>
       </div>
     </section>
 
@@ -149,13 +173,13 @@
               <h2 class="page-title">Instanzen</h2>
               <p class="page-sub">Jede Instanz hat eigene Welten, Mods, Addons und Einstellungen.</p>
             </div>
-            <button class="primary" id="new-instance"><svg viewBox="0 0 24 24" class="btn-icon"><path d="M12 5v14M5 12h14"/></svg>Neue Instanz</button>
+            <button class="primary" id="new-instance"><svg data-icon="plus" class="btn-icon"></svg>Neue Instanz</button>
           </div>
           <div class="instance-grid" id="instance-grid"></div>
         </div>
 
         <div id="instance-detail" hidden>
-          <button class="back-link" id="detail-back"><svg viewBox="0 0 24 24" class="btn-icon"><path d="m15 6-6 6 6 6"/></svg>Alle Instanzen</button>
+          <button class="back-link" id="detail-back"><svg data-icon="chevron-left" class="btn-icon"></svg>Alle Instanzen</button>
           <div class="detail-head">
             <div id="detail-tile"></div>
             <div class="detail-info">
@@ -163,30 +187,43 @@
               <div class="detail-meta" id="detail-meta"></div>
             </div>
             <div class="detail-actions">
-              <button class="ghost" id="detail-folder"><svg viewBox="0 0 24 24" class="btn-icon"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>Ordner</button>
-              <button class="primary big" id="detail-play"><svg viewBox="0 0 24 24" class="btn-icon fill"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z"/></svg>Spielen</button>
+              <button class="ghost" id="detail-folder"><svg data-icon="folder" class="btn-icon"></svg>Ordner</button>
+              <button class="primary big" id="detail-play"><svg data-icon="play" class="btn-icon"></svg>Spielen</button>
             </div>
           </div>
 
           <div class="tabs" id="detail-tabs">
             <button data-tab="mods" class="active">Mods</button>
             <button data-tab="addons">Heldix-Addons</button>
+            <button data-tab="shaders">Shader</button>
             <button data-tab="settings">Einstellungen</button>
           </div>
 
           <div class="tab-panel" id="tab-content">
             <div class="content-toolbar">
               <div class="search-field">
-                <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+                <svg data-icon="search"></svg>
                 <input type="text" id="content-filter" placeholder="Installierte durchsuchen …" spellcheck="false">
               </div>
               <span class="content-count" id="content-count"></span>
-              <button class="ghost" id="content-add-file"><svg viewBox="0 0 24 24" class="btn-icon"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/></svg>Datei hinzufügen</button>
-              <button class="primary" id="content-browse"><svg viewBox="0 0 24 24" class="btn-icon"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5Z"/></svg>Mods entdecken</button>
+              <button class="ghost" id="content-add-file"><svg data-icon="file" class="btn-icon"></svg>Datei hinzufügen</button>
+              <button class="ghost" id="content-perf" hidden><svg data-icon="performance" class="btn-icon"></svg>Leistungs-Paket</button>
+              <button class="primary" id="content-browse"><svg data-icon="compass" class="btn-icon"></svg>Mods entdecken</button>
             </div>
             <p class="content-hint" id="content-hint"></p>
             <div class="content-list" id="content-list"></div>
             <div class="drop-overlay"><div>JAR-Dateien hier ablegen</div></div>
+          </div>
+
+          <div class="tab-panel" id="tab-shaders" hidden>
+            <div class="shader-status" id="shader-status"></div>
+            <div class="content-toolbar" id="shader-toolbar">
+              <span class="content-count" id="shader-count"></span>
+              <button class="ghost" id="shader-folder"><svg data-icon="folder" class="btn-icon"></svg>Ordner</button>
+              <button class="ghost" id="shader-add-file"><svg data-icon="file" class="btn-icon"></svg>Datei hinzufügen</button>
+              <button class="primary" id="shader-browse"><svg data-icon="compass" class="btn-icon"></svg>Shaderpacks entdecken</button>
+            </div>
+            <div class="content-list" id="shader-list"></div>
           </div>
 
           <div class="tab-panel" id="tab-settings" hidden>
@@ -196,6 +233,11 @@
                 <label class="stack"><span>Name</span><input type="text" id="is-name" maxlength="40" spellcheck="false"></label>
                 <div class="stack"><span>Farbe</span><div class="swatches" id="is-colors"></div></div>
                 <p class="hint" id="is-created"></p>
+              </div>
+              <div class="card" id="is-heldix-card" hidden>
+                <h3>HeldixClient</h3>
+                <label class="toggle-row"><span>HeldixClient in dieser Instanz<small class="toggle-sub">HUD, Heldix-Menü, Zoom und Addons zusätzlich zu deinen Fabric-Mods</small></span><input type="checkbox" class="switch" id="is-heldix-toggle"></label>
+                <p class="hint">Läuft über den Heldix Loader als Fabric-Mod. Verträgt sich mit Sodium und Iris; die Heldix-Shader pausieren, solange ein Iris-Shaderpack aktiv ist.</p>
               </div>
               <div class="card">
                 <h3>Arbeitsspeicher</h3>
@@ -209,10 +251,10 @@
               <div class="card wide">
                 <h3>Ordner</h3>
                 <div class="folder-grid four">
-                  <button class="ghost" data-instance-folder="saves">Welten</button>
-                  <button class="ghost" data-instance-folder="mods">Mods</button>
-                  <button class="ghost" data-instance-folder="addons">Addons</button>
-                  <button class="ghost" data-instance-folder="logs">Logs</button>
+                  <button class="ghost" data-instance-folder="saves"><svg data-icon="world" class="btn-icon"></svg>Welten</button>
+                  <button class="ghost" data-instance-folder="mods"><svg data-icon="cube" class="btn-icon"></svg>Mods</button>
+                  <button class="ghost" data-instance-folder="addons"><svg data-icon="addons" class="btn-icon"></svg>Addons</button>
+                  <button class="ghost" data-instance-folder="logs"><svg data-icon="file" class="btn-icon"></svg>Logs</button>
                 </div>
                 <p class="hint mono" id="is-path"></p>
               </div>
@@ -221,7 +263,7 @@
                   <h3>Instanz löschen</h3>
                   <p class="hint">Verschiebt den Ordner mit allen Welten in den Papierkorb.</p>
                 </div>
-                <button class="danger" id="is-delete">Instanz löschen</button>
+                <button class="danger" id="is-delete"><svg data-icon="trash" class="btn-icon"></svg>Instanz löschen</button>
               </div>
             </div>
           </div>
@@ -239,7 +281,7 @@
         <div class="cards">
           <div class="card">
             <div class="card-head">
-              <div class="card-icon"><svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="10" rx="2"/><path d="M8 7V4M12 7V4M16 7V4M8 20v-3M12 20v-3M16 20v-3"/></svg></div>
+              <div class="card-icon"><svg data-icon="chip"></svg></div>
               <div><h3>Arbeitsspeicher</h3><p class="hint">Standard für alle Instanzen.</p></div>
             </div>
             <div class="memory-display"><output id="memory-value">4 GB</output><span class="memory-badge" id="memory-badge">Empfohlen</span></div>
@@ -249,7 +291,7 @@
 
           <div class="card">
             <div class="card-head">
-              <div class="card-icon"><svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7Z"/></svg></div>
+              <div class="card-icon"><svg data-icon="performance"></svg></div>
               <div><h3>Leistung</h3><p class="hint">Grafik-API und Java-Einstellungen für mehr FPS.</p></div>
             </div>
             <div class="stack">
@@ -269,7 +311,7 @@
 
           <div class="card">
             <div class="card-head">
-              <div class="card-icon"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+              <div class="card-icon"><svg data-icon="monitor"></svg></div>
               <div><h3>Spiel</h3><p class="hint">Fenster und Verhalten beim Start.</p></div>
             </div>
             <label class="toggle-row">
@@ -288,7 +330,7 @@
 
           <div class="card">
             <div class="card-head">
-              <div class="card-icon discord"><svg viewBox="0 0 24 24"><path d="M7.5 7.5c3-1.3 6-1.3 9 0M7.5 16.5c3 1.3 6 1.3 9 0"/><path d="M16.5 7.5c1.7 2.6 2.5 5.4 2.4 8.6-.9.8-2 1.4-3.2 1.8l-1-1.6M7.5 7.5C5.8 10.1 5 12.9 5.1 16.1c.9.8 2 1.4 3.2 1.8l1-1.6"/><circle cx="9.6" cy="12.6" r="1.2"/><circle cx="14.4" cy="12.6" r="1.2"/></svg></div>
+              <div class="card-icon discord"><svg data-icon="chat"></svg></div>
               <div><h3>Discord</h3><p class="hint">Zeigt Freunden in Discord, was du gerade spielst.</p></div>
             </div>
             <label class="toggle-row">
@@ -304,7 +346,7 @@
 
           <div class="card">
             <div class="card-head">
-              <div class="card-icon"><svg viewBox="0 0 24 24"><path d="M9 3h6M10 3v4c0 1-3 2-3 5v6a3 3 0 0 0 3 3h4a3 3 0 0 0 3-3v-6c0-3-3-4-3-5V3"/></svg></div>
+              <div class="card-icon"><svg data-icon="cup"></svg></div>
               <div><h3>Java</h3><p class="hint">Leer lassen: Der Launcher nimmt automatisch die passende Version.</p></div>
             </div>
             <label class="stack">
@@ -319,10 +361,31 @@
 
           <div class="card">
             <div class="card-head">
-              <div class="card-icon"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg></div>
-              <div><h3>Launcher-Daten</h3><p class="hint">Minecraft-Dateien, Java und alle Instanzen.</p></div>
+              <div class="card-icon"><svg data-icon="code"></svg></div>
+              <div><h3>Entwickler</h3><p class="hint">Werkzeuge für die Entwicklung von HeldixClient.</p></div>
             </div>
-            <button class="ghost" data-folder="data">Datenordner öffnen</button>
+            <label class="toggle-row">
+              <span>Entwickleroptionen<small class="toggle-sub">Offline-Konten ohne Microsoft-Konto – nur auf PCs mit Entwickler-Schlüssel</small></span>
+              <input type="checkbox" class="switch" id="developer-toggle">
+            </label>
+            <div class="dev-panel" id="dev-panel" hidden>
+              <div class="discord-status" id="dev-status"><span class="discord-dot"></span><span id="dev-status-text"></span></div>
+              <div class="dev-code">
+                <span>PC-Kennung</span>
+                <code id="dev-machine"></code>
+                <button class="ghost small" id="dev-copy" type="button">Kopieren</button>
+                <button class="ghost small" id="dev-recheck" type="button">Neu prüfen</button>
+              </div>
+              <button class="ghost" id="dev-import" type="button">Schlüssel importieren …</button>
+            </div>
+          </div>
+
+          <div class="card wide">
+            <div class="card-head">
+              <div class="card-icon"><svg data-icon="folder"></svg></div>
+              <div><h3>Launcher-Daten</h3><p class="hint">Minecraft-Dateien, Java und alle Instanzen.</p></div>
+              <button class="ghost card-head-action" data-folder="data"><svg data-icon="external" class="btn-icon"></svg>Datenordner öffnen</button>
+            </div>
             <p class="hint mono" id="data-dir"></p>
           </div>
         </div>
@@ -350,15 +413,13 @@
               <button data-filter="all" class="active">Alles</button>
               <button data-filter="problems">Warnungen &amp; Fehler</button>
             </div>
-            <button class="ghost icon-text" id="copy-log">
-              <svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>Kopieren
-            </button>
-            <button class="ghost" id="clear-log">Leeren</button>
-            <button class="danger" id="kill-game" disabled>Spiel beenden</button>
+            <button class="ghost icon-text" id="copy-log"><svg data-icon="copy" class="btn-icon"></svg>Kopieren</button>
+            <button class="ghost" id="clear-log"><svg data-icon="trash" class="btn-icon"></svg>Leeren</button>
+            <button class="danger" id="kill-game" disabled><svg data-icon="close" class="btn-icon"></svg>Spiel beenden</button>
           </div>
         </div>
         <div class="log" id="log"><div class="log-empty">
-          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3M13 15h4"/></svg>
+          <svg data-icon="terminal"></svg>
           Noch keine Ausgabe. Starte das Spiel, dann erscheint hier das Log.
         </div></div>
       </div>
@@ -369,70 +430,84 @@
   <div class="modal-backdrop" id="new-instance-modal" hidden>
     <div class="modal ni-modal" role="dialog" aria-modal="true" aria-labelledby="ni-title">
       <div class="ni-head">
-        <div>
+        <div class="ni-head-icon"><svg data-icon="plus"></svg></div>
+        <div class="ni-head-text">
           <h3 class="modal-title" id="ni-title">Neue Instanz</h3>
-          <p class="modal-sub">Jede Instanz hat eigene Welten, Mods und Einstellungen.</p>
+          <p class="modal-sub">Loader wählen, Version aussuchen, fertig. Jede Instanz hat eigene Welten, Mods und Einstellungen.</p>
         </div>
-        <button class="icon-button" id="ni-close" title="Schließen"><svg viewBox="0 0 24 24" class="icon"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        <button class="icon-button" id="ni-close" title="Schließen"><svg data-icon="close" class="icon"></svg></button>
       </div>
 
-      <div class="ni-body">
-        <section class="ni-col ni-versions-col">
-          <div class="ni-label"><span class="ni-step">1</span>Minecraft-Version<span class="ni-label-extra" id="ni-version-count"></span></div>
-          <div class="version-search">
-            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
-            <input type="text" id="ni-filter" placeholder="Version suchen …" spellcheck="false">
-          </div>
-          <div class="version-tabs" id="ni-tabs">
-            <button data-tab="release" class="active">Releases</button>
-            <button data-tab="snapshot">Snapshots</button>
-            <button data-tab="old">Alt</button>
-          </div>
-          <div class="version-list" id="ni-versions"></div>
-        </section>
-
-        <section class="ni-col ni-setup-col">
-          <div class="ni-label"><span class="ni-step">2</span>Loader</div>
+      <div class="ni-scroll">
+        <section class="ni-section">
+          <div class="ni-label"><span class="ni-step">1</span>Loader</div>
           <div class="ni-loaders" id="ni-loaders">
-            <button class="ni-loader" data-loader="heldix">
-              <span class="ni-loader-icon heldix">H</span>
-              <span class="ni-loader-body">
-                <span class="ni-loader-title">Heldix Loader<span class="ni-pill">Empfohlen</span></span>
-                <span class="ni-loader-text"></span>
+            <button class="ni-loader" data-loader="heldix" type="button">
+              <span class="ni-loader-top">
+                <span class="ni-loader-icon heldix"><svg data-icon="loader-heldix"></svg></span>
+                <span class="ni-pill">Empfohlen</span>
+                <span class="ni-radio"></span>
               </span>
-              <span class="ni-radio"></span>
+              <span class="ni-loader-title">Heldix Loader</span>
+              <span class="ni-loader-text">HeldixClient mit HUD, Heldix-Menü, Shadern und Addons</span>
+              <span class="ni-loader-range"></span>
             </button>
-            <button class="ni-loader" data-loader="fabric">
-              <span class="ni-loader-icon fabric">F</span>
-              <span class="ni-loader-body">
-                <span class="ni-loader-title">Fabric</span>
-                <span class="ni-loader-text"></span>
+            <button class="ni-loader" data-loader="fabric" type="button">
+              <span class="ni-loader-top">
+                <span class="ni-loader-icon fabric"><svg data-icon="loader-fabric"></svg></span>
+                <span class="ni-radio"></span>
               </span>
-              <span class="ni-radio"></span>
+              <span class="ni-loader-title">Fabric</span>
+              <span class="ni-loader-text">Mods von Modrinth, Sodium &amp; Shaderpacks – mit HeldixClient</span>
+              <span class="ni-loader-range"></span>
             </button>
-            <button class="ni-loader" data-loader="vanilla">
-              <span class="ni-loader-icon vanilla">V</span>
-              <span class="ni-loader-body">
-                <span class="ni-loader-title">Vanilla</span>
-                <span class="ni-loader-text"></span>
+            <button class="ni-loader" data-loader="vanilla" type="button">
+              <span class="ni-loader-top">
+                <span class="ni-loader-icon vanilla"><svg data-icon="loader-vanilla"></svg></span>
+                <span class="ni-radio"></span>
               </span>
-              <span class="ni-radio"></span>
+              <span class="ni-loader-title">Vanilla</span>
+              <span class="ni-loader-text">Minecraft ganz ohne Mods</span>
+              <span class="ni-loader-range"></span>
             </button>
           </div>
-
-          <div class="ni-label"><span class="ni-step">3</span>Name und Farbe</div>
-          <div class="ni-identity">
-            <div id="ni-preview"></div>
-            <input type="text" id="ni-name" maxlength="40" spellcheck="false" placeholder="Name der Instanz">
-          </div>
-          <div class="swatches" id="ni-colors"></div>
         </section>
+
+        <div class="ni-body">
+          <section class="ni-col ni-versions-col">
+            <div class="ni-label"><span class="ni-step">2</span>Minecraft-Version<span class="ni-label-extra" id="ni-version-count"></span></div>
+            <div class="version-search">
+              <svg data-icon="search"></svg>
+              <input type="text" id="ni-filter" placeholder="Version suchen …" spellcheck="false">
+            </div>
+            <div class="version-tabs" id="ni-tabs">
+              <button data-tab="release" class="active" type="button">Releases</button>
+              <button data-tab="snapshot" type="button">Snapshots</button>
+              <button data-tab="old" type="button">Alt</button>
+            </div>
+            <div class="version-list" id="ni-versions"></div>
+          </section>
+
+          <section class="ni-col ni-setup-col">
+            <div class="ni-label"><span class="ni-step">3</span>Name und Optionen</div>
+            <!-- Name mit Vorschau: so erscheint die Instanz später in der Übersicht -->
+            <div class="ni-identity" id="ni-identity">
+              <div id="ni-preview"></div>
+              <div class="ni-identity-fields">
+                <input type="text" id="ni-name" maxlength="40" spellcheck="false" placeholder="Name der Instanz" aria-label="Name der Instanz">
+                <div class="ni-identity-meta" id="ni-identity-meta"></div>
+              </div>
+            </div>
+            <div class="ni-colors-row" title="Farbe für den Streifen der Karte und den Lichtschein auf der Startseite"><span>Farbe</span><div class="swatches" id="ni-colors"></div></div>
+            <div class="ni-options" id="ni-options"></div>
+          </section>
+        </div>
       </div>
 
       <div class="ni-foot">
         <div class="ni-summary" id="ni-summary"></div>
-        <button class="ghost" id="ni-cancel">Abbrechen</button>
-        <button class="primary" id="ni-create"><svg viewBox="0 0 24 24" class="btn-icon"><path d="M12 5v14M5 12h14"/></svg>Instanz anlegen</button>
+        <button class="ghost" id="ni-cancel" type="button">Abbrechen</button>
+        <button class="primary" id="ni-create" type="button"><svg data-icon="plus" class="btn-icon"></svg>Instanz anlegen</button>
       </div>
     </div>
   </div>
@@ -442,13 +517,13 @@
     <div class="modal wide">
       <div class="modal-head">
         <div>
-          <h3 class="modal-title">Mods entdecken</h3>
+          <h3 class="modal-title" id="mr-title">Mods entdecken</h3>
           <p class="modal-sub" id="mr-sub"></p>
         </div>
-        <button class="icon-button" id="mr-close" title="Schließen"><svg viewBox="0 0 24 24" class="icon"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        <button class="icon-button" id="mr-close" title="Schließen"><svg data-icon="close" class="icon"></svg></button>
       </div>
       <div class="search-field large">
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg>
+        <svg data-icon="search"></svg>
         <input type="text" id="mr-query" placeholder="z. B. Sodium, Iris, Mod Menu …" spellcheck="false">
       </div>
       <div class="mr-list" id="mr-list"></div>
@@ -456,13 +531,11 @@
     </div>
   </div>
 
+  <!-- ============ Konten ============ -->
   <div class="popover" id="account-popover" hidden>
     <div class="popover-title">Konten</div>
     <div class="account-list" id="account-list"></div>
-    <button class="primary full" id="add-microsoft">
-      <svg viewBox="0 0 24 24"><path d="M3 3h8.5v8.5H3zM12.5 3H21v8.5h-8.5zM3 12.5h8.5V21H3zM12.5 12.5H21V21h-8.5z"/></svg>
-      Mit Microsoft anmelden
-    </button>
+    <button class="primary full" id="add-microsoft"><svg data-icon="microsoft" class="btn-icon"></svg>Mit Microsoft anmelden</button>
     <p class="hint small" id="ms-hint" hidden>Für den Microsoft-Login fehlt noch die Azure-Client-ID (siehe README).</p>
     <form class="offline-form" id="offline-form">
       <input type="text" id="offline-name" placeholder="Spielername" maxlength="16" spellcheck="false">

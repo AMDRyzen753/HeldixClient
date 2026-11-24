@@ -35,6 +35,27 @@ final class TransformerChain implements ClassFileTransformer {
 		}
 	}
 
+	java.util.Set<String> targets() {
+		return java.util.Set.copyOf(byTarget.keySet());
+	}
+
+	/**
+	 * Wendet die Transformer direkt auf eine schon gelesene Klasse an (Start in Fabric: aus dem Mixin-Plugin,
+	 * Mixin schreibt die Klasse danach selbst und berechnet die Frames).
+	 */
+	void apply(String className, ClassNode node) {
+		List<Entry> entries = byTarget.get(className);
+		if (entries == null) return;
+		for (Entry entry : entries) {
+			try {
+				entry.transformer().transform(className, node);
+			} catch (Throwable t) {
+				LoaderCore.problem(entry.source() + ": " + className.replace('/', '.') + " konnte nicht verändert werden – " + t);
+				LoaderCore.LOG.error("Transformer von {} ist an {} gescheitert", entry.source(), className, t);
+			}
+		}
+	}
+
 	@Override
 	public byte[] transform(ClassLoader loader, String className, Class<?> redefined, ProtectionDomain domain, byte[] original) {
 		if (className == null) return null;

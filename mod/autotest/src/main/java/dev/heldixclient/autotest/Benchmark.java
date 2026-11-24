@@ -49,6 +49,7 @@ final class Benchmark {
 		int seconds = Integer.getInteger("heldix.benchmark.seconds", 20);
 		ShaderPreset shader = ShaderPreset.byKey(System.getProperty("heldix.benchmark.shader", "aus"));
 		boolean boost = Boolean.getBoolean("heldix.benchmark.boost");
+		int engine = Integer.getInteger("heldix.benchmark.engine", 0);
 
 		t.waitFor("Hauptmenü nach dem Laden", mc -> mc.gui.screen() instanceof TitleScreen && mc.gui.overlay() == null, 300);
 		t.waitTicks(20);
@@ -60,6 +61,7 @@ final class Benchmark {
 			HeldixConfig.get().backgroundFps = false; // Fenster ist beim Test oft nicht im Vordergrund
 			Shaders.select(shader);
 			if (Performance.boostEnabled() != boost) Performance.setBoost(boost);
+			dev.heldixclient.render.ShaderEngine.applyLevel(engine);
 		});
 
 		t.run(mc -> CreateWorldScreen.openFresh(mc, () -> mc.gui.setScreen(new TitleScreen())));
@@ -122,9 +124,9 @@ final class Benchmark {
 		double avgFps = frames.size() / (totalMs / 1000);
 		List<Long> slowest = frames.stream().sorted((a, b) -> Long.compare(b, a)).limit(Math.max(1, frames.size() / 100)).toList();
 		double low1 = 1000 / (slowest.stream().mapToLong(Long::longValue).average().orElse(1) / 1e6);
-		t.screenshot("heldix-benchmark-" + backend.toLowerCase(Locale.ROOT));
-		t.log(String.format(Locale.ROOT, "HELDIX-BENCHMARK: backend=%s avg=%.1f low1=%.1f frames=%d seconds=%.1f resolution=%s shader=%s boost=%s",
-				backend, avgFps, low1, frames.size(), elapsed, resolution, shader.key(), boost));
+		t.screenshot("heldix-benchmark-" + backend.toLowerCase(Locale.ROOT) + (engine > 0 ? "-engine" + engine : ""));
+		t.log(String.format(Locale.ROOT, "HELDIX-BENCHMARK: backend=%s avg=%.1f low1=%.1f frames=%d seconds=%.1f resolution=%s shader=%s boost=%s engine=%d",
+				backend, avgFps, low1, frames.size(), elapsed, resolution, shader.key(), boost, engine));
 		t.check("Benchmark hat gemessen", avgFps > 0);
 	}
 }

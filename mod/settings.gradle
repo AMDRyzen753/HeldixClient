@@ -1,6 +1,8 @@
 dependencyResolutionManagement {
 	repositories {
 		mavenCentral()
+		// nur für die Fabric-Variante des Loaders (Fabric Loader und Mixin zum Kompilieren)
+		maven { url = "https://maven.fabricmc.net/" }
 	}
 }
 
@@ -8,6 +10,8 @@ rootProject.name = 'heldixclient'
 
 // Heldix Loader: der eigene Mod-Loader (Java-Agent)
 include 'heldix-loader'
+// derselbe Loader als Fabric-Mod: Heldix-Mods wie HeldixClient laufen damit auch in Fabric-Instanzen
+include 'heldix-loader-fabric'
 // Heldix-API (reines Java, ohne Minecraft) und Beispiel-Addon
 include 'heldix-api'
 include 'example-addon'

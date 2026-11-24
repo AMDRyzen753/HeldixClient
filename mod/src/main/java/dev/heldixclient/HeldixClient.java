@@ -11,6 +11,7 @@ import dev.heldixclient.loader.api.ModInfo;
 import dev.heldixclient.loader.api.event.ClientEvents;
 import dev.heldixclient.loader.api.event.HudEvents;
 import dev.heldixclient.loader.api.event.ScreenEvents;
+import dev.heldixclient.loader.api.event.WorldEvents;
 import dev.heldixclient.module.ModuleManager;
 import dev.heldixclient.render.DebugOverlay;
 import dev.heldixclient.screen.HeldixMenuScreen;
@@ -24,6 +25,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import org.slf4j.Logger;
@@ -61,6 +63,9 @@ public class HeldixClient implements HeldixModInitializer {
 		// F3: eigener Eintrag – vor dem Laden der F3-Einstellungen, damit Minecraft ihn kennt
 		DebugOverlay.register();
 
+		// zuletzt besuchten Server merken (Startseite: "Weiterspielen" bzw. Mehrspieler-Karte)
+		WorldEvents.JOIN.register(HeldixClient::rememberServer);
+
 		// Pausemenü: direkter Zugang zum Heldix-Menü
 		ScreenEvents.AFTER_INIT.register((minecraft, screen, width, height) -> {
 			if (screen instanceof PauseScreen pause && pause.showsPauseMenu()) {
@@ -83,13 +88,23 @@ public class HeldixClient implements HeldixModInitializer {
 		int y = 4;
 		int w = 4 + 14 + 6 + font.width(heldix) + 4 + font.width(client) + 6 + font.width(ver) + 7;
 		Draw.glass(g, x, y, w, 22, 0xB00B1830);
-		Draw.badge(g, font, x + 4, y + 4, 14);
+		dev.heldixclient.ui.Ui.logo(g, x + 4, y + 4, 14, 1f);
 		int textX = x + 24;
 		g.text(font, heldix, textX, y + 7, Theme.TEXT, false);
 		textX += font.width(heldix) + 4;
 		g.text(font, client, textX, y + 7, Theme.ACCENT_LIGHT, false);
 		textX += font.width(client) + 6;
 		g.text(font, ver, textX, y + 7, Theme.FAINT, false);
+	}
+
+	private static void rememberServer(Minecraft mc) {
+		ServerData server = mc.getCurrentServer();
+		if (server == null || server.isLan() || server.isRealm()) return;
+		HeldixConfig.Data config = HeldixConfig.get();
+		config.lastServerIp = server.ip;
+		config.lastServerName = server.name;
+		config.lastServerAt = System.currentTimeMillis();
+		HeldixConfig.save();
 	}
 
 	private static void onTick(Minecraft mc) {

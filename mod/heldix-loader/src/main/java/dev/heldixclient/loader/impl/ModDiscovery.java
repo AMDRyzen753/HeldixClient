@@ -71,6 +71,26 @@ final class ModDiscovery {
 		return result;
 	}
 
+	/** Liest die heldix.mod.json einer JAR (für den Start in Fabric, wo Fabric die JARs schon kennt). */
+	static List<Candidate> read(List<Path> jars, Consumer<String> problems) {
+		List<Candidate> result = new ArrayList<>();
+		for (Path jar : jars) {
+			if (!Files.isRegularFile(jar)) continue;
+			try (JarFile archive = new JarFile(jar.toFile())) {
+				JarEntry entry = archive.getJarEntry(METADATA);
+				if (entry == null) continue;
+				try (Reader reader = new InputStreamReader(archive.getInputStream(entry), StandardCharsets.UTF_8)) {
+					ModMetadata meta = GSON.fromJson(reader, ModMetadata.class);
+					if (meta == null) throw new IllegalStateException(METADATA + " ist leer");
+					result.add(new Candidate(jar, meta));
+				}
+			} catch (Exception e) {
+				problems.accept(jar.getFileName() + ": nicht lesbar (" + e.getMessage() + ")");
+			}
+		}
+		return result;
+	}
+
 	/** Behält nur Mods, die zu Minecraft, Loader und ihren Abhängigkeiten passen – Abhängigkeiten zuerst. */
 	static List<Candidate> resolve(List<Candidate> candidates, String loaderVersion, String minecraftVersion, Consumer<String> problems) {
 		Map<String, Candidate> byId = new LinkedHashMap<>();

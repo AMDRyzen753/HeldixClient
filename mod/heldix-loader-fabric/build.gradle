@@ -1,0 +1,45 @@
+// Heldix Loader als Fabric-Mod ("heldixloader").
+//
+// Enthält denselben Loader wie heldix-loader (API, Events, Patches), startet aber nicht als Java-Agent,
+// sondern über Fabric: Fabric lädt die JARs der Heldix-Mods (sie haben zusätzlich eine fabric.mod.json),
+// ein Mixin-Plugin wendet die Heldix-Eingriffe auf Minecraft-Klassen an – nachdem alle Fabric-Mixins
+// (z. B. von Sodium oder Iris) angewendet sind. So läuft HeldixClient unverändert auch in Fabric-Instanzen.
+plugins {
+	id 'java'
+}
+
+apply from: rootProject.file('gradle/minecraft.gradle')
+
+group = rootProject.maven_group
+version = rootProject.heldix_loader_version
+
+base {
+	archivesName = 'heldix-loader-fabric'
+}
+
+dependencies {
+	compileOnly project(':heldix-loader')
+	compileOnly "net.fabricmc:fabric-loader:${rootProject.fabric_loader_version}"
+	compileOnly "net.fabricmc:sponge-mixin:${rootProject.fabric_mixin_version}"
+	compileOnly "org.ow2.asm:asm-tree:${rootProject.asm_version}"
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+	it.options.encoding = 'UTF-8'
+}
+
+processResources {
+	def props = [version: project.version, minecraft_version: rootProject.minecraft_version]
+	inputs.properties props
+	filesMatching('fabric.mod.json') {
+		expand props
+	}
+}
+
+jar {
+	// Klassen und Ressourcen des Loaders – aber ohne ASM, das bringt Fabric selbst mit
+	from(project(':heldix-loader').sourceSets.main.output)
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+	dependsOn(':heldix-loader:classes')
+}

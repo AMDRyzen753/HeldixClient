@@ -39,6 +39,24 @@ export interface Settings {
   graphicsApi: GraphicsApi;
   /** abgestimmte JVM-Einstellungen (G1, kompakte Objekt-Header ab Java 25) */
   jvmTuning: boolean;
+  /** Entwickleroptionen (Offline-Konten ohne Microsoft-Konto, nur mit Entwickler-Schlüssel) */
+  developerMode: boolean;
+}
+
+export interface DeveloperStatus {
+  /** Entwickleroptionen eingeschaltet */
+  enabled: boolean;
+  /** Kennung dieses PCs für Entwickler-Schlüssel, z. B. "3F2A-91C0-7B44-E0D1" */
+  machineCode: string;
+  keyValid: boolean;
+  /** für wen der Schlüssel ausgestellt ist */
+  keyName: string | null;
+  /** warum der Schlüssel nicht gilt */
+  reason: string | null;
+  /** wo der Launcher den Schlüssel sucht */
+  keyPath: string;
+  /** Schlüssel wurde gerade automatisch erstellt (Signaturschlüssel des Entwicklers liegt auf diesem PC) */
+  autoCreated: boolean;
 }
 
 // ---------- Instanzen ----------
@@ -55,6 +73,8 @@ export interface InstanceInfo {
   playTimeMs: number;
   /** eigener RAM-Wert für diese Instanz (null = globale Einstellung) */
   memoryMb: number | null;
+  /** HeldixClient läuft in dieser Instanz (Heldix immer, Fabric abschaltbar, Vanilla nie) */
+  heldixClient: boolean;
   modCount: number;
   addonCount: number;
   path: string;
@@ -67,7 +87,17 @@ export interface NewInstance {
   color: string;
 }
 
-export type InstancePatch = Partial<Pick<InstanceInfo, 'name' | 'color' | 'memoryMb'>>;
+export type InstancePatch = Partial<Pick<InstanceInfo, 'name' | 'color' | 'memoryMb' | 'heldixClient'>>;
+
+/** Ergebnis von "Leistungs-Paket installieren" */
+export interface PerformancePackResult {
+  installed: string[];
+  alreadyInstalled: string[];
+  /** gibt es für diese Minecraft-Version (noch) nicht */
+  unavailable: string[];
+  /** Hinweise, z. B. wegen eines Konflikts ausgeschaltete Mods */
+  notes: string[];
+}
 
 /** Eine Mod- oder Addon-Datei in einer Instanz */
 export interface ContentItem {
@@ -87,6 +117,27 @@ export interface ContentItem {
 }
 
 export type ContentKind = 'mods' | 'addons';
+
+/** Ein Shaderpack im Ordner shaderpacks einer Fabric-Instanz */
+export interface ShaderpackInfo {
+  /** Datei- oder Ordnername */
+  file: string;
+  name: string;
+  /** null bei entpackten Ordnern */
+  sizeBytes: number | null;
+  /** von Modrinth installiert */
+  projectId: string | null;
+  /** in Iris eingeschaltet */
+  active: boolean;
+}
+
+export interface ShaderpackList {
+  packs: ShaderpackInfo[];
+  /** aktives Pack (null = Shader aus) */
+  active: string | null;
+  irisInstalled: boolean;
+  sodiumInstalled: boolean;
+}
 
 export interface ModrinthHit {
   projectId: string;
@@ -149,7 +200,7 @@ export interface AppInfo {
   totalMemoryMb: number;
 }
 
-export type FolderKind = 'data' | 'instance' | 'mods' | 'addons' | 'logs' | 'saves';
+export type FolderKind = 'data' | 'instance' | 'mods' | 'addons' | 'logs' | 'saves' | 'shaderpacks';
 
 export interface SkinInfo {
   /** Skin-Textur als data:-URL */
@@ -157,6 +208,12 @@ export interface SkinInfo {
   /** schmales Modell (Alex), breites (Steve) oder null = am Bild erkennen */
   slim: boolean | null;
   source: 'account' | 'default';
+}
+
+/** Echte Logos für die Instanz-Kacheln (Daten-URLs, null = nicht verfügbar) */
+export interface LoaderLogos {
+  fabric: string | null;
+  vanilla: string | null;
 }
 
 export interface NewsEntry {
@@ -216,14 +273,28 @@ export interface HeldixApi {
 
   searchModrinth(instanceId: string, query: string, offset: number): Promise<ModrinthSearchResult>;
   installModrinth(instanceId: string, projectId: string): Promise<string[]>;
+  /** Sodium, Lithium, FerriteCore & Co. in eine Fabric-Instanz installieren */
+  installPerformancePack(instanceId: string): Promise<PerformancePackResult>;
+
+  listShaderpacks(instanceId: string): Promise<ShaderpackList>;
+  searchShaderpacks(instanceId: string, query: string, offset: number): Promise<ModrinthSearchResult>;
+  /** lädt das Pack, installiert bei Bedarf Iris + Sodium und schaltet es ein */
+  installShaderpack(instanceId: string, projectId: string): Promise<{ title: string; mods: string[]; notes: string[] }>;
+  setActiveShaderpack(instanceId: string, file: string | null): Promise<void>;
+  removeShaderpack(instanceId: string, file: string): Promise<void>;
+  addShaderpackFiles(instanceId: string, paths?: string[]): Promise<number>;
 
   listAccounts(): Promise<AccountInfo[]>;
   /** Skin des aktiven Kontos für die 3D-Figur */
   getSkin(): Promise<SkinInfo | null>;
   listNews(): Promise<NewsEntry[]>;
+  loaderLogos(): Promise<LoaderLogos>;
   getNewsBody(id: string): Promise<string>;
   addMicrosoftAccount(): Promise<AccountInfo>;
   addOfflineAccount(name: string): Promise<AccountInfo>;
+  getDeveloperStatus(): Promise<DeveloperStatus>;
+  /** Signaturschlüssel (signing-key.pem) oder Entwickler-Schlüssel (developer.key) auswählen; null = abgebrochen */
+  importDeveloperKey(): Promise<DeveloperStatus | null>;
   removeAccount(id: string): Promise<void>;
   selectAccount(id: string): Promise<void>;
 

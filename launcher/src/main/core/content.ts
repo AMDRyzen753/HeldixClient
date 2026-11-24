@@ -38,6 +38,8 @@ interface ParsedMeta {
   error: string | null;
   /** Welches Format die JAR hat */
   format: 'heldix' | 'fabric' | 'addon' | null;
+  /** Heldix-Mod, die zusätzlich eine fabric.mod.json hat (läuft auch in Fabric, z. B. HeldixClient) */
+  fabricToo: boolean;
 }
 
 const metaCache = new Map<string, { key: string; meta: ParsedMeta }>();
@@ -60,7 +62,7 @@ function iconPath(icon: unknown): string | null {
 }
 
 function parseJar(file: string, kind: ContentKind): ParsedMeta {
-  const empty: ParsedMeta = { id: null, name: null, version: null, description: '', authors: [], icon: null, error: null, format: null };
+  const empty: ParsedMeta = { id: null, name: null, version: null, description: '', authors: [], icon: null, error: null, format: null, fabricToo: false };
   try {
     const zip = new AdmZip(file);
     // Mods: Heldix-Mod (heldix.mod.json) oder Fabric-Mod (fabric.mod.json); Addons: heldix.addon.json
@@ -72,7 +74,9 @@ function parseJar(file: string, kind: ContentKind): ParsedMeta {
     // Manche Mods haben Zeilenumbrüche in Strings – die stören JSON.parse
     const json = JSON.parse(entry.getData().toString('utf8').replace(/\r?\n/g, ' ')) as Record<string, unknown>;
     let icon: string | null = null;
-    const iconFile = found.format === 'fabric' ? iconPath(json.icon) : null;
+    const fabricEntry = found.format === 'heldix' ? zip.getEntry('fabric.mod.json') : null;
+    const fabricJson = fabricEntry ? (JSON.parse(fabricEntry.getData().toString('utf8').replace(/\r?\n/g, ' ')) as Record<string, unknown>) : null;
+    const iconFile = found.format === 'fabric' ? iconPath(json.icon) : fabricJson ? iconPath(fabricJson.icon) : null;
     if (iconFile) {
       const iconEntry = zip.getEntry(iconFile.replace(/^\//, ''));
       if (iconEntry && iconEntry.header.size < 256 * 1024) {
@@ -88,6 +92,7 @@ function parseJar(file: string, kind: ContentKind): ParsedMeta {
       icon,
       error: null,
       format: found.format,
+      fabricToo: fabricEntry != null,
     };
   } catch (error) {
     return { ...empty, error: `Datei nicht lesbar: ${error instanceof Error ? error.message : error}` };
@@ -112,7 +117,7 @@ function compatibility(meta: ParsedMeta, loader: InstanceLoader, managed: boolea
     if (managed) return 'Alte Fabric-Version – wird beim nächsten Start automatisch entfernt bzw. ersetzt';
     return 'Fabric-Mod – läuft nicht mit dem Heldix Loader, nur in Fabric-Instanzen';
   }
-  if (loader === 'fabric' && meta.format === 'heldix') return 'Heldix-Mod – läuft nur in Heldix-Instanzen';
+  if (loader === 'fabric' && meta.format === 'heldix' && !meta.fabricToo) return 'Heldix-Mod ohne Fabric-Unterstützung – läuft nur in Heldix-Instanzen';
   return null;
 }
 

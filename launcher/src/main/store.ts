@@ -38,6 +38,7 @@ function defaultSettings(): Settings {
     discordShowServer: true,
     graphicsApi: 'vulkan',
     jvmTuning: true,
+    developerMode: false,
   };
 }
 

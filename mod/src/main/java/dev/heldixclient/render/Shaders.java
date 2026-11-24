@@ -38,11 +38,15 @@ public final class Shaders {
 
 	/** GameRenderer.update: hängt den Stil an die angeforderten Post-Effekte dieses Bildes. */
 	public static void request(List<Identifier> requested) {
+		// Iris-Shaderpack aktiv (Fabric-Instanz): Heldix-Shader pausieren
+		if (IrisCompat.shaderPackActive()) return;
 		Identifier effect = current().effect();
 		if (effect != null && Minecraft.getInstance().level != null && !requested.contains(effect)) {
 			// zuerst: Effekte von Minecraft (z. B. Zuschauen als Creeper) liegen danach darüber
 			requested.add(0, effect);
 		}
+		// Shader-Engine davor: Licht- und Tiefeneffekte zuerst, danach der Farbstil
+		ShaderEngine.request(requested);
 	}
 
 	/** true, wenn der gewählte Stil im letzten Bild tatsächlich gezeichnet wurde. */
@@ -56,6 +60,7 @@ public final class Shaders {
 	/** Kurzer Zustand für F3: "Kino", "Kino (nicht aktiv)" oder "Aus". */
 	public static String describe() {
 		ShaderPreset preset = current();
+		if (IrisCompat.shaderPackActive()) return "pausiert (Iris-Shaderpack aktiv)";
 		if (preset == ShaderPreset.OFF) return "Aus";
 		if (Minecraft.getInstance().level == null) return preset.label();
 		return isApplied() ? preset.label() : preset.label() + " (nicht aktiv)";
