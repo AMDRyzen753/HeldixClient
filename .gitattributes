@@ -1,0 +1,15 @@
+# Textdateien im Repository einheitlich mit LF speichern
+* text=auto
+
+# Windows-Skripte brauchen CRLF, Shell-Skripte LF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh text eol=lf
+mod/gradlew text eol=lf
+
+# Binärdateien nie verändern
+*.png binary
+*.jpg binary
+*.ico binary
+*.jar binary
+*.exe binary

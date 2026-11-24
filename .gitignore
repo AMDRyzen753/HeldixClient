@@ -18,3 +18,8 @@ mod/*/build/
 .idea/
 .vscode/
 *.log
+
+# Betriebssystem
+.DS_Store
+Thumbs.db
+desktop.ini
