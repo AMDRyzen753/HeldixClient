@@ -1,0 +1,20 @@
+# Portables JDK (wird lokal heruntergeladen)
+.tools/
+
+# Launcher
+launcher/node_modules/
+launcher/dist/
+launcher/release/
+launcher/resources/client-mods/*.jar
+launcher/resources/heldix-addons/
+launcher/resources/heldix-loader/
+
+# Mod (siehe auch mod/.gitignore)
+mod/.gradle/
+mod/build/
+mod/run/
+mod/*/build/
+
+.idea/
+.vscode/
+*.log

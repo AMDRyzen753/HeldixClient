@@ -1,0 +1,15 @@
+dependencyResolutionManagement {
+	repositories {
+		mavenCentral()
+	}
+}
+
+rootProject.name = 'heldixclient'
+
+// Heldix Loader: der eigene Mod-Loader (Java-Agent)
+include 'heldix-loader'
+// Heldix-API (reines Java, ohne Minecraft) und Beispiel-Addon
+include 'heldix-api'
+include 'example-addon'
+// Automatischer Test im echten Spiel (wird nicht ausgeliefert)
+include 'autotest'

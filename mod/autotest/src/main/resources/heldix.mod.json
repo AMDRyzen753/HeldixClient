@@ -1,0 +1,13 @@
+{
+  "id": "heldix-autotest",
+  "name": "Heldix Autotest",
+  "version": "${version}",
+  "description": "Automatischer Test im echten Spiel (nur für die Entwicklung, aktiv mit -Dheldix.autotest=true).",
+  "authors": ["HeldixClient"],
+  "entrypoints": {
+    "client": ["dev.heldixclient.autotest.AutoTest"]
+  },
+  "depends": {
+    "heldixclient": "*"
+  }
+}

@@ -1,0 +1,49 @@
+// HeldixClient – die Client-Mod. Läuft auf dem Heldix Loader (kein Fabric, kein Mixin).
+plugins {
+	id 'java'
+}
+
+apply from: 'gradle/minecraft.gradle'
+
+// Die Heldix-API ist ein eigenes Projekt (reines Java) und wird in die Mod-JAR eingebettet
+evaluationDependsOn(':heldix-api')
+
+version = "${project.mod_version}+${project.minecraft_version}"
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+dependencies {
+	compileOnly project(':heldix-loader')
+	implementation project(':heldix-api')
+}
+
+processResources {
+	def props = [version: project.mod_version, minecraft_version: project.minecraft_version, loader_version: project.heldix_loader_version]
+	inputs.properties props
+	filesMatching('heldix.mod.json') {
+		expand props
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+	it.options.encoding = 'UTF-8'
+}
+
+jar {
+	from(project(':heldix-api').sourceSets.main.output)
+}
+
+// Absichtlich kaputtes Addon (falsche API-Version), um die Fehlerbehandlung im Autotest zu prüfen
+tasks.register('brokenTestAddon', Jar) {
+	archiveFileName = 'heldix-addon-kaputt.jar'
+	destinationDirectory = layout.buildDirectory.dir('test-addons')
+	from('test-addons/kaputt')
+}
+
+build {
+	dependsOn(':heldix-loader:build', ':heldix-api:build', ':example-addon:build', ':autotest:build', 'brokenTestAddon')
+}

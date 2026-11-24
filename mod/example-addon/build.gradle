@@ -1,0 +1,27 @@
+// Beispiel für ein Heldix-Addon: braucht nur die Heldix-API, kein Minecraft und kein Fabric.
+plugins {
+	id 'java'
+}
+
+version = '1.0.0'
+
+base {
+	archivesName = 'heldix-addon-uhrzeit'
+}
+
+dependencies {
+	compileOnly project(':heldix-api')
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+	it.options.encoding = 'UTF-8'
+}
+
+processResources {
+	def props = [version: project.version]
+	inputs.properties props
+	filesMatching('heldix.addon.json') {
+		expand props
+	}
+}

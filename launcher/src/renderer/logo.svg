@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="hx-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="0.55" stop-color="#0ea5e9"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+    <linearGradient id="hx-sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="hx-glyph" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dff6ff"/>
+    </linearGradient>
+    <radialGradient id="hx-light" cx="0.8" cy="0.12" r="0.6">
+      <stop offset="0" stop-color="#cffafe" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#cffafe" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="hx-dark" cx="0.1" cy="0.95" r="0.55">
+      <stop offset="0" stop-color="#1e3a8a" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#1e3a8a" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="hx-clip"><rect x="16" y="16" width="168" height="168" rx="48"/></clipPath>
+    <filter id="hx-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#0b3b75" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <rect x="16" y="16" width="168" height="168" rx="48" fill="url(#hx-bg)"/>
+  <g clip-path="url(#hx-clip)">
+    <rect x="16" y="16" width="168" height="168" fill="url(#hx-light)"/>
+    <rect x="16" y="16" width="168" height="168" fill="url(#hx-dark)"/>
+    <rect x="16" y="16" width="168" height="92" fill="url(#hx-sheen)"/>
+  </g>
+  <!-- "H" aus Glasstreifen: zwei Balken, halbtransparenter Querbalken darüber -->
+  <g filter="url(#hx-shadow)">
+    <rect x="57" y="55" width="27" height="90" rx="13.5" fill="url(#hx-glyph)"/>
+    <rect x="116" y="55" width="27" height="90" rx="13.5" fill="url(#hx-glyph)"/>
+    <rect x="64" y="86.5" width="72" height="27" rx="13.5" fill="#ffffff" fill-opacity="0.6"/>
+  </g>
+  <rect x="16.75" y="16.75" width="166.5" height="166.5" rx="47.25" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="1.5"/>
+</svg>

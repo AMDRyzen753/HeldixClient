@@ -1,0 +1,13 @@
+{
+  "id": "heldixclient",
+  "name": "HeldixClient",
+  "version": "${version}",
+  "description": "PvP-Client mit HUD-Modulen, Zoom, eigenem Menü-Design und Heldix-Addons.",
+  "authors": ["HeldixClient"],
+  "minecraft": "${minecraft_version}",
+  "loader": ">=${loader_version}",
+  "entrypoints": {
+    "client": ["dev.heldixclient.HeldixClient"]
+  },
+  "transformers": ["dev.heldixclient.transform.HeldixPatches"]
+}

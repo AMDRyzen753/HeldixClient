@@ -1,0 +1,32 @@
+// Automatischer Test im echten Spiel: eine Heldix-Mod, die nur mit -Dheldix.autotest=true aktiv wird.
+// Start über den Launcher:  npm run test:launch -- 26.3 heldix --autotest
+plugins {
+	id 'java'
+}
+
+apply from: rootProject.file('gradle/minecraft.gradle')
+
+version = rootProject.mod_version
+
+base {
+	archivesName = 'heldix-autotest'
+}
+
+dependencies {
+	compileOnly project(':heldix-loader')
+	compileOnly project(':')
+	compileOnly project(':heldix-api')
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+	it.options.encoding = 'UTF-8'
+}
+
+processResources {
+	def props = [version: project.version]
+	inputs.properties props
+	filesMatching('heldix.mod.json') {
+		expand props
+	}
+}

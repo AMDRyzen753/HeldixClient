@@ -1,0 +1,90 @@
+{
+  "name": "heldixclient-launcher",
+  "productName": "HeldixClient",
+  "version": "0.6.0",
+  "description": "Launcher für den HeldixClient",
+  "author": "HeldixClient",
+  "private": true,
+  "main": "dist/main/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node scripts/copy-static.mjs",
+    "start": "npm run build && electron .",
+    "mod": "node scripts/build-mod.mjs",
+    "icon": "electron scripts/render-icon.mjs",
+    "dist": "npm run mod && npm run build && electron-builder --win",
+    "test:launch": "npm run build && node dist/scripts/test-launch.js",
+    "test:discord": "npm run build && node dist/scripts/test-discord.js"
+  },
+  "build": {
+    "appId": "dev.heldixclient.launcher",
+    "productName": "HeldixClient",
+    "copyright": "© 2026 HeldixClient",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/main/**/*.js",
+      "dist/renderer/**/*",
+      "!**/*.map",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/client-mods",
+        "to": "client-mods",
+        "filter": [
+          "*.jar"
+        ]
+      },
+      {
+        "from": "resources/heldix-addons",
+        "to": "heldix-addons",
+        "filter": [
+          "*.jar"
+        ]
+      },
+      {
+        "from": "resources/heldix-loader",
+        "to": "heldix-loader",
+        "filter": [
+          "*.jar"
+        ]
+      }
+    ],
+    "electronLanguages": [
+      "de",
+      "en-US"
+    ],
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "HeldixClient",
+      "artifactName": "HeldixClient-Setup-${version}.exe"
+    }
+  },
+  "dependencies": {
+    "adm-zip": "^0.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
+    "typescript": "^7.0.2"
+  }
+}

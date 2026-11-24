@@ -1,0 +1,49 @@
+// Heldix Loader: eigener Mod-Loader für Minecraft.
+// Läuft als Java-Agent (-javaagent), verändert Minecraft-Klassen beim Laden mit ASM und
+// lädt Heldix-Mods (heldix.mod.json) aus dem mods-Ordner. Kein Fabric, kein Mixin.
+plugins {
+	id 'java-library'
+}
+
+apply from: rootProject.file('gradle/minecraft.gradle')
+
+group = rootProject.maven_group
+version = rootProject.heldix_loader_version
+
+base {
+	archivesName = 'heldix-loader'
+}
+
+dependencies {
+	// "api", damit Mods mit eigenen Transformern ASM beim Kompilieren sehen
+	api "org.ow2.asm:asm:${rootProject.asm_version}"
+	api "org.ow2.asm:asm-tree:${rootProject.asm_version}"
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+	it.options.encoding = 'UTF-8'
+}
+
+processResources {
+	def props = [version: project.version, minecraft_version: rootProject.minecraft_version]
+	inputs.properties props
+	filesMatching('heldix-loader.properties') {
+		expand props
+	}
+}
+
+jar {
+	manifest {
+		attributes(
+				'Premain-Class': 'dev.heldixclient.loader.impl.HeldixAgent',
+				'Implementation-Title': 'Heldix Loader',
+				'Implementation-Version': project.version,
+		)
+	}
+	// ASM wird eingebettet: der Launcher braucht nur diese eine JAR
+	from({ configurations.runtimeClasspath.collect { zipTree(it) } }) {
+		exclude 'module-info.class', 'META-INF/**'
+	}
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

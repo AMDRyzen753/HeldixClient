@@ -1,0 +1,61 @@
+// Minecraft als Compile-Abhängigkeit – direkt von Mojang, ohne Fabric Loom.
+//
+// Seit 26.1 liefert Mojang den Client unverschleiert aus: Klassen- und Methodennamen im
+// Quellcode sind genau die Namen im Spiel. Es reicht also, die Client-JAR und ihre
+// Bibliotheken auf den Compile-Classpath zu legen. Alles wird einmal nach
+// .gradle/minecraft/<version>/ geladen und danach nur noch über die Dateigröße geprüft.
+import groovy.json.JsonSlurper
+import java.security.MessageDigest
+
+def mcVersion = rootProject.property('minecraft_version').toString()
+def cacheDir = new File(rootProject.projectDir, ".gradle/minecraft/${mcVersion}")
+
+def sha1Of = { File file ->
+	def digest = MessageDigest.getInstance('SHA-1')
+	file.withInputStream { input ->
+		byte[] buffer = new byte[65536]
+		int read
+		while ((read = input.read(buffer)) > 0) digest.update(buffer, 0, read)
+	}
+	digest.digest().encodeHex().toString()
+}
+
+def download = { String url, File target, String sha1, Long size ->
+	if (target.isFile() && (size == null || target.length() == size)) return target
+	target.parentFile.mkdirs()
+	def part = new File(target.path + '.part')
+	logger.lifecycle("Minecraft: lade ${url}")
+	new URI(url).toURL().withInputStream { input -> part.withOutputStream { output -> output << input } }
+	if (sha1 != null && sha1Of(part) != sha1) {
+		part.delete()
+		throw new GradleException("Prüfsumme stimmt nicht: ${url}")
+	}
+	target.delete()
+	if (!part.renameTo(target)) throw new GradleException("Kann ${target} nicht schreiben")
+	return target
+}
+
+def versionFile = new File(cacheDir, "${mcVersion}.json")
+if (!versionFile.isFile()) {
+	def manifest = new JsonSlurper().parse(new URI('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json').toURL())
+	def entry = manifest.versions.find { it.id == mcVersion }
+	if (entry == null) throw new GradleException("Minecraft ${mcVersion} steht nicht im Versionsmanifest von Mojang")
+	download(entry.url, versionFile, entry.sha1, null)
+}
+def version = new JsonSlurper().parse(versionFile)
+
+def jars = []
+def client = version.downloads.client
+jars << download(client.url, new File(cacheDir, 'client.jar'), client.sha1, client.size as Long)
+version.libraries.each { lib ->
+	def artifact = lib.downloads?.artifact
+	// Natives (Name mit Classifier) werden zum Kompilieren nicht gebraucht
+	if (artifact == null || lib.name.split(':').length > 3) return
+	jars << download(artifact.url, new File(cacheDir, "libraries/${artifact.path}"), artifact.sha1, artifact.size as Long)
+}
+
+project.ext.minecraftJar = new File(cacheDir, 'client.jar')
+project.ext.minecraftClasspath = project.files(jars)
+dependencies {
+	compileOnly project.ext.minecraftClasspath
+}
