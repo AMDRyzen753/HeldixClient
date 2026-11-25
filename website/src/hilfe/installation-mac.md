@@ -39,7 +39,7 @@ Danach startet HeldixClient ganz normal.
 Java lädt der Launcher auch auf dem Mac selbst, passend zu deinem Chip. Deine Microsoft-Anmeldung liegt verschlüsselt im Schlüsselbund von macOS.
 
 ## Wie geht es weiter?
-1. [Mit dem Microsoft-Konto anmelden](/hilfe/anmelden-microsoft) – oder solange die Freigabe durch Mojang aussteht: [Über den Minecraft Launcher anmelden](/hilfe/anmelden-minecraft-launcher).
+1. [Mit dem Microsoft-Konto anmelden](/hilfe/anmelden-microsoft) – oder [über den Minecraft Launcher](/hilfe/anmelden-minecraft-launcher).
 2. [Das erste Spiel starten](/hilfe/erster-start).
 
 Lässt sich die App trotzdem nicht öffnen? Dann hilft [Mac: App lässt sich nicht öffnen](/hilfe/mac-app-blockiert).

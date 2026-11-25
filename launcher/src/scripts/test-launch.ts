@@ -19,7 +19,6 @@ import path from 'node:path';
 import type { GraphicsApi, InstanceLoader } from '../shared/api';
 import { CLIENT_MOD_PREFIX, DATA_DIR_NAME } from '../main/config';
 import { offlineUuid } from '../main/core/auth';
-import { InstanceStore } from '../main/core/instances';
 import { buildLaunchArguments, startGame } from '../main/core/launch';
 import { GraphicsWatch, graphicsArguments, tunedJvmArguments } from '../main/core/performance';
 import { getVersionManifest } from '../main/core/mojang';
@@ -80,12 +79,33 @@ async function main(): Promise<void> {
     console.log(`Iris-Shaderpack: ${pack ?? 'aus'}`);
   }
 
-  if (withClient) {
-    const bundled = path.join(resources, 'heldix-addons');
-    await new InstanceStore(createPaths(path.join(paths.root, 'test-instances'))).installBundledAddons(gameDir, bundled);
-    // Testläufe sollen immer den frischen Build nutzen, auch wenn sich die Versionsnummer nicht geändert hat
-    for (const jar of (await readdir(bundled)).filter((f) => f.endsWith('.jar'))) {
-      await copyFile(path.join(bundled, jar), path.join(gameDir, 'heldix-addons', jar));
+  if (withClient && !flags.includes('--ohne-addons')) {
+    // Die Addons kommen sonst aus dem Addon-Store; Testläufe nehmen den frischen Gradle-Build (mod/addons/<id>),
+    // auch wenn sich die Versionsnummer nicht geändert hat. Ältere Versionen desselben Addons fliegen raus.
+    const addonsDir = path.join(gameDir, 'heldix-addons');
+    await mkdir(addonsDir, { recursive: true });
+    // Reste aus dem Addon-Store-Test (vorgemerkte Löschungen, Ersatz-JARs) würden den frischen Build überschreiben
+    for (const leftover of (await readdir(addonsDir)).filter((f) => f === '.entfernen' || f.endsWith('.neu') || f.endsWith('.part'))) {
+      await rm(path.join(addonsDir, leftover), { force: true });
+    }
+    for (const id of ['uhrzeit', 'spotify']) {
+      const libs = path.join(modRepo, 'addons', id, 'build', 'libs');
+      const built = await Promise.all((await readdir(libs).catch(() => [] as string[]))
+        .filter((f) => f.startsWith(`heldix-addon-${id}-`) && f.endsWith('.jar'))
+        .map(async (f) => ({ f, mtimeMs: (await stat(path.join(libs, f))).mtimeMs })));
+      const newest = built.sort((a, b) => b.mtimeMs - a.mtimeMs)[0]?.f;
+      if (!newest) throw new Error(`Addon ${id} ist nicht gebaut (im Ordner mod: gradlew build)`);
+      for (const old of (await readdir(addonsDir)).filter((f) => f.startsWith(`heldix-addon-${id}-`) && f !== newest)) await rm(path.join(addonsDir, old), { force: true });
+      await copyFile(path.join(libs, newest), path.join(addonsDir, newest));
+      if (id === 'uhrzeit' && flags.includes('--alte-addons')) {
+        // ältere Version vortäuschen: der Spieltest aktualisiert sie dann über den Addon-Store (Download, Prüfsumme)
+        const zip = new AdmZip(path.join(addonsDir, newest));
+        const meta = JSON.parse(zip.getEntry('heldix.addon.json')!.getData().toString('utf8')) as { version: string };
+        meta.version = '1.0.0';
+        zip.updateFile('heldix.addon.json', Buffer.from(JSON.stringify(meta)));
+        zip.writeZip(path.join(addonsDir, 'heldix-addon-uhrzeit-1.0.0.jar'));
+        await rm(path.join(addonsDir, newest), { force: true });
+      }
     }
   }
   const screenshots = path.join(gameDir, 'screenshots');

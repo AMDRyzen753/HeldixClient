@@ -78,6 +78,8 @@ public final class AddonManager {
 		List<Path> jars = new ArrayList<>();
 		try {
 			Files.createDirectories(dir);
+			// im Addon-Store entfernte bzw. ersetzte JARs (unter Windows waren sie bis zum Spielende gesperrt)
+			AddonStore.applyPendingRemovals(dir);
 			try (Stream<Path> files = Files.list(dir)) {
 				files.filter(p -> p.getFileName().toString().endsWith(".jar")).sorted().forEach(jars::add);
 			}
@@ -151,7 +153,7 @@ public final class AddonManager {
 	}
 
 	/** Vergleicht Versionen wie "1.2.0" zahlenweise; Text dahinter (z. B. "-beta") zählt nicht. */
-	static int compareVersions(String a, String b) {
+	public static int compareVersions(String a, String b) {
 		String[] x = (a != null ? a : "").split("[.+-]");
 		String[] y = (b != null ? b : "").split("[.+-]");
 		for (int i = 0; i < Math.max(x.length, y.length); i++) {
@@ -170,7 +172,7 @@ public final class AddonManager {
 		}
 	}
 
-	private static AddonMetadata readMetadata(Path jar) throws Exception {
+	static AddonMetadata readMetadata(Path jar) throws Exception {
 		try (JarFile file = new JarFile(jar.toFile())) {
 			JarEntry entry = file.getJarEntry(METADATA_FILE);
 			if (entry == null) throw new IllegalStateException(METADATA_FILE + " fehlt in der JAR");

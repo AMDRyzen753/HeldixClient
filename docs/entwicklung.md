@@ -11,7 +11,7 @@
 ```powershell
 cd launcher
 npm install
-npm run mod      # baut Heldix Loader, Client-Mod und Addons und legt sie in resources/ ab
+npm run mod      # baut Heldix Loader und Client-Mod und legt sie in resources/ ab (Addons: npm run addon -- <id>)
 npm start        # baut und startet den Launcher im Entwicklungsmodus
 npm run dist     # Java-Teile + Launcher bauen und Installer erzeugen
 ```
@@ -38,7 +38,7 @@ Weitere Hinweise:
 
 ## Entwickleroptionen in der fertigen App
 
-In der installierten .exe gibt es Offline-Konten normalerweise erst mit einem Microsoft-Konto. Für die eigene Entwicklung (z. B. solange Mojang die App noch nicht freigeschaltet hat) gibt es **Einstellungen → Entwickler → Entwickleroptionen**. Sie schalten Offline-Konten ohne Microsoft-Konto frei, aber nur auf PCs mit einem **Entwickler-Schlüssel**:
+In der installierten .exe gibt es Offline-Konten normalerweise erst mit einem Microsoft-Konto. Für die eigene Entwicklung (z. B. Tests ohne Microsoft-Konto oder mit einer noch nicht freigeschalteten eigenen App-ID) gibt es **Einstellungen → Entwickler → Entwickleroptionen**. Sie schalten Offline-Konten ohne Microsoft-Konto frei, aber nur auf PCs mit einem **Entwickler-Schlüssel**:
 
 ```powershell
 cd launcher
@@ -74,7 +74,7 @@ Der Starttest bricht mit Fehler ab, wenn:
 
 - das Spiel abstürzt;
 - ein Eingriff des Loaders oder einer Mod fehlschlägt;
-- Loader, HeldixClient oder die mitgelieferten Addons nicht geladen werden;
+- Loader, HeldixClient oder die Addons (frisch gebaut aus mod/addons, sonst kommen sie aus dem Addon-Store) nicht geladen werden;
 - HeldixClient keinen Status für Discord meldet (Hauptmenü, im Autotest auch Einzelspieler);
 - eine Fabric- oder Vanilla-Instanz fälschlich den Heldix Loader lädt.
 
@@ -179,6 +179,6 @@ Falls der Name noch einmal geändert werden soll:
 - **Code-Signatur** für den Installer, damit SmartScreen nicht mehr warnt
 - **Auto-Update** für Launcher, Loader und Mod über GitHub Releases
 - **Weitere Module oder Addons:** Minimap, Item-Physik, Server-spezifische Profile
-- **Mod- und Addon-Katalog** im Launcher, ähnlich wie Fabric-Mods über Modrinth
+- **Addons anderer Entwickler** im Addon-Store (Einreichen mit Prüfung im Team-Bereich)
 - **Shaderpacks** im Stil von OptiFine/Iris (Schatten, Reflexionen) bräuchten einen eigenen Renderer; die eingebauten Stile sind Post-Effekte
 - **Kosmetik** wie Capes braucht einen eigenen Server, der Spieler und Kosmetik zuordnet

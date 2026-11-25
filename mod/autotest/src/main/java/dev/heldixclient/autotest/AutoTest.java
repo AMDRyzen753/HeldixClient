@@ -233,10 +233,13 @@ public final class AutoTest implements HeldixModInitializer {
 		clickTest(t, "direkt geöffnet");
 		t.screenshot("heldix-03-heldix-menue");
 
-		// Unter-Menüs: Einstellungen → Reiter Addons (Seitenleiste, dann Reiter)
+		// Unter-Menüs: Einstellungen → Reiter Info; Addons ist eine eigene Kategorie mit dem Addon-Store
+		openPage(t, "INFO");
+		t.check("Einstellungen haben die Reiter Allgemein und Info",
+				t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabIds()).equals(java.util.List.of("SETTINGS", "INFO")));
 		openPage(t, "ADDONS");
-		t.check("Einstellungen haben die Reiter Allgemein, Addons und Info",
-				t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabIds()).equals(java.util.List.of("SETTINGS", "ADDONS", "INFO")));
+		t.check("Addons haben die Reiter Installiert und Addon-Store",
+				t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabIds()).equals(java.util.List.of("ADDONS", "STORE")));
 		t.moveMouse(350, 235);
 		t.waitTicks(5);
 		t.screenshot("heldix-03b-addons");
@@ -315,6 +318,7 @@ public final class AutoTest implements HeldixModInitializer {
 		// Rüstung, Trank-Effekte, Dauersprint, Freelook, Fadenkreuz, Chat, Wegpunkte; Heldix-Dienst (mit --service)
 		FeatureTests.modules(t);
 		FeatureTests.social(t);
+		FeatureTests.addonStore(t);
 
 		// Welt verlassen
 		t.run(mc -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));

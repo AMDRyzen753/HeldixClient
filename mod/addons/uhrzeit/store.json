@@ -1,0 +1,8 @@
+{
+	"_hinweis": "Angaben für den Addon-Store (nicht in der JAR). Name, Version, Kurzbeschreibung, Autoren und API kommen aus src/main/resources/heldix.addon.json.",
+	"icon": "clock",
+	"kategorie": "hud",
+	"plattformen": [],
+	"beschreibung": "Zwei HUD-Elemente und eine kleine Begrüßung:\n\n- Uhrzeit: die echte Uhrzeit, auf Wunsch mit Sekunden.\n- Spielzeit: wie lange du schon in der aktuellen Welt bist.\n- Begrüßung: ein Gruß im Chat, wenn du eine Welt betrittst – mit Zähler, wie oft du schon da warst.\n\nDas Addon ist gleichzeitig die Vorlage für eigene Addons (siehe „Für Entwickler“ auf heldixclient.com).",
+	"hinweise": ["Jetzt im Addon-Store statt im Launcher"]
+}

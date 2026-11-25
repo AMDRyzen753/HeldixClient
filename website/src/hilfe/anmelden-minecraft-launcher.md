@@ -5,7 +5,7 @@ kategorie: erste-schritte
 reihenfolge: 4
 stichworte: minecraft launcher, offizieller launcher, anmelden, login, alternative anmeldung, installation heldixclient, brücke, spielen
 ---
-Bei dieser Anmeldung meldet dich der offizielle Minecraft Launcher an – gespielt wird aber mit HeldixClient, mit deinen Instanzen, Mods und Einstellungen. Sie braucht keine Freigabe von Mojang und funktioniert deshalb schon jetzt.
+Bei dieser Anmeldung meldet dich der offizielle Minecraft Launcher an – gespielt wird aber mit HeldixClient, mit deinen Instanzen, Mods und Einstellungen. Sie ist eine Alternative zu [Mit dem Microsoft-Konto anmelden](/hilfe/anmelden-microsoft), z. B. wenn du ohnehin im offiziellen Launcher angemeldet bist.
 
 ## Voraussetzungen
 - Der offizielle Minecraft Launcher ist installiert.

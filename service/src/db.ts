@@ -168,6 +168,28 @@ export interface LauncherVersionRow {
   publishedAt: number;
 }
 
+/** Addon im Store. `downloads`: vollständige Downloads, nur eine Zahl (ohne IP oder sonstige Daten). */
+export interface AddonRow {
+  id: string;
+  hidden: boolean;
+  downloads: number;
+  createdAt: number;
+}
+
+/** Veröffentlichte Version eines Addons. `manifest` ist genau der signierte Text. */
+export interface AddonVersionRow {
+  id: string;
+  version: string;
+  manifest: string;
+  signature: string;
+  file: string;
+  size: number;
+  sha256: string;
+  publishedAt: number;
+  /** Spielername des Team-Mitglieds; null = über die Server-Konsole */
+  publishedBy: string | null;
+}
+
 export interface NewsRow {
   id: number;
   title: string;
@@ -397,6 +419,30 @@ CREATE TABLE launcher_versions (
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX launcher_versions_published ON launcher_versions (published_at);
 `,
+  // 5: Addon-Store (Addons mit Download-Zähler, signierte Versionen)
+  `
+CREATE TABLE addons (
+  id TEXT PRIMARY KEY,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  downloads INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+
+-- manifest: genau der signierte Text; published_by: Spielername (NULL = Server-Konsole), ohne Fremdschlüssel,
+-- damit der Name an der Version bleibt, auch wenn das Team-Mitglied sein Konto löscht.
+CREATE TABLE addon_versions (
+  id TEXT NOT NULL REFERENCES addons (id) ON DELETE CASCADE,
+  version TEXT NOT NULL,
+  manifest TEXT NOT NULL,
+  signature TEXT NOT NULL,
+  file TEXT NOT NULL UNIQUE,
+  size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  published_at INTEGER NOT NULL,
+  published_by TEXT,
+  PRIMARY KEY (id, version)
+) STRICT, WITHOUT ROWID;
+`,
 ];
 
 const SCHEMA_VERSION = MIGRATIONS.length;
@@ -411,6 +457,8 @@ const TICKET_COLUMNS = `t.id, t.uuid, u.name, t.category, t.subject, t.status, t
   (SELECT coalesce(max(m.id), 0) FROM ticket_messages m WHERE m.ticket = t.id AND m.from_team = 1) AS last_team_id,
   (SELECT m.from_team FROM ticket_messages m WHERE m.ticket = t.id ORDER BY m.id DESC LIMIT 1) AS last_from_team`;
 const NEWS_COLUMNS = 'id, title, text, author_uuid, author_name, published, created_at, published_at, updated_at';
+const ADDON_COLUMNS = 'id, hidden, downloads, created_at';
+const ADDON_VERSION_COLUMNS = 'id, version, manifest, signature, file, size, sha256, published_at, published_by';
 /** Größer als jede vergebene Nachrichten-ID (für „von der neuesten an“). */
 const NEWEST = Number.MAX_SAFE_INTEGER;
 
@@ -520,6 +568,24 @@ function toNews(row: Row): NewsRow {
     createdAt: Number(row.created_at),
     publishedAt: nullableNumber(row.published_at),
     updatedAt: Number(row.updated_at),
+  };
+}
+
+function toAddon(row: Row): AddonRow {
+  return { id: String(row.id), hidden: Number(row.hidden) === 1, downloads: Number(row.downloads), createdAt: Number(row.created_at) };
+}
+
+function toAddonVersion(row: Row): AddonVersionRow {
+  return {
+    id: String(row.id),
+    version: String(row.version),
+    manifest: String(row.manifest),
+    signature: String(row.signature),
+    file: String(row.file),
+    size: Number(row.size),
+    sha256: String(row.sha256),
+    publishedAt: Number(row.published_at),
+    publishedBy: nullableString(row.published_by),
   };
 }
 
@@ -750,6 +816,26 @@ function prepareStatements(db: DatabaseSync) {
     // Versionsverlauf des Launchers
     recordVersion: db.prepare('INSERT OR IGNORE INTO launcher_versions (version, date, notes, published_at) VALUES (?, ?, ?, ?)'),
     listVersions: db.prepare('SELECT version, date, notes, published_at FROM launcher_versions ORDER BY published_at DESC, version DESC LIMIT ?'),
+
+    // Addon-Store
+    listAddons: db.prepare(`SELECT ${ADDON_COLUMNS} FROM addons ORDER BY id`),
+    getAddon: db.prepare(`SELECT ${ADDON_COLUMNS} FROM addons WHERE id = ?`),
+    insertAddon: db.prepare('INSERT OR IGNORE INTO addons (id, created_at) VALUES (?, ?)'),
+    setAddonHidden: db.prepare('UPDATE addons SET hidden = ? WHERE id = ? AND hidden <> ?'),
+    countAddonDownload: db.prepare('UPDATE addons SET downloads = downloads + 1 WHERE id = ?'),
+    deleteAddon: db.prepare('DELETE FROM addons WHERE id = ?'),
+    countVisibleAddons: db.prepare(
+      'SELECT count(*) AS n FROM addons a WHERE a.hidden = 0 AND EXISTS (SELECT 1 FROM addon_versions v WHERE v.id = a.id)',
+    ),
+    insertAddonVersion: db.prepare(`
+      INSERT INTO addon_versions (id, version, manifest, signature, file, size, sha256, published_at, published_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    addonVersionsOf: db.prepare(`SELECT ${ADDON_VERSION_COLUMNS} FROM addon_versions WHERE id = ?`),
+    allAddonVersions: db.prepare(`SELECT ${ADDON_VERSION_COLUMNS} FROM addon_versions`),
+    getAddonVersion: db.prepare(`SELECT ${ADDON_VERSION_COLUMNS} FROM addon_versions WHERE id = ? AND version = ?`),
+    addonVersionByFile: db.prepare(`SELECT ${ADDON_VERSION_COLUMNS} FROM addon_versions WHERE file = ?`),
+    deleteAddonVersion: db.prepare('DELETE FROM addon_versions WHERE id = ? AND version = ?'),
+    countAddonVersions: db.prepare('SELECT count(*) AS n FROM addon_versions WHERE id = ?'),
 
     // Status
     countUsers: db.prepare('SELECT count(*) AS n FROM users'),
@@ -1511,5 +1597,70 @@ export class Store {
 
   countUsers(): number {
     return Number((this.sql.countUsers.get() as Row).n);
+  }
+
+  // ---------- Addon-Store ----------
+
+  listAddons(): AddonRow[] {
+    return (this.sql.listAddons.all() as Row[]).map(toAddon);
+  }
+
+  getAddon(id: string): AddonRow | undefined {
+    const row = this.sql.getAddon.get(id) as Row | undefined;
+    return row ? toAddon(row) : undefined;
+  }
+
+  /** Versionen eines Addons (ohne Reihenfolge; sortiert wird nach Version). */
+  addonVersionsOf(id: string): AddonVersionRow[] {
+    return (this.sql.addonVersionsOf.all(id) as Row[]).map(toAddonVersion);
+  }
+
+  allAddonVersions(): AddonVersionRow[] {
+    return (this.sql.allAddonVersions.all() as Row[]).map(toAddonVersion);
+  }
+
+  getAddonVersion(id: string, version: string): AddonVersionRow | undefined {
+    const row = this.sql.getAddonVersion.get(id, version) as Row | undefined;
+    return row ? toAddonVersion(row) : undefined;
+  }
+
+  /** Version, zu der eine Datei gehört (jede Datei gehört zu höchstens einer). */
+  addonVersionByFile(file: string): AddonVersionRow | undefined {
+    const row = this.sql.addonVersionByFile.get(file) as Row | undefined;
+    return row ? toAddonVersion(row) : undefined;
+  }
+
+  /** Neue Version; ein neues Addon wird dabei sichtbar angelegt. */
+  insertAddonVersion(row: AddonVersionRow): void {
+    this.transaction(() => {
+      this.sql.insertAddon.run(row.id, row.publishedAt);
+      this.sql.insertAddonVersion.run(row.id, row.version, row.manifest, row.signature, row.file, row.size, row.sha256, row.publishedAt, row.publishedBy);
+    });
+  }
+
+  /** Aus dem Store nehmen bzw. wieder zeigen. true, wenn sich etwas geändert hat. */
+  setAddonHidden(id: string, hidden: boolean): boolean {
+    const value = hidden ? 1 : 0;
+    return Number(this.sql.setAddonHidden.run(value, id, value).changes) > 0;
+  }
+
+  /** Ein vollständiger Download mehr (nur der Zähler, sonst nichts). */
+  countAddonDownload(id: string): void {
+    this.sql.countAddonDownload.run(id);
+  }
+
+  /** Löscht eine Version; war es die letzte, auch das Addon mit seinem Zähler. Liefert, ob das Addon jetzt weg ist. */
+  deleteAddonVersion(id: string, version: string): boolean {
+    return this.transaction(() => {
+      this.sql.deleteAddonVersion.run(id, version);
+      if (Number((this.sql.countAddonVersions.get(id) as Row).n) > 0) return false;
+      this.sql.deleteAddon.run(id);
+      return true;
+    });
+  }
+
+  /** Sichtbare Addons mit mindestens einer Version. */
+  countVisibleAddons(): number {
+    return Number((this.sql.countVisibleAddons.get() as Row).n);
   }
 }

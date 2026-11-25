@@ -84,11 +84,169 @@ export function compareVersions(a: string, b: string): number {
   return preA < preB ? -1 : 1;
 }
 
+/** Gültige Version wie im Launcher (1.2.3 oder 1.2.3-beta.1)? */
+export function isVersion(value: unknown): value is string {
+  return typeof value === 'string' && VERSION_RE.test(value);
+}
+
 /** Hash einer Datei, gestreamt (große Dateien blockieren den Dienst nicht). */
-async function hashFile(file: string, algorithm: 'sha256' | 'sha512', encoding: 'hex' | 'base64'): Promise<string> {
+export async function hashFile(file: string, algorithm: 'sha256' | 'sha512', encoding: 'hex' | 'base64'): Promise<string> {
   const hash = createHash(algorithm);
   await pipelineAsync(fs.createReadStream(file), hash);
   return hash.digest(encoding);
+}
+
+/**
+ * Echter Pfad von `file` direkt in `dir`, oder `null`, wenn die Datei fehlt oder (über einen symbolischen Link)
+ * außerhalb des Ordners liegt. Den Namen prüft der Aufrufer vorher (keine Pfadtrenner, festes Muster).
+ */
+export async function resolveInDir(dir: string, file: string): Promise<string | null> {
+  try {
+    const realDir = await fs.promises.realpath(dir);
+    const real = await fs.promises.realpath(path.join(realDir, file));
+    return path.dirname(real) === realDir ? real : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface SendFileOptions {
+  /** Dateiname für `Content-Disposition` */
+  name: string;
+  contentType: string;
+  cacheControl: string;
+  /** Kommt so lange nichts beim Client an, wird die Verbindung getrennt. */
+  idleTimeoutMs: number;
+  /** Nach einem vollständig gesendeten GET der ganzen Datei (200, kein HEAD, kein Teilbereich). */
+  onComplete?: () => void;
+}
+
+/**
+ * Liefert eine Datei aus (`GET`/`HEAD`), auf Wunsch einen Teil (`Range`, `If-Range`), mit `ETag` und `Last-Modified`.
+ * Die Datei wird gestreamt; ein langsamer Client bremst das Lesen (kein Puffern im Speicher).
+ */
+export async function sendFile(req: IncomingMessage, res: ServerResponse, real: string, options: SendFileOptions): Promise<void> {
+  let handle: fs.promises.FileHandle;
+  try {
+    handle = await fs.promises.open(real, 'r');
+  } catch {
+    throw new HttpError(404, NO_SUCH_FILE);
+  }
+  let streaming = false;
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) throw new HttpError(404, NO_SUCH_FILE);
+    const size = info.size;
+    const etag = `"${size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`;
+    const lastModified = info.mtime.toUTCString();
+    let range = parseRange(req.headers.range, size);
+    // Fortsetzen nur, wenn die Datei noch dieselbe ist; sonst die ganze neue Datei.
+    const ifRange = req.headers['if-range'];
+    if (range !== null && ifRange !== undefined && ifRange !== etag && ifRange !== lastModified) range = null;
+    if (range === 'unsatisfiable') {
+      throw new HttpError(416, 'Dieser Bereich liegt außerhalb der Datei.', {
+        'Content-Range': `bytes */${size}`,
+        'Accept-Ranges': 'bytes',
+      });
+    }
+    const start = range?.start ?? 0;
+    const end = range?.end ?? size - 1;
+    const length = size === 0 ? 0 : end - start + 1;
+    const headers: Record<string, string> = {
+      'Content-Type': options.contentType,
+      'Content-Length': String(length),
+      'Content-Disposition': `attachment; filename="${options.name}"`,
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': options.cacheControl,
+      'X-Content-Type-Options': 'nosniff',
+      ETag: etag,
+      'Last-Modified': lastModified,
+    };
+    if (range !== null) headers['Content-Range'] = `bytes ${start}-${end}/${size}`;
+    res.writeHead(range !== null ? 206 : 200, headers);
+    if (req.method === 'HEAD' || length === 0) {
+      res.end();
+      return;
+    }
+    res.setTimeout(options.idleTimeoutMs, () => res.destroy());
+    const stream = handle.createReadStream({ start, end, autoClose: true });
+    streaming = true;
+    const whole = range === null && req.method === 'GET';
+    pipeline(stream, res, (err) => {
+      // Abbruch durch den Client oder Lesefehler: pipeline schließt Datei und Verbindung.
+      if (!err && whole) options.onComplete?.();
+    });
+  } finally {
+    if (!streaming) await handle.close().catch(() => {});
+  }
+}
+
+/** 413 für einen zu großen Upload (die Verbindung wird danach geschlossen). */
+export function uploadTooLarge(maxBytes: number): HttpError {
+  return new HttpError(413, `Die Datei ist zu groß (höchstens ${Math.round(maxBytes / 1024 / 1024)} MB).`, { Connection: 'close' });
+}
+
+/** Wirft 413, wenn `Content-Length` schon mehr als `maxBytes` ankündigt (bevor etwas gelesen wird). */
+export function checkUploadLength(req: IncomingMessage, maxBytes: number): void {
+  const declared = Number(req.headers['content-length'] ?? '0');
+  if (Number.isFinite(declared) && declared > maxBytes) throw uploadTooLarge(maxBytes);
+}
+
+/**
+ * Speichert den Anfragekörper gestreamt als `<file>.part` in `dir` und benennt ihn erst am Ende um (wer liest, sieht
+ * nie eine halbe Datei). Höchstens `maxBytes` (sonst 413); kommt `idleTimeoutMs` lang nichts an, wird abgebrochen
+ * (400). SHA-256 und SHA-512 werden beim Empfang mitgerechnet. Den Namen prüft der Aufrufer vorher.
+ */
+export async function receiveFile(
+  req: IncomingMessage,
+  dir: string,
+  file: string,
+  maxBytes: number,
+  idleTimeoutMs: number,
+): Promise<{ size: number; sha256: string; sha512: string; mtimeMs: number }> {
+  let part: string | undefined;
+  try {
+    await fs.promises.mkdir(dir, { recursive: true });
+    const realDir = await fs.promises.realpath(dir);
+    part = path.join(realDir, `${file}.part`);
+    // Reste eines abgebrochenen Uploads weg; 'wx' folgt keinem symbolischen Link.
+    await fs.promises.rm(part, { force: true });
+    const hash512 = createHash('sha512');
+    const hash256 = createHash('sha256');
+    let size = 0;
+    let idle: NodeJS.Timeout | undefined;
+    const resetIdle = () => {
+      if (idle) clearTimeout(idle);
+      idle = setTimeout(() => req.destroy(new Error('Zeitüberschreitung beim Upload')), idleTimeoutMs);
+      idle.unref();
+    };
+    const meter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        resetIdle();
+        size += chunk.length;
+        if (size > maxBytes) return callback(uploadTooLarge(maxBytes));
+        hash512.update(chunk);
+        hash256.update(chunk);
+        callback(null, chunk);
+      },
+    });
+    resetIdle();
+    try {
+      await pipelineAsync(req, meter, fs.createWriteStream(part, { flags: 'wx', mode: 0o644 }));
+    } finally {
+      if (idle) clearTimeout(idle);
+    }
+    const target = path.join(realDir, file);
+    await fs.promises.rename(part, target);
+    part = undefined;
+    const info = await fs.promises.stat(target);
+    return { size, sha256: hash256.digest('hex'), sha512: hash512.digest('base64'), mtimeMs: info.mtimeMs };
+  } catch (err) {
+    if (err instanceof HttpError) throw err;
+    throw new HttpError(400, 'Der Upload wurde abgebrochen. Bitte noch einmal versuchen.', { Connection: 'close' });
+  } finally {
+    if (part !== undefined) await fs.promises.rm(part, { force: true }).catch(() => {});
+  }
 }
 
 function sha512File(file: string): Promise<string> {
@@ -251,57 +409,12 @@ export class Updates {
   async serve(req: IncomingMessage, res: ServerResponse, file: string, idleTimeoutMs: number): Promise<void> {
     const real = await this.resolve(file);
     if (real === null) throw new HttpError(404, NO_SUCH_FILE);
-    let handle: fs.promises.FileHandle;
-    try {
-      handle = await fs.promises.open(real, 'r');
-    } catch {
-      throw new HttpError(404, NO_SUCH_FILE);
-    }
-    let streaming = false;
-    try {
-      const info = await handle.stat();
-      if (!info.isFile()) throw new HttpError(404, NO_SUCH_FILE);
-      const size = info.size;
-      const etag = `"${size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`;
-      const lastModified = info.mtime.toUTCString();
-      let range = parseRange(req.headers.range, size);
-      // Fortsetzen nur, wenn die Datei noch dieselbe ist; sonst die ganze neue Datei.
-      const ifRange = req.headers['if-range'];
-      if (range !== null && ifRange !== undefined && ifRange !== etag && ifRange !== lastModified) range = null;
-      if (range === 'unsatisfiable') {
-        throw new HttpError(416, 'Dieser Bereich liegt außerhalb der Datei.', {
-          'Content-Range': `bytes */${size}`,
-          'Accept-Ranges': 'bytes',
-        });
-      }
-      const start = range?.start ?? 0;
-      const end = range?.end ?? size - 1;
-      const length = size === 0 ? 0 : end - start + 1;
-      const headers: Record<string, string> = {
-        'Content-Type': CONTENT_TYPES[parseDownloadName(file)!.kind],
-        'Content-Length': String(length),
-        'Content-Disposition': `attachment; filename="${file}"`,
-        'Accept-Ranges': 'bytes',
-        'Cache-Control': 'no-cache',
-        'X-Content-Type-Options': 'nosniff',
-        ETag: etag,
-        'Last-Modified': lastModified,
-      };
-      if (range !== null) headers['Content-Range'] = `bytes ${start}-${end}/${size}`;
-      res.writeHead(range !== null ? 206 : 200, headers);
-      if (req.method === 'HEAD' || length === 0) {
-        res.end();
-        return;
-      }
-      res.setTimeout(idleTimeoutMs, () => res.destroy());
-      const stream = handle.createReadStream({ start, end, autoClose: true });
-      streaming = true;
-      pipeline(stream, res, () => {
-        // Abbruch durch den Client oder Lesefehler: pipeline schließt Datei und Verbindung.
-      });
-    } finally {
-      if (!streaming) await handle.close().catch(() => {});
-    }
+    await sendFile(req, res, real, {
+      name: file,
+      contentType: CONTENT_TYPES[parseDownloadName(file)!.kind],
+      cacheControl: 'no-cache',
+      idleTimeoutMs,
+    });
   }
 
   // ---------- Team-Bereich (Admin) ----------
@@ -405,59 +518,18 @@ export class Updates {
    */
   async receive(req: IncomingMessage, file: string, maxBytes: number, idleTimeoutMs: number): Promise<{ file: string; size: number; sha512: string }> {
     if (parseDownloadName(file) === null) throw new HttpError(400, INVALID_NAME);
-    const tooLarge = () =>
-      new HttpError(413, `Die Datei ist zu groß (höchstens ${Math.round(maxBytes / 1024 / 1024)} MB).`, { Connection: 'close' });
-    const declared = Number(req.headers['content-length'] ?? '0');
-    if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge();
+    checkUploadLength(req, maxBytes);
     if ((await this.published())?.file === file) {
       throw new HttpError(409, 'Das ist der Installer der veröffentlichten Version. Er lässt sich nicht ersetzen.');
     }
     if (this.uploading.has(file)) throw new HttpError(409, 'Diese Datei wird gerade schon hochgeladen.');
     this.uploading.add(file);
-    let part: string | undefined;
     try {
-      await fs.promises.mkdir(this.dir, { recursive: true });
-      const dir = await fs.promises.realpath(this.dir);
-      part = path.join(dir, `${file}.part`);
-      // Reste eines abgebrochenen Uploads weg; 'wx' folgt keinem symbolischen Link.
-      await fs.promises.rm(part, { force: true });
-      const hash = createHash('sha512');
-      const hash256 = createHash('sha256');
-      let size = 0;
-      let idle: NodeJS.Timeout | undefined;
-      const resetIdle = () => {
-        if (idle) clearTimeout(idle);
-        idle = setTimeout(() => req.destroy(new Error('Zeitüberschreitung beim Upload')), idleTimeoutMs);
-        idle.unref();
-      };
-      const meter = new Transform({
-        transform(chunk: Buffer, _encoding, callback) {
-          resetIdle();
-          size += chunk.length;
-          if (size > maxBytes) return callback(tooLarge());
-          hash.update(chunk);
-          hash256.update(chunk);
-          callback(null, chunk);
-        },
-      });
-      resetIdle();
-      try {
-        await pipelineAsync(req, meter, fs.createWriteStream(part, { flags: 'wx', mode: 0o644 }));
-      } finally {
-        if (idle) clearTimeout(idle);
-      }
-      const target = path.join(dir, file);
-      await fs.promises.rename(part, target);
-      part = undefined;
+      const received = await receiveFile(req, this.dir, file, maxBytes, idleTimeoutMs);
       // SHA-256 für /v1/launcher/files gleich mitgerechnet: Die Liste muss die Datei nicht noch einmal lesen.
-      const info = await fs.promises.stat(target);
-      this.sha256Cache.set(file, { size: info.size, mtimeMs: info.mtimeMs, sha256: hash256.digest('hex') });
-      return { file, size, sha512: hash.digest('base64') };
-    } catch (err) {
-      if (err instanceof HttpError) throw err;
-      throw new HttpError(400, 'Der Upload wurde abgebrochen. Bitte noch einmal versuchen.', { Connection: 'close' });
+      this.sha256Cache.set(file, { size: received.size, mtimeMs: received.mtimeMs, sha256: received.sha256 });
+      return { file, size: received.size, sha512: received.sha512 };
     } finally {
-      if (part !== undefined) await fs.promises.rm(part, { force: true }).catch(() => {});
       this.uploading.delete(file);
     }
   }
@@ -572,13 +644,7 @@ export class Updates {
    */
   private async resolve(file: string): Promise<string | null> {
     if (parseDownloadName(file) === null) return null;
-    try {
-      const dir = await fs.promises.realpath(this.dir);
-      const real = await fs.promises.realpath(path.join(dir, file));
-      return path.dirname(real) === dir ? real : null;
-    } catch {
-      return null;
-    }
+    return resolveInDir(this.dir, file);
   }
 
   private async sizeOf(file: string): Promise<number | null> {

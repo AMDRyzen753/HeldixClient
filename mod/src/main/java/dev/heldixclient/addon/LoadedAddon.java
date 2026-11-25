@@ -58,6 +58,16 @@ public final class LoadedAddon {
 		return metadata != null && metadata.authors != null ? metadata.authors : List.of();
 	}
 
+	/** Im Addon-Store entfernt – die Datei verschwindet beim nächsten Start */
+	public boolean pendingRemoval() {
+		return AddonStore.pendingRemoval(fileName());
+	}
+
+	/** ID aus der heldix.addon.json (null, wenn sie nicht lesbar war) */
+	public String id() {
+		return metadata != null ? metadata.id : null;
+	}
+
 	public int moduleCount() {
 		return modules.size();
 	}

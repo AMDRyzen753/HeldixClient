@@ -1,5 +1,5 @@
 // HeldixClient – Webseite: Team-Bereich (/team) für Moderatoren und Admins
-// (Meldungen, Support, Spieler, Sperren, Neuigkeiten, Mein Teamprofil; Admins zusätzlich Updates, Team, Protokoll).
+// (Meldungen, Support, Spieler, Sperren, Neuigkeiten, Mein Teamprofil; Admins zusätzlich Updates, Addons, Team, Protokoll).
 // Zugang: Cookie-Sitzung + Team-Rolle + Zwei-Faktor-Anmeldung (TOTP), in dieser Sitzung bestätigt (12 Stunden).
 // Der Dienst antwortet sonst mit 403 und code forbidden / 2fa_setup_required / 2fa_required – dann zeigt
 // die Seite die passende Sperre (Einrichten, Code eingeben, kein Zugang).
@@ -39,6 +39,7 @@ import {
   uid,
   upload,
 } from './app-common.js';
+import { ADDON_ID_RE, KATEGORIEN, addonIcon, hasIcon, platformText } from './addon-common.js';
 import { memberCard, newsCard, publicGet, skinHead } from './public-cards.js';
 
 // Spielerbilder im Team-Bereich: Minecraft-Köpfe über die Cookie-Sitzung (das bestätigte Team darf alle).
@@ -67,6 +68,11 @@ const state = {
   manifest: null, // { outer, inner }
   uploading: null,
   macUploading: null,
+  teamAddons: null, // { addons, pending, keyConfigured } aus GET /v1/team/addons
+  addonJar: null, // in dieser Sitzung hochgeladene JAR { file, size, sha256 (selbst gerechnet), serverSha256 }
+  addonManifest: null, // gewählte .addon.json { outer, inner, problems, fileName } oder { error, fileName }
+  addonUploading: null,
+  addonUploadingFile: null,
   auditLimit: AUDIT_STEP,
   supportFilter: 'open',
   supportTickets: [],
@@ -293,6 +299,7 @@ function onTab(name) {
     sperren: loadBans,
     neuigkeiten: loadNews,
     updates: loadUpdates,
+    addons: loadTeamAddons,
     team: loadMembers,
     protokoll: loadAudit,
     support: loadSupport,
@@ -1370,6 +1377,506 @@ async function publishManifest(event) {
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// Addons (nur Admins): JAR hochladen, signiertes Manifest prüfen und veröffentlichen, ausblenden, löschen
+// ---------------------------------------------------------------------------------------------------------
+
+const ADDON_FILE_RE = /^heldix-addon-[a-z0-9][a-z0-9_-]{0,39}-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.jar$/;
+const ADDON_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
+const ADDON_MAX = 50 * 1024 * 1024;
+/** Höchste Heldix-API-Stufe, die HeldixClient derzeit lädt. */
+const ADDON_API_HEUTE = 2;
+
+const textLength = (value) => [...value].length;
+
+function normalizeTeamAddons(data) {
+  return {
+    addons: (Array.isArray(data?.addons) ? data.addons : [])
+      .filter((addon) => addon && typeof addon.id === 'string')
+      .map((addon) => ({ ...addon, versions: Array.isArray(addon.versions) ? [...addon.versions].sort((a, b) => compareVersions(b.version, a.version)) : [] }))
+      .sort((a, b) => String(a.name ?? a.id).localeCompare(String(b.name ?? b.id), 'de', { sensitivity: 'base' })),
+    pending: Array.isArray(data?.pending) ? data.pending.filter((entry) => entry && typeof entry.file === 'string') : [],
+    keyConfigured: data?.keyConfigured !== false,
+  };
+}
+
+async function loadTeamAddons() {
+  const box = $('#addon-verwaltung');
+  if (!box.firstChild) box.replaceChildren(loadingState());
+  state.teamAddons = normalizeTeamAddons(await teamCall('GET', '/v1/team/addons'));
+  renderTeamAddons();
+}
+
+/** Antworten der Änderungs-Routen: mit Liste übernehmen, sonst neu laden. */
+async function applyTeamAddons(data) {
+  if (data && Array.isArray(data.addons)) {
+    state.teamAddons = normalizeTeamAddons(data);
+    renderTeamAddons();
+  } else {
+    await loadTeamAddons();
+  }
+}
+
+const shortSha = (hash) => (typeof hash === 'string' && hash.length > 20 ? `${hash.slice(0, 12)}…${hash.slice(-6)}` : (hash ?? '–'));
+const addonDownloads = (count) => (count === 1 ? '1 Download' : `${new Intl.NumberFormat('de-DE').format(count ?? 0)} Downloads`);
+
+function renderTeamAddons() {
+  const data = state.teamAddons;
+  if (!data) return;
+  $('#addon-schluessel-fehlt').hidden = data.keyConfigured;
+  $('#addon-anzahl').textContent = data.addons.length ? String(data.addons.length) : '';
+  rerender($('#addon-verwaltung'), JSON.stringify(data.addons), () => {
+    if (!data.addons.length) return emptyState('Noch kein Addon veröffentlicht.', 'addons');
+    return h('div', { class: 'addon-admin-list' }, data.addons.map(addonAdminItem));
+  });
+  const pending = [...data.pending].sort((a, b) => (b.uploadedAt ?? 0) - (a.uploadedAt ?? 0));
+  rerender($('#addon-offen'), JSON.stringify(pending), () => {
+    if (!pending.length) return emptyState('Keine offenen Dateien.', 'file');
+    return h(
+      'ul',
+      { class: 'rows' },
+      pending.map((entry) =>
+        h(
+          'li',
+          { class: 'row' },
+          h('span', { class: 'row-icon', 'aria-hidden': 'true' }, icon('file')),
+          h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, h('code', { class: 'mono', text: entry.file })), h('div', { class: 'row-sub', text: `${formatBytes(entry.size)} · hochgeladen ${formatDateTime(entry.uploadedAt)}` })),
+          h(
+            'div',
+            { class: 'row-actions' },
+            h(
+              'button',
+              { type: 'button', class: 'button tiny ghost quiet-danger', 'aria-label': `${entry.file} löschen`, dataset: { focusKey: `pending:${entry.file}` }, onClick: () => deletePendingAddonFile(entry) },
+              icon('trash'),
+              h('span', { class: 'label', text: 'Löschen' }),
+            ),
+          ),
+        ),
+      ),
+    );
+  });
+  renderAddonCheck();
+}
+
+function addonAdminItem(addon) {
+  const name = addon.name ?? addon.id;
+  const latest = addon.versions[0] ?? null;
+  const switchId = `addon-sichtbar-${addon.id}`;
+  const toggle = h('input', { type: 'checkbox', class: 'switch', role: 'switch', id: switchId, dataset: { focusKey: `visible:${addon.id}` } });
+  toggle.checked = !addon.hidden;
+  toggle.addEventListener('change', () => toggleAddonVisible(addon, toggle));
+  return h(
+    'article',
+    { class: 'addon-admin', dataset: { id: addon.id } },
+    h(
+      'div',
+      { class: 'addon-admin-head' },
+      h('span', { class: 'row-icon', 'aria-hidden': 'true' }, icon('addons')),
+      h(
+        'div',
+        { class: 'row-main' },
+        h('div', { class: 'row-title' }, h('span', { text: name }), h('code', { class: 'mono muted', text: addon.id }), chip(`Version ${addon.latest ?? latest?.version ?? '?'}`, 'accent'), addon.hidden ? chip('ausgeblendet', 'warning') : null),
+        h(
+          'div',
+          { class: 'row-sub', text: [addonDownloads(addon.downloads), addon.versions.length === 1 ? '1 Version' : `${addon.versions.length} Versionen`, latest?.publishedAt ? `zuletzt ${formatDate(latest.publishedAt)}${latest.publishedBy ? ` von ${latest.publishedBy}` : ''}` : null].filter(Boolean).join(' · ') },
+        ),
+      ),
+      h(
+        'div',
+        { class: 'row-actions addon-admin-actions' },
+        h('label', { class: 'inline-switch', for: switchId }, toggle, h('span', { text: 'Im Store sichtbar' })),
+        addon.hidden ? null : h('a', { class: 'button tiny ghost', href: `/addons#${addon.id}`, target: '_blank', rel: 'noopener' }, icon('external'), h('span', { class: 'label', text: 'Im Store' })),
+      ),
+    ),
+    h(
+      'ul',
+      { class: 'rows addon-admin-versions', 'aria-label': `Versionen von ${name}` },
+      addon.versions.map((version, index) => {
+        const notes = Array.isArray(version.notes) ? version.notes.filter((note) => typeof note === 'string' && note.trim()) : [];
+        return h(
+          'li',
+          { class: 'row' },
+          h('span', { class: 'row-icon', 'aria-hidden': 'true' }, icon('file')),
+          h(
+            'div',
+            { class: 'row-main' },
+            h('div', { class: 'row-title' }, h('strong', { text: version.version }), index === 0 ? chip('neueste', 'success') : null, version.api ? chip(`API ${version.api}`) : null),
+            h('div', { class: 'row-sub', text: [formatBytes(version.size), version.publishedAt ? `veröffentlicht ${formatDateTime(version.publishedAt)}` : null, version.publishedBy ? `von ${version.publishedBy}` : null].filter(Boolean).join(' · ') }),
+            h('div', { class: 'row-meta' }, h('code', { class: 'mono', title: version.sha256 ?? '', text: `SHA-256 ${shortSha(version.sha256)}` })),
+            notes.length ? h('ul', { class: 'plain-list addon-admin-notes' }, notes.map((note) => h('li', { text: note }))) : null,
+          ),
+          h(
+            'div',
+            { class: 'row-actions' },
+            h(
+              'button',
+              { type: 'button', class: 'button tiny ghost quiet-danger', 'aria-label': `${name} ${version.version} löschen`, dataset: { focusKey: `version:${addon.id}:${version.version}` }, onClick: () => deleteAddonVersion(addon, version) },
+              icon('trash'),
+              h('span', { class: 'label', text: 'Löschen' }),
+            ),
+          ),
+        );
+      }),
+    ),
+  );
+}
+
+async function toggleAddonVisible(addon, input) {
+  const hidden = !input.checked;
+  const name = addon.name ?? addon.id;
+  const patch = async () => applyTeamAddons(await teamCall('PATCH', `/v1/team/addons/${encodeURIComponent(addon.id)}`, { hidden }));
+  if (hidden) {
+    const ok = await confirmAction({
+      title: `${name} aus dem Store nehmen?`,
+      text: 'Das Addon verschwindet aus dem Store auf der Webseite, im Launcher und im Spiel. Wer es installiert hat, behält es. Die Dateien bleiben auf dem Server.',
+      confirmLabel: 'Aus dem Store nehmen',
+      danger: true,
+      onConfirm: patch,
+    });
+    if (!ok) {
+      input.checked = true;
+      return;
+    }
+    toast(`${name} steht nicht mehr im Store.`, 'success');
+  } else {
+    try {
+      await busy(input, patch);
+      toast(`${name} steht wieder im Store.`, 'success');
+    } catch (error) {
+      input.checked = false;
+      showError(error);
+    }
+  }
+}
+
+async function deleteAddonVersion(addon, version) {
+  const name = addon.name ?? addon.id;
+  const only = addon.versions.length === 1;
+  const newest = addon.versions[0]?.version === version.version;
+  const ok = await confirmAction({
+    title: `${name} ${version.version} löschen?`,
+    text: [
+      only
+        ? 'Das ist die einzige Version: Das Addon verschwindet ganz aus dem Store.'
+        : newest
+          ? `Die Datei wird gelöscht. Der Store bietet dann wieder Version ${addon.versions[1].version} an.`
+          : 'Die Datei dieser Version wird gelöscht.',
+      'Wer diese Version installiert hat, behält sie.',
+    ],
+    confirmLabel: 'Löschen',
+    danger: true,
+    onConfirm: async () => applyTeamAddons(await teamCall('DELETE', `/v1/team/addons/${encodeURIComponent(addon.id)}/versions/${encodeURIComponent(version.version)}`)),
+  });
+  if (ok) toast(`${name} ${version.version} ist gelöscht.`, 'success');
+}
+
+async function deletePendingAddonFile(entry) {
+  const ok = await confirmAction({
+    title: `${entry.file} löschen?`,
+    text: 'Die hochgeladene Datei verschwindet vom Server. Veröffentlicht war sie noch nicht.',
+    confirmLabel: 'Löschen',
+    danger: true,
+    onConfirm: async () => applyTeamAddons(await teamCall('DELETE', `/v1/team/addons/files/${encodeURIComponent(entry.file)}`)),
+  });
+  if (!ok) return;
+  if (state.addonJar?.file === entry.file) state.addonJar = null;
+  renderAddonCheck();
+  toast(`${entry.file} ist gelöscht.`, 'success');
+}
+
+/** Felder des Manifests nach den Regeln des Dienstes prüfen; gibt deutsche Hinweise zurück (leer = alles gut). */
+function addonManifestProblems(m) {
+  const problems = [];
+  const isText = (value, min, max) => typeof value === 'string' && textLength(value) >= min && textLength(value) <= max;
+  if (m.type !== 'heldix-addon') problems.push('„type“ muss "heldix-addon" sein.');
+  if (typeof m.id !== 'string' || !ADDON_ID_RE.test(m.id)) problems.push('„id“: nur a–z, 0–9, _ und -, höchstens 40 Zeichen.');
+  if (!isText(m.name, 1, 40)) problems.push('„name“: 1–40 Zeichen.');
+  if (typeof m.version !== 'string' || !ADDON_VERSION_RE.test(m.version)) problems.push('„version“ wie 1.2.3 oder 1.2.3-beta.1.');
+  if (!isText(m.summary, 1, 200)) problems.push('„summary“: 1–200 Zeichen.');
+  if (!isText(m.description, 0, 4000)) problems.push('„description“: Text mit höchstens 4000 Zeichen.');
+  if (!Array.isArray(m.authors) || m.authors.length < 1 || m.authors.length > 5 || !m.authors.every((author) => isText(author, 1, 40))) problems.push('„authors“: 1–5 Namen mit je 1–40 Zeichen.');
+  if (!Number.isInteger(m.api) || m.api < 1 || m.api > 99) problems.push('„api“: ganze Zahl von 1 bis 99.');
+  if (typeof m.icon !== 'string' || !/^[a-z0-9-]{1,30}$/.test(m.icon)) problems.push('„icon“: Name aus dem Heldix-Icon-Set (a–z, 0–9, -).');
+  if (!Object.hasOwn(KATEGORIEN, m.category)) problems.push(`„category“: eine von ${Object.keys(KATEGORIEN).join(', ')}.`);
+  if (!Array.isArray(m.platforms) || !m.platforms.every((system) => ['windows', 'mac', 'linux'].includes(system)) || new Set(m.platforms).size !== m.platforms.length) problems.push('„platforms“: windows, mac und/oder linux, ohne Doppelte (leer = alle).');
+  if (typeof m.id === 'string' && typeof m.version === 'string' && m.file !== `heldix-addon-${m.id}-${m.version}.jar`) problems.push(`„file“ muss heldix-addon-${m.id}-${m.version}.jar heißen.`);
+  if (!Number.isInteger(m.size) || m.size < 1 || m.size > ADDON_MAX) problems.push('„size“: 1 Byte bis 50 MB.');
+  if (typeof m.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(m.sha256)) problems.push('„sha256“: 64 Hex-Zeichen (klein).');
+  if (typeof m.date !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(m.date) || !Number.isFinite(Date.parse(m.date))) problems.push('„date“: Datum nach ISO 8601, z. B. 2026-11-25.');
+  if (m.notes !== undefined && (!Array.isArray(m.notes) || m.notes.length > 20 || !m.notes.every((note) => isText(note, 1, 300)))) problems.push('„notes“: höchstens 20 Texte mit je 1–300 Zeichen.');
+  return problems;
+}
+
+function setAddonUploadMessage(kind, text) {
+  const error = $('#addon-upload-fehler');
+  const okBox = $('#addon-upload-ok');
+  error.hidden = kind !== 'error';
+  okBox.hidden = kind !== 'ok';
+  if (kind === 'error') error.textContent = text;
+  if (kind === 'ok') okBox.replaceChildren(icon('check'), h('span', { text }));
+}
+
+async function sha256Hex(file) {
+  if (!globalThis.crypto?.subtle) return null;
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+const publishedAddonFile = (file) => state.teamAddons?.addons.some((addon) => addon.versions.some((version) => version.file === file));
+
+async function onAddonFilesChosen(event) {
+  const input = event.currentTarget;
+  const chosen = [...(input.files ?? [])];
+  input.value = '';
+  if (!chosen.length) return;
+  $('#addon-dateien-name').textContent = chosen.map((file) => `${file.name} · ${formatBytes(file.size)}`).join(', ');
+  setAddonUploadMessage(null);
+  const jars = chosen.filter((file) => /\.jar$/i.test(file.name));
+  const manifests = chosen.filter((file) => /\.json$/i.test(file.name));
+  if (jars.length > 1 || manifests.length > 1 || jars.length + manifests.length !== chosen.length) {
+    setAddonUploadMessage('error', 'Bitte höchstens eine JAR und eine .addon.json wählen.');
+    return;
+  }
+  if (manifests.length) {
+    await readAddonManifest(manifests[0]);
+    renderAddonCheck();
+  }
+  if (jars.length) await uploadAddonJar(jars[0]);
+  renderAddonCheck();
+}
+
+async function readAddonManifest(file) {
+  const fail = (text) => {
+    state.addonManifest = { error: text, fileName: file.name };
+  };
+  if (file.size > 64 * 1024) return fail('Diese Datei ist zu groß für eine .addon.json.');
+  let outer;
+  try {
+    outer = JSON.parse((await file.text()).replace(/^﻿/, ''));
+  } catch {
+    return fail('Die Datei ist kein gültiges JSON. Bitte die .addon.json wählen, die npm run addon erzeugt.');
+  }
+  if (!outer || typeof outer !== 'object' || typeof outer.manifest !== 'string' || typeof outer.signature !== 'string' || !outer.signature) {
+    return fail('Das ist keine .addon.json: Es fehlen „manifest“ oder „signature“. Sie entsteht mit npm run addon.');
+  }
+  let inner;
+  try {
+    inner = JSON.parse(outer.manifest);
+  } catch {
+    return fail('„manifest“ in der .addon.json ist kein gültiges JSON.');
+  }
+  if (!inner || typeof inner !== 'object' || Array.isArray(inner)) return fail('„manifest“ in der .addon.json ist kein Objekt.');
+  state.addonManifest = { outer: { manifest: outer.manifest, signature: outer.signature }, inner, problems: addonManifestProblems(inner), fileName: file.name };
+}
+
+async function uploadAddonJar(file) {
+  const inner = state.addonManifest?.inner;
+  if (!ADDON_FILE_RE.test(file.name)) {
+    setAddonUploadMessage('error', 'Die JAR muss so heißen wie beim Bauen: heldix-addon-<id>-<version>.jar (z. B. heldix-addon-spotify-1.0.0.jar).');
+    return;
+  }
+  if (inner && typeof inner.file === 'string' && inner.file !== file.name) {
+    setAddonUploadMessage('error', `Die JAR passt nicht zum Manifest: Erwartet wird ${inner.file}.`);
+    return;
+  }
+  if (file.size === 0 || file.size > ADDON_MAX) {
+    setAddonUploadMessage('error', file.size ? 'Die Datei ist größer als 50 MB.' : 'Die Datei ist leer.');
+    return;
+  }
+  if (publishedAddonFile(file.name)) {
+    setAddonUploadMessage('error', 'Diese Version ist schon veröffentlicht und lässt sich nicht ersetzen. Für Änderungen eine höhere Version bauen.');
+    return;
+  }
+  if (state.teamAddons?.pending.some((entry) => entry.file === file.name)) {
+    const replace = await confirmAction({ title: `${file.name} ersetzen?`, text: 'Eine Datei mit diesem Namen liegt schon auf dem Server (noch nicht veröffentlicht).', confirmLabel: 'Ersetzen' });
+    if (!replace) return;
+  }
+  const bar = $('#addon-balken');
+  const fill = bar.firstElementChild;
+  const label = $('#addon-fortschritt-text');
+  const chooser = $('#addon-dateien').closest('label');
+  $('#addon-fortschritt').hidden = false;
+  $('#addon-abbrechen').hidden = false;
+  fill.style.width = '0%';
+  bar.setAttribute('aria-valuenow', '0');
+  label.textContent = 'Prüfsumme wird berechnet …';
+  chooser.classList.add('disabled');
+  $('#addon-dateien').disabled = true;
+  state.addonJar = null;
+  state.addonUploadingFile = file.name;
+  renderAddonCheck();
+  try {
+    const sha256 = await sha256Hex(file).catch(() => null);
+    label.textContent = `0 % · 0 von ${formatBytes(file.size)}`;
+    const started = Date.now();
+    const job = upload(`/v1/team/addons/files/${encodeURIComponent(file.name)}`, file, (loaded, total) => {
+      const percent = Math.min(100, Math.floor((loaded / total) * 100));
+      fill.style.width = `${percent}%`;
+      bar.setAttribute('aria-valuenow', String(percent));
+      const seconds = (Date.now() - started) / 1000;
+      const speed = seconds > 0.5 ? ` · ${formatBytes(loaded / seconds)}/s` : '';
+      label.textContent = `${percent} % · ${formatBytes(loaded)} von ${formatBytes(total)}${speed}`;
+    });
+    state.addonUploading = job;
+    const result = await job.promise;
+    state.addonJar = { file: file.name, size: result?.size ?? file.size, sha256, serverSha256: typeof result?.sha256 === 'string' ? result.sha256 : null };
+    fill.style.width = '100%';
+    label.textContent = `100 % · ${formatBytes(file.size)}`;
+    setAddonUploadMessage('ok', `${file.name} ist hochgeladen (${formatBytes(state.addonJar.size)}).${state.addonManifest?.inner ? '' : ' Jetzt die .addon.json wählen.'}`);
+    toast(`${file.name} ist hochgeladen.`, 'success');
+    await loadTeamAddons().catch(showError);
+  } catch (error) {
+    handleAccessError(error);
+    if (!error.handled) setAddonUploadMessage('error', error.message);
+  } finally {
+    state.addonUploading = null;
+    state.addonUploadingFile = null;
+    $('#addon-abbrechen').hidden = true;
+    chooser.classList.remove('disabled');
+    $('#addon-dateien').disabled = false;
+    setTimeout(() => {
+      if (!state.addonUploading) $('#addon-fortschritt').hidden = true;
+    }, 1500);
+  }
+}
+
+function renderAddonCheck() {
+  const box = $('#addon-pruefung');
+  const actions = $('#addon-aktionen');
+  const chosen = state.addonManifest;
+  if (!chosen && !state.addonJar) {
+    box.replaceChildren(h('p', { class: 'muted small', text: 'Sobald JAR und .addon.json da sind, steht hier die Prüfung.' }));
+    box.classList.remove('filled');
+    actions.hidden = true;
+    return;
+  }
+  box.classList.add('filled');
+  actions.hidden = false;
+  const publish = $('#addon-veroeffentlichen');
+  if (chosen?.error) {
+    box.replaceChildren(h('ul', { class: 'check-list' }, h('li', { class: 'fail' }, icon('close'), h('span', { text: `${chosen.fileName}: ${chosen.error}` }))));
+    publish.disabled = true;
+    return;
+  }
+  if (!chosen) {
+    box.replaceChildren(h('ul', { class: 'check-list' }, h('li', { class: 'info' }, icon('info'), h('span', { text: `${state.addonJar.file} liegt bereit. Jetzt die passende .addon.json wählen.` }))));
+    publish.disabled = true;
+    return;
+  }
+  const inner = chosen.inner;
+  const data = state.teamAddons;
+  const checks = [];
+  if (data && !data.keyConfigured) checks.push(['fail', 'Im Dienst ist kein Update-Schlüssel eingerichtet – Veröffentlichen geht erst danach.']);
+  if (chosen.problems.length) for (const problem of chosen.problems.slice(0, 4)) checks.push(['fail', `Manifest: ${problem}`]);
+  else checks.push(['ok', 'Manifest vollständig, Typ heldix-addon']);
+  const jar = state.addonJar?.file === inner.file ? state.addonJar : null;
+  const pending = data?.pending.find((entry) => entry.file === inner.file);
+  if (jar) checks.push(['ok', `JAR ${inner.file} ist hochgeladen`]);
+  else if (state.addonUploadingFile === inner.file) checks.push(['wait', `JAR ${inner.file} wird gerade hochgeladen …`]);
+  else if (pending) checks.push(['ok', `JAR ${inner.file} liegt schon auf dem Server (hochgeladen ${formatDateTime(pending.uploadedAt)})`]);
+  else checks.push(['fail', `JAR ${typeof inner.file === 'string' ? inner.file : ''} fehlt noch – zuerst hochladen (Schritt 1)`]);
+  const size = jar?.size ?? pending?.size;
+  if (typeof size === 'number') checks.push([size === inner.size ? 'ok' : 'fail', size === inner.size ? `Größe passt (${formatBytes(size)})` : `Größe passt nicht: Manifest ${formatBytes(inner.size)}, JAR ${formatBytes(size)}`]);
+  if (jar?.sha256) {
+    const same = jar.sha256 === inner.sha256 && (!jar.serverSha256 || jar.serverSha256 === jar.sha256);
+    checks.push([same ? 'ok' : 'fail', same ? 'SHA-256 passt zur hochgeladenen JAR (selbst nachgerechnet)' : 'SHA-256 passt nicht zur hochgeladenen JAR – falsche Datei oder altes Manifest?']);
+  } else if (jar?.serverSha256 || pending) {
+    const known = jar?.serverSha256 ?? null;
+    if (known) checks.push([known === inner.sha256 ? 'ok' : 'fail', known === inner.sha256 ? 'SHA-256 passt (laut Dienst)' : 'SHA-256 passt nicht zur JAR auf dem Server']);
+    else checks.push(['info', 'SHA-256 prüft der Dienst beim Veröffentlichen (die JAR wurde nicht in dieser Sitzung gewählt)']);
+  }
+  const existing = data?.addons.find((addon) => addon.id === inner.id);
+  if (existing) {
+    const highest = existing.versions[0]?.version ?? existing.latest;
+    if (highest && typeof inner.version === 'string') {
+      const higher = compareVersions(inner.version, highest) > 0;
+      checks.push([higher ? 'ok' : 'fail', higher ? `Version ${inner.version} ist höher als ${highest}` : `Version ${inner.version} ist nicht höher als die vorhandene ${highest}`]);
+    }
+    if (existing.hidden) checks.push(['warn', 'Das Addon ist ausgeblendet. Auch die neue Version erscheint erst, wenn du es wieder einblendest.']);
+  } else if (data) {
+    checks.push(['ok', 'Neues Addon – es steht nach dem Veröffentlichen sofort im Store']);
+  }
+  if (Number.isInteger(inner.api) && inner.api > ADDON_API_HEUTE) checks.push(['warn', `Braucht Heldix-API-Stufe ${inner.api} – HeldixClient kann derzeit bis Stufe ${ADDON_API_HEUTE}.`]);
+  if (typeof inner.icon === 'string' && !hasIcon(inner.icon)) checks.push(['warn', `Icon „${inner.icon}“ gibt es im Heldix-Icon-Set nicht – angezeigt wird das Puzzleteil.`]);
+  checks.push(['info', 'Die Signatur prüft der Dienst beim Veröffentlichen']);
+
+  const notes = Array.isArray(inner.notes) ? inner.notes.filter((note) => typeof note === 'string' && note.trim()) : [];
+  const platforms = Array.isArray(inner.platforms) ? inner.platforms.filter((system) => typeof system === 'string') : [];
+  box.replaceChildren(
+    h(
+      'div',
+      { class: 'manifest-head' },
+      addonIcon(typeof inner.icon === 'string' ? inner.icon : 'addons'),
+      h('div', null, h('strong', { text: typeof inner.name === 'string' ? inner.name : '?' }), h('p', { class: 'muted small', text: typeof inner.summary === 'string' ? inner.summary : '' })),
+    ),
+    h(
+      'dl',
+      { class: 'facts-list' },
+      h('dt', { text: 'ID' }),
+      h('dd', null, h('code', { class: 'mono', text: String(inner.id ?? '–') })),
+      h('dt', { text: 'Version' }),
+      h('dd', null, h('strong', { text: String(inner.version ?? '–') })),
+      h('dt', { text: 'Datei' }),
+      h('dd', null, h('code', { class: 'mono', text: String(inner.file ?? '–') })),
+      h('dt', { text: 'Größe' }),
+      h('dd', { text: formatBytes(inner.size) }),
+      h('dt', { text: 'SHA-256' }),
+      h('dd', null, h('code', { class: 'mono hash', title: String(inner.sha256 ?? ''), text: shortSha(inner.sha256) })),
+      h('dt', { text: 'Kategorie' }),
+      h('dd', { text: KATEGORIEN[inner.category] ?? String(inner.category ?? '–') }),
+      h('dt', { text: 'Systeme' }),
+      h('dd', { text: platformText(platforms.filter((system) => ['windows', 'mac', 'linux'].includes(system))) }),
+      h('dt', { text: 'API-Stufe' }),
+      h('dd', { text: String(inner.api ?? '–') }),
+      h('dt', { text: 'Autoren' }),
+      h('dd', { text: Array.isArray(inner.authors) ? inner.authors.join(', ') : '–' }),
+      notes.length ? [h('dt', { text: 'Neu' }), h('dd', null, h('ul', { class: 'plain-list' }, notes.map((note) => h('li', { text: note }))))] : null,
+    ),
+    h(
+      'ul',
+      { class: 'check-list' },
+      checks.map(([kind, text]) => h('li', { class: kind }, icon(kind === 'ok' ? 'check' : kind === 'fail' ? 'close' : kind === 'warn' ? 'warning' : kind === 'wait' ? 'clock' : 'info'), h('span', { text }))),
+    ),
+  );
+  const blocked = checks.some(([kind]) => kind === 'fail' || kind === 'wait');
+  publish.disabled = blocked;
+  publish.title = blocked ? 'Erst die rot markierten Punkte klären.' : '';
+}
+
+function resetAddonUpload() {
+  state.addonManifest = null;
+  state.addonJar = null;
+  $('#addon-dateien-name').textContent = 'Keine Datei gewählt';
+  setAddonUploadMessage(null);
+  renderAddonCheck();
+}
+
+async function publishAddon(event) {
+  const chosen = state.addonManifest;
+  if (!chosen?.inner) return;
+  const { inner, outer } = chosen;
+  const existing = state.teamAddons?.addons.some((addon) => addon.id === inner.id);
+  const ok = await confirmAction({
+    title: `${inner.name} ${inner.version} veröffentlichen?`,
+    text: existing
+      ? 'Die neue Version steht sofort im Store. Launcher und Spiel bieten sie als Aktualisierung an.'
+      : 'Das Addon steht sofort im Store – auf der Webseite, im Launcher und im Spiel.',
+    confirmLabel: 'Veröffentlichen',
+    onConfirm: async () => {
+      const data = await teamCall('PUT', '/v1/team/addons/manifest', outer);
+      state.addonManifest = null;
+      state.addonJar = null;
+      await applyTeamAddons(data);
+    },
+  });
+  if (!ok) {
+    event.currentTarget?.focus?.();
+    return;
+  }
+  resetAddonUpload();
+  toast(`${inner.name} ${inner.version} ist im Store.`, 'success');
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // Team (nur Admins)
 // ---------------------------------------------------------------------------------------------------------
 
@@ -1450,7 +1957,7 @@ async function changeRole(member, select) {
   const ok = await confirmAction({
     title: `${member.name} zum ${label} machen?`,
     text: [
-      role === 'admin' ? 'Admins können zusätzlich Updates veröffentlichen, das Team verwalten, das Protokoll lesen, Capes zurücksetzen und Spielerdaten löschen.' : 'Moderatoren sehen Meldungen, Spieler und Sperren und schreiben Neuigkeiten.',
+      role === 'admin' ? 'Admins können zusätzlich Updates und Addons veröffentlichen, das Team verwalten, das Protokoll lesen, Capes zurücksetzen und Spielerdaten löschen.' : 'Moderatoren sehen Meldungen, Spieler und Sperren und schreiben Neuigkeiten.',
       self ? 'Das betrifft dich selbst: Danach siehst du nur noch die Bereiche für Moderatoren.' : null,
     ],
     confirmLabel: 'Rolle ändern',
@@ -1508,7 +2015,7 @@ async function onMemberSubmit(event) {
   const label = ROLE_LABELS[role] ?? role;
   const ok = await confirmAction({
     title: `${name} als ${label} hinzufügen?`,
-    text: role === 'admin' ? 'Admins haben alle Rechte, auch für Updates und das Team.' : 'Moderatoren sehen Meldungen mit Chatverlauf, Spieler und Sperren.',
+    text: role === 'admin' ? 'Admins haben alle Rechte, auch für Updates, Addons und das Team.' : 'Moderatoren sehen Meldungen mit Chatverlauf, Spieler und Sperren.',
     confirmLabel: 'Hinzufügen',
     onConfirm: async () => renderMembers(await teamCall('POST', '/v1/team/members', { name, role })),
   });
@@ -1922,6 +2429,11 @@ const ACTIONS = {
   'update.delete': 'Installer gelöscht',
   'update.publish': 'Update veröffentlicht',
   'update.manifest': 'Update veröffentlicht',
+  'addon.upload': 'Addon-Datei hochgeladen',
+  'addon.publish': 'Addon veröffentlicht',
+  'addon.hide': 'Addon aus dem Store genommen',
+  'addon.show': 'Addon wieder im Store',
+  'addon.delete': 'Addon-Datei gelöscht',
   'member.add': 'Mitglied hinzugefügt',
   'team.add': 'Mitglied hinzugefügt',
   'member.role': 'Rolle geändert',
@@ -2045,6 +2557,13 @@ function init() {
   $('#upload-json').addEventListener('change', onManifestChosen);
   $('#manifest-veroeffentlichen').addEventListener('click', publishManifest);
 
+  $('#addon-dateien').addEventListener('change', onAddonFilesChosen);
+  $('#addon-abbrechen').addEventListener('click', () => state.addonUploading?.abort());
+  $('#addon-veroeffentlichen').addEventListener('click', publishAddon);
+  $('#addon-verwerfen').addEventListener('click', resetAddonUpload);
+  $('#addons-neu').addEventListener('click', (event) => busy(event.currentTarget, () => loadTeamAddons()).catch(showError));
+  renderAddonCheck();
+
   $('#mitglied-form').addEventListener('submit', onMemberSubmit);
 
   $('#support-filter').addEventListener('click', (event) => {
@@ -2078,7 +2597,7 @@ function init() {
   });
 
   window.addEventListener('beforeunload', (event) => {
-    if (state.uploading || state.macUploading || editorDirty() || profileDirty()) {
+    if (state.uploading || state.macUploading || state.addonUploading || editorDirty() || profileDirty()) {
       event.preventDefault();
       event.returnValue = '';
     }

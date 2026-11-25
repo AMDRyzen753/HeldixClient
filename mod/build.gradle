@@ -45,5 +45,5 @@ tasks.register('brokenTestAddon', Jar) {
 }
 
 build {
-	dependsOn(':heldix-loader:build', ':heldix-api:build', ':example-addon:build', ':spotify-addon:build', ':launcher-bridge:build', ':autotest:build', 'brokenTestAddon')
+	dependsOn(':heldix-loader:build', ':heldix-api:build', ':addons:uhrzeit:build', ':addons:spotify:build', ':launcher-bridge:build', ':autotest:build', 'brokenTestAddon')
 }

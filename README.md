@@ -25,7 +25,7 @@ Ein eigener Minecraft-Client nach dem Vorbild von Lunar oder Feather, bestehend 
 | **Launcher** | Lädt Minecraft direkt von Mojang, verwaltet Instanzen und Konten und startet das Spiel. Electron + TypeScript. |
 | **Heldix Loader** | Ein eigener Mod-Loader. Er klinkt sich als Java-Agent beim Start ein, verändert Minecraft-Klassen per ASM und lädt Heldix-Mods. Es gibt ihn auch als Fabric-Mod, damit HeldixClient in Fabric-Instanzen mitläuft. |
 | **HeldixClient-Mod** | Bringt die Features ins Spiel: eigener Ladebildschirm, eigene Oberfläche (Startseite, Einzel-/Mehrspieler, Pausemenü, Heldix-Menü) mit eigener Schrift und eigenen Icons, HUD-Module, Zoom, Heldix-Shader und ein eigenes F3-Menü. |
-| **Heldix-Addons** | Kleine Erweiterungen über eine stabile API, die nach Minecraft-Updates ohne neuen Build weiterlaufen. Mitgeliefert: **Spotify** (Song mit Cover im HUD, Musik per Taste steuern) und **Uhrzeit & Spielzeit**. |
+| **Heldix-Addons** | Kleine Erweiterungen über eine stabile API, die nach Minecraft-Updates ohne neuen Build weiterlaufen. Einzeln aus dem **Addon-Store** (im Launcher, im Spiel und auf der Webseite, vom Team signiert), z. B. **Spotify** (Song mit Cover im HUD, Musik per Taste steuern) und **Uhrzeit & Spielzeit**. |
 
 Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Launcher eine **Fabric-Instanz** an. HeldixClient läuft dort mit (abschaltbar).
 
@@ -122,7 +122,7 @@ Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Laun
 3. Anmelden und spielen wie unter Windows. Unterschiede: Vulkan gibt es auf dem Mac nicht (Minecraft wählt die Grafik selbst), Updates meldet der Launcher nur und lädt sie nicht selbst, und das Spotify-Addon braucht Windows.
 
 > [!NOTE]
-> Die Anmeldung mit Microsoft-Konten braucht eine App-ID, die Mojang freigeschaltet hat. Solange die Freigabe aussteht, lehnt Minecraft die Anmeldung ab. Bis dahin gibt es **Über Minecraft Launcher anmelden**: Der offizielle Minecraft Launcher meldet an, gespielt wird mit HeldixClient. Hintergründe stehen in [docs/einrichtung.md](docs/einrichtung.md).
+> Die Anmeldung mit Microsoft-Konten braucht eine App-ID, die Mojang freigeschaltet hat. Die App-ID von HeldixClient ist seit November 2026 freigegeben. Als Alternative gibt es **Über Minecraft Launcher anmelden**: Der offizielle Minecraft Launcher meldet an, gespielt wird mit HeldixClient. Wer einen eigenen Build mit eigener App-ID ausliefert, muss sie selbst freischalten lassen, siehe [docs/einrichtung.md](docs/einrichtung.md).
 
 ## Selbst bauen
 
@@ -132,7 +132,7 @@ Voraussetzungen: Windows oder macOS, [Node.js](https://nodejs.org) 22 oder neuer
 git clone https://github.com/AMDRyzen753/HeldixClient.git
 cd HeldixClient\launcher
 npm install
-npm run mod      # baut Heldix Loader, Client-Mod und Addons
+npm run mod      # baut Heldix Loader und Client-Mod (Addons: npm run addon -- <id>, siehe docs/addons.md)
 npm start        # startet den Launcher im Entwicklungsmodus
 npm run dist     # erzeugt den Installer in launcher\release\
 npm run dist:mac # nur auf einem Mac: DMG und ZIP für Apple Silicon und Intel
@@ -157,8 +157,8 @@ mod/                     Java-Projekte (Gradle, Minecraft 26.3, Java 25)
 ├── heldix-loader-fabric/ derselbe Loader als Fabric-Mod (für HeldixClient in Fabric-Instanzen)
 ├── src/                 HeldixClient-Mod
 ├── heldix-api/          API für Heldix-Addons (ohne Minecraft-Abhängigkeit)
-├── example-addon/       Beispiel-Addon „Uhrzeit & Spielzeit“
-├── spotify-addon/       Spotify-Addon (Windows-Mediensteuerung)
+├── addons/uhrzeit/      Addon „Uhrzeit & Spielzeit“ (auch Vorlage), kommt über den Addon-Store
+├── addons/spotify/      Spotify-Addon (Windows-Mediensteuerung), kommt über den Addon-Store
 ├── launcher-bridge/     Brücke: Anmeldung über den offiziellen Minecraft Launcher
 service/                 Heldix-Dienst: Freunde, Capes für alle, Heldix-Symbol (Node.js) und Server-Installer
 website/                 Webseite (Startseite, Download, Impressum, Datenschutz)

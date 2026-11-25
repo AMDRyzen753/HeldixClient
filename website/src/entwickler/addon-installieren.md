@@ -1,14 +1,22 @@
 ---
 titel: Addons installieren und Fehler finden
-beschreibung: Wo Addons hingehören, wie du sie im Launcher installierst und abschaltest – und was du tust, wenn ein Addon nicht lädt.
+beschreibung: Wo Addons hingehören, wie du sie aus dem Addon-Store oder als eigene JAR installierst und abschaltest – und was du tust, wenn ein Addon nicht lädt.
 reihenfolge: 4
-stichworte: installieren, heldix-addons, ordner, launcher, abschalten, kompatibilität, fehler, log, fehlersuche
+stichworte: installieren, heldix-addons, addon-store, store, ordner, launcher, abschalten, kompatibilität, fehler, log, fehlersuche
 ---
 Heldix-Addons laufen in jeder Instanz mit HeldixClient: in Heldix-Instanzen und in Fabric-Instanzen, in denen HeldixClient eingeschaltet ist (Instanz → Einstellungen → HeldixClient). Jede Instanz hat ihren eigenen Ordner `heldix-addons`, Addons gelten also immer nur für die Instanz, in die du sie legst. In reinen Vanilla-Instanzen gibt es keine Addons.
 
 Den Launcher bekommst du unter [Download](/download). Die Kurzfassung für Spieler steht im Hilfe-Center unter [Heldix-Addons](/hilfe/heldix-addons).
 
-## Im Launcher installieren
+## Aus dem Addon-Store
+
+Fertige Addons wie **Spotify** und **Uhrzeit & Spielzeit** kommen nicht mehr mit dem Launcher, sondern aus dem [Addon-Store](/addons). Jede Version dort hat das Team geprüft und mit seinem Schlüssel signiert.
+
+- **Im Launcher:** Instanz → Reiter **Heldix-Addons** → **Addon-Store** → **Installieren** bzw. **Aktualisieren**. Der Launcher prüft dabei Signatur, SHA-256-Prüfsumme und die `heldix.addon.json` der Datei.
+- **Im Spiel:** Heldix-Menü → **Addons**, Reiter **Addon-Store**. Installieren, Aktualisieren und Entfernen (Papierkorb neben dem Knopf) wirken beim nächsten Start.
+- **Auf der Webseite:** Auf der Seite des Addons im [Addon-Store](/addons) lädst du die JAR herunter und legst sie wie unten beschrieben von Hand in den Ordner.
+
+## Eigene JAR im Launcher installieren
 
 1. Öffne im Launcher **Instanzen** und wähle die Instanz aus.
 2. Wechsle in den Reiter **Heldix-Addons**.
@@ -16,10 +24,6 @@ Den Launcher bekommst du unter [Download](/download). Die Kurzfassung für Spiel
 4. Starte das Spiel. Addons werden beim Spielstart geladen – läuft das Spiel schon, starte es neu.
 
 Der Launcher liest dabei die `heldix.addon.json` der Datei. Fehlt sie, steht in der Liste „Kein Heldix-Addon (heldix.addon.json fehlt)“.
-
-## Mitgelieferte Addons
-
-Der Launcher bringt zwei Addons mit: **Spotify** und **Uhrzeit & Spielzeit**. Neue Instanzen mit HeldixClient bekommen beide automatisch. Fehlt eines in einer bestehenden Instanz oder gibt es eine neuere Version, zeigt der Reiter **Heldix-Addons** oben eine Karte „Mitgelieferte Addons“ mit **Installieren** bzw. **Aktualisieren**. Beim Aktualisieren entfernt der Launcher die ältere Version selbst.
 
 > **Hinweis:** Das Spotify-Addon liest den laufenden Song über die Windows-Mediensteuerung. Es braucht keine Anmeldung, funktioniert aber nur unter Windows. Die Tasten sind [[Pos1]] (Abspielen/Pause), [[Bild ab]] (nächster Song) und [[Bild auf]] (vorheriger Song).
 
@@ -42,14 +46,14 @@ Du kannst ein Addon auch direkt in den Ordner `heldix-addons` der Instanz kopier
 ## Kompatibilität
 
 - **Minecraft-Versionen:** Addons nutzen nur die Heldix-API. Dieselbe JAR läuft deshalb auch nach Minecraft-Updates weiter, solange es HeldixClient für die Version gibt.
-- **API-Stufe:** HeldixClient 0.12.1 lädt Addons für API 1 und API 2. Ein Addon mit `"api": 2` braucht mindestens HeldixClient 0.11.0. Welche Stufe dein HeldixClient kann, steht im Heldix-Menü unter **Einstellungen → Addons** ganz unten („Heldix Loader … · Addon-API 2“).
+- **API-Stufe:** HeldixClient 0.13.0 lädt Addons für API 1 und API 2. Ein Addon mit `"api": 2` braucht mindestens HeldixClient 0.11.0. Welche Stufe dein HeldixClient kann, steht im Heldix-Menü unter **Addons → Installiert** ganz unten („Heldix Loader … · Addon-API 2“).
 - **Zu neues Addon:** Verlangt ein Addon eine höhere API-Stufe, wird es mit „bitte HeldixClient aktualisieren“ übersprungen. HeldixClient kommt mit dem Launcher und wird mit ihm aktualisiert – hol dir also die neueste Launcher-Version.
 - **Doppelt installiert:** Liegt dasselbe Addon (gleiche `id`) mehrmals im Ordner, nutzt HeldixClient die neueste Version. Die anderen erscheinen im Heldix-Menü mit „Ältere Version – genutzt wird …“ bzw. „Doppelt installiert – genutzt wird …“.
 - **Betriebssystem:** Addons laufen überall, wo HeldixClient läuft – es sei denn, ein Addon nutzt etwas Systemeigenes, wie das Spotify-Addon die Windows-Mediensteuerung.
 
 ## Wenn ein Addon nicht lädt
 
-Öffne im Spiel das Heldix-Menü und geh zu **Einstellungen → Addons**. Dort steht jedes installierte Addon mit Status: „Aktiv“ mit der Zahl seiner Module oder rot „Fehler“ mit dem Grund. Das Spiel läuft in jedem Fall weiter.
+Öffne im Spiel das Heldix-Menü und geh zu **Addons**, Reiter **Installiert**. Dort steht jedes installierte Addon mit Status: „Aktiv“ mit der Zahl seiner Module oder rot „Fehler“ mit dem Grund. Das Spiel läuft in jedem Fall weiter.
 
 Die häufigsten Meldungen:
 

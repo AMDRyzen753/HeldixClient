@@ -52,13 +52,14 @@ public final class Shell {
 		SHADER("Shader", "shader", Section.HELDIX, "Grafik"),
 		PERFORMANCE("Leistung", "performance", SHADER),
 		WAYPOINTS("Wegpunkte", "pin", Section.HELDIX),
+		ADDONS("Installiert", "addons", Section.HELDIX, "Addons"),
+		STORE("Addon-Store", "download", ADDONS),
 		CAPE("Cape", "cape", Section.PROFILE),
 		FRIENDS("Freunde", "friends", Section.PROFILE),
 		MESSAGES("Nachrichten", "chat", FRIENDS),
 		REQUESTS("Anfragen", "user-plus", FRIENDS),
 		PRIVACY("Privatsphäre", "shield", FRIENDS),
 		SETTINGS("Allgemein", "settings", Section.SYSTEM, "Einstellungen"),
-		ADDONS("Addons", "addons", SETTINGS),
 		INFO("Info", "info", SETTINGS),
 		/** eigener Bildschirm, nicht in der Seitenleiste (Knöpfe bei Module, Übersicht, Einstellungen) */
 		HUD("HUD-Editor", "hud", Section.SYSTEM),
@@ -262,6 +263,10 @@ public final class Shell {
 	 * Freunde = offene Anfragen und ungelesene Nachrichten, Anfragen bzw. Nachrichten jeweils für sich.
 	 */
 	public static String badge(Page page) {
+		if (page == Page.ADDONS || page == Page.STORE) {
+			int updates = dev.heldixclient.addon.AddonStore.updateCount();
+			return updates > 0 ? Integer.toString(Math.min(updates, 99)) : null;
+		}
 		if (!Social.online()) return null;
 		int count = switch (page) {
 			case FRIENDS -> Social.incoming().size() + dev.heldixclient.social.Messages.unreadTotal();
@@ -363,7 +368,7 @@ public final class Shell {
 			case WORLDS -> minecraft.gui.setScreen(new WorldsScreen());
 			case SERVERS -> minecraft.gui.setScreen(minecraft.options.skipMultiplayerWarning ? new ServersScreen() : new SafetyScreen(from));
 			case REALMS -> minecraft.gui.setScreen(new RealmsMainScreen(from));
-			case OVERVIEW, MODULES, CAPE, FRIENDS, MESSAGES, REQUESTS, PRIVACY, WAYPOINTS, SHADER, PERFORMANCE, SETTINGS, ADDONS, INFO ->
+			case OVERVIEW, MODULES, CAPE, FRIENDS, MESSAGES, REQUESTS, PRIVACY, WAYPOINTS, SHADER, PERFORMANCE, ADDONS, STORE, SETTINGS, INFO ->
 					minecraft.gui.setScreen(new HeldixMenuScreen(back, page));
 			case HUD -> minecraft.gui.setScreen(new HudEditorScreen(from));
 			case OPTIONS -> minecraft.gui.setScreen(new OptionsScreen(from, minecraft.options));

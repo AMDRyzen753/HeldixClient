@@ -134,9 +134,11 @@ export async function loginMinecraft(ms: MicrosoftTokens): Promise<MinecraftSess
   if (loginRes.status === 403) {
     const body = await loginRes.text().catch(() => '');
     if (/app registration|AppRegInfo/i.test(body)) {
-      // Antwort von Mojang: "Invalid app registration, see https://aka.ms/AppRegInfo for more information"
+      // Antwort von Mojang: "Invalid app registration, see https://aka.ms/AppRegInfo for more information".
+      // Die App-ID von HeldixClient ist freigegeben (November 2026); das passiert nur mit einer nicht freigegebenen
+      // eigenen App-ID (eigener Build) oder falls Mojang die Freigabe zurückzieht.
       throw new AuthError(
-        'Mojang hat die Microsoft-Anmeldung von HeldixClient noch nicht freigeschaltet. Bis zur Freigabe klappt sie für niemanden – dein Konto ist in Ordnung.',
+        'Mojang lässt die Microsoft-Anmeldung dieses Launchers nicht zu („Invalid app registration“). Bitte die aktuelle Version von heldixclient.com nutzen oder über den Minecraft Launcher anmelden – dein Konto ist in Ordnung.',
       );
     }
     const message = /"errorMessage"\s*:\s*"([^"]+)"/.exec(body)?.[1];

@@ -3,11 +3,9 @@ titel: Mit dem Microsoft-Konto anmelden
 beschreibung: So meldest du dich im Launcher mit dem Microsoft-Konto an, mit dem du Minecraft (Java Edition) gekauft hast.
 kategorie: erste-schritte
 reihenfolge: 3
-stichworte: anmelden, login, einloggen, microsoft, konto, account, xbox, mojang, freigabe, noch nicht freigeschaltet
+stichworte: anmelden, login, einloggen, microsoft, konto, account, xbox, mojang, freigabe, invalid app registration
 ---
 Zum Spielen meldest du dich mit dem Microsoft-Konto an, mit dem du Minecraft: Java Edition gekauft hast.
-
-> **Hinweis:** HeldixClient wartet zurzeit noch auf die Freigabe der Microsoft-Anmeldung durch Mojang. Bis dahin klappt die direkte Anmeldung für niemanden – nutze solange [Über den Minecraft Launcher anmelden](/hilfe/anmelden-minecraft-launcher).
 
 ## So meldest du dich an
 1. Klicke im Launcher unten links in der Seitenleiste auf **Nicht angemeldet** (oder auf der Startseite auf „bitte anmelden“).
@@ -19,12 +17,10 @@ Zum Spielen meldest du dich mit dem Microsoft-Konto an, mit dem du Minecraft: Ja
 - ein Microsoft-Konto, mit dem Minecraft: Java Edition gekauft wurde
 - ein Xbox-Profil zu diesem Konto – fehlt es, sagt dir der Launcher Bescheid
 
-## „Mojang hat die Microsoft-Anmeldung … noch nicht freigeschaltet“
-Neue Apps dürfen die Anmeldung von Minecraft erst nutzen, wenn Mojang sie geprüft und freigegeben hat. Für HeldixClient ist die Freigabe beantragt, aber noch nicht erteilt. Solange erscheint nach der Anmeldung bei Microsoft diese Meldung:
+## Von Mojang freigegeben
+Apps dürfen die Anmeldung von Minecraft erst nutzen, wenn Mojang sie geprüft und freigegeben hat. HeldixClient ist seit November 2026 freigegeben – die Anmeldung mit Microsoft klappt also direkt im Launcher.
 
-„Mojang hat die Microsoft-Anmeldung von HeldixClient noch nicht freigeschaltet. Bis zur Freigabe klappt sie für niemanden – dein Konto ist in Ordnung.“
-
-Mit deinem Konto ist alles in Ordnung, und du musst nichts tun. Bis zur Freigabe meldest du dich [über den Minecraft Launcher](/hilfe/anmelden-minecraft-launcher) an – damit spielst du ganz normal mit HeldixClient.
+Möchtest du lieber den offiziellen Minecraft Launcher die Anmeldung erledigen lassen, geht das weiterhin: [Über den Minecraft Launcher anmelden](/hilfe/anmelden-minecraft-launcher).
 
 ## Sicher gespeichert
 - Dein Passwort gibst du nur im Anmeldefenster von Microsoft ein. HeldixClient bekommt es nie zu sehen.

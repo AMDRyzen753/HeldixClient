@@ -1,10 +1,10 @@
 ---
 titel: Addon-API im Detail
-beschreibung: Module, HUD-Elemente, Einstellungen, Tasten, Einblendungen und Ereignisse – mit echten Beispielen aus den mitgelieferten Addons.
+beschreibung: Module, HUD-Elemente, Einstellungen, Tasten, Einblendungen und Ereignisse – mit echten Beispielen aus den Addons Spotify und Uhrzeit & Spielzeit.
 reihenfolge: 2
 stichworte: api, heldixapi, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config
 ---
-Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **2** (Stand HeldixClient 0.12.1). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Heldix-Addons schreiben](/entwickler/addons).
+Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **2** (Stand HeldixClient 0.13.0). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Heldix-Addons schreiben](/entwickler/addons).
 
 ## Das Objekt HeldixApi
 

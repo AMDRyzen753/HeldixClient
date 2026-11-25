@@ -16,6 +16,7 @@
 #   - Der Dienst läuft als eigener Benutzer ohne Rechte, nur auf 127.0.0.1; Caddy stellt Webseite und API per HTTPS bereit.
 #   - Daten liegen in /var/lib/heldix-dienst. Ein zweiter Aufruf aktualisiert, die Daten bleiben.
 #   - Launcher-Updates: Installer und update.json kommen nach /var/lib/heldix-dienst/updates (per scp oder im Team-Bereich).
+#   - Addon-Store: signierte Addons (JAR) liegen in /var/lib/heldix-dienst/addons, veröffentlicht im Team-Bereich.
 #   - Anmeldung auf der Webseite (ohne Passwort, über den Launcher) unter https://<domain>/konto, Team-Bereich dort.
 #   - Verwaltung (Meldungen, Sperren, Team): sudo heldix-dienst-admin hilfe; erster Admin: sudo heldix-dienst-admin team <name> admin
 #
@@ -43,6 +44,7 @@ HELDIX_VERSION="__HELDIX_VERSION__"
 INSTALL_DIR="/opt/heldix-dienst"
 DATA_DIR="/var/lib/heldix-dienst"
 UPDATES_DIR="$DATA_DIR/updates"
+ADDONS_DIR="$DATA_DIR/addons"
 ADMIN_BIN="/usr/local/bin/heldix-dienst-admin"
 CADDY_DATA_DIR="/var/lib/heldix-dienst-caddy"
 CONFIG_DIR="/etc/heldix-dienst"
@@ -295,6 +297,8 @@ create_users() {
   install -d -m 700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DATA_DIR"
   # Launcher-Updates: schreiben darf nur der Dienst (Uploads im Team-Bereich) und root (scp), lesen alle
   install -d -m 755 -o "$SERVICE_USER" -g "$SERVICE_USER" "$UPDATES_DIR"
+  # Addon-Store: JARs schreibt der Dienst (Uploads im Team-Bereich); ein bestehender Ordner gehört danach wieder ihm
+  install -d -m 755 -o "$SERVICE_USER" -g "$SERVICE_USER" "$ADDONS_DIR"
   if [ "$HTTPS" = 1 ] && ! id "$CADDY_USER" >/dev/null 2>&1; then
     useradd --system --home-dir "$CADDY_DATA_DIR" --no-create-home --shell /usr/sbin/nologin "$CADDY_USER" 2>/dev/null \
       || useradd -r -d "$CADDY_DATA_DIR" -M -s /sbin/nologin "$CADDY_USER"
@@ -461,7 +465,8 @@ $API_DOMAIN {
 	# Caddy streamt die Antwort (kein Puffern der ganzen Datei) und hat für Antworten keine Zeitgrenze;
 	# einen hängenden Client trennt der Dienst selbst.
 	# Uploads im Team-Bereich (bis 1 GiB): Caddy hat keine Grenze für den Anfragekörper und reicht ihn gestreamt durch.
-	@gross path /v1/launcher/download/* /v1/team/updates/files/*
+	# Addons (JAR bis 50 MiB) genauso: Downloads unter /v1/addons/<id>/files/ (mit Range), Uploads im Team-Bereich.
+	@gross path /v1/launcher/download/* /v1/team/updates/files/* /v1/addons/* /v1/team/addons/files/*
 	handle @gross {
 		reverse_proxy 127.0.0.1:$PORT
 	}
@@ -544,6 +549,7 @@ User=$SERVICE_USER
 Group=$SERVICE_USER
 EnvironmentFile=$ENV_FILE
 Environment=HELDIX_DIENST_UPDATES=$UPDATES_DIR
+Environment=HELDIX_DIENST_ADDONS=$ADDONS_DIR
 WorkingDirectory=$INSTALL_DIR/app
 ExecStart=$INSTALL_DIR/node/bin/node --disable-warning=ExperimentalWarning $INSTALL_DIR/app/dist/server.js
 Restart=always
@@ -738,6 +744,12 @@ summary() {
   else
     echo "    Im Team-Bereich geht das nicht: Dem Installer lag kein Update-Schlüssel bei (launcher/src/main/update-public-key.ts)."
   fi
+  echo ""
+  if [ -f "$UPDATE_KEY_FILE" ]; then
+    echo "  Addon veröffentlichen: im Team-Bereich unter „Addons“ JAR und .addon.json hochladen (Signatur wird geprüft)."
+  else
+    echo "  Addons lassen sich ohne Update-Schlüssel nicht veröffentlichen (Team-Bereich antwortet mit 503)."
+  fi
 }
 
 uninstall() {
@@ -759,7 +771,7 @@ uninstall() {
     userdel "$CADDY_USER" >/dev/null 2>&1 || true
     ok "Daten, Zertifikate, Einstellungen und Benutzer gelöscht"
   else
-    info "Daten (auch Launcher-Updates) bleiben in $DATA_DIR, Einstellungen in $CONFIG_DIR (löschen mit --uninstall --purge)."
+    info "Daten (auch Launcher-Updates und Addons) bleiben in $DATA_DIR, Einstellungen in $CONFIG_DIR (löschen mit --uninstall --purge)."
   fi
 }
 

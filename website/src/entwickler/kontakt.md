@@ -25,7 +25,7 @@ Die API-Datei für Addons (`heldix-api-1.0.0.jar`) und ein fertiges Beispielproj
 
 - **Versionen:** HeldixClient, Heldix Loader, Minecraft und Java. Alle stehen im Heldix-Menü unter **Einstellungen → Info**.
 - **Die API-Stufe** deines Addons, also den Wert von `api` aus der `heldix.addon.json`.
-- **Die genaue Fehlermeldung:** die rote Zeile unter **Einstellungen → Addons** bzw. die „Hinweise beim Start“ unter **Einstellungen → Info**.
+- **Die genaue Fehlermeldung:** die rote Zeile unter **Addons → Installiert** bzw. die „Hinweise beim Start“ unter **Einstellungen → Info**.
 - **Die passenden Zeilen aus dem Log** (Launcher → **Konsole**), am besten ab der ersten Fehlermeldung.
 - **Was du erwartet hast und was stattdessen passiert ist**, und was du schon probiert hast.
 

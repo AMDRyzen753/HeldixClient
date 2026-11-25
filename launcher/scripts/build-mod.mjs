@@ -1,11 +1,11 @@
-// Baut Heldix Loader, Client-Mod und die mitgelieferten Addons (../mod) und legt die JARs in resources/ ab:
+// Baut Heldix Loader und Client-Mod (../mod) und legt die JARs in resources/ ab:
 //   resources/heldix-loader/heldix-loader-<version>.jar   (der eigene Loader, Java-Agent)
 //   resources/client-mods/heldixclient-<version>+<mc>.jar (die HeldixClient-Mod)
-//   resources/heldix-addons/*.jar                          (mitgelieferte Addons)
 //   resources/launcher-bridge/heldix-bridge-<version>.jar  (Brücke zum offiziellen Minecraft Launcher, plus icon.png)
+// Addons kommen nicht mehr mit dem Launcher, sondern aus dem Addon-Store (npm run addon -- <id>, siehe docs/addons.md).
 // Nutzt das portable JDK aus ../.tools/jdk-25, falls vorhanden, sonst JAVA_HOME.
 import { spawnSync } from 'node:child_process';
-import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -76,15 +76,21 @@ const newestBridge = (await Promise.all(bridgeJars.map(async (jar) => ({ jar, mt
 await replaceAll(path.join(resources, 'launcher-bridge'), bridgeLibs, [newestBridge], 'Brücke');
 await copyFile(path.join(launcherDir, 'build', 'icon.png'), path.join(resources, 'launcher-bridge', 'icon.png'));
 
-// Mitgelieferte Heldix-Addons (neue Heldix-Instanzen bekommen sie automatisch, bestehende über den Reiter „Heldix-Addons“)
-const addonTarget = path.join(resources, 'heldix-addons');
-await rm(addonTarget, { recursive: true, force: true });
-await mkdir(addonTarget, { recursive: true });
-for (const project of ['example-addon', 'spotify-addon']) {
-  const libs = path.join(modDir, project, 'build', 'libs');
-  const jars = await Promise.all((await jarsIn(libs, () => true)).map(async (jar) => ({ jar, mtimeMs: (await stat(path.join(libs, jar))).mtimeMs })));
-  const newestAddon = jars.sort((a, b) => b.mtimeMs - a.mtimeMs)[0]?.jar;
-  if (!newestAddon) throw new Error(`Addon ${project} wurde nicht gebaut`);
-  await copyFile(path.join(libs, newestAddon), path.join(addonTarget, newestAddon));
-  console.log(`Addon bereit: resources/heldix-addons/${newestAddon}`);
+// Früher mitgelieferte Addons aus alten Builds entfernen (sie kommen jetzt aus dem Addon-Store)
+await rm(path.join(resources, 'heldix-addons'), { recursive: true, force: true });
+
+// Der Addon-Store im Launcher muss wissen, bis zu welcher API-Stufe die Mod Addons laden kann
+const apiSource = await readFile(path.join(modDir, 'heldix-api', 'src', 'main', 'java', 'dev', 'heldixclient', 'api', 'HeldixApi.java'), 'utf8');
+const storeSource = await readFile(path.join(launcherDir, 'src', 'main', 'core', 'addonstore.ts'), 'utf8');
+const modApi = /int API_VERSION = (\d+);/.exec(apiSource)?.[1];
+const storeApi = /export const HELDIX_ADDON_API = (\d+);/.exec(storeSource)?.[1];
+if (!modApi || modApi !== storeApi) {
+  throw new Error(`Addon-API passt nicht: HeldixApi.API_VERSION = ${modApi}, HELDIX_ADDON_API in src/main/core/addonstore.ts = ${storeApi}`);
+}
+// Launcher und Spiel prüfen Store-Addons mit demselben öffentlichen Schlüssel (npm run update-key schreibt beide)
+const keySource = await readFile(path.join(launcherDir, 'src', 'main', 'update-public-key.ts'), 'utf8');
+const launcherKey = /UPDATE_PUBLIC_KEY: string \| null = (".*");/.exec(keySource)?.[1];
+const modKey = await readFile(path.join(modDir, 'src', 'main', 'resources', 'heldix-store-key.pem'), 'utf8').catch(() => null);
+if (launcherKey && JSON.parse(launcherKey) !== modKey) {
+  throw new Error('mod/src/main/resources/heldix-store-key.pem passt nicht zu src/main/update-public-key.ts – "npm run update-key" ausführen und neu bauen.');
 }

@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
 import { exportData, myReports } from './account';
+import { ADDON_MANIFEST_BODY_LIMIT, Addons, MAX_ADDON_SIZE } from './addons';
 import { Challenges, hashToken, hasJoined, isLoopback, newToken, parseBearer } from './auth';
 import { Blocks } from './blocks';
 import { Store, type SettingsPatch, type TeamMemberRow, type TeamRole, type UserRow, type WebSessionRow } from './db';
@@ -41,6 +42,8 @@ export interface ServiceOptions {
   log?: (line: string) => void;
   /** Ordner mit Launcher-Installern und update.json (Standard: `<dataDir>/updates`). */
   updatesDir?: string;
+  /** Ordner mit den JARs des Addon-Stores (Standard: `<dataDir>/addons`). */
+  addonsDir?: string;
   /** Adresse der Webseite (Origin, z. B. `https://heldixclient.com`); ohne: keine Anmeldung auf der Webseite (503). */
   website?: string | null;
   /** Öffentlicher Update-Schlüssel (Ed25519, PEM); ohne: kein Veröffentlichen im Team-Bereich (503). */
@@ -75,6 +78,8 @@ export interface ServiceOptions {
   reportTtlMs?: number;
   /** Downloads von Launcher-Installern pro IP und Zeitraum (rateWindowMs). */
   downloadRateLimit?: number;
+  /** Downloads von Addon-Dateien pro IP und Zeitraum (rateWindowMs). */
+  addonDownloadRateLimit?: number;
   /** Kommt so lange nichts beim Client an, wird ein Download abgebrochen. */
   downloadIdleTimeoutMs?: number;
   /** Web-Anmeldung: Einmal-Code, Sitzung (ab Anmeldung, ohne Nutzung), 2FA-Bestätigung der Sitzung. */
@@ -95,6 +100,8 @@ export interface ServiceOptions {
   /** Größter Upload eines Installers im Team-Bereich und Abbruch, wenn so lange nichts ankommt. */
   maxUploadBytes?: number;
   uploadIdleTimeoutMs?: number;
+  /** Größter Upload einer Addon-Datei (Standard und Höchstwert im Manifest: 50 MiB). */
+  maxAddonUploadBytes?: number;
   /** Erlaubte Hosts für Skin-Dateien der Teamseite (Standard: textures.minecraft.net) und Zeitgrenze pro Abfrage. */
   skinHosts?: readonly string[];
   skinTimeoutMs?: number;
@@ -156,7 +163,14 @@ interface Route {
 
 /** Wege ohne Anmeldung, die auch andere Seiten abfragen dürfen: CORS für alle Antworten, auch Fehler. */
 function isPublicPath(path: string): boolean {
-  return path.startsWith('/v1/launcher/') || path.startsWith('/v1/public/') || path === '/v1/news' || path === '/v1/status';
+  return (
+    path.startsWith('/v1/launcher/') ||
+    path.startsWith('/v1/public/') ||
+    path === '/v1/addons' ||
+    path.startsWith('/v1/addons/') ||
+    path === '/v1/news' ||
+    path === '/v1/status'
+  );
 }
 
 /** Version des Dienstes aus package.json (liegt je nach Start eine bis drei Ebenen über dieser Datei). */
@@ -203,6 +217,7 @@ export function createService(options: ServiceOptions): Service {
   const reportTtlMs = options.reportTtlMs ?? 90 * 24 * 60 * 60 * 1000;
   const downloadIdleTimeoutMs = options.downloadIdleTimeoutMs ?? 120_000;
   const updatesDir = options.updatesDir ?? join(options.dataDir, 'updates');
+  const addonsDir = options.addonsDir ?? join(options.dataDir, 'addons');
   const website = options.website ? new URL(options.website).origin : null;
   const auditTtlMs = options.auditTtlMs ?? 365 * 24 * 60 * 60 * 1000;
   let updateKey: KeyObject | null = null;
@@ -231,6 +246,7 @@ export function createService(options: ServiceOptions): Service {
   const apiLimiter = new RateLimiter(options.apiRateLimit ?? 120, rateWindowMs);
   const messageLimiter = new RateLimiter(options.messageRateLimit ?? 20, rateWindowMs);
   const downloadLimiter = new RateLimiter(options.downloadRateLimit ?? 30, rateWindowMs);
+  const addonDownloadLimiter = new RateLimiter(options.addonDownloadRateLimit ?? 60, rateWindowMs);
   const skinLimiter = new RateLimiter(options.skinRateLimit ?? 300, rateWindowMs);
   const linkLimiter = new RateLimiter(options.webLinkRateLimit ?? 10, rateWindowMs);
   const totpLimiter = new RateLimiter(options.totpRateLimit ?? 5, options.totpWindowMs ?? 10 * 60_000);
@@ -270,6 +286,7 @@ export function createService(options: ServiceOptions): Service {
     }
   };
   const updates = new Updates(updatesDir, log, recordVersion);
+  const addons = new Addons(store, addonsDir, log);
   const skins = new Skins({
     sessionServer,
     hosts: options.skinHosts ?? DEFAULT_SKIN_HOSTS,
@@ -293,9 +310,10 @@ export function createService(options: ServiceOptions): Service {
     totpLimiter,
     totpNow: options.totpNow ?? Date.now,
   });
-  const team = new Team(store, realtime, updates, {
+  const team = new Team(store, realtime, updates, addons, {
     updateKey,
     maxUploadBytes: options.maxUploadBytes ?? MAX_SETUP_SIZE,
+    maxAddonUploadBytes: Math.min(options.maxAddonUploadBytes ?? MAX_ADDON_SIZE, MAX_ADDON_SIZE),
     uploadIdleTimeoutMs: options.uploadIdleTimeoutMs ?? 60_000,
   });
 
@@ -617,6 +635,7 @@ export function createService(options: ServiceOptions): Service {
         online: realtime.onlineCount(),
         players: playerCount.value,
         launcher: published?.version ?? null,
+        addons: addons.visibleCount(),
         since: startedAt,
       },
       { 'Cache-Control': 'max-age=30' },
@@ -716,6 +735,40 @@ export function createService(options: ServiceOptions): Service {
     return RESPONDED;
   }
 
+  // ---------- Addon-Store (öffentlich) ----------
+
+  /** `GET /v1/addons`: sichtbare Addons mit der neuesten Version. */
+  function addonList(ctx: Context) {
+    sendJson(ctx.res, 200, addons.list(), { 'Cache-Control': 'max-age=60' });
+    return RESPONDED;
+  }
+
+  /** `GET /v1/addons/<id>`: ein Addon mit allen Versionen. */
+  function addonDetail(ctx: Context) {
+    sendJson(ctx.res, 200, addons.detail(ctx.params[0] ?? ''), { 'Cache-Control': 'max-age=60' });
+    return RESPONDED;
+  }
+
+  /** `GET /v1/addons/<id>/download`: Weiterleitung auf die Datei der neuesten Version (Knopf auf der Webseite). */
+  function addonDownloadLatest(ctx: Context) {
+    const id = ctx.params[0] ?? '';
+    const file = addons.latestFile(id);
+    ctx.res.writeHead(302, {
+      Location: `/v1/addons/${id}/files/${file}`,
+      'Cache-Control': 'no-cache',
+      'Content-Length': '0',
+    });
+    ctx.res.end();
+    return RESPONDED;
+  }
+
+  /** `GET /v1/addons/<id>/files/<file>`: die JAR (Range, ETag); ein vollständiger Download zählt mit. */
+  async function addonFile(ctx: Context) {
+    rateLimit(addonDownloadLimiter, clientIp(ctx.req), 'Zu viele Downloads. Bitte kurz warten.');
+    await addons.serve(ctx.req, ctx.res, ctx.params[0] ?? '', ctx.params[1] ?? '', downloadIdleTimeoutMs);
+    return RESPONDED;
+  }
+
   const teamRoutes: Route[] = [
     { method: 'GET', pattern: /^\/v1\/team\/me\/profile$/, kind: 'team', handler: (ctx) => team.profile(teamMember(ctx)) },
     {
@@ -805,6 +858,45 @@ export function createService(options: ServiceOptions): Service {
       kind: 'team',
       role: 'admin',
       handler: async (ctx) => team.publish(actor(ctx), await body(ctx)),
+    },
+    // Addon-Store: wie Updates nur für Admins. `PUT …/manifest` und `PATCH …/<id>` treffen dasselbe Muster, die Methode entscheidet.
+    { method: 'GET', pattern: /^\/v1\/team\/addons$/, kind: 'team', role: 'admin', handler: () => team.addonsOverview() },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/team\/addons\/files\/([^/]+)$/,
+      kind: 'team',
+      role: 'admin',
+      // Roher, gestreamter Körper bis 50 MiB: ohne BODY_LIMIT, ohne JSON.
+      handler: (ctx) => team.uploadAddon(actor(ctx), ctx.req, ctx.params[0] ?? ''),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/team\/addons\/files\/([^/]+)$/,
+      kind: 'team',
+      role: 'admin',
+      handler: (ctx) => team.deleteAddonFile(actor(ctx), ctx.params[0] ?? ''),
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/team\/addons\/manifest$/,
+      kind: 'team',
+      role: 'admin',
+      // Beschreibung und Hinweise machen das Manifest größer als BODY_LIMIT erlaubt.
+      handler: async (ctx) => team.publishAddon(actor(ctx), await readJsonObject(ctx.req, ADDON_MANIFEST_BODY_LIMIT)),
+    },
+    {
+      method: 'PATCH',
+      pattern: /^\/v1\/team\/addons\/([^/]+)$/,
+      kind: 'team',
+      role: 'admin',
+      handler: async (ctx) => team.setAddonHidden(actor(ctx), ctx.params[0] ?? '', await body(ctx)),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/team\/addons\/([^/]+)\/versions\/([^/]+)$/,
+      kind: 'team',
+      role: 'admin',
+      handler: (ctx) => team.deleteAddonVersion(actor(ctx), ctx.params[0] ?? '', ctx.params[1] ?? ''),
     },
     { method: 'GET', pattern: /^\/v1\/team\/members$/, kind: 'team', role: 'admin', handler: () => team.members() },
     {
@@ -944,6 +1036,13 @@ export function createService(options: ServiceOptions): Service {
     { method: 'GET', pattern: /^\/v1\/launcher\/files$/, kind: 'public', handler: launcherFiles },
     { method: 'GET', pattern: /^\/v1\/launcher\/download\/([^/]+)$/, kind: 'public', handler: download },
     { method: 'HEAD', pattern: /^\/v1\/launcher\/download\/([^/]+)$/, kind: 'public', handler: download },
+    // Addon-Store (ohne Anmeldung)
+    { method: 'GET', pattern: /^\/v1\/addons$/, kind: 'public', handler: addonList },
+    { method: 'GET', pattern: /^\/v1\/addons\/([^/]+)$/, kind: 'public', handler: addonDetail },
+    { method: 'GET', pattern: /^\/v1\/addons\/([^/]+)\/download$/, kind: 'public', handler: addonDownloadLatest },
+    { method: 'HEAD', pattern: /^\/v1\/addons\/([^/]+)\/download$/, kind: 'public', handler: addonDownloadLatest },
+    { method: 'GET', pattern: /^\/v1\/addons\/([^/]+)\/files\/([^/]+)$/, kind: 'public', handler: addonFile },
+    { method: 'HEAD', pattern: /^\/v1\/addons\/([^/]+)\/files\/([^/]+)$/, kind: 'public', handler: addonFile },
     {
       method: 'GET',
       pattern: /^\/v1\/ws$/,
@@ -1059,6 +1158,7 @@ export function createService(options: ServiceOptions): Service {
     apiLimiter.sweep(now);
     messageLimiter.sweep(now);
     downloadLimiter.sweep(now);
+    addonDownloadLimiter.sweep(now);
     linkLimiter.sweep(now);
     totpLimiter.sweep(now);
     exportLimiter.sweep(now);

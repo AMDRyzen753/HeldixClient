@@ -1,14 +1,14 @@
 ---
 titel: Anmeldung abgelehnt
-beschreibung: Was Meldungen wie „noch nicht freigeschaltet“, „kein Xbox-Profil“ oder „nicht gekauft“ bei der Anmeldung bedeuten – und was du tun kannst.
+beschreibung: Was Meldungen wie „kein Xbox-Profil“, „nicht gekauft“ oder „Invalid app registration“ bei der Anmeldung bedeuten – und was du tun kannst.
 kategorie: probleme
 reihenfolge: 3
-stichworte: anmeldung, login, abgelehnt, fehler, microsoft, xbox, xbox-profil, nicht gekauft, kinderkonto, abgelaufen, freigeschaltet, mojang
+stichworte: anmeldung, login, abgelehnt, fehler, microsoft, xbox, xbox-profil, nicht gekauft, kinderkonto, abgelaufen, freigeschaltet, invalid app registration, mojang
 ---
 Die Anmeldung läuft über Microsoft, Xbox und Minecraft. Klappt ein Schritt nicht, zeigt der Launcher eine Meldung. Hier findest du die häufigsten.
 
 ## Microsoft-Anmeldung
-- **„Mojang hat die Microsoft-Anmeldung von HeldixClient noch nicht freigeschaltet …“** – Mit deinem Konto ist alles in Ordnung. Die Freigabe durch Mojang steht noch aus und gilt für alle. Melde dich solange [über den Minecraft Launcher](/hilfe/anmelden-minecraft-launcher) an.
+- **„Mojang lässt die Microsoft-Anmeldung dieses Launchers nicht zu („Invalid app registration“) …“** – Mit deinem Konto ist alles in Ordnung. HeldixClient ist von Mojang freigegeben; diese Meldung kommt nur bei selbst gebauten Versionen mit eigener App-ID. Lade HeldixClient von der [Download-Seite](/download) oder melde dich [über den Minecraft Launcher](/hilfe/anmelden-minecraft-launcher) an.
 - **„Dieses Microsoft-Konto hat noch kein Xbox-Profil.“** – Melde dich einmal auf der Xbox-Webseite mit diesem Konto an und erstelle ein Profil. Danach klappt es.
 - **„Kinderkonto: Ein Erwachsener muss das Konto erst zu einer Microsoft-Familie hinzufügen.“** – Ein Elternteil muss dein Konto in seiner Microsoft-Familie freigeben.
 - **„Für dieses Konto ist eine Altersverifizierung nötig.“** – Die Verifizierung musst du bei Microsoft erledigen.

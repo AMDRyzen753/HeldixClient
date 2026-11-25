@@ -29,5 +29,5 @@ HeldixClient hat (noch) keine kostenpflichtige Code-Signatur von Microsoft. Smar
 Spätere Versionen installiert der Launcher von selbst – mehr dazu unter [Updates des Launchers](/hilfe/launcher-updates).
 
 ## Wie geht es weiter?
-1. [Mit dem Microsoft-Konto anmelden](/hilfe/anmelden-microsoft) – oder solange die Freigabe durch Mojang aussteht: [Über den Minecraft Launcher anmelden](/hilfe/anmelden-minecraft-launcher).
+1. [Mit dem Microsoft-Konto anmelden](/hilfe/anmelden-microsoft) – oder [über den Minecraft Launcher](/hilfe/anmelden-minecraft-launcher).
 2. [Das erste Spiel starten](/hilfe/erster-start).

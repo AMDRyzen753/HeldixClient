@@ -10,14 +10,28 @@ Addons sind die einfache Stufe unter den Mods. HeldixClient lädt sie aus dem Or
 
 Wie Heldix-Mods funktionieren, steht in [heldix-loader.md](heldix-loader.md).
 
-## Mitgelieferte Addons
+## Addon-Store
 
-Der Launcher bringt zwei Addons mit. Neue Instanzen mit HeldixClient bekommen sie automatisch. Bei bestehenden Instanzen bietet der Reiter **Instanzen → Heldix-Addons** sie oben als Karte zum Installieren an, auch wenn es eine neuere Version gibt.
+Addons kommen nicht mehr mit dem Launcher, sondern einzeln aus dem **Addon-Store**. Jedes Addon ist ein eigenes Projekt unter [mod/addons](../mod/addons) mit eigener Version. Der Store ist an drei Stellen:
+
+- **Launcher:** Instanzen → Instanz → **Heldix-Addons** → Karten „Addon-Store“ oben (Installieren, Aktualisieren, Details).
+- **Im Spiel:** Heldix-Menü → **Addons** → Reiter **Addon-Store**. Installieren, Aktualisieren und Entfernen wirken nach einem Neustart, weil Addons ihre Tasten beim Start anlegen. Unter Windows sind geladene JARs gesperrt; das Spiel merkt sie in `heldix-addons/.entfernen` vor (bzw. legt eine `.jar.neu` ab) und erledigt das beim nächsten Start.
+- **Webseite:** `/addons` mit Beschreibung, Versionen, Prüfsumme und Download der JAR.
 
 | Addon | Was es macht |
 | --- | --- |
-| **Spotify** ([spotify-addon](../mod/spotify-addon)) | HUD-Element mit Cover, Titel, Künstler und Fortschritt des laufenden Songs. Tasten für Abspielen/Pause (**Pos1**), nächsten Song (**Bild ab**) und vorherigen Song (**Bild auf**). Bei jedem Songwechsel erscheint oben rechts eine kurze Einblendung. |
-| **Uhrzeit & Spielzeit** ([example-addon](../mod/example-addon)) | Uhrzeit und Spielzeit im HUD und eine Begrüßung im Chat. Gleichzeitig die Vorlage für eigene Addons. |
+| **Spotify** ([mod/addons/spotify](../mod/addons/spotify)) | HUD-Element mit Cover, Titel, Künstler und Fortschritt des laufenden Songs. Tasten für Abspielen/Pause (**Pos1**), nächsten Song (**Bild ab**) und vorherigen Song (**Bild auf**). Bei jedem Songwechsel erscheint oben rechts eine kurze Einblendung. |
+| **Uhrzeit & Spielzeit** ([mod/addons/uhrzeit](../mod/addons/uhrzeit)) | Uhrzeit und Spielzeit im HUD und eine Begrüßung im Chat. Gleichzeitig die Vorlage für eigene Addons. |
+
+**Sicherheit:** Addons sind Code, der im Spiel läuft. Deshalb veröffentlicht nur das Team, und jede Version ist mit dem **Update-Schlüssel** signiert (derselbe Ed25519-Schlüssel wie bei Launcher-Updates). Signiert werden die Bytes von `"heldix-addon\n"` + Manifest, damit ein Addon-Manifest nie als Launcher-Update gilt. Der Heldix-Dienst prüft die Signatur beim Veröffentlichen, Launcher und Spiel prüfen Signatur, Größe, SHA-256 und die `heldix.addon.json` der JAR noch einmal vor dem Installieren. Ein übernommenes Team-Konto kann so kein fremdes Addon ausliefern. Der öffentliche Schlüssel liegt im Launcher (`launcher/src/main/update-public-key.ts`) und in der Mod (`mod/src/main/resources/heldix-store-key.pem`); `npm run update-key` schreibt beide, `npm run mod` bricht ab, wenn sie nicht zusammenpassen.
+
+### Ein Addon veröffentlichen
+
+1. Version in `mod/addons/<id>/build.gradle` erhöhen und in `mod/addons/<id>/store.json` die `hinweise` (Was ist neu) eintragen. Dort stehen auch Icon, Kategorie (`hud`, `musik`, `chat`, `werkzeuge`, `sonstiges`), Systeme (`plattformen`, leer = alle) und die lange Beschreibung (Klartext, Absätze durch Leerzeile, Listenpunkte mit „- “).
+2. Im Ordner `launcher`: `npm run addon -- <id>`. Das baut das Addon, signiert es und legt `heldix-addon-<id>-<version>.jar` und `heldix-addon-<id>-<version>.addon.json` in `launcher/release/addons/`.
+3. Auf heldixclient.com im Team-Bereich (Admin) unter **Addons** beide Dateien wählen und veröffentlichen. Jede neue Version muss höher sein als die vorige. Ein Addon lässt sich dort auch aus dem Store nehmen oder eine Version löschen.
+
+Addons anderer Entwickler: Einreichen über eine Support-Anfrage; das Team prüft den Code, legt das Addon unter `mod/addons/` an (oder baut die gelieferte JAR) und veröffentlicht es wie oben.
 
 ### Spotify-Addon
 
@@ -65,14 +79,14 @@ public class MeinAddon implements HeldixAddon {
 }
 ```
 
-**Vorlagen:** [example-addon](../mod/example-addon) (Uhrzeit, Spielzeit, Begrüßung) und [spotify-addon](../mod/spotify-addon) (Tasten, Einstellungen, Bilder, Einblendungen, Hintergrund-Prozess).
+**Vorlagen:** [mod/addons/uhrzeit](../mod/addons/uhrzeit) (Uhrzeit, Spielzeit, Begrüßung) und [mod/addons/spotify](../mod/addons/spotify) (Tasten, Einstellungen, Bilder, Einblendungen, Hintergrund-Prozess).
 
 ```powershell
 cd mod
-.\gradlew :example-addon:build     # Ergebnis: mod/example-addon/build/libs/
+.\gradlew :addons:uhrzeit:build     # Ergebnis: mod/addons/uhrzeit/build/libs/
 ```
 
-Fertige Addons zieht man im Launcher unter **Instanzen → Heldix-Addons** in die Liste oder legt sie direkt in den Ordner `heldix-addons/` der Instanz.
+Zum Ausprobieren zieht man die JAR im Launcher unter **Instanzen → Heldix-Addons** in die Liste oder legt sie direkt in den Ordner `heldix-addons/` der Instanz. Für alle Spieler kommt sie über den Addon-Store (siehe oben).
 
 ## Was die API kann
 
@@ -108,6 +122,6 @@ Details stehen in den Javadoc-Kommentaren der [API-Klassen](../mod/heldix-api/sr
 ## Robustheit
 
 - Jedes Addon bekommt einen eigenen Classloader.
-- Addons mit unpassender API-Version, fehlender `heldix.addon.json` oder Fehlern beim Laden werden übersprungen. Das Heldix-Menü zeigt sie im Reiter **Addons** rot mit Grund an.
+- Addons mit unpassender API-Version, fehlender `heldix.addon.json` oder Fehlern beim Laden werden übersprungen. Das Heldix-Menü zeigt sie unter **Addons → Installiert** rot mit Grund an.
 - Wirft ein Addon zur Laufzeit drei Fehler, wird es abgeschaltet.
 - Das Spiel läuft in allen Fällen weiter.

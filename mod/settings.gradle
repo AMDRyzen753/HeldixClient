@@ -12,11 +12,12 @@ rootProject.name = 'heldixclient'
 include 'heldix-loader'
 // derselbe Loader als Fabric-Mod: Heldix-Mods wie HeldixClient laufen damit auch in Fabric-Instanzen
 include 'heldix-loader-fabric'
-// Heldix-API (reines Java, ohne Minecraft) und Beispiel-Addon
+// Heldix-API (reines Java, ohne Minecraft)
 include 'heldix-api'
-include 'example-addon'
-// Spotify-Addon (Musik im HUD, Steuerung per Taste; wird mit dem Launcher ausgeliefert)
-include 'spotify-addon'
+// Heldix-Addons: jedes Addon ist ein eigenes Projekt mit eigener Version und kommt über den Addon-Store
+// (nicht mehr mit dem Launcher). Veröffentlichen: im Ordner launcher `npm run addon -- <id>`, siehe docs/addons.md.
+include 'addons:uhrzeit'
+include 'addons:spotify'
 // Brücke zum offiziellen Minecraft Launcher (Anmeldung von dort, gespielt wird mit HeldixClient)
 include 'launcher-bridge'
 // Automatischer Test im echten Spiel (wird nicht ausgeliefert)

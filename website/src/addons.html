@@ -1,0 +1,133 @@
+<!--seite {"titel": "Addon-Store", "beschreibung": "Heldix-Addons für HeldixClient: zusätzliche Module und HUD-Anzeigen, vom Team geprüft und signiert. Installieren im Launcher, im Spiel oder per Download.", "bild": "/images/spiel-heldix-menue.png"}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<script type="module" src="/addons.js"></script>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+{{include:nav.html}}
+
+<main id="inhalt" class="wrap store-page" data-api-base="https://__API_DOMAIN__">
+  <div class="page-hero">
+    <span class="eyebrow">Addon-Store</span>
+    <h1>Mehr Module mit <span class="gradient">Heldix-Addons</span></h1>
+    <p class="lead">Addons erweitern HeldixClient um eigene Module und HUD-Anzeigen. Jedes Addon prüft und signiert das Team, bevor es hier erscheint.</p>
+  </div>
+
+  <noscript><p class="notice">Der Addon-Store braucht JavaScript. Ohne Browser geht es im Launcher: Instanzen → Instanz → Heldix-Addons → Addon-Store.</p></noscript>
+
+  <div class="module-tools glass store-tools" role="search" id="store-werkzeuge" hidden>
+    <label class="search-field">
+      <span class="visually-hidden">Addons durchsuchen</span>
+      {{icon:search}}
+      <input type="search" id="addon-suche" placeholder="Addon suchen, z. B. Musik" autocomplete="off">
+    </label>
+    <div class="segmented" role="group" aria-label="Kategorie" id="addon-kategorien"></div>
+    <label class="sort-field">
+      <span>Sortieren</span>
+      <select class="input select tiny-select" id="addon-sortierung">
+        <option value="beliebt">Beliebt</option>
+        <option value="neu">Neu</option>
+        <option value="name">Name</option>
+      </select>
+    </label>
+  </div>
+  <p class="result-line" id="addon-ergebnis" aria-live="polite"></p>
+  <p class="notice" id="addon-unbekannt" role="status" hidden></p>
+
+  <div class="addon-grid" id="addon-liste" aria-busy="true">
+    <div class="loading-inline" role="status"><span class="spinner" aria-hidden="true"></span><span>Addons werden geladen …</span></div>
+  </div>
+  <div class="empty" id="addon-keine-treffer" hidden>{{icon:search}}<p>Kein Addon passt zu deiner Suche.</p></div>
+
+  <!-- Noch keine Addons -->
+  <div class="store-state glass" id="store-leer" hidden>
+    <span class="badge">{{icon:addons}}</span>
+    <h2>Noch keine Addons im Store</h2>
+    <p>Sobald das Team ein Addon veröffentlicht, steht es hier – und im Launcher und im Spiel.</p>
+    <p class="store-state-actions"><a class="button small ghost" href="/entwickler/addons">Eigenes Addon schreiben{{icon:chevron-right}}</a></p>
+  </div>
+
+  <!-- Dienst nicht erreichbar -->
+  <div class="store-state glass warn" id="store-fehler" role="alert" hidden>
+    <span class="badge">{{icon:warning}}</span>
+    <h2>Der Addon-Store ist gerade nicht erreichbar</h2>
+    <p id="store-fehler-text">Der Heldix-Dienst antwortet nicht. Installierte Addons laufen trotzdem weiter.</p>
+    <p class="store-state-actions">
+      <button class="button small" type="button" id="store-erneut">{{icon:refresh}}Erneut versuchen</button>
+      <a class="button small ghost" href="/status">Status ansehen</a>
+    </p>
+  </div>
+
+  <!-- Installieren -->
+  <section id="installieren" aria-labelledby="installieren-titel">
+    <div class="section-head">
+      <span class="eyebrow">Installieren</span>
+      <h2 id="installieren-titel">So kommt ein Addon ins Spiel</h2>
+      <p>Addons gelten immer für eine Instanz mit HeldixClient. Beim nächsten Start der Instanz sind sie dabei.</p>
+    </div>
+    <div class="install-ways">
+      <article class="install-way">
+        <span class="badge">{{icon:loader-heldix}}</span>
+        <h3>Im Launcher</h3>
+        <p><strong>Instanzen</strong> → Instanz wählen → Reiter <strong>Heldix-Addons</strong> → <strong>Addon-Store</strong> → <strong>Installieren</strong>. Neue Versionen bekommst du dort mit <strong>Aktualisieren</strong>.</p>
+      </article>
+      <article class="install-way">
+        <span class="badge">{{icon:modules}}</span>
+        <h3>Im Spiel</h3>
+        <p>Heldix-Menü (rechte <kbd>Umschalt</kbd>-Taste) → <strong>Einstellungen</strong> → <strong>Addons</strong> → Reiter <strong>Store</strong> → <strong>Installieren</strong>. Das Addon lädt beim nächsten Spielstart.</p>
+      </article>
+      <article class="install-way">
+        <span class="badge">{{icon:folder}}</span>
+        <h3>Von Hand</h3>
+        <p>JAR herunterladen und in den Ordner <code>heldix-addons</code> der Instanz legen – nicht nach <code>mods</code>. Im Launcher: Instanz → <strong>Einstellungen</strong> → <strong>Ordner</strong> → <strong>Addons</strong>.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- Fragen -->
+  <section id="fragen" aria-labelledby="fragen-titel">
+    <div class="section-head">
+      <span class="eyebrow">Fragen</span>
+      <h2 id="fragen-titel">Gut zu wissen</h2>
+    </div>
+    <div class="faq">
+      <details>
+        <summary>Sind Addons sicher?{{icon:chevron-down}}</summary>
+        <p>Addons sind Programmcode, der in deinem Spiel läuft. Deshalb kommen in den Store nur Addons, die das Team geprüft und mit seinem Schlüssel signiert hat. Launcher und Spiel prüfen beim Installieren die Signatur und die SHA-256-Prüfsumme der Datei.</p>
+      </details>
+      <details>
+        <summary>Was bedeutet „API-Stufe“?{{icon:chevron-down}}</summary>
+        <p>Die Stufe der Heldix-API, die ein Addon braucht. HeldixClient lädt derzeit Addons bis Stufe 2. Braucht ein Addon mehr, aktualisiere den Launcher – HeldixClient kommt mit ihm.</p>
+      </details>
+      <details>
+        <summary>Läuft ein Addon nach einem Minecraft-Update weiter?{{icon:chevron-down}}</summary>
+        <p>Ja. Addons nutzen nur die Heldix-API, deshalb läuft dieselbe Datei weiter, solange es HeldixClient für die Minecraft-Version gibt. Hat ein Addon einen Fehler, schaltet HeldixClient nur das Addon ab – das Spiel läuft weiter.</p>
+      </details>
+      <details>
+        <summary>Was zählt der Download-Zähler?{{icon:chevron-down}}</summary>
+        <p>Nur, wie oft eine Datei vollständig geladen wurde. Dabei speichert der Dienst weder deine IP-Adresse noch andere Angaben über dich.</p>
+      </details>
+      <details>
+        <summary>Kann ich ein eigenes Addon in den Store bringen?{{icon:chevron-down}}</summary>
+        <p>Ja. Schick es dem Team über eine <a href="/konto#ziel=support">Support-Anfrage</a>. Das Team prüft es, signiert es und stellt es in den Store. Wie du ein Addon baust, steht unter <a href="/entwickler/addons">Für Entwickler</a>.</p>
+      </details>
+    </div>
+  </section>
+</main>
+
+<!-- Details zu einem Addon (/addons#<id>) -->
+<dialog class="modal addon-dialog" id="addon-detail" aria-labelledby="addon-detail-titel">
+  <div class="addon-dialog-inner">
+    <button class="icon-button addon-dialog-close" type="button" id="addon-detail-schliessen" aria-label="Schließen">{{icon:close}}</button>
+    <div id="addon-detail-inhalt"></div>
+  </div>
+</dialog>
+
+{{ICONS_ALLE_HTML}}
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+{{include:footer.html}}
+</body>
+</html>

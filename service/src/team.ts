@@ -1,7 +1,8 @@
-// Team-Bereich der Webseite: Meldungen, Sperren, Spieler, Neuigkeiten, Updates, Mitglieder und Protokoll.
+// Team-Bereich der Webseite: Meldungen, Sperren, Spieler, Neuigkeiten, Updates, Addons, Mitglieder und Protokoll.
 // Zugang (Rolle, 2FA) prüft app.ts mit Web.teamGate; hier stehen nur noch die Aktionen.
 import type { KeyObject } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import type { Addons } from './addons';
 import type { AuditRow, BanRow, NewsRow, ReportRow, ReportStatus, Store, TeamMemberRow, TeamProfilePatch, TeamRole, UserRow } from './db';
 import { UNKNOWN_PLAYER } from './friends';
 import { HttpError } from './http';
@@ -49,6 +50,8 @@ export interface TeamOptions {
   /** Öffentlicher Update-Schlüssel (Ed25519); ohne: Veröffentlichen im Browser geht nicht (503). */
   updateKey: KeyObject | null;
   maxUploadBytes: number;
+  /** Größter Upload einer Addon-Datei (JAR). */
+  maxAddonUploadBytes: number;
   uploadIdleTimeoutMs: number;
 }
 
@@ -70,6 +73,7 @@ export class Team {
     private readonly store: Store,
     private readonly realtime: Realtime,
     private readonly updates: Updates,
+    private readonly addons: Addons,
     private readonly options: TeamOptions,
   ) {}
 
@@ -518,5 +522,46 @@ export class Team {
     await this.updates.deleteFile(file);
     this.audit(actor, 'update.delete', file);
     return this.updatesOverview();
+  }
+
+  // ---------- Addons ----------
+
+  addonsOverview() {
+    return this.addons.overview(this.options.updateKey !== null);
+  }
+
+  async uploadAddon(actor: Actor, req: IncomingMessage, file: string) {
+    const result = await this.addons.receive(req, file, this.options.maxAddonUploadBytes, this.options.uploadIdleTimeoutMs);
+    this.audit(actor, 'addon.upload', result.file, `${result.size} Byte, SHA-256 ${result.sha256}`);
+    return result;
+  }
+
+  async deleteAddonFile(actor: Actor, file: string) {
+    await this.addons.deleteFile(file);
+    this.audit(actor, 'addon.delete', file);
+    return this.addonsOverview();
+  }
+
+  /** Signiert mit dem Update-Schlüssel (über "heldix-addon\n" + Manifest); ohne Schlüssel 503. */
+  async publishAddon(actor: Actor, input: Record<string, unknown>) {
+    if (!this.options.updateKey) {
+      throw new HttpError(503, 'Auf diesem Server ist kein Update-Schlüssel eingerichtet. Addons lassen sich hier nicht veröffentlichen.');
+    }
+    const row = await this.addons.publish(input, this.options.updateKey, actor.name);
+    this.audit(actor, 'addon.publish', `${row.id} ${row.version}`, row.file);
+    return this.addonsOverview();
+  }
+
+  /** `{ "hidden": true | false }`: aus dem Store nehmen bzw. wieder zeigen (Dateien bleiben). */
+  async setAddonHidden(actor: Actor, id: string, input: Record<string, unknown>) {
+    if (typeof input.hidden !== 'boolean') throw new HttpError(400, '„hidden“ muss true oder false sein.');
+    if (this.addons.setHidden(id, input.hidden)) this.audit(actor, input.hidden ? 'addon.hide' : 'addon.show', id);
+    return this.addonsOverview();
+  }
+
+  async deleteAddonVersion(actor: Actor, id: string, version: string) {
+    const result = await this.addons.deleteVersion(id, version);
+    this.audit(actor, 'addon.delete', `${id} ${version}`, result.removed ? `${result.file} (letzte Version, Addon entfernt)` : result.file);
+    return this.addonsOverview();
   }
 }

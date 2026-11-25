@@ -130,6 +130,7 @@
       <button class="tab" type="button" role="tab" id="tab-sperren" data-tab="sperren" aria-controls="panel-sperren" aria-selected="false" tabindex="-1">{{icon:ban}}Sperren</button>
       <button class="tab" type="button" role="tab" id="tab-neuigkeiten" data-tab="neuigkeiten" aria-controls="panel-neuigkeiten" aria-selected="false" tabindex="-1">{{icon:news}}Neuigkeiten</button>
       <button class="tab" type="button" role="tab" id="tab-updates" data-tab="updates" data-admin aria-controls="panel-updates" aria-selected="false" tabindex="-1" hidden>{{icon:download}}Updates</button>
+      <button class="tab" type="button" role="tab" id="tab-addons" data-tab="addons" data-admin aria-controls="panel-addons" aria-selected="false" tabindex="-1" hidden>{{icon:addons}}Addons</button>
       <button class="tab" type="button" role="tab" id="tab-team" data-tab="team" data-admin aria-controls="panel-team" aria-selected="false" tabindex="-1" hidden>{{icon:friends}}Team</button>
       <button class="tab" type="button" role="tab" id="tab-protokoll" data-tab="protokoll" data-admin aria-controls="panel-protokoll" aria-selected="false" tabindex="-1" hidden>{{icon:clock}}Protokoll</button>
       <button class="tab" type="button" role="tab" id="tab-profil" data-tab="profil" aria-controls="panel-profil" aria-selected="false" tabindex="-1">{{icon:user}}Mein Teamprofil</button>
@@ -313,6 +314,69 @@
       </div>
     </div>
 
+    <!-- Addons -->
+    <div class="panel" id="panel-addons" role="tabpanel" aria-labelledby="tab-addons" tabindex="0" hidden>
+      <p class="notice small-notice key-notice" id="addon-schluessel-fehlt" role="alert" hidden>Im Heldix-Dienst ist kein Update-Schlüssel eingerichtet (<code>HELDIX_DIENST_UPDATE_KEY</code>). Ohne ihn kann der Dienst keine Signatur prüfen und nimmt kein Addon an. Hochladen geht trotzdem.</p>
+      <div class="panel-grid">
+        <div class="app-card">
+          <h2>Addon veröffentlichen</h2>
+          <ol class="upload-steps">
+            <li>
+              <h3>1. JAR und .addon.json wählen</h3>
+              <p class="muted small">Beide zusammen oder nacheinander. Die Seite lädt zuerst die JAR hoch und rechnet ihre SHA-256-Prüfsumme selbst nach.</p>
+              <div class="file-row">
+                <label class="button small ghost file-button">{{icon:file}}Dateien wählen …<input type="file" id="addon-dateien" accept=".jar,.json,application/java-archive,application/json" multiple class="visually-hidden"></label>
+                <span class="file-name muted" id="addon-dateien-name">Keine Datei gewählt</span>
+              </div>
+              <div class="upload-progress" id="addon-fortschritt" hidden>
+                <div class="progress" role="progressbar" aria-label="Hochladen" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="addon-balken"><span></span></div>
+                <div class="progress-row"><span id="addon-fortschritt-text">0 %</span><button class="button tiny ghost" type="button" id="addon-abbrechen">Abbrechen</button></div>
+              </div>
+              <p class="form-error" id="addon-upload-fehler" role="alert" hidden></p>
+              <p class="form-ok" id="addon-upload-ok" hidden></p>
+            </li>
+            <li>
+              <h3>2. Prüfen und veröffentlichen</h3>
+              <div class="manifest-check" id="addon-pruefung"></div>
+              <div class="card-actions" id="addon-aktionen" hidden>
+                <button class="button small" type="button" id="addon-veroeffentlichen">{{icon:check}}Veröffentlichen</button>
+                <button class="button small ghost" type="button" id="addon-verwerfen">Auswahl verwerfen</button>
+              </div>
+            </li>
+          </ol>
+        </div>
+        <div class="app-card">
+          <h2>So kommt ein Addon in den Store</h2>
+          <ol class="steps small-steps">
+            <li><span>Auf dem Entwickler-PC im Ordner <code>launcher</code> <code>npm run addon -- &lt;id&gt;</code> ausführen. Das baut <code>heldix-addon-&lt;id&gt;-&lt;version&gt;.jar</code> und signiert die passende <code>.addon.json</code> mit dem privaten Update-Schlüssel; beide liegen danach in <code>launcher/release/addons/</code>.</span></li>
+            <li><span>Hier beide Dateien wählen. Die JAR wird hochgeladen, dann zeigt die Seite die Prüfung.</span></li>
+            <li><span>Veröffentlichen: Das Addon steht sofort im Store – auf der Webseite, im Launcher und im Spiel.</span></li>
+          </ol>
+          <p class="info-box small">{{icon:shield}}<span>Der Dienst prüft die Signatur mit dem öffentlichen Update-Schlüssel, Größe und SHA-256 der JAR und dass die Version höher ist als jede vorhandene. Ohne gültige Signatur kommt nichts in den Store – auch nicht von einem übernommenen Team-Konto.</span></p>
+          <p class="hint">Addons von anderen kommen über eine Support-Anfrage. Erst den Code prüfen, dann bauen und signieren.</p>
+        </div>
+      </div>
+      <div class="app-card">
+        <div class="card-head">
+          <div>
+            <h2>Addons <span class="muted" id="addon-anzahl"></span></h2>
+            <p>Ausgeblendete Addons bleiben samt Dateien auf dem Server, stehen aber nirgends im Store.</p>
+          </div>
+          <button class="button tiny ghost" type="button" id="addons-neu">{{icon:refresh}}Aktualisieren</button>
+        </div>
+        <div id="addon-verwaltung"></div>
+      </div>
+      <div class="app-card">
+        <div class="card-head">
+          <div>
+            <h2>Hochgeladen, nicht veröffentlicht</h2>
+            <p>JARs ohne veröffentlichtes Manifest. Sie stehen nicht im Store.</p>
+          </div>
+        </div>
+        <div id="addon-offen"></div>
+      </div>
+    </div>
+
     <!-- Team -->
     <div class="panel" id="panel-team" role="tabpanel" aria-labelledby="tab-team" tabindex="0" hidden>
       <div class="app-card">
@@ -333,7 +397,7 @@
           <button class="button small" type="submit">{{icon:user-plus}}Hinzufügen</button>
         </form>
         <p class="form-error" id="mitglied-fehler" role="alert" hidden></p>
-        <p class="hint"><strong>Moderatoren</strong> sehen Meldungen, Spieler und Sperren und schreiben Neuigkeiten. <strong>Admins</strong> zusätzlich: Updates, Team, Protokoll, Cape zurücksetzen und Spielerdaten löschen.</p>
+        <p class="hint"><strong>Moderatoren</strong> sehen Meldungen, Spieler und Sperren und schreiben Neuigkeiten. <strong>Admins</strong> zusätzlich: Updates, Addons, Team, Protokoll, Cape zurücksetzen und Spielerdaten löschen.</p>
       </div>
       <div class="app-card">
         <div class="card-head"><h2>Mitglieder <span class="muted" id="mitglieder-anzahl"></span></h2></div>
@@ -399,7 +463,8 @@
   </div>
 </main>
 
-{{include:icons.html}}
+{{ICONS_ALLE_HTML}}
+<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 {{include:footer.html}}
 </body>
 </html>

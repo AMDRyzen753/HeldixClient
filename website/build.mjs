@@ -8,8 +8,9 @@
 // - Seitenangaben (Titel, Beschreibung, Open Graph, noindex) aus <!--seite {…}--> am Anfang einer Seite
 // - Hilfe-Center (src/hilfe/*.md) und Entwickler-Seiten (src/entwickler/*.md) mit eigenem, sicherem
 //   Markdown-Renderer (kein HTML aus den Texten) und Syntax-Farben per CSS-Klassen
-// - Module aus den Quellen der Mod (module/impl/*.java, Icons aus Module.java, Spotify-Addon) + Texte aus
-//   src/data/module.json; Capes aus capes.json der Mod (Texturen werden mitkopiert)
+// - Module aus den Quellen der Mod (module/impl/*.java, Icons aus Module.java, Module der Store-Addons aus
+//   mod/addons/<id>) + Texte aus src/data/module.json; Capes aus capes.json der Mod (Texturen werden mitkopiert)
+// - Addon-Store (/addons): der Inhalt kommt zur Laufzeit vom Dienst, die Seite bekommt dafür das ganze Icon-Set
 // - 3D-Ansicht: skinview3d (MIT) samt Lizenztexten, dazu ein selbst gezeichneter Standard-Skin
 // - Bilder (docs/images), Logo, Hintergrund und die Schrift Inter (aus der Mod) werden mitkopiert
 // - sitemap.xml und robots.txt
@@ -312,6 +313,9 @@ function defaultSkin() {
 // Module und Capes aus den Quellen der Mod
 // ---------------------------------------------------------------------------------------------------------
 
+/** Addons, deren Module auf /module stehen. Die Addons liegen in mod/addons/<id> und kommen aus dem Addon-Store. */
+const STORE_MODULE_ADDONS = ['spotify'];
+
 function readModules(icons) {
   const modDir = path.join(root, 'mod', 'src', 'main', 'java', 'dev', 'heldixclient', 'module');
   const iconMap = {};
@@ -324,15 +328,20 @@ function readModules(icons) {
     const [, id, name, description, enabled] = call;
     modules.push({ id, name, description, enabled: enabled === 'true', hud: /extends\s+HudModule\b/.test(source), icon: iconMap[id] ?? 'cube', addon: null });
   }
-  // Mitgelieferte Addons (Spotify)
-  const addonDir = path.join(root, 'mod', 'spotify-addon', 'src', 'main', 'java');
+  // Module aus Addons im Addon-Store (die Karte verlinkt auf /addons#<id>)
   const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? walk(path.join(dir, entry.name)) : entry.name.endsWith('.java') ? [path.join(dir, entry.name)] : []));
-  if (existsSync(addonDir)) {
-    for (const file of walk(addonDir)) {
+  for (const addonId of STORE_MODULE_ADDONS) {
+    const addonDir = path.join(root, 'mod', 'addons', addonId);
+    const javaDir = path.join(addonDir, 'src', 'main', 'java');
+    if (!existsSync(javaDir)) throw new Error(`Addon ${addonId}: ${path.relative(root, javaDir)} fehlt`);
+    const info = JSON.parse(readFileSync(path.join(addonDir, 'src', 'main', 'resources', 'heldix.addon.json'), 'utf8'));
+    const addon = { id: info.id || addonId, name: `${info.name || addonId}-Addon` };
+    for (const file of walk(javaDir)) {
       const source = readFileSync(file, 'utf8');
-      for (const match of source.matchAll(/register(Hud)?Module\(\s*ModuleSpec\.of\("([^"]+)",\s*"([^"]+)",\s*"([^"]*)"\)([^;]*?)(?:,|\))/g)) {
+      // Bis zum Ende der Anweisung lesen: withIcon(...) steht oft hinter .at(x, y)
+      for (const match of source.matchAll(/register(Hud)?Module\(\s*ModuleSpec\.of\("([^"]+)",\s*"([^"]+)",\s*"([^"]*)"\)([^;]*)/g)) {
         const icon = /withIcon\("([a-z0-9-]+)"\)/.exec(match[5])?.[1] ?? 'addons';
-        modules.push({ id: match[2], name: match[3], description: match[4], enabled: false, hud: Boolean(match[1]), icon, addon: 'Spotify-Addon' });
+        modules.push({ id: match[2], name: match[3], description: match[4], enabled: false, hud: Boolean(match[1]), icon, addon });
       }
     }
   }
@@ -383,12 +392,13 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
     return `<article class="module-card tile reveal" id="modul-${escape(module.id)}" data-kategorie="${kind}" data-suche="${escape(search.replace(/\[\[|\]\]/g, ''))}">
   <div class="module-top"><span class="badge">${svg(module.icon)}</span><span class="chip ${kind === 'hud' ? 'accent' : kind === 'addon' ? 'warning' : ''}">${kindLabel}</span>${module.enabled ? '<span class="chip success">von Anfang an an</span>' : ''}</div>
   <h3>${escape(module.name)}</h3>
-  <p class="module-short">${escape(module.description)}${module.addon ? ` · ${escape(module.addon)}` : ''}</p>
+  <p class="module-short">${escape(module.description)}${module.addon ? ` · ${escape(module.addon.name)}` : ''}</p>
   ${extra.text ? `<p class="module-text">${inline(extra.text)}</p>` : ''}
   ${extra.tasten?.length ? `<ul class="module-keys" aria-label="Tasten">${extra.tasten.map((key) => `<li>${inline(key)}</li>`).join('')}</ul>` : ''}
   ${extra.einstellungen?.length ? `<details class="module-more"><summary>Einstellungen${svg('chevron-down')}</summary><ul>${extra.einstellungen.map((entry) => `<li>${inline(entry)}</li>`).join('')}</ul></details>` : ''}
   ${extra.hinweis ? `<p class="module-hint">${svg('info')}<span>${inline(extra.hinweis)}</span></p>` : ''}
   ${extra.bild ? `<button class="module-shot" type="button" data-full="/images/${escape(extra.bild)}">${svg('image')}Im Spiel ansehen</button>` : ''}
+  ${module.addon ? `<a class="module-store" href="/addons#${escape(module.addon.id)}">${svg('addons')}Im Addon-Store ansehen</a>` : ''}
 </article>`;
   };
 
@@ -478,6 +488,11 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
     HILFE_THEMEN_HTML: hilfeKategorieChips,
     HILFE_ANZAHL: String(hilfe.length),
     ENTWICKLER_KARTEN_HTML: entwicklerCardsHtml,
+    // Das ganze Icon-Set für Seiten, die ihre Icons erst zur Laufzeit kennen (Addon-Store: das Icon steht im Manifest)
+    ICONS_ALLE_HTML: `<template id="icons">\n${Object.keys(icons)
+      .sort()
+      .map((name) => `  <span data-icon="${escape(name)}">${svg(name)}</span>`)
+      .join('\n')}\n</template>`,
   };
 
   const partials = path.join(srcDir, '_partials');

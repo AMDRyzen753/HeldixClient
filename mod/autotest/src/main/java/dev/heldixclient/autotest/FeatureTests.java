@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import com.mojang.authlib.GameProfile;
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.heldixclient.HeldixClient;
+import dev.heldixclient.addon.AddonStore;
 import dev.heldixclient.config.HeldixConfig;
 import dev.heldixclient.module.HudModule;
 import dev.heldixclient.module.Module;
@@ -121,7 +122,8 @@ final class FeatureTests {
 				Math.abs(yawDuring - yawBefore) < 0.01f && Math.abs(cameraYaw - yawBefore) > 30f);
 		t.screenshot("heldix-22-freelook");
 		t.run(mc -> HeldixClient.freelookKey.setDown(false));
-		t.waitTicks(3);
+		// bei langsamen Frames braucht das Zurückschalten etwas länger als drei Ticks
+		t.waitSoft(mc -> !ModuleManager.freelook.isActive() && mc.options.getCameraType() == CameraType.FIRST_PERSON, 3);
 		t.check("Freelook beendet: erste Person, Blickrichtung unverändert", t.compute(mc -> !ModuleManager.freelook.isActive()
 				&& mc.options.getCameraType() == CameraType.FIRST_PERSON && Math.abs(mc.player.getYRot() - yawBefore) < 0.01f));
 
@@ -232,6 +234,87 @@ final class FeatureTests {
 	// ======================================================================================
 
 	private static final HttpClient HTTP = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
+
+	/**
+	 * Addon-Store gegen den Test-Dienst (--service): Liste mit geprüften Signaturen, Entfernen (geladene JAR wird unter
+	 * Windows vorgemerkt), wieder Installieren (Download mit Prüfsumme) und eine gefälschte Signatur.
+	 * Die Addons veröffentlicht vorher der Ende-zu-Ende-Test (npm run addon); ohne sie wird der Rest übersprungen.
+	 */
+	static void addonStore(TestContext t) {
+		if (t.compute(mc -> Social.baseUrl()).isEmpty()) {
+			t.log("Addon-Store: kein Heldix-Dienst (--service fehlt), Test übersprungen");
+			return;
+		}
+		t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.STORE));
+		t.waitTicks(5);
+		t.run(mc -> AddonStore.refresh(true));
+		t.waitSoft(mc -> !AddonStore.busy() && AddonStore.status() != AddonStore.Status.LOADING, 20);
+		t.check("Addon-Store geladen (" + t.compute(mc -> AddonStore.status()) + ", " + t.compute(mc -> AddonStore.error()) + ")",
+				t.compute(mc -> AddonStore.status()) == AddonStore.Status.READY);
+		List<AddonStore.Entry> entries = t.compute(mc -> AddonStore.entries());
+		if (entries.isEmpty()) {
+			t.log("Addon-Store ist leer – Installieren übersprungen");
+			return;
+		}
+		AddonStore.Entry uhrzeit = entries.stream().filter(e -> e.id().equals("uhrzeit")).findFirst().orElse(null);
+		t.check("Addon-Store: Uhrzeit & Spielzeit mit gültiger Signatur", uhrzeit != null);
+		if (uhrzeit == null) return;
+		String before = t.compute(mc -> AddonStore.installedVersion("uhrzeit"));
+		t.moveMouse(5, 5);
+		if (before != null && dev.heldixclient.addon.AddonManager.compareVersions(uhrzeit.version(), before) > 0) {
+			// Start mit --alte-addons: Update über den Store (Download, Größe, SHA-256, heldix.addon.json)
+			t.check("Update angeboten (" + before + " → " + uhrzeit.version() + ", Abzeichen " + t.compute(mc -> AddonStore.updateCount()) + ")",
+					t.compute(mc -> AddonStore.updateCount()) >= 1);
+			t.waitTicks(5);
+			t.screenshot("heldix-store-0-update");
+			t.run(mc -> AddonStore.install(uhrzeit));
+			t.waitSoft(mc -> !AddonStore.busy(), 60);
+			t.check("Update aus dem Store geladen (" + t.compute(mc -> AddonStore.failure("uhrzeit")) + ")",
+					uhrzeit.version().equals(t.compute(mc -> AddonStore.installedVersion("uhrzeit"))) && t.compute(mc -> AddonStore.failure("uhrzeit")) == null
+							&& "aktualisiert".equals(t.compute(mc -> AddonStore.changes().get("uhrzeit"))));
+			java.nio.file.Path dir = t.compute(mc -> dev.heldixclient.addon.AddonManager.addonDirectory());
+			boolean oldGoneOrPending = !java.nio.file.Files.exists(dir.resolve("heldix-addon-uhrzeit-" + before + ".jar"))
+					|| t.compute(mc -> AddonStore.pendingRemoval("heldix-addon-uhrzeit-" + before + ".jar"));
+			t.check("Alte Version gelöscht bzw. für den Neustart vorgemerkt", oldGoneOrPending
+					&& java.nio.file.Files.exists(dir.resolve(uhrzeit.file())));
+		}
+		t.run(mc -> ((HeldixMenuScreen) mc.gui.screen()).showStoreDetails("spotify"));
+		t.waitTicks(5);
+		t.screenshot("heldix-store-1-liste");
+		t.check("Uhrzeit gilt als installiert", uhrzeit.version().equals(t.compute(mc -> AddonStore.installedVersion("uhrzeit"))));
+
+		t.run(mc -> AddonStore.remove("uhrzeit"));
+		t.waitSoft(mc -> !AddonStore.busy(), 20);
+		t.check("Entfernen: Uhrzeit gilt als entfernt", t.compute(mc -> AddonStore.installedVersion("uhrzeit")) == null);
+		t.check("Entfernen: Hinweis auf Neustart", "entfernt".equals(t.compute(mc -> AddonStore.changes().get("uhrzeit"))));
+		t.waitTicks(3);
+		t.screenshot("heldix-store-2-entfernt");
+
+		t.run(mc -> AddonStore.install(uhrzeit));
+		t.waitSoft(mc -> !AddonStore.busy(), 60);
+		t.check("Wieder installiert aus dem Store (" + t.compute(mc -> AddonStore.failure("uhrzeit")) + ")",
+				uhrzeit.version().equals(t.compute(mc -> AddonStore.installedVersion("uhrzeit"))) && t.compute(mc -> AddonStore.failure("uhrzeit")) == null);
+
+		// Rohdaten vom Dienst: Original gültig, verändertes Manifest abgelehnt
+		try {
+			HttpResponse<String> raw = HTTP.send(HttpRequest.newBuilder(URI.create(t.compute(mc -> Social.baseUrl()) + "/v1/addons")).GET().build(),
+					HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+			JsonObject first = JsonParser.parseString(raw.body()).getAsJsonObject().getAsJsonArray("addons").get(0).getAsJsonObject();
+			String manifest = first.get("manifest").getAsString();
+			String signature = first.get("signature").getAsString();
+			boolean original = AddonStore.verify(manifest, signature, 0) != null;
+			boolean tampered;
+			try {
+				AddonStore.verify(manifest.replace("\"api\":", "\"api\": "), signature, 0);
+				tampered = false;
+			} catch (Exception expected) {
+				tampered = true;
+			}
+			t.check("Signatur: Original gültig, verändertes Manifest abgelehnt", original && tampered);
+		} catch (Exception e) {
+			t.check("Signatur-Prüfung (" + e + ")", false);
+		}
+	}
 
 	static void social(TestContext t) {
 		if (t.compute(mc -> Social.state()) == Social.State.DISABLED) {

@@ -145,6 +145,25 @@
     </div>
   </section>
 
+  <section id="addon-store" aria-labelledby="addon-store-titel">
+    <div class="wrap">
+      <div class="store-band reveal">
+        <div class="store-band-text">
+          <span class="eyebrow">{{icon:addons}}Addon-Store</span>
+          <h2 id="addon-store-titel">Noch mehr Module mit Addons</h2>
+          <p>Addons erweitern HeldixClient um eigene Module und HUD-Anzeigen. In den Store kommt nur, was das Team geprüft und signiert hat.</p>
+          <ul class="story-list">
+            <li>{{icon:check}}<span>Installieren mit einem Klick – im Launcher oder im Spiel</span></li>
+            <li>{{icon:check}}<span>Laufen auch nach Minecraft-Updates weiter</span></li>
+            <li>{{icon:check}}<span>Hat ein Addon einen Fehler, schaltet HeldixClient nur das Addon ab</span></li>
+          </ul>
+          <p class="store-band-actions"><a class="button" href="/addons">{{icon:addons}}Zum Addon-Store</a></p>
+        </div>
+        <div class="store-band-list" id="start-addons" aria-label="Beliebt im Addon-Store" hidden></div>
+      </div>
+    </div>
+  </section>
+
   <section id="bilder" aria-labelledby="bilder-titel">
     <div class="wrap">
       <div class="section-head reveal">
@@ -241,6 +260,7 @@
   <figure><img alt=""><figcaption></figcaption></figure>
 </div>
 
+{{ICONS_ALLE_HTML}}
 {{include:footer.html}}
 </body>
 </html>

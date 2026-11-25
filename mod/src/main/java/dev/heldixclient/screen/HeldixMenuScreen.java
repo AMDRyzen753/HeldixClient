@@ -6,6 +6,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.device.GpuDevice;
 import dev.heldixclient.HeldixClient;
 import dev.heldixclient.addon.AddonManager;
+import dev.heldixclient.addon.AddonStore;
 import dev.heldixclient.addon.LoadedAddon;
 import dev.heldixclient.api.HeldixApi;
 import dev.heldixclient.config.HeldixConfig;
@@ -135,6 +136,10 @@ public class HeldixMenuScreen extends ShellScreen {
 	private Filter filter = Filter.ALL;
 	private CapeTab capeTab = CapeTab.HELDIX;
 	private WaypointTab waypointTab = WaypointTab.LIST;
+	/** Addon-Store: aufgeklappte Karte und Bestätigung für Entfernen */
+	private String storeOpen;
+	private String storeConfirmRemove;
+	private long storeConfirmAt;
 	private List<Row> rows = List.of();
 
 	private Setting.Slider dragging;
@@ -295,6 +300,11 @@ public class HeldixMenuScreen extends ShellScreen {
 		throw new IllegalStateException("Kein Eintrag " + name + " in der Seitenleiste");
 	}
 
+	/** Details einer Karte im Addon-Store aufklappen (für den Autotest) */
+	public void showStoreDetails(String id) {
+		storeOpen = id;
+	}
+
 	/** Ids der sichtbaren Reiter (für den Autotest) */
 	public List<String> tabIds() {
 		return tabs.stream().map(ShellTab::id).toList();
@@ -370,6 +380,7 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	@Override
 	protected void initContent() {
+		AddonStore.refresh(false);
 		search = null;
 		pageInput = null;
 		pageButton = null;
@@ -805,6 +816,11 @@ public class HeldixMenuScreen extends ShellScreen {
 			case PERFORMANCE -> "Mehr FPS, weniger Last";
 			case SETTINGS -> "Design, HUD und Tasten";
 			case ADDONS -> AddonManager.addons().size() + (AddonManager.addons().size() == 1 ? " Addon installiert" : " Addons installiert");
+			case STORE -> switch (AddonStore.status()) {
+				case READY -> AddonStore.entries().size() == 1 ? "1 Addon im Store" : AddonStore.entries().size() + " Addons im Store";
+				case ERROR -> "Store nicht erreichbar";
+				default -> AddonStore.available() ? "Lade …" : "Braucht den Heldix-Dienst";
+			};
 			case INFO -> "Versionen und geladene Mods";
 			default -> null;
 		};
@@ -838,6 +854,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			case PERFORMANCE -> buildPerformanceRows(list);
 			case SETTINGS -> buildSettingsRows(list);
 			case ADDONS -> buildAddonRows(list);
+			case STORE -> buildStoreRows(list);
 			case INFO -> buildInfoRows(list);
 			default -> {
 			}
@@ -1307,14 +1324,64 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	private void buildAddonRows(List<Row> list) {
 		List<LoadedAddon> addons = AddonManager.addons();
+		Map<String, String> changes = AddonStore.changes();
+		if (!changes.isEmpty()) list.add(new Notice("refresh", restartText(changes), Ui.WARNING));
 		if (addons.isEmpty()) {
-			list.add(new EmptyState("addons", "Keine Addons installiert", "Lege Heldix-Addons (.jar) in den Ordner " + AddonManager.ADDON_DIR
-					+ " deiner Instanz oder installiere sie im Launcher."));
+			list.add(new EmptyState("addons", "Keine Addons installiert", "Addons wie Spotify oder Uhrzeit & Spielzeit findest du im Addon-Store."));
+			list.add(new Notice("download", "Geprüfte Addons mit einem Klick installieren.", Ui.ACCENT_TEXT).action("Zum Addon-Store", () -> go(Shell.Page.STORE)));
 		} else {
 			list.add(new Section("Installiert", addons.size() + (addons.size() == 1 ? " Addon" : " Addons")));
 			for (LoadedAddon addon : addons) list.add(new AddonCard(addon));
 		}
 		list.add(new Text("Heldix Loader " + HeldixLoader.version() + "  ·  Addon-API " + HeldixApi.API_VERSION, Ui.FAINT));
+	}
+
+	/** Hinweis nach Änderungen im Store: wirken erst nach einem Neustart (Addons legen beim Start ihre Tasten an) */
+	private static String restartText(Map<String, String> changes) {
+		List<String> parts = new ArrayList<>();
+		changes.forEach((id, action) -> {
+			String name = AddonStore.entries().stream().filter(e -> e.id().equals(id)).map(AddonStore.Entry::name).findFirst().orElse(id);
+			parts.add(name + " " + action);
+		});
+		parts.sort(String::compareTo);
+		return String.join(", ", parts) + " – wirkt nach einem Neustart des Spiels.";
+	}
+
+	/** Seite Addon-Store: Liste vom Heldix-Dienst, signiert vom Team */
+	private void buildStoreRows(List<Row> list) {
+		if (!AddonStore.available()) {
+			list.add(new EmptyState("download", "Addon-Store nicht verfügbar", Social.baseUrl().isEmpty()
+					? "Der Heldix-Dienst ist in dieser Installation nicht eingerichtet."
+					: "Der Store lädt die Liste vom Heldix-Dienst. Einschalten unter Freunde → Privatsphäre → „Heldix-Dienst nutzen“."));
+			return;
+		}
+		AddonStore.refresh(false);
+		Map<String, String> changes = AddonStore.changes();
+		if (!changes.isEmpty()) list.add(new Notice("refresh", restartText(changes), Ui.WARNING));
+		List<AddonStore.Entry> entries = AddonStore.entries();
+		switch (AddonStore.status()) {
+			case IDLE, LOADING -> {
+				if (entries.isEmpty()) list.add(new Notice("refresh", "Lade den Addon-Store …", Ui.ACCENT_TEXT));
+			}
+			case ERROR -> list.add(new Notice("warning", AddonStore.error(), Ui.DANGER).action("Erneut versuchen", () -> AddonStore.refresh(true)));
+			case READY -> {
+				if (entries.isEmpty()) list.add(new EmptyState("download", "Noch keine Addons", "Im Addon-Store gibt es gerade keine Addons."));
+			}
+		}
+		List<AddonStore.Entry> sorted = new ArrayList<>(entries);
+		sorted.sort(java.util.Comparator.comparingInt(this::storeOrder).thenComparing(e -> -e.downloads()).thenComparing(AddonStore.Entry::name));
+		for (AddonStore.Entry entry : sorted) list.add(new StoreCard(entry));
+		if (!entries.isEmpty()) {
+			list.add(new Text("Alle Addons sind vom HeldixClient-Team geprüft und signiert. Installieren, Aktualisieren und Entfernen wirken nach einem Neustart des Spiels.", Ui.FAINT));
+		}
+	}
+
+	/** Reihenfolge im Store: Updates, nicht installiert, installiert, nicht passend */
+	private int storeOrder(AddonStore.Entry entry) {
+		if (entry.problem() != null) return 3;
+		String installed = AddonStore.installedVersion(entry.id());
+		if (installed == null) return 1;
+		return AddonManager.compareVersions(entry.version(), installed) > 0 ? 0 : 2;
 	}
 
 	private void buildSettingsRows(List<Row> list) {
@@ -2309,14 +2376,15 @@ public class HeldixMenuScreen extends ShellScreen {
 
 		@Override
 		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
-			boolean ok = addon.isActive();
-			int color = ok ? Ui.SUCCESS : Ui.DANGER;
+			boolean removing = addon.pendingRemoval();
+			boolean ok = addon.isActive() && !removing;
+			int color = removing ? Ui.WARNING : ok ? Ui.SUCCESS : Ui.DANGER;
 			Ui.rect(g, x, y, w, ADDON_H, 10, Ui.SURFACE);
 			Ui.outline(g, x, y, w, ADDON_H, 10, (color & 0xFFFFFF) | 0x44000000);
 			Ui.rect(g, x + 10, y + 10, 26, 26, 8, (color & 0xFFFFFF) | 0x33000000);
 			Ui.icon(g, ok ? addon.icon() : "warning", x + 16, y + 16, 14, color);
 
-			String status = ok ? "Aktiv · " + addon.moduleCount() + (addon.moduleCount() == 1 ? " Modul" : " Module") : "Fehler";
+			String status = removing ? "Wird entfernt" : ok ? "Aktiv · " + addon.moduleCount() + (addon.moduleCount() == 1 ? " Modul" : " Module") : "Fehler";
 			int statusW = Ui.width(status, Ui.Font.SMALL) + 14;
 			int statusX = x + w - statusW - 10;
 			Ui.rect(g, statusX, y + 9, statusW, 14, 7, (color & 0xFFFFFF) | 0x2A000000);
@@ -2327,9 +2395,230 @@ public class HeldixMenuScreen extends ShellScreen {
 			Ui.text(g, Ui.ellipsize(title, statusX - textX - 40, Ui.Font.LABEL), textX, y + 11, Ui.TEXT, Ui.Font.LABEL);
 			int titleW = Math.min(Ui.width(title, Ui.Font.LABEL), statusX - textX - 40);
 			Ui.text(g, addon.version(), textX + titleW + 6, y + 12, Ui.FAINT, Ui.Font.SMALL);
-			String line = ok ? addon.description() : addon.error();
-			Ui.text(g, Ui.ellipsize(line == null ? "" : line, w - 56, Ui.Font.SMALL), textX, y + 26, ok ? Ui.MUTED : Ui.DANGER, Ui.Font.SMALL);
+			String line = removing ? "Im Addon-Store entfernt – verschwindet beim nächsten Start" : ok ? addon.description() : addon.error();
+			Ui.text(g, Ui.ellipsize(line == null ? "" : line, w - 56, Ui.Font.SMALL), textX, y + 26, removing ? Ui.WARNING : ok ? Ui.MUTED : Ui.DANGER, Ui.Font.SMALL);
 		}
+	}
+
+	/** Eine Zeile in den Details einer Store-Karte (null = kleiner Abstand) */
+	private record StoreLine(FormattedCharSequence text, int color) {
+	}
+
+	/** Ein Addon im Addon-Store: Icon, Name, Kurzbeschreibung; rechts Installieren/Aktualisieren/Installiert; Klick klappt Details auf */
+	private final class StoreCard implements Row {
+		private static final int HEAD_H = 58;
+		private final AddonStore.Entry entry;
+
+		StoreCard(AddonStore.Entry entry) {
+			this.entry = entry;
+		}
+
+		private boolean open() {
+			return entry.id().equals(storeOpen);
+		}
+
+		private List<StoreLine> details(int w) {
+			List<StoreLine> lines = new ArrayList<>();
+			int width = Math.max(60, w - 50 - 14);
+			for (String paragraph : entry.description().split("\n\\s*\n")) {
+				boolean any = false;
+				for (String raw : paragraph.split("\n")) {
+					String line = raw.strip();
+					if (line.isEmpty()) continue;
+					for (FormattedCharSequence part : Ui.wrap(line.startsWith("- ") ? "•  " + line.substring(2) : line, width, Ui.Font.SMALL)) {
+						lines.add(new StoreLine(part, Ui.MUTED));
+					}
+					any = true;
+				}
+				if (any) lines.add(new StoreLine(null, 0));
+			}
+			if (!entry.notes().isEmpty()) {
+				for (FormattedCharSequence part : Ui.wrap("Neu in " + entry.version() + ": " + String.join(" · ", entry.notes()), width, Ui.Font.SMALL)) {
+					lines.add(new StoreLine(part, Ui.TEXT));
+				}
+				lines.add(new StoreLine(null, 0));
+			}
+			String meta = "von " + String.join(", ", entry.authors()) + " · Addon-API " + entry.api() + " · " + sizeText(entry.size());
+			for (FormattedCharSequence part : Ui.wrap(meta, width, Ui.Font.SMALL)) lines.add(new StoreLine(part, Ui.FAINT));
+			return lines;
+		}
+
+		private int detailsHeight(List<StoreLine> lines) {
+			int h = 0;
+			for (StoreLine line : lines) h += line.text() == null ? 5 : 10;
+			return h;
+		}
+
+		@Override
+		public int height(int width) {
+			return open() ? HEAD_H + 4 + detailsHeight(details(width)) + 10 : HEAD_H;
+		}
+
+		private String installed() {
+			return AddonStore.installedVersion(entry.id());
+		}
+
+		private boolean update() {
+			String installed = installed();
+			return installed != null && entry.problem() == null && AddonManager.compareVersions(entry.version(), installed) > 0;
+		}
+
+		/** Beschriftung und Icon des Knopfs rechts; null-Icon = kein Knopf zum Klicken */
+		private String label() {
+			Float progress = AddonStore.progress(entry.id());
+			if (progress != null) return "Lädt … " + Math.round(progress * 100) + " %";
+			if (entry.problem() != null) return "Nicht verfügbar";
+			if (installed() == null) return "Installieren";
+			return update() ? "Aktualisieren" : "Installiert";
+		}
+
+		private boolean actionable() {
+			return AddonStore.progress(entry.id()) == null && entry.problem() == null && (installed() == null || update());
+		}
+
+		/** {x, Breite} des Knopfs */
+		private int[] button(int x, int w) {
+			int bw = Ui.width(label(), Ui.Font.SMALL) + 30;
+			return new int[] {x + w - 12 - bw, bw};
+		}
+
+		private boolean removable() {
+			return installed() != null && AddonStore.progress(entry.id()) == null;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			int h = height(w);
+			boolean update = update();
+			boolean hover = Ui.inside(mouseX, mouseY, x, y, w, HEAD_H);
+			Ui.rect(g, x, y, w, h, 10, hover ? Ui.SURFACE_HOVER : Ui.SURFACE);
+			Ui.outline(g, x, y, w, h, 10, update ? Ui.ACCENT_LINE : hover ? Ui.LINE_STRONG : Ui.LINE);
+			Ui.rect(g, x + 10, y + 14, 30, 30, 8, Ui.ACCENT_SOFT);
+			Ui.icon(g, Ui.hasIcon(entry.icon()) ? entry.icon() : "addons", x + 17, y + 21, 16, Ui.ACCENT_TEXT);
+
+			int[] button = button(x, w);
+			int by = y + (HEAD_H - 20) / 2;
+			Float progress = AddonStore.progress(entry.id());
+			boolean overButton = Ui.inside(mouseX, mouseY, button[0], by, button[1], 20);
+			String label = label();
+			if (progress != null) {
+				Ui.rect(g, button[0], by, button[1], 20, 10, Ui.ACCENT_SOFT);
+				Ui.rect(g, button[0], by, Math.max(20, button[1] * progress), 20, 10, Ui.ACCENT_LINE);
+				Ui.icon(g, "download", button[0] + 9, by + 6, 8, Ui.TEXT);
+				Ui.text(g, label, button[0] + 21, by + 6, Ui.TEXT, Ui.Font.SMALL);
+			} else if (entry.problem() != null) {
+				Ui.rect(g, button[0], by, button[1], 20, 10, 0x14FFFFFF);
+				Ui.icon(g, "ban", button[0] + 9, by + 6, 8, Ui.FAINT);
+				Ui.text(g, label, button[0] + 21, by + 6, Ui.FAINT, Ui.Font.SMALL);
+				if (overButton) Ui.requestTooltip(entry.problem(), mouseX, mouseY);
+			} else if (actionable()) {
+				Ui.rect(g, button[0], by, button[1], 20, 10, overButton ? Ui.ACCENT_HOVER : Ui.ACCENT);
+				Ui.icon(g, update ? "refresh" : "download", button[0] + 9, by + 6, 8, 0xFFFFFFFF);
+				Ui.text(g, label, button[0] + 21, by + 6, 0xFFFFFFFF, Ui.Font.SMALL);
+			} else {
+				Ui.outline(g, button[0], by, button[1], 20, 10, (Ui.SUCCESS & 0xFFFFFF) | 0x66000000);
+				Ui.icon(g, "check", button[0] + 9, by + 6, 8, Ui.SUCCESS);
+				Ui.text(g, label, button[0] + 21, by + 6, Ui.SUCCESS, Ui.Font.SMALL);
+			}
+			int right = button[0] - 8;
+			boolean confirming = entry.id().equals(storeConfirmRemove) && System.currentTimeMillis() - storeConfirmAt < 4000;
+			if (removable()) {
+				boolean overTrash = Ui.inside(mouseX, mouseY, right - 20, by, 20, 20);
+				Ui.icon(g, "trash", right - 15, by + 5, 10, confirming || overTrash ? Ui.DANGER : Ui.FAINT);
+				if (overTrash && !confirming) Ui.requestTooltip(entry.name() + " entfernen", mouseX, mouseY);
+				right -= 24;
+			}
+
+			int textX = x + 50;
+			int textW = right - textX;
+			String version = entry.version();
+			int titleW = Math.min(Ui.width(entry.name(), Ui.Font.LABEL), Math.max(20, textW - Ui.width(version, Ui.Font.SMALL) - 8));
+			Ui.text(g, Ui.ellipsize(entry.name(), titleW, Ui.Font.LABEL), textX, y + 10, Ui.TEXT, Ui.Font.LABEL);
+			Ui.text(g, Ui.ellipsize(version, textW - titleW - 6, Ui.Font.SMALL), textX + titleW + 6, y + 11, update ? Ui.ACCENT_TEXT : Ui.FAINT, Ui.Font.SMALL);
+			Ui.text(g, Ui.ellipsize(entry.summary(), textW, Ui.Font.SMALL), textX, y + 24, Ui.MUTED, Ui.Font.SMALL);
+			String failure = AddonStore.failure(entry.id());
+			String change = AddonStore.changes().get(entry.id());
+			String third;
+			int thirdColor;
+			if (confirming) {
+				third = "Nochmal klicken zum Entfernen";
+				thirdColor = Ui.DANGER;
+			} else if (failure != null) {
+				third = failure;
+				thirdColor = Ui.DANGER;
+			} else if (change != null) {
+				third = (change.substring(0, 1).toUpperCase(Locale.ROOT) + change.substring(1)) + " – aktiv nach einem Neustart";
+				thirdColor = Ui.WARNING;
+			} else {
+				List<String> chips = new ArrayList<>();
+				if (update) chips.add("Update von " + installed());
+				chips.add(entry.categoryLabel());
+				if (!entry.platforms().isEmpty()) chips.add(entry.problem() == null ? "Nur " + platformNames(entry.platforms()) : entry.problem());
+				chips.add(entry.downloads() == 1 ? "1 Download" : entry.downloads() + " Downloads");
+				chips.add(open() ? "Weniger" : "Details");
+				third = String.join("  ·  ", chips);
+				thirdColor = update ? Ui.ACCENT_TEXT : Ui.FAINT;
+			}
+			Ui.text(g, Ui.ellipsize(third, textW, Ui.Font.SMALL), textX, y + 38, thirdColor, Ui.Font.SMALL);
+			if (failure != null && hover && Ui.inside(mouseX, mouseY, textX, y + 36, textW, 12)) Ui.requestTooltip(failure, mouseX, mouseY);
+
+			if (open()) {
+				int ly = y + HEAD_H + 4;
+				Ui.rect(g, textX, y + HEAD_H - 2, w - 50 - 12, 1, 0, Ui.LINE);
+				for (StoreLine line : details(w)) {
+					if (line.text() == null) {
+						ly += 5;
+						continue;
+					}
+					g.text(font, line.text(), textX, ly, line.color(), false);
+					ly += 10;
+				}
+			}
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			if (!Ui.inside(mouseX, mouseY, x, y, w, height(w))) return false;
+			int[] button = button(x, w);
+			int by = y + (HEAD_H - 20) / 2;
+			if (Ui.inside(mouseX, mouseY, button[0], by, button[1], 20)) {
+				if (actionable()) {
+					HeldixMenuScreen.this.click();
+					AddonStore.install(entry);
+				}
+				return true;
+			}
+			if (removable() && Ui.inside(mouseX, mouseY, button[0] - 28, by, 20, 20)) {
+				HeldixMenuScreen.this.click();
+				boolean confirmed = entry.id().equals(storeConfirmRemove) && System.currentTimeMillis() - storeConfirmAt < 4000;
+				if (confirmed) {
+					storeConfirmRemove = null;
+					AddonStore.remove(entry.id());
+				} else {
+					storeConfirmRemove = entry.id();
+					storeConfirmAt = System.currentTimeMillis();
+				}
+				return true;
+			}
+			HeldixMenuScreen.this.click();
+			storeOpen = open() ? null : entry.id();
+			return true;
+		}
+	}
+
+	private static String platformNames(List<String> platforms) {
+		List<String> names = new ArrayList<>();
+		for (String p : platforms) names.add(switch (p) {
+			case "windows" -> "Windows";
+			case "mac" -> "macOS";
+			default -> "Linux";
+		});
+		return String.join(" und ", names);
+	}
+
+	private static String sizeText(long bytes) {
+		if (bytes < 1024 * 1024) return Math.max(1, Math.round(bytes / 1024.0)) + " KB";
+		return String.format(Locale.GERMANY, "%.1f MB", bytes / 1024.0 / 1024.0);
 	}
 
 	/** Ein Freund in einer Karte: Kopf des Skins, Name, was er gerade macht; rechts Entfernen (mit Bestätigung) */

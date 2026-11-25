@@ -8,8 +8,9 @@ Der Heldix-Dienst ist ein kleiner Server (Ordner [service/](../service)). Zusamm
 - **Nachrichten:** Kurze Direktnachrichten an Freunde, auch wenn ihr gerade nicht auf demselben Server seid.
 - **Blockieren und Melden:** Wer stört, lässt sich blockieren und beim Betreiber melden.
 - **Launcher-Updates und Downloads:** Der Launcher lädt neue Versionen über den Dienst. Alle Downloads der Webseite (Windows und macOS, mit Prüfsummen) kommen ebenfalls vom Dienst, nicht von GitHub.
+- **Addon-Store:** Heldix-Addons kommen einzeln aus dem Store, im Launcher, im Spiel und auf der Webseite. Nur das Team veröffentlicht, und jede Version ist mit dem Update-Schlüssel signiert.
 - **Webseite mit Konto:** Anmelden ohne Passwort über den Launcher oder das Spiel. Auf der Webseite siehst du Freunde, Nachrichten und Einstellungen, lädst deine Daten herunter und siehst deine Meldungen.
-- **Team-Bereich:** Moderatoren und Admins bearbeiten auf der Webseite Meldungen, Sperren und Support-Anfragen und schreiben Neuigkeiten. Admins veröffentlichen außerdem Updates und verwalten das Team. Der Zugang braucht eine Zwei-Faktor-Anmeldung.
+- **Team-Bereich:** Moderatoren und Admins bearbeiten auf der Webseite Meldungen, Sperren und Support-Anfragen und schreiben Neuigkeiten. Admins veröffentlichen außerdem Updates und Addons und verwalten das Team. Der Zugang braucht eine Zwei-Faktor-Anmeldung.
 - **Support:** Spieler schreiben dem Team über Webseite, Launcher oder Spiel; Antworten meldet das Spiel sofort.
 - **Teamseite, Neuigkeiten, Versionsverlauf, Status:** Öffentlich (ohne Anmeldung) gibt es die Teamseite (nur wer zustimmt), alle Neuigkeiten, die Liste der Launcher-Versionen und einen Status mit Summen.
 
@@ -29,15 +30,16 @@ Ohne eingetragene Adresse des Dienstes sind diese Funktionen aus; der Rest von H
 - **Datenauskunft:** Auf der Webseite lädt „Meine Daten herunterladen“ alles als Datei herunter, was der Dienst über dich speichert (höchstens 5-mal pro Stunde).
 - **Team:** Für Team-Mitglieder speichert der Dienst Rolle, seit wann und von wem, das Geheimnis der Zwei-Faktor-Anmeldung und den zuletzt benutzten Code-Zeitschritt, bis zur Entfernung aus dem Team. Jede ändernde Team-Aktion steht mit Name und Zeitpunkt im Protokoll, das 365 Tage aufbewahrt wird (auch nach dem Löschen der Daten, zur Nachvollziehbarkeit). Neuigkeiten des Teams stehen öffentlich mit dem Namen des Autors auf Webseite und Launcher; löscht der Autor seine Daten, bleibt der Name an der Neuigkeit.
 - **Launcher-Updates:** Beim Abruf der neuesten Version und beim Download speichert der Dienst nichts. Wie oft eine IP-Adresse lädt, zählt er nur kurz im Arbeitsspeicher (für die Begrenzung, eine Minute lang). Der Versionsverlauf enthält nur Versionen, Datum und Änderungen, keine Personen.
+- **Addon-Store:** Liste, Details und Downloads gehen ohne Anmeldung; der Dienst erfährt dabei nicht, wer du bist. Pro Addon zählt er nur, wie oft es vollständig heruntergeladen wurde: eine Zahl, ohne IP-Adresse, Zeitpunkt oder sonstige Daten. Wie oft eine IP-Adresse lädt, zählt er wie bei den Launcher-Downloads nur kurz im Arbeitsspeicher (eine Minute lang). Launcher und Spiel laden die Liste erst, wenn du den Store öffnest. An jeder Version merkt sich der Dienst den Namen des Team-Mitglieds, das sie veröffentlicht hat; den sieht nur das Team.
 - **Teamseite nur mit Zustimmung:** Auf der öffentlichen Teamseite steht ein Team-Mitglied nur, wenn es das selbst eingeschaltet hat (Standard: aus). Dann zeigt sie Name, Rolle, Aufgabe, einen kurzen Text, seit wann es dabei ist und den Minecraft-Skin. Den Skin lädt der Dienst selbst bei Mojang und gibt ihn weiter; der Browser der Besucher fragt nie bei Mojang. Genauso zeigt die Webseite angemeldeten Spielern die Skins ihrer Freunde, Anfragen und Blockierten (und dem Team die von Spielern, um die es geht); andere Skins gibt der Dienst nicht heraus. Ausschalten oder das Verlassen des Teams nimmt den Eintrag sofort heraus.
 - **Support-Anfragen** sehen nur du und das Team. Antworten des Teams zeigen dir den Namen des Mitglieds nur, wenn es auf der Teamseite steht, sonst „HeldixClient-Team“. Geschlossene Anfragen löscht der Dienst 90 Tage nach dem Schließen, andere 180 Tage nach der letzten Nachricht. „Daten löschen“ und eine Sperre löschen deine Anfragen sofort; sie stehen in deiner Datenauskunft.
-- **Status:** Die öffentliche Status-Abfrage zeigt nur Summen (wie viele Spieler online und insgesamt angemeldet sind), keine Namen.
+- **Status:** Die öffentliche Status-Abfrage zeigt nur Summen (wie viele Spieler online und insgesamt angemeldet sind, wie viele Addons im Store sind), keine Namen.
 - **Einstellungen im Heldix-Menü:** „Für andere erkennbar“, „Online-Status für Freunde“, „Server für Freunde sichtbar“, „Nachrichten von Freunden annehmen“.
-- **Daten löschen:** Im Heldix-Menü unter Freunde → Privatsphäre (oder auf der Webseite) löscht „Daten beim Dienst löschen“ alles, was der Dienst über dich gespeichert hat: Konto, Freundschaften, Anfragen, Nachrichten (auch die an dich), Blockierungen (von dir und gegen dich), deine Meldungen, alle Anmeldungen auf der Webseite und eine Team-Mitgliedschaft. Dazu gehören auch deine Support-Anfragen und dein Teamprofil. Es bleiben nur Meldungen anderer über dich (bis zum Ablauf nach 90 Tagen), Einträge im Team-Protokoll (bis zum Ablauf nach 365 Tagen), der Autorname an Neuigkeiten und an Antworten auf Support-Anfragen anderer, und eine Sperre.
+- **Daten löschen:** Im Heldix-Menü unter Freunde → Privatsphäre (oder auf der Webseite) löscht „Daten beim Dienst löschen“ alles, was der Dienst über dich gespeichert hat: Konto, Freundschaften, Anfragen, Nachrichten (auch die an dich), Blockierungen (von dir und gegen dich), deine Meldungen, alle Anmeldungen auf der Webseite und eine Team-Mitgliedschaft. Dazu gehören auch deine Support-Anfragen und dein Teamprofil. Es bleiben nur Meldungen anderer über dich (bis zum Ablauf nach 90 Tagen), Einträge im Team-Protokoll (bis zum Ablauf nach 365 Tagen), der Autorname an Neuigkeiten, an Antworten auf Support-Anfragen anderer und an veröffentlichten Addon-Versionen, und eine Sperre.
 
 ## Schnittstelle (Version 1)
 
-Alle Anfragen und Antworten sind JSON (UTF-8), außer Download und Upload der Launcher-Installer und dem Datenexport (JSON-Datei). UUIDs sind immer klein geschrieben und ohne Bindestriche (32 Hex-Zeichen). Fehler antworten mit einem passenden HTTP-Status und `{ "error": "<deutscher Text für den Spieler>" }`, im Team-Bereich bei fehlendem Zugang zusätzlich mit `"code"`.
+Alle Anfragen und Antworten sind JSON (UTF-8), außer Download und Upload der Launcher-Installer und der Addons und dem Datenexport (JSON-Datei). UUIDs sind immer klein geschrieben und ohne Bindestriche (32 Hex-Zeichen). Fehler antworten mit einem passenden HTTP-Status und `{ "error": "<deutscher Text für den Spieler>" }`, im Team-Bereich bei fehlendem Zugang zusätzlich mit `"code"`.
 
 **Zwei Arten der Anmeldung:**
 - **Bearer-Token** (Launcher, Spiel): `Authorization: Bearer <token>` aus `POST /v1/auth/login`.
@@ -45,7 +47,7 @@ Alle Anfragen und Antworten sind JSON (UTF-8), außer Download und Upload der La
 
 Alle Routen für Spieler (`/v1/me…`, `/v1/friends…`, `/v1/messages…`, `/v1/blocks…`, `/v1/reports…`, `/v1/support…`, `/v1/players/lookup`) nehmen beides an. `POST /v1/web/link` geht nur mit Bearer-Token, `/v1/web/…` und `/v1/team/…` nur mit Cookie, der WebSocket nur mit Bearer-Token.
 
-**Öffentliche Routen** (ohne Anmeldung: `/v1/public/…`, `/v1/news`, `/v1/launcher/…`, `/v1/status`) antworten immer mit `Access-Control-Allow-Origin: *`, auch bei Fehlern, und mit einem kurzen `Cache-Control`.
+**Öffentliche Routen** (ohne Anmeldung: `/v1/public/…`, `/v1/news`, `/v1/launcher/…`, `/v1/addons…`, `/v1/status`) antworten immer mit `Access-Control-Allow-Origin: *`, auch bei Fehlern, und mit einem kurzen `Cache-Control` (Addon-Dateien ändern sich nie und dürfen lange im Cache bleiben).
 
 ### Anmeldung
 
@@ -190,6 +192,47 @@ Der Launcher aktualisiert sich über den Dienst, und die Download-Seite der Webs
 **Versionsverlauf:** `GET /v1/launcher/versions?limit=<1–50, Standard 20>` → `{ "versions": [ { "version", "date", "notes": ["…"], "publishedAt": <ms> } ] }`, neueste zuerst, `Cache-Control: max-age=60`. Der Launcher zeigt damit nach einem Update „Was ist neu in <Version>“.
 - Der Dienst merkt sich jede veröffentlichte Version genau einmal (`version` ist eindeutig): nach dem Veröffentlichen im Team-Bereich und, bei `scp`, sobald er die neue `update.json` einliest und der Installer vollständig da ist (beim nächsten Abruf von `latest`, `versions` oder `status`). `date` und `notes` (höchstens 30) kommen aus dem Manifest, `publishedAt` ist der Zeitpunkt, zu dem der Dienst die Version zuerst gesehen hat.
 
+### Addon-Store
+
+Heldix-Addons kommen nicht mit dem Launcher, sondern einzeln aus dem Store (Launcher, Heldix-Menü im Spiel, Webseite). Addons sind Code, der im Spiel läuft. Deshalb veröffentlicht nur das Team (Admins, siehe [Team-Bereich](#team-bereich)), und jede Version ist mit dem **Update-Schlüssel** signiert, demselben Ed25519-Schlüssel wie bei Launcher-Updates. So kann auch ein übernommenes Team-Konto kein fremdes Addon ausliefern. Diese Wege brauchen keine Anmeldung und antworten immer mit `Access-Control-Allow-Origin: *`, auch bei Fehlern.
+
+| Anfrage | Antwort |
+| --- | --- |
+| `GET /v1/addons` | `{ "addons": [Addon] }`: sichtbare Addons mit ihrer neuesten Version, meiste Downloads zuerst, dann nach Name; `Cache-Control: max-age=60` |
+| `GET /v1/addons/<id>` | `{ "addon": Addon, "versions": [ { "version", "date", "notes", "api", "size", "sha256", "file", "publishedAt" } ] }`, neueste Version zuerst; `Cache-Control: max-age=60`. Unbekannt oder versteckt: 404 „Dieses Addon gibt es nicht.“ |
+| `GET`, `HEAD /v1/addons/<id>/download` | 302 mit `Location: /v1/addons/<id>/files/<file der neuesten Version>`, `Cache-Control: no-cache` (Knopf auf der Webseite); unbekannt oder versteckt: 404 |
+| `GET`, `HEAD /v1/addons/<id>/files/<file>` | die JAR einer veröffentlichten Version dieses Addons; sonst 404 „Diese Datei gibt es nicht.“ |
+
+`Addon` = alle Felder des Manifests außer `type` (`id`, `name`, `version`, `summary`, `description`, `authors`, `api`, `icon`, `category`, `platforms`, `file`, `size`, `sha256`, `date`, `notes`) plus `downloads` (Zahl), `publishedAt` (ms), `manifest` (genau der signierte Text) und `signature` (Base64).
+
+- **Prüfen im Client:** Launcher und Spiel prüfen die Signatur selbst und verlassen sich nur auf den geprüften Text in `manifest`, nicht auf die Felder daneben (die sind für die Webseite). Nach dem Download prüfen sie Größe und SHA-256 der JAR.
+- **Signatur:** Ed25519 über die UTF-8-Bytes von `"heldix-addon\n" + manifest` (Domänentrennung). Ein Launcher-Update (signiert über den Text ohne Präfix) ist nie als Addon gültig und ein Addon-Manifest nie als Launcher-Update. Erzeugt werden JAR und Manifest im Ordner `launcher` mit `npm run addon -- <id>` (signiert mit dem privaten Update-Schlüssel): `heldix-addon-<id>-<version>.jar` und `heldix-addon-<id>-<version>.addon.json` = `{ "manifest": "<JSON als Text>", "signature": "<Base64>" }`.
+- **Manifest** (alle Felder Pflicht; unbekannte Zusatzfelder sind erlaubt und werden ignoriert). Texte gelten genau wie signiert, ohne Kürzen; gezählt werden Unicode-Zeichen. Nicht erlaubt sind Steuerzeichen, Zeilen- und Absatztrenner und Steuerzeichen für die Schreibrichtung, in `description` aber Zeilenumbrüche als `\n` (kein `\r`, kein Tab):
+
+  | Feld | Regel |
+  | --- | --- |
+  | `type` | genau `"heldix-addon"` |
+  | `id` | `^[a-z0-9][a-z0-9_-]{0,39}$` (wie in `heldix.addon.json`) |
+  | `name` | 1–40 Zeichen, eine Zeile |
+  | `version` | `1.2.3` oder mit Zusatz wie `1.2.3-beta.1` (wie bei Launcher-Updates) |
+  | `summary` | 1–200 Zeichen, eine Zeile (Kurzbeschreibung = `description` aus `heldix.addon.json`) |
+  | `description` | 0–4000 Zeichen Klartext; Absätze durch eine Leerzeile, Zeilen mit `- ` sind Listenpunkte. Wird nie als HTML ausgegeben |
+  | `authors` | 1–5 Einträge, je 1–40 Zeichen |
+  | `api` | ganze Zahl 1–99: Heldix-API-Stufe, die das Addon braucht |
+  | `icon` | `^[a-z0-9-]{1,30}$`, Name aus dem Heldix-Icon-Set; unbekannte zeigen die Clients als Puzzleteil |
+  | `category` | `hud`, `musik`, `chat`, `werkzeuge` oder `sonstiges` (angezeigt als „HUD“, „Musik & Medien“, „Chat & Freunde“, „Werkzeuge“, „Sonstiges“) |
+  | `platforms` | Liste aus `windows`, `mac`, `linux` ohne Doppelte; leer = alle Systeme |
+  | `file` | genau `heldix-addon-<id>-<version>.jar` |
+  | `size` | ganze Zahl, 1 Byte bis 50 MiB |
+  | `sha256` | 64 kleine Hex-Zeichen |
+  | `date` | Datum nach ISO 8601, z. B. `2026-11-25` oder `2026-11-25T18:30:00Z` |
+  | `notes` | 0–20 Texte, je 1–300 Zeichen, eine Zeile („Was ist neu“) |
+
+- **Sichtbar:** Ein neues Addon ist sofort im Store. Das Team kann es herausnehmen (`hidden`); dann ergeben Detail, Weiterleitung und Dateien 404, die Dateien bleiben aber liegen. Ein Addon ohne Version gibt es nicht: Wird die letzte Version gelöscht, verschwindet es ganz, mit seinem Zähler.
+- **Neueste Version:** Vergleich wie bei Launcher-Updates (`1.10.0` > `1.2.0`, `1.2.0` > `1.2.0-beta.1`). Jede neue Version muss höher sein als alle vorhandenen dieses Addons.
+- **Download:** `Content-Type: application/java-archive`, `Content-Disposition: attachment; filename="<file>"`, `Content-Length`, `Accept-Ranges: bytes`, `ETag`, `Last-Modified`, Range und `If-Range` wie bei den Launcher-Downloads (206, 416). `Cache-Control: public, max-age=31536000, immutable`: Eine veröffentlichte Datei lässt sich nicht ersetzen, ihr Name enthält Addon und Version. Nur Dateien, die zu einer veröffentlichten Version genau dieses Addons gehören, liefert der Dienst aus; unveröffentlichte Uploads, andere Namen, Unterordner und symbolische Links nach außerhalb ergeben 404. Höchstens 60 Addon-Downloads pro Minute und IP, sonst 429.
+- **Download-Zähler:** Ein vollständig ausgeliefertes `GET` der ganzen Datei (200; kein `HEAD`, kein Teilbereich, kein abgebrochener Download) zählt `downloads` des Addons um 1 hoch. Gespeichert wird nur diese Zahl, keine IP-Adresse und sonst nichts. Die Weiterleitung `download` zählt nicht.
+
 ### Webseite: Anmeldung und Sitzungen
 
 Kein Passwort und kein Microsoft-Login auf der Webseite: Der Launcher (oder das Heldix-Menü im Spiel) ist schon beim Dienst angemeldet, holt einen Einmal-Link und öffnet ihn im Browser.
@@ -244,7 +287,7 @@ Geprüft wird in dieser Reihenfolge: Rolle vorhanden, 2FA eingerichtet, Code bes
 | --- | --- | --- |
 | Meldungen, Sperren, Spieler ansehen und suchen, Neuigkeiten | ja | ja |
 | Spieler: Cape zurücksetzen, Daten löschen | – | ja |
-| Updates veröffentlichen | – | ja |
+| Updates und Addons veröffentlichen | – | ja |
 | Team-Mitglieder verwalten, Protokoll | – | ja |
 
 **Routen** (Admin-Routen markiert)
@@ -274,6 +317,12 @@ Geprüft wird in dieser Reihenfolge: Rolle vorhanden, 2FA eingerichtet, Code bes
 | `PUT /v1/team/updates/files/<file>` (admin) | roher Inhalt (`application/octet-stream`, gestreamt, höchstens 1 GiB) | `{ "file", "size", "sha512": "<base64>" }` |
 | `PUT /v1/team/updates/manifest` (admin) | Inhalt von `update.json` (`{ "manifest", "signature" }`) | `{ "current": <Manifest-Objekt> }` |
 | `DELETE /v1/team/updates/files/<file>` (admin) | – | wie `GET /v1/team/updates` |
+| `GET /v1/team/addons` (admin) | – | `{ "addons": [ { "id", "name", "hidden", "downloads", "latest": "<Version>", "versions": [ { "version", "file", "size", "sha256", "date", "notes", "api", "publishedAt", "publishedBy": "<Spielername>" } ] } ], "pending": [ { "file", "size", "uploadedAt" } ], "keyConfigured": bool }`, alle Addons (auch versteckte) nach Name, Versionen neueste zuerst |
+| `PUT /v1/team/addons/files/<file>` (admin) | roher Inhalt der JAR (`application/octet-stream`, gestreamt, höchstens 50 MiB) | `{ "file", "size", "sha256": "<hex>" }` |
+| `DELETE /v1/team/addons/files/<file>` (admin) | – | wie `GET /v1/team/addons` |
+| `PUT /v1/team/addons/manifest` (admin) | Inhalt der `.addon.json` (`{ "manifest", "signature" }`, höchstens 256 KB) | wie `GET /v1/team/addons` |
+| `PATCH /v1/team/addons/<id>` (admin) | `{ "hidden": bool }` | wie `GET /v1/team/addons` |
+| `DELETE /v1/team/addons/<id>/versions/<version>` (admin) | – | wie `GET /v1/team/addons` |
 | `GET /v1/team/members` (admin) | – | `{ "members": [ { "uuid", "name", "role", "addedAt", "addedBy": "<name>" \| null, "twoFactor": bool } ] }` |
 | `POST /v1/team/members` (admin) | `{ "uuid" \| "name", "role" }` | wie `GET` |
 | `PUT /v1/team/members/<uuid>` (admin) | `{ "role" }` | wie `GET` |
@@ -293,8 +342,9 @@ Spieler (`GET /v1/team/players/<uuid>`) = `{ "uuid", "name", "cape", "visible", 
 - **Spieler löschen** wirkt wie dessen `DELETE /v1/me` (ohne Sperre): Verbindungen enden mit 4001.
 - **Neuigkeiten:** Titel einzeilig, Text mit Zeilenumbrüchen (`\r\n` wird zu `\n`), sonst die Regeln für Nachrichten. Moderatoren dürfen alle Neuigkeiten bearbeiten. Der Autor bleibt der, der sie angelegt hat.
 - **Updates veröffentlichen:** Hochladen streamt in `<file>.part` und benennt erst am Ende um. Erlaubt sind alle Namen wie beim Download, also auch die Mac-Dateien; sonst 400; über 1 GiB: 413; der Windows-Installer der veröffentlichten Version lässt sich weder ersetzen noch löschen (409). Mac-Dateien lassen sich immer löschen, auch die gerade über `latest/<ziel>` angebotene; dann zeigt `latest` auf die nächstältere. Beim Manifest prüft der Dienst die Ed25519-Signatur mit dem öffentlichen Update-Schlüssel (`HELDIX_DIENST_UPDATE_KEY`; ohne: 503) und dieselben Regeln wie der Launcher: Dateiname passt zur Version, Größe, `sha512` (400 bei falscher Signatur oder falschem Inhalt). Die Datei muss im Ordner liegen und Größe und SHA-512 müssen stimmen, und die Version muss höher sein als die veröffentlichte (Vorabversionen wie `1.2.0-beta.1` zählen weniger als `1.2.0`), sonst 409. Erst dann ersetzt der Dienst `update.json` atomar (neue Datei schreiben, dann umbenennen). So kann auch ein übernommenes Team-Konto kein fremdes Update ausliefern.
+- **Addons veröffentlichen** (siehe [Addon-Store](#addon-store)): Hochladen streamt die JAR in `<file>.part` und benennt erst am Ende um. Der Name muss `heldix-addon-<id>-<version>.jar` sein (sonst 400), höchstens 50 MiB (sonst 413). Eine Datei, die zu einer veröffentlichten Version gehört, lässt sich weder ersetzen noch einzeln löschen (409); dafür die Version löschen. Hochgeladene JARs ohne veröffentlichtes Manifest stehen unter `pending`. Beim Manifest prüft der Dienst in dieser Reihenfolge: Update-Schlüssel eingerichtet (sonst 503), Form (`manifest` und `signature` als Text, Manifest höchstens 64 KB; sonst 400), Signatur über `"heldix-addon\n" + manifest` (sonst 400 „Die Signatur stimmt nicht.“), alle Felder (400 mit Hinweis, z. B. „Ungültiges Addon-Manifest: „name“ ist zu lang (höchstens 40 Zeichen).“), Datei im Addon-Ordner (sonst 409 „Erst die JAR hochladen: …“) mit passender Größe und SHA-256 (sonst 400), Version höher als jede vorhandene dieses Addons (sonst 409). Ein neues Addon ist danach sofort sichtbar. `PATCH` mit `hidden` nimmt ein Addon aus dem Store oder zeigt es wieder (unbekannt: 404, kein Wahrheitswert: 400). Eine Version löschen löscht auch ihre Datei; war es die letzte, ist das Addon ganz weg (mit Zähler). Gleichzeitig läuft pro Datei nur eine Aktion (Hochladen, Veröffentlichen oder Löschen, sonst 409).
 - **Mitglieder:** Aufnehmen nur, wer sich schon einmal angemeldet hat (sonst 404); ist er schon im Team, ändert `POST` die Rolle. Ungültige Rolle: 400. Mindestens ein Admin muss bleiben: Den letzten Admin herabstufen, entfernen oder als Spieler löschen ergibt 409 „Es muss mindestens ein Admin bleiben.“ (`DELETE /v1/me` des letzten Admins geht trotzdem; dann legt der Betreiber einen neuen an).
-- **Protokoll:** Jede ändernde Team-Aktion landet im Protokoll; Einträge verfallen nach 365 Tagen. `action` ist eine von: `report.done`, `ban`, `unban`, `player.reset-cape`, `player.delete`, `news.create`, `news.update`, `news.delete`, `update.upload`, `update.publish`, `update.delete`, `team.add`, `team.role`, `team.remove`, `team.reset-2fa`, `team.profile` (nur „öffentlich an“/„öffentlich aus“, ohne Texte), `support.reply`, `support.close`, `2fa.enable`. `target` ist z. B. „Name (uuid)“, „Meldung 12“, „Anfrage 7 (Name)“, „Neuigkeit 3: Titel“ oder ein Dateiname.
+- **Protokoll:** Jede ändernde Team-Aktion landet im Protokoll; Einträge verfallen nach 365 Tagen. `action` ist eine von: `report.done`, `ban`, `unban`, `player.reset-cape`, `player.delete`, `news.create`, `news.update`, `news.delete`, `update.upload`, `update.publish`, `update.delete`, `addon.upload`, `addon.publish`, `addon.hide`, `addon.show`, `addon.delete` (Version oder unveröffentlichte Datei), `team.add`, `team.role`, `team.remove`, `team.reset-2fa`, `team.profile` (nur „öffentlich an“/„öffentlich aus“, ohne Texte), `support.reply`, `support.close`, `2fa.enable`. `target` ist z. B. „Name (uuid)“, „Meldung 12“, „Anfrage 7 (Name)“, „Neuigkeit 3: Titel“, „spotify 1.2.0“ (Addon und Version), eine Addon-ID oder ein Dateiname.
 - **Teamprofil:** `public` (Standard `false`: niemand erscheint ohne eigene Zustimmung), `title` (Aufgabe, 0–40 Zeichen, eine Zeile, z. B. „Entwicklung“), `about` (0–200 Zeichen, eine Zeile); sonst 400. Die Zustimmung lässt sich jederzeit zurücknehmen; wer das Team verlässt, verliert das Profil (bei neuer Aufnahme ist es wieder privat).
 
 ### Support-Anfragen
@@ -343,8 +393,8 @@ Die Routen für das Team (`/v1/team/support…`, jede Rolle) stehen beim [Team-B
 
 ### Status
 
-`GET /v1/status` ohne Anmeldung → `{ "ok": true, "service": "<Version des Dienstes>", "online": <Spieler mit offener WebSocket-Verbindung>, "players": <angemeldete Spieler insgesamt>, "launcher": "<veröffentlichte Version>" | null, "since": <Start des Dienstes, ms> }`, `Cache-Control: max-age=30`.
-- Nur Summen, keine Namen. `online` zählt jeden Spieler einmal, auch mit mehreren Verbindungen; eine Web-Sitzung zählt nicht. `players` zählt der Dienst höchstens alle 30 Sekunden neu. `launcher` ist die Version, die `/v1/launcher/latest` gerade ausliefert.
+`GET /v1/status` ohne Anmeldung → `{ "ok": true, "service": "<Version des Dienstes>", "online": <Spieler mit offener WebSocket-Verbindung>, "players": <angemeldete Spieler insgesamt>, "launcher": "<veröffentlichte Version>" | null, "addons": <sichtbare Addons im Store>, "since": <Start des Dienstes, ms> }`, `Cache-Control: max-age=30`.
+- Nur Summen, keine Namen. `online` zählt jeden Spieler einmal, auch mit mehreren Verbindungen; eine Web-Sitzung zählt nicht. `players` zählt der Dienst höchstens alle 30 Sekunden neu. `launcher` ist die Version, die `/v1/launcher/latest` gerade ausliefert. `addons` zählt die Addons, die `/v1/addons` gerade zeigt.
 
 ### Echtzeit (WebSocket)
 
@@ -369,13 +419,13 @@ Der Dienst schließt Verbindungen mit Code 4000 („Zeitüberschreitung“), 400
 
 ### Schutz vor Missbrauch
 
-- Anfragekörper sind höchstens 16 KB groß und müssen innerhalb von 15 Sekunden ankommen (sonst 408). Ausnahme: Uploads der Installer im Team-Bereich, bis 1 GiB, abgebrochen erst, wenn 60 Sekunden lang nichts ankommt.
+- Anfragekörper sind höchstens 16 KB groß und müssen innerhalb von 15 Sekunden ankommen (sonst 408). Ausnahmen im Team-Bereich: Uploads der Installer bis 1 GiB und der Addons bis 50 MiB, abgebrochen erst, wenn 60 Sekunden lang nichts ankommt; das Addon-Manifest (`PUT /v1/team/addons/manifest`) bis 256 KB.
 - Anmeldung (`challenge`, `login`, `dev`): höchstens 20 Anfragen pro Minute und IP.
 - Übrige Anfragen: höchstens 120 pro Minute und Token, sonst 429.
 - Webseite: höchstens 10 Anmelde-Links pro Minute und Spieler, 5 Versuche für den 2FA-Code pro 10 Minuten und Spieler, 5 Datenexporte pro Stunde und Spieler.
 - Support: höchstens 3 offene Anfragen, 5 neue in 24 Stunden und 30 Nachrichten pro Stunde und Spieler.
 - Skins für Angemeldete (`/v1/skins/<uuid>`): höchstens 300 pro Minute und Spieler; sie zählen nicht zur allgemeinen Grenze.
-- Nachrichten: höchstens 20 pro Minute und Spieler. Meldungen: einmal pro Spieler und höchstens 10 in 24 Stunden. Blockierungen: höchstens 500. Downloads der Launcher-Installer: höchstens 30 pro Minute und IP.
+- Nachrichten: höchstens 20 pro Minute und Spieler. Meldungen: einmal pro Spieler und höchstens 10 in 24 Stunden. Blockierungen: höchstens 500. Downloads der Launcher-Installer: höchstens 30 pro Minute und IP, Downloads von Addons (`/v1/addons/<id>/files/…`) höchstens 60 pro Minute und IP.
 - Hinter einem Reverse-Proxy zählt `X-Forwarded-For` nur mit `HELDIX_DIENST_TRUST_PROXY=1`.
 
 ## Betrieb
@@ -422,11 +472,12 @@ Voraussetzung ist ein Linux-Server mit systemd, z. B. Debian 12 oder Ubuntu 22.0
 - **Node.js und Caddy:** Er lädt Node.js 24 und Caddy (HTTPS mit Let's Encrypt) von den offiziellen Seiten, prüft die Prüfsummen und legt beide unter `/opt/heldix-dienst` ab. Paketquellen ändert er nicht.
 - **Eigene Benutzer:** Dienst und Caddy laufen ohne Rechte, jeweils mit einem eigenen Benutzer. Der Dienst lauscht nur auf `127.0.0.1`. Die systemd-Dienste `heldix-dienst` und `heldix-dienst-caddy` sind abgeschottet und starten nach einem Neustart von selbst.
 - **Webseite:** Caddy liefert sie aus `/opt/heldix-dienst/app/website` aus, mit kurzen Adressen wie `/datenschutz`, eigener 404-Seite und strengen Sicherheits-Headern (CSP, HSTS). Zugriffsprotokolle schreibt Caddy keine. Die Anzeige „Heldix-Dienst online“ unten auf der Seite fragt `/dienst-status` auf derselben Adresse ab, der Download-Bereich ebenso `/launcher-latest` (leitet intern auf `/v1/launcher/latest`). Der Download-Knopf zeigt direkt auf `https://api.<domain>/v1/launcher/download/latest`.
-- **API:** Caddy reicht alles an den Dienst weiter. Die Launcher-Installer unter `/v1/launcher/download/` und die Uploads unter `/v1/team/updates/files/` gehen ohne Kompression durch (`Content-Length` und `Range` bleiben erhalten); Caddy streamt sie in beide Richtungen, ohne Grenze für den Anfragekörper und ohne Zeitgrenze.
+- **API:** Caddy reicht alles an den Dienst weiter. Die Launcher-Installer unter `/v1/launcher/download/`, alles unter `/v1/addons/` (außer der Liste selbst) und die Uploads unter `/v1/team/updates/files/` und `/v1/team/addons/files/` gehen ohne Kompression durch (`Content-Length` und `Range` bleiben erhalten); Caddy streamt sie in beide Richtungen, ohne Grenze für den Anfragekörper und ohne Zeitgrenze.
 - **Webseite und Dienst unter einer Adresse:** Auf der Webseite leitet Caddy `/api/*` ohne das `/api` an den Dienst weiter (Anmeldung, Spieler- und Team-Bereich mit dem Cookie der Webseite), ebenfalls ohne Kompression und ohne Grenze für Uploads. Der Dienst sieht die IP der Besucher wie bei der API über `X-Forwarded-For`. Der Installer setzt `HELDIX_DIENST_WEBSITE=https://<domain>`.
-- **Update-Schlüssel:** `npm run installer` übernimmt den öffentlichen Schlüssel aus [launcher/src/main/update-public-key.ts](../launcher/src/main/update-public-key.ts). Der Installer legt ihn als `/etc/heldix-dienst/update-public-key.pem` ab und setzt `HELDIX_DIENST_UPDATE_KEY`. Ohne Schlüssel lassen sich Updates nur per `scp` veröffentlichen.
+- **Update-Schlüssel:** `npm run installer` übernimmt den öffentlichen Schlüssel aus [launcher/src/main/update-public-key.ts](../launcher/src/main/update-public-key.ts). Der Installer legt ihn als `/etc/heldix-dienst/update-public-key.pem` ab und setzt `HELDIX_DIENST_UPDATE_KEY`. Ohne Schlüssel lassen sich Updates nur per `scp` veröffentlichen und Addons gar nicht.
 - **Daten:** Datenbank in `/var/lib/heldix-dienst`, Einstellungen in `/etc/heldix-dienst/dienst.env`. Eigene Einträge dort, z. B. `HELDIX_DIENST_CAPES`, bleiben bei Updates erhalten. Der Entwicklungsmodus wird auf dem Server immer ausgeschaltet.
 - **Launcher-Updates:** Ordner `/var/lib/heldix-dienst/updates`. Er gehört dem Benutzer des Dienstes (Rechte 755): Der Dienst schreibt dort Uploads aus dem Team-Bereich, root lädt per `scp` hoch. Siehe [Launcher-Update veröffentlichen](#launcher-update-veröffentlichen).
+- **Addon-Store:** Ordner `/var/lib/heldix-dienst/addons` (`HELDIX_DIENST_ADDONS`), ebenfalls dem Benutzer des Dienstes (Rechte 755). Die JARs liegen direkt darin; welche Versionen veröffentlicht sind, steht in der Datenbank. Die Abschottung des Dienstes (`ReadWritePaths`) umfasst ihn, weil er im Datenordner liegt. Siehe [Addon veröffentlichen](#addon-veröffentlichen).
 - **Verwaltung:** Der Befehl `heldix-dienst-admin` (in `/usr/local/bin`) zeigt Meldungen, sperrt Spieler und verwaltet das Team, siehe [Verwaltung](#verwaltung-meldungen-sperren-und-team).
 - **Firewall:** Ist ufw oder firewalld aktiv, öffnet er die Ports 80 und 443.
 - **Prüfungen:** Er prüft, ob alle Namen auf den Server zeigen und ob die Ports frei sind. Zum Schluss fragt er API und Webseite über HTTPS ab.
@@ -440,7 +491,7 @@ Voraussetzung ist ein Linux-Server mit systemd, z. B. Debian 12 oder Ubuntu 22.0
 | `--no-www` | keine Weiterleitung von `www.<domain>` (bei Subdomains wie `heldix.example.de` automatisch) |
 | `--port <zahl>` | interner Port, Standard 8787 |
 | `--no-https` | ohne Caddy, z. B. wenn schon nginx, Apache oder Plesk auf 80/443 läuft. Dort dann die API an `127.0.0.1:<port>` weiterleiten (Beispiele unten) und die Webseite aus `/opt/heldix-dienst/app/website` ausliefern |
-| `--uninstall` | Programme, Dienste und `heldix-dienst-admin` entfernen, Daten (auch die Launcher-Updates) bleiben; mit `--purge` auch Daten, Zertifikate und Benutzer |
+| `--uninstall` | Programme, Dienste und `heldix-dienst-admin` entfernen, Daten (auch die Launcher-Updates und Addons) bleiben; mit `--purge` auch Daten, Zertifikate und Benutzer |
 | `--yes` | keine Rückfragen |
 
 - **Update:** Den Installer einer neueren Version mit denselben Optionen noch einmal ausführen. Node.js und Caddy werden nur neu geladen, wenn es neue Versionen gibt. Für eine geänderte Webseite reicht dasselbe: `npm run installer`, dann den Installer erneut ausführen.
@@ -479,6 +530,18 @@ scp HeldixClient-Setup-0.12.0.exe update.json root@example.de:/var/lib/heldix-di
 - Die Dateien müssen für den Dienst lesbar sein (bei scp als root der Standard, Rechte 644). Alte Installer können liegen bleiben; ausgeliefert wird jede Datei mit passendem Namen, angeboten wird für Windows nur die aus `update.json`, für Mac die höchste Version.
 - Ohne Installer (Docker, von Hand): Update-Ordner ist `HELDIX_DIENST_UPDATES`, Standard `<Datenordner>/updates`.
 
+### Addon veröffentlichen
+
+Addons gehen nur über den Team-Bereich (Admin mit Zwei-Faktor-Anmeldung) und nur mit Update-Schlüssel auf dem Server. Eine Befehlszeile auf dem Server gibt es dafür nicht.
+
+1. **Bauen und signieren** (auf dem Entwicklungs-PC mit dem privaten Update-Schlüssel): im Ordner `launcher` `npm run addon -- <id>`, z. B. `npm run addon -- spotify`. Das erzeugt `heldix-addon-<id>-<version>.jar` und `heldix-addon-<id>-<version>.addon.json`. Die Version kommt aus dem Addon und muss höher sein als jede schon veröffentlichte.
+2. **Hochladen:** Auf der Webseite unter Team-Bereich → **Addons** beide Dateien wählen. Die Seite lädt erst die JAR hoch, zeigt dann das Manifest (ID, Version, Datei, Größe und SHA-256 im Vergleich zur hochgeladenen Datei) und veröffentlicht per Knopf. Der Dienst prüft Signatur, Felder, Größe, SHA-256 und Version noch einmal selbst; erst dann steht das Addon im Store.
+3. **Danach:** Im selben Reiter lässt sich ein Addon aus dem Store nehmen (Dateien bleiben, Launcher und Spiel bieten es nicht mehr an) oder eine Version löschen. Hochgeladene, aber nicht veröffentlichte JARs stehen dort ebenfalls und lassen sich löschen.
+
+- Eine gelöschte Version nicht mit anderem Inhalt unter derselben Versionsnummer neu veröffentlichen, lieber eine höhere Version nehmen: Addon-Dateien dürfen ein Jahr im Cache bleiben (`immutable`).
+- Die JAR kann auch per scp in den Addon-Ordner (`/var/lib/heldix-dienst/addons/`, erst als `….jar.part`, auf dem Server dann umbenennen); veröffentlicht wird sie trotzdem im Team-Bereich, dann nur mit der `.addon.json`. Die Datei muss für den Dienst lesbar sein (scp: Standard).
+- Ohne Installer (Docker, von Hand): Addon-Ordner ist `HELDIX_DIENST_ADDONS`, Standard `<Datenordner>/addons`.
+
 ### Verwaltung: Meldungen, Sperren und Team
 
 Auf dem Server mit sudo (der Befehl läuft als Benutzer des Dienstes, mit dessen Datenordner, und darf laufen, während der Dienst läuft). Jede Änderung steht im Team-Protokoll mit dem Handelnden „CLI“.
@@ -505,8 +568,9 @@ Auf dem Server mit sudo (der Befehl läuft als Benutzer des Dienstes, mit dessen
 - **Umgebungsvariablen:**
   - `PORT` (Standard 8787) und `HELDIX_DIENST_DATA` (Ordner für die Datenbank, Standard `./data`).
   - `HELDIX_DIENST_UPDATES` (Ordner für Launcher-Installer und `update.json`, Standard `<Datenordner>/updates`; der Dienst schreibt dort Uploads aus dem Team-Bereich).
+  - `HELDIX_DIENST_ADDONS` (Ordner für die JARs des Addon-Stores, Standard `<Datenordner>/addons`; der Dienst schreibt dort Uploads aus dem Team-Bereich).
   - `HELDIX_DIENST_WEBSITE` (Adresse der Webseite, z. B. `https://heldixclient.com`, ohne Pfad): für die Anmelde-Links und den Schutz vor fremden Seiten. Ohne: keine Anmeldung auf der Webseite (`POST /v1/web/link` → 503).
-  - `HELDIX_DIENST_UPDATE_KEY` (Datei mit dem öffentlichen Update-Schlüssel, PEM, Ed25519). Ohne oder unlesbar: Der Dienst startet mit einer Warnung, Veröffentlichen im Team-Bereich antwortet mit 503.
+  - `HELDIX_DIENST_UPDATE_KEY` (Datei mit dem öffentlichen Update-Schlüssel, PEM, Ed25519). Ohne oder unlesbar: Der Dienst startet mit einer Warnung, Veröffentlichen von Updates und Addons im Team-Bereich antwortet mit 503.
   - `HOST` (Standard: alle Netzwerkschnittstellen; mit `127.0.0.1` nur von diesem Rechner erreichbar).
   - `HELDIX_DIENST_SESSION_SERVER` (Standard `https://sessionserver.mojang.com`, für Tests umstellbar).
   - Dazu die oben genannten `HELDIX_DIENST_DEV`, `HELDIX_DIENST_CAPES` und `HELDIX_DIENST_TRUST_PROXY`.
@@ -567,7 +631,7 @@ Auf dem Server mit sudo (der Befehl läuft als Benutzer des Dienstes, mit dessen
   }
   ```
 
-  `proxy_buffering off` reicht die Launcher-Installer (über 100 MB) direkt durch, statt sie erst zwischenzuspeichern; Kompression dort nicht einschalten. Die Webseite fragt auf ihrer eigenen Adresse `/dienst-status` und `/launcher-latest` ab: Beide an den Dienst weiterleiten, auf `/health` bzw. `/v1/launcher/latest`. Dazu `/api/` ohne das Präfix (im `server`-Block der Webseite):
+  `proxy_buffering off` reicht die Launcher-Installer (über 100 MB) direkt durch, statt sie erst zwischenzuspeichern; Kompression dort nicht einschalten. Für `/v1/addons/` (JARs bis 50 MiB, mit Range) gilt dasselbe. Die Webseite fragt auf ihrer eigenen Adresse `/dienst-status` und `/launcher-latest` ab: Beide an den Dienst weiterleiten, auf `/health` bzw. `/v1/launcher/latest`. Dazu `/api/` ohne das Präfix (im `server`-Block der Webseite):
 
   ```nginx
   location /api/ {
@@ -579,6 +643,6 @@ Auf dem Server mit sudo (der Befehl läuft als Benutzer des Dienstes, mit dessen
       proxy_read_timeout 600s;
   }
   ```
-- **Überwachung:** `GET /health` antwortet mit `{ "ok": true }` (nutzt auch der Docker-Healthcheck). Ohne Anmeldung, ohne Daten. `GET /v1/status` zeigt dazu Version, Start, Spieler online und insgesamt und die veröffentlichte Launcher-Version.
+- **Überwachung:** `GET /health` antwortet mit `{ "ok": true }` (nutzt auch der Docker-Healthcheck). Ohne Anmeldung, ohne Daten. `GET /v1/status` zeigt dazu Version, Start, Spieler online und insgesamt, die veröffentlichte Launcher-Version und die Zahl der Addons im Store.
 - **Verbindungen nach außen:** Außer zu Mojang für die Anmeldung (`sessionserver.mojang.com`) verbindet sich der Dienst nur für Skins (Teamseite und `/v1/skins`: `sessionserver.mojang.com`, `textures.minecraft.net`, jeweils HTTPS).
 - **Adresse im Client:** In [launcher/src/main/config.ts](../launcher/src/main/config.ts) bei `HELDIX_SERVICE_URL` eintragen (oder beim Bauen die Umgebungsvariable `HELDIX_SERVICE_URL` setzen). Der Launcher gibt sie dem Spiel als `-Dheldixclient.service=<url>` mit.

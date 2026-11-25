@@ -1,0 +1,8 @@
+{
+	"_hinweis": "Angaben für den Addon-Store (nicht in der JAR). Name, Version, Kurzbeschreibung, Autoren und API kommen aus src/main/resources/heldix.addon.json.",
+	"icon": "music",
+	"kategorie": "musik",
+	"plattformen": ["windows"],
+	"beschreibung": "Zeigt den laufenden Song mit Cover, Titel, Künstler und Fortschritt als HUD-Element. Bei jedem Songwechsel erscheint oben rechts eine kurze Einblendung.\n\nSteuern lässt sich die Musik per Taste: Abspielen/Pause mit Pos1, nächster Song mit Bild ab, vorheriger Song mit Bild auf. Die Tasten änderst du unter Optionen → Steuerung → Heldix-Addons.\n\n- Keine Anmeldung: Das Addon liest den Song über die Windows-Mediensteuerung, ein Spotify-Konto oder Premium ist nicht nötig.\n- Es werden keine Daten ins Internet geschickt.\n- Auf Wunsch steuert es auch andere Player wie den Browser oder VLC (Einstellung „Nur Spotify“ ausschalten).\n- Nur unter Windows.",
+	"hinweise": ["Jetzt im Addon-Store statt im Launcher"]
+}

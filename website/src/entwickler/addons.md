@@ -1,8 +1,8 @@
 ---
 titel: Heldix-Addons schreiben
-beschreibung: Was ein Heldix-Addon ist, wie es aufgebaut ist und wie du in wenigen Minuten dein erstes eigenes Addon baust.
+beschreibung: Was ein Heldix-Addon ist, wie es aufgebaut ist, wie du in wenigen Minuten dein erstes eigenes Addon baust und wie es in den Addon-Store kommt.
 reihenfolge: 1
-stichworte: addon, api, heldix.addon.json, onEnable, onDisable, gradle, einstieg, beispiel
+stichworte: addon, api, heldix.addon.json, onEnable, onDisable, gradle, einstieg, beispiel, addon-store, veröffentlichen, einreichen
 ---
 Heldix-Addons sind kleine Erweiterungen für HeldixClient. Ein Addon ist eine einzelne JAR-Datei, die HeldixClient beim Spielstart aus dem Ordner `heldix-addons` deiner Instanz lädt. Du programmierst dabei nur gegen die **Heldix-API**. Sie enthält bewusst nichts aus Minecraft – deshalb läuft dieselbe Addon-JAR auch nach einem Minecraft-Update einfach weiter.
 
@@ -110,7 +110,7 @@ Was die einzelnen Bausteine können, steht ausführlich unter [Addon-API im Deta
 
 ## Die API-Version
 
-Die aktuelle API-Stufe ist **2** (Konstante `HeldixApi.API_VERSION`, Stand HeldixClient 0.12.1). HeldixClient lädt Addons, die für API 1 oder API 2 gebaut sind.
+Die aktuelle API-Stufe ist **2** (Konstante `HeldixApi.API_VERSION`, Stand HeldixClient 0.13.0). HeldixClient lädt Addons, die für API 1 oder API 2 gebaut sind.
 
 - **API 1:** Module und HUD-Module, Ereignisse (Tick, Welt betreten und verlassen, Chat), Spielerdaten, lokale Chatnachrichten, eigene Einstellungen mit `api.config()` und ein Logger.
 - **API 2** (ab HeldixClient 0.11.0): eigene Tasten, Einblendungen oben rechts, Einstellungen im Untermenü eines Moduls, Icons für Module, Bilder, Heldix-Schrift und abgerundete Flächen im HUD sowie ein eigener Datenordner.
@@ -123,7 +123,7 @@ Trag in `api` die höchste Stufe ein, deren Funktionen du benutzt. In den API-Kl
 
 ## Bauen mit Gradle
 
-Du brauchst ein JDK 21 oder neuer. Die mitgelieferten Addons werden für Java 21 gebaut; das reicht für alle Funktionen der API.
+Du brauchst ein JDK 21 oder neuer. Die Addons des Teams werden für Java 21 gebaut; das reicht für alle Funktionen der API.
 
 Die API-Datei (`heldix-api-1.0.0.jar`) und ein fertiges Beispielprojekt bekommst du auf Anfrage über den [Support](/konto#ziel=support). Leg die API-Datei in den Ordner `libs` deines Projekts.
 
@@ -178,9 +178,23 @@ Gebaut wird im Projektordner mit:
 
 Unter Windows lautet der Befehl in PowerShell `.\gradlew build`. Die fertige JAR liegt danach in `build/libs/`, hier also `mein-addon-1.0.0.jar`. Wie du sie ins Spiel bekommst, steht unter [Addons installieren](/entwickler/addon-installieren).
 
-## Vorlagen aus dem Launcher
+## Im Addon-Store veröffentlichen
 
-Der Launcher bringt zwei Addons mit, die gleichzeitig gute Vorlagen sind:
+Im [Addon-Store](/addons) stehen nur Addons, die das Team veröffentlicht. Jede Version ist mit dem Schlüssel des Teams signiert; Launcher und Spiel installieren nichts ohne gültige Signatur. Addons sind Code, der im Spiel läuft – deshalb geht nichts ungeprüft in den Store.
+
+So kommt dein Addon hinein:
+
+1. **Einreichen:** Schreib dem Team über eine [Support-Anfrage](/konto#ziel=support) (Kategorie „Sonstiges“), was dein Addon macht. Wie das Team an den Quelltext kommt, klärt ihr in der Anfrage.
+2. **Prüfen:** Das Team sieht sich das Addon an. Rückfragen kommen in derselben Anfrage.
+3. **Signieren und veröffentlichen:** Das Team signiert das Addon und stellt es in den Store. Ab dann steht es auf der Webseite, im Launcher und im Spiel.
+
+Für den Store braucht das Team außer der `heldix.addon.json` ein paar Angaben: ein Icon aus dem Heldix-Icon-Set (wie bei `withIcon`), eine Kategorie (HUD, Musik & Medien, Chat & Freunde, Werkzeuge oder Sonstiges), die Systeme, auf denen das Addon läuft, eine längere Beschreibung in Klartext und für jede Version ein paar Stichpunkte, was neu ist. Als Kurzbeschreibung dient `description` aus der `heldix.addon.json`.
+
+> **Hinweis:** Jede neue Version braucht eine höhere Versionsnummer als die vorige. Eine veröffentlichte Version lässt sich nicht ersetzen.
+
+## Vorlagen
+
+Zwei Addons des Teams sind gleichzeitig gute Vorlagen. Beide gibt es im [Addon-Store](/addons):
 
 - **Uhrzeit & Spielzeit** (`uhrzeit`): zwei HUD-Module, ein Schalt-Modul für eine Begrüßung im Chat, eine Einstellung „Sekunden“ und ein Zähler mit `api.config()`.
 - **Spotify** (`spotify`): eigene Tasten, mehrere Einstellungen, ein selbst gezeichnetes HUD-Element mit Album-Cover, Einblendungen beim Songwechsel und ein Hintergrund-Prozess, der nur läuft, solange das Modul an ist.

@@ -69,6 +69,7 @@ const port = readPort(env.PORT);
 const host = env.HOST?.trim() || undefined;
 const dataDir = path.resolve(env.HELDIX_DIENST_DATA?.trim() || './data');
 const updatesDir = path.resolve(env.HELDIX_DIENST_UPDATES?.trim() || path.join(dataDir, 'updates'));
+const addonsDir = path.resolve(env.HELDIX_DIENST_ADDONS?.trim() || path.join(dataDir, 'addons'));
 const sessionServer = readUrl(env.HELDIX_DIENST_SESSION_SERVER);
 const website = readWebsite(env.HELDIX_DIENST_WEBSITE);
 const updateKey = readUpdateKey(env.HELDIX_DIENST_UPDATE_KEY);
@@ -82,6 +83,7 @@ try {
 const service = createService({
   dataDir,
   updatesDir,
+  addonsDir,
   sessionServer,
   dev: env.HELDIX_DIENST_DEV === '1',
   capes,
@@ -95,8 +97,8 @@ service.server.on('error', (err) => fail(`Server-Fehler: ${err.message}`));
 service.server.listen(port, host, () => {
   const address = service.server.address();
   const shown = typeof address === 'object' && address ? `${address.address}:${address.port}` : String(address);
-  log(`Heldix-Dienst läuft auf ${shown} (Daten: ${dataDir}, Updates: ${updatesDir}, Session-Server: ${sessionServer})`);
-  log(`Webseite: ${website ?? 'nicht eingerichtet (keine Anmeldung auf der Webseite)'} · Update-Schlüssel: ${updateKey ? 'eingerichtet' : 'keiner (kein Veröffentlichen im Team-Bereich)'}`);
+  log(`Heldix-Dienst läuft auf ${shown} (Daten: ${dataDir}, Updates: ${updatesDir}, Addons: ${addonsDir}, Session-Server: ${sessionServer})`);
+  log(`Webseite: ${website ?? 'nicht eingerichtet (keine Anmeldung auf der Webseite)'} · Update-Schlüssel: ${updateKey ? 'eingerichtet' : 'keiner (kein Veröffentlichen von Updates und Addons im Team-Bereich)'}`);
 });
 
 let stopping = false;

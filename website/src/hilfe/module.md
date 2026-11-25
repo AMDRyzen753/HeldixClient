@@ -34,6 +34,6 @@ Wo diese Anzeigen stehen und wie groß sie sind, legst du im [HUD-Editor](/hilfe
 - **Wegpunkte** – siehe [Wegpunkte](/hilfe/wegpunkte).
 
 ## Addons
-Installierte Heldix-Addons wie Spotify stehen im Reiter **Addons**. Mehr dazu unter [Heldix-Addons](/hilfe/heldix-addons).
+Installierte Heldix-Addons wie Spotify stehen im Reiter **Addons**. Neue Addons gibt es im [Addon-Store](/addons), mehr dazu unter [Heldix-Addons](/hilfe/heldix-addons).
 
 > **Achtung:** Manche Server verbieten einzelne Funktionen. Halte dich an die Regeln des jeweiligen Servers – Freelook ist auf hypixel.net zum Beispiel automatisch abgeschaltet.

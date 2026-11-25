@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { InstanceLoader, InstancePatch, NewInstance } from '../../shared/api';
-import { ADDON_DIR, installBundledAddon, listBundledAddons } from './content';
+import { ADDON_DIR } from './content';
 import { exists, readJson, writeJson } from './fsutil';
 import type { LauncherPaths } from './paths';
 
@@ -84,7 +84,7 @@ export class InstanceStore {
     await writeJson(path.join(this.dir(config.id), INSTANCE_FILE), config);
   }
 
-  async create(data: NewInstance, bundledAddonsDir: string | null): Promise<InstanceConfig> {
+  async create(data: NewInstance): Promise<InstanceConfig> {
     const name = data.name.trim().slice(0, 40) || `Minecraft ${data.minecraft}`;
     const config: InstanceConfig = {
       id: slug(name),
@@ -99,7 +99,7 @@ export class InstanceStore {
     };
     const dir = this.dir(config.id);
     await mkdir(path.join(dir, 'mods'), { recursive: true });
-    if (usesHeldixClient(config)) await this.installBundledAddons(dir, bundledAddonsDir);
+    if (usesHeldixClient(config)) await this.ensureAddonDir(dir);
     await this.save(config);
     return config;
   }
@@ -114,27 +114,16 @@ export class InstanceStore {
     return config;
   }
 
-  /**
-   * Mitgelieferte Heldix-Addons in eine Instanz legen (beim Anlegen). Fehlende kommen dazu, ältere Versionen
-   * werden ersetzt; was schon in gleicher oder neuerer Version da ist, bleibt unverändert.
-   */
-  async installBundledAddons(instanceDir: string, bundledAddonsDir: string | null): Promise<void> {
+  /** Leeren Addon-Ordner anlegen; Addons kommen aus dem Addon-Store (core/addonstore.ts). */
+  async ensureAddonDir(instanceDir: string): Promise<void> {
     await mkdir(path.join(instanceDir, ADDON_DIR), { recursive: true });
-    if (!bundledAddonsDir) return;
-    try {
-      for (const addon of await listBundledAddons(instanceDir, bundledAddonsDir)) {
-        if (addon.state !== 'installed') await installBundledAddon(instanceDir, bundledAddonsDir, addon.file);
-      }
-    } catch {
-      // keine mitgelieferten Addons vorhanden
-    }
   }
 
   /**
    * Übernimmt Spielordner aus Launcher-Versionen vor dem Instanz-System
    * (z. B. "26.3-fabric") als Instanzen, damit Welten und Einstellungen erhalten bleiben.
    */
-  async migrateLegacy(bundledAddonsDir: string | null): Promise<number> {
+  async migrateLegacy(): Promise<number> {
     let migrated = 0;
     let dirs: string[] = [];
     try {
@@ -158,7 +147,7 @@ export class InstanceStore {
         playTimeMs: 0,
         memoryMb: null,
       };
-      if (loader === 'heldix') await this.installBundledAddons(path.join(this.paths.instances, dir), bundledAddonsDir);
+      if (loader === 'heldix') await this.ensureAddonDir(path.join(this.paths.instances, dir));
       await this.save(config);
       migrated++;
     }

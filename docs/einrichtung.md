@@ -26,9 +26,11 @@ Neue Apps dürfen die Minecraft-Schnittstellen erst nach einer Prüfung durch Mo
 - Gefragt werden Name, Application (Client) ID, Tenant ID, eine Website und eine Begründung.
 - Die Prüfung kann einige Tage bis Wochen dauern.
 
-Bis zur Freigabe klappt die Anmeldung bei Microsoft zwar, danach meldet der Launcher aber: „Mojang hat die Microsoft-Anmeldung von HeldixClient noch nicht freigeschaltet …“. Das gilt für alle Konten, bis Mojang die App freigibt. Die Antwort kommt per E-Mail.
+Bis zur Freigabe klappt die Anmeldung bei Microsoft zwar, danach antwortet Minecraft aber mit „Invalid app registration“ und der Launcher meldet: „Mojang lässt die Microsoft-Anmeldung dieses Launchers nicht zu …“. Das gilt für alle Konten, bis Mojang die App freigibt. Die Antwort kommt per E-Mail („approved for our allow list“); danach ist im Code nichts zu ändern, solange die freigegebene ID in `config.ts` steht.
 
-Bis dahin geht die [Anmeldung über den offiziellen Minecraft Launcher](#anmeldung-über-den-offiziellen-minecraft-launcher). Zum Testen ohne Konto: den Launcher aus dem Quellcode starten (`npm start`) oder in der .exe die [Entwickleroptionen mit Entwickler-Schlüssel](entwicklung.md#entwickleroptionen-in-der-fertigen-app) nutzen. Dann gehen Offline-Konten ohne Microsoft-Konto, also Einzelspieler, LAN und Server ohne Online-Modus. Für Server mit Online-Modus braucht es eine echte Anmeldung.
+**Stand HeldixClient:** Die App-ID in [config.ts](../launcher/src/main/config.ts) ist seit November 2026 von Mojang freigegeben.
+
+Für eigene Builds bis zur Freigabe geht die [Anmeldung über den offiziellen Minecraft Launcher](#anmeldung-über-den-offiziellen-minecraft-launcher). Zum Testen ohne Konto: den Launcher aus dem Quellcode starten (`npm start`) oder in der .exe die [Entwickleroptionen mit Entwickler-Schlüssel](entwicklung.md#entwickleroptionen-in-der-fertigen-app) nutzen. Dann gehen Offline-Konten ohne Microsoft-Konto, also Einzelspieler, LAN und Server ohne Online-Modus. Für Server mit Online-Modus braucht es eine echte Anmeldung.
 
 ### Anmeldung über den offiziellen Minecraft Launcher
 

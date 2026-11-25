@@ -112,9 +112,9 @@ test('/v1/status: Version, online (eindeutige Spieler mit WebSocket, ohne Web-Si
       assert.equal(res.headers.get('access-control-allow-origin'), '*');
       const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', '..', 'package.json'), 'utf8'));
       const { since, ...rest } = res.body;
-      assert.deepEqual(rest, { ok: true, service: pkg.version, online: 2, players: 4, launcher: '2.3.4' });
+      assert.deepEqual(rest, { ok: true, service: pkg.version, online: 2, players: 4, launcher: '2.3.4', addons: 0 });
       assert.ok(since >= started - 5000 && since <= Date.now());
-      assert.equal(pkg.version, '1.3.0');
+      assert.equal(pkg.version, '1.4.0');
     } finally {
       for (const client of clients) await client.close();
     }

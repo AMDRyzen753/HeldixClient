@@ -21,8 +21,11 @@ import { verifyManifest, type UpdateManifest } from '../main/core/updater';
 const UPDATE_KEY_PATH = path.join(os.homedir(), '.heldixclient-dev', 'update-key.pem');
 const ROOT = path.join(__dirname, '..', '..');
 const PUBLIC_KEY_TS = path.join(ROOT, 'src', 'main', 'update-public-key.ts');
+/** Derselbe Schlüssel prüft im Spiel die Addons aus dem Addon-Store */
+const MOD_STORE_KEY = path.join(ROOT, '..', 'mod', 'src', 'main', 'resources', 'heldix-store-key.pem');
 
 async function writePublicKey(publicPem: string): Promise<boolean> {
+  if ((await readFile(MOD_STORE_KEY, 'utf8').catch(() => '')) !== publicPem) await writeFile(MOD_STORE_KEY, publicPem);
   const current = await readFile(PUBLIC_KEY_TS, 'utf8').catch(() => '');
   if (current.includes(JSON.stringify(publicPem))) return false;
   await writeFile(

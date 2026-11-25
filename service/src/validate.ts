@@ -170,6 +170,14 @@ export function checkText(value: unknown, maxLength: number, allowEmpty: boolean
 const FORBIDDEN_MULTILINE_RE = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F\p{Cs}\u2028\u2029\u202A-\u202E\u2066-\u2069]/u;
 
 /**
+ * Enthält der Text Zeichen, die nicht erlaubt sind (wie bei Nachrichten; mit `multiline` sind Zeilenumbrüche als `\n`
+ * erlaubt)? Für Texte, die unverändert bleiben müssen (signierte Addon-Manifeste): ohne Trimmen.
+ */
+export function hasForbiddenChars(text: string, multiline: boolean): boolean {
+  return (multiline ? FORBIDDEN_MULTILINE_RE : FORBIDDEN_TEXT_RE).test(text);
+}
+
+/**
  * Prüft einen mehrzeiligen Text: Zeilenumbrüche werden zu `\n` vereinheitlicht, Leerzeichen am Anfang und Ende fallen
  * weg, danach 1 bis `maxLength` Zeichen ohne sonstige Steuerzeichen.
  */

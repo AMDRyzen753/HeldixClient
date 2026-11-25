@@ -144,16 +144,31 @@ export interface ContentItem {
 
 export type ContentKind = 'mods' | 'addons';
 
-/** Ein Addon, das der Launcher mitbringt (z. B. Spotify), mit Status in einer Instanz */
-export interface BundledAddon {
-  file: string;
+/** Ein Addon aus dem Addon-Store (Signatur geprüft) mit Status in einer Instanz */
+export interface StoreAddon {
   id: string;
   name: string;
-  version: string | null;
+  version: string;
+  summary: string;
+  /** Klartext: Absätze durch Leerzeile, Zeilen mit „- “ sind Listenpunkte */
   description: string;
-  /** available = noch nicht installiert, update = ältere Version installiert */
-  state: 'available' | 'installed' | 'update';
+  authors: string[];
+  /** Name aus dem Heldix-Icon-Set */
+  icon: string;
+  category: 'hud' | 'musik' | 'chat' | 'werkzeuge' | 'sonstiges';
+  /** leer = alle Systeme */
+  platforms: ('windows' | 'mac' | 'linux')[];
+  api: number;
+  size: number;
+  date: string;
+  notes: string[];
+  downloads: number;
+  /** available = nicht installiert, update = ältere Version installiert, unsupported-* = läuft hier nicht */
+  state: 'available' | 'installed' | 'update' | 'unsupported-api' | 'unsupported-platform';
+  /** Warum es hier nicht läuft (bei unsupported-*) */
+  reason: string | null;
   installedVersion: string | null;
+  installedEnabled: boolean | null;
 }
 
 /** Ein Shaderpack im Ordner shaderpacks einer Fabric-Instanz */
@@ -322,10 +337,10 @@ export interface HeldixApi {
   removeContent(instanceId: string, kind: ContentKind, file: string): Promise<void>;
   /** Ohne Pfade öffnet sich ein Dateidialog */
   addContentFiles(instanceId: string, kind: ContentKind, paths?: string[]): Promise<number>;
-  /** Mitgelieferte Heldix-Addons und ob sie in der Instanz installiert sind */
-  listBundledAddons(instanceId: string): Promise<BundledAddon[]>;
-  /** Installiert bzw. aktualisiert ein mitgeliefertes Addon; gibt den Namen zurück */
-  installBundledAddon(instanceId: string, file: string): Promise<string>;
+  /** Addons aus dem Addon-Store mit Status in der Instanz */
+  listStoreAddons(instanceId: string): Promise<StoreAddon[]>;
+  /** Lädt ein Addon aus dem Store (Signatur und Prüfsumme geprüft) in die Instanz; gibt den Namen zurück */
+  installStoreAddon(instanceId: string, addonId: string): Promise<string>;
   pathForFile(file: File): string;
 
   searchModrinth(instanceId: string, query: string, offset: number): Promise<ModrinthSearchResult>;
@@ -383,7 +398,7 @@ export interface HeldixApi {
   /** öffnet heldixclient.com im Browser, schon angemeldet (Profil, Freunde, Nachrichten, Support, Team-Bereich) */
   openWebAccount(target?: WebTarget): Promise<void>;
   /** öffnet eine öffentliche Seite von heldixclient.com, z. B. "neuigkeiten" */
-  openWebsite(page: 'neuigkeiten' | 'das-team' | 'status' | 'download' | 'hilfe'): Promise<void>;
+  openWebsite(page: 'neuigkeiten' | 'das-team' | 'status' | 'download' | 'hilfe' | 'addons'): Promise<void>;
   /** null = nichts Neues zu zeigen */
   getWhatsNew(): Promise<WhatsNew | null>;
   markWhatsNewSeen(): Promise<void>;

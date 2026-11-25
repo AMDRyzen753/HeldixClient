@@ -1,5 +1,5 @@
 // Instanzen: Übersicht, Detailansicht (Mods, Addons, Einstellungen), Modrinth-Suche, neue Instanz
-import type { BundledAddon, ContentItem, ContentKind, InstanceInfo, InstanceLoader, ModrinthHit, QuickPlayTarget, ShaderpackList, VersionInfo } from '../shared/api';
+import type { ContentItem, ContentKind, InstanceInfo, InstanceLoader, ModrinthHit, QuickPlayTarget, ShaderpackList, StoreAddon, VersionInfo } from '../shared/api';
 import {
   $,
   api,
@@ -185,7 +185,7 @@ function switchTab(tab: DetailTab): void {
   $('#tab-shaders').hidden = tab !== 'shaders';
   $('#bundled-addons').hidden = true;
   if (tab === 'shaders') void loadShaders();
-  if (tab === 'addons') void loadBundled();
+  if (tab === 'addons') void loadStore();
   if (tab === 'mods' || tab === 'addons') {
     const isMods = tab === 'mods';
     const heldix = current()?.loader === 'heldix';
@@ -206,60 +206,136 @@ function switchTab(tab: DetailTab): void {
   }
 }
 
-/** Icons der mitgelieferten Addons (Name aus dem Heldix-Icon-Set) */
-const BUNDLED_ICONS: Record<string, string> = { spotify: 'music', uhrzeit: 'clock' };
+/** Icons installierter Addons (Name aus dem Heldix-Icon-Set); der Addon-Store ergänzt sie */
+const ADDON_ICONS: Record<string, string> = { spotify: 'music', uhrzeit: 'clock' };
+const CATEGORY_LABELS: Record<StoreAddon['category'], string> = { hud: 'HUD', musik: 'Musik & Medien', chat: 'Chat & Freunde', werkzeuge: 'Werkzeuge', sonstiges: 'Sonstiges' };
+const PLATFORM_LABELS: Record<StoreAddon['platforms'][number], string> = { windows: 'Windows', mac: 'macOS', linux: 'Linux' };
+/** Sichtbare Karten, bevor „Alle anzeigen“ nötig wird */
+const STORE_PREVIEW = 4;
+let storeExpanded = false;
+let storeOpen: string | null = null;
 
-/** Mitgelieferte Addons, die in dieser Instanz noch fehlen oder veraltet sind, als Karten über der Liste */
-async function loadBundled(): Promise<void> {
+/** Beschreibung aus dem Store als Klartext: Absätze und „- “-Listen, nie HTML */
+function plainText(text: string): HTMLElement {
+  const box = h('div', { class: 'store-text' });
+  for (const block of text.split(/\n\s*\n/)) {
+    const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) continue;
+    if (lines.every((line) => line.startsWith('- '))) {
+      box.append(h('ul', {}, ...lines.map((line) => h('li', { text: line.slice(2) }))));
+    } else {
+      box.append(h('p', { text: lines.join(' ') }));
+    }
+  }
+  return box;
+}
+
+/** Addon-Store: alle Addons vom Heldix-Dienst mit Zustand in dieser Instanz (über der Liste der installierten) */
+async function loadStore(): Promise<void> {
   const box = $('#bundled-addons');
   const requested = detailId;
   if (!requested || kind() !== 'addons') return;
-  let addons: BundledAddon[] = [];
+  let addons: StoreAddon[] = [];
+  let failure: string | null = null;
   try {
-    addons = await api.listBundledAddons(requested);
-  } catch {
-    addons = [];
+    addons = await api.listStoreAddons(requested);
+  } catch (error) {
+    failure = errorMessage(error);
   }
   if (requested !== detailId || kind() !== 'addons') return;
+  for (const addon of addons) ADDON_ICONS[addon.id] = addon.icon;
   box.textContent = '';
-  const offer = addons.filter((addon) => addon.state !== 'installed');
-  box.hidden = offer.length === 0;
-  if (offer.length === 0) return;
-
+  box.hidden = false;
+  const web = h('button', { class: 'link-button store-web', title: 'Alle Addons mit Beschreibung auf heldixclient.com' }, 'Auf heldixclient.com ansehen');
+  web.addEventListener('click', () => void api.openWebsite('addons'));
   box.append(h('div', { class: 'bundled-head' },
-    h('span', { class: 'bundled-title', text: 'Mitgelieferte Addons' }),
-    h('span', { class: 'bundled-sub', text: 'Kommen mit dem Launcher – ein Klick, und sie sind beim nächsten Start dabei' })));
+    h('span', { class: 'bundled-title', text: 'Addon-Store' }),
+    h('span', { class: 'bundled-sub', text: 'Geprüft und signiert vom HeldixClient-Team · aktiv ab dem nächsten Spielstart' }),
+    web));
+  if (failure) {
+    const retry = h('button', { class: 'ghost' }, uiIcon('refresh', 'btn-icon'), 'Erneut versuchen');
+    retry.addEventListener('click', () => void loadStore());
+    box.append(h('div', { class: 'store-message' }, uiIcon('warning'), h('span', { text: failure }), retry));
+    return;
+  }
+  if (addons.length === 0) {
+    box.append(h('div', { class: 'store-message' }, uiIcon('addons'), h('span', { text: 'Im Addon-Store gibt es gerade keine Addons.' })));
+    return;
+  }
+  // Updates zuerst, dann noch nicht installierte, dann installierte; nicht passende ans Ende
+  const order: Record<StoreAddon['state'], number> = { update: 0, available: 1, installed: 2, 'unsupported-platform': 3, 'unsupported-api': 4 };
+  const sorted = [...addons].sort((a, b) => order[a.state] - order[b.state] || b.downloads - a.downloads || a.name.localeCompare(b.name, 'de'));
+  const visible = storeExpanded ? sorted : sorted.slice(0, STORE_PREVIEW);
   const grid = h('div', { class: 'bundled-grid' });
-  for (const addon of offer) {
-    const update = addon.state === 'update';
-    const button = h('button', { class: update ? 'ghost' : 'primary' },
-      uiIcon(update ? 'refresh' : 'download', 'btn-icon'),
-      update ? 'Aktualisieren' : 'Installieren');
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      try {
-        const name = await api.installBundledAddon(requested, addon.file);
-        toast(`${name} ist installiert und beim nächsten Spielstart dabei.`, 'success');
-        await loadContent();
-        await loadBundled();
-        await reloadInstances();
-      } catch (error) {
-        button.disabled = false;
-        toast(errorMessage(error), 'error');
-      }
+  for (const addon of visible) grid.append(storeCard(requested, addon));
+  box.append(grid);
+  if (sorted.length > STORE_PREVIEW) {
+    const more = h('button', { class: 'link-button store-more' }, storeExpanded ? 'Weniger anzeigen' : `Alle ${sorted.length} Addons anzeigen`);
+    more.addEventListener('click', () => {
+      storeExpanded = !storeExpanded;
+      void loadStore();
     });
-    const version = update && addon.installedVersion ? `${addon.installedVersion} → ${addon.version ?? '?'}` : addon.version;
-    grid.append(h('div', { class: `bundled-card bundled-${addon.id}` },
-      h('div', { class: 'bundled-icon' }, uiIcon(BUNDLED_ICONS[addon.id] ?? 'addons')),
+    box.append(more);
+  }
+}
+
+function storeCard(instanceId: string, addon: StoreAddon): HTMLElement {
+  const update = addon.state === 'update';
+  const installed = addon.state === 'installed';
+  const unsupported = addon.state === 'unsupported-api' || addon.state === 'unsupported-platform';
+  const label = h('span', { text: update ? 'Aktualisieren' : installed ? 'Installiert' : unsupported ? 'Nicht verfügbar' : 'Installieren' });
+  const button = h('button', { class: update || installed || unsupported ? 'ghost' : 'primary' },
+    uiIcon(update ? 'refresh' : installed ? 'check' : unsupported ? 'ban' : 'download', 'btn-icon'), label) as HTMLButtonElement;
+  button.disabled = installed || unsupported;
+  if (unsupported && addon.reason) button.title = addon.reason;
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    label.textContent = update ? 'Wird aktualisiert …' : 'Wird installiert …';
+    try {
+      const name = await api.installStoreAddon(instanceId, addon.id);
+      toast(`${name} ${addon.version} ist installiert und beim nächsten Spielstart dabei.`, 'success');
+      await loadContent();
+      await loadStore();
+      await reloadInstances();
+    } catch (error) {
+      button.disabled = false;
+      label.textContent = update ? 'Aktualisieren' : 'Installieren';
+      toast(errorMessage(error), 'error');
+    }
+  });
+  const version = update && addon.installedVersion ? `${addon.installedVersion} → ${addon.version}` : addon.version;
+  const chips = h('div', { class: 'store-chips' },
+    h('span', { class: 'store-chip', text: CATEGORY_LABELS[addon.category] ?? 'Sonstiges' }),
+    addon.platforms.length ? h('span', { class: 'store-chip', text: `Nur ${addon.platforms.map((p) => PLATFORM_LABELS[p]).join(' & ')}` }) : null,
+    h('span', { class: 'store-chip', text: addon.downloads === 1 ? '1 Download' : `${formatCount(addon.downloads)} Downloads` }),
+    installed && addon.installedEnabled === false ? h('span', { class: 'store-chip warn', text: 'Ausgeschaltet' }) : null,
+    unsupported && addon.reason ? h('span', { class: 'store-chip warn', text: addon.reason }) : null);
+  const open = storeOpen === addon.id;
+  const details = h('button', { class: 'link-button store-details-toggle', 'aria-expanded': String(open) }, open ? 'Weniger' : 'Details');
+  details.addEventListener('click', () => {
+    storeOpen = storeOpen === addon.id ? null : addon.id;
+    void loadStore();
+  });
+  const date = Date.parse(addon.date);
+  const extra = open
+    ? h('div', { class: 'store-details' },
+      addon.description ? plainText(addon.description) : null,
+      addon.notes.length ? h('div', { class: 'store-notes' }, h('strong', { text: `Neu in ${addon.version}` }), h('ul', {}, ...addon.notes.map((note) => h('li', { text: note })))) : null,
+      h('div', { class: 'store-meta', text: `von ${addon.authors.join(', ')} · Addon-API ${addon.api}${Number.isFinite(date) ? ` · ${formatDate(date)}` : ''}` }))
+    : null;
+  return h('div', { class: `bundled-card store-card bundled-${addon.id}${open ? ' open' : ''}` },
+    h('div', { class: 'store-row' },
+      h('div', { class: 'bundled-icon' }, uiIcon(addon.icon)),
       h('div', { class: 'bundled-main' },
         h('div', { class: 'bundled-name' },
           h('span', { text: addon.name }),
-          version ? h('span', { class: 'content-version', text: version }) : null,
+          h('span', { class: 'content-version', text: version }),
           update ? h('span', { class: 'tag tag-type', text: 'UPDATE' }) : null),
-        h('div', { class: 'bundled-desc', text: addon.description })),
-      button));
-  }
-  box.append(grid);
+        h('div', { class: 'bundled-desc', text: addon.summary }),
+        chips,
+        details),
+      button),
+    extra);
 }
 
 function kind(): ContentKind {
@@ -305,7 +381,7 @@ function renderContent(): void {
   }
 
   for (const item of items) {
-    const bundledIcon = !isMods && item.id ? BUNDLED_ICONS[item.id] : undefined;
+    const bundledIcon = !isMods && item.id ? ADDON_ICONS[item.id] : undefined;
     const icon = item.icon
       ? h('img', { class: 'content-icon', src: item.icon, alt: '' })
       : bundledIcon
@@ -350,7 +426,7 @@ async function removeItem(item: ContentItem): Promise<void> {
     await api.removeContent(detailId!, kind(), item.file);
     toast(`${item.name} wurde entfernt.`, 'success');
     await loadContent();
-    if (kind() === 'addons') await loadBundled();
+    if (kind() === 'addons') await loadStore();
     await reloadInstances();
   } catch (error) {
     toast(errorMessage(error), 'error');

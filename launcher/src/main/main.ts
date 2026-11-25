@@ -34,10 +34,10 @@ import {
 } from './config';
 import { loginMinecraft, offlineUuid, refreshMicrosoft, sessionFromAccessToken } from './core/auth';
 import { BridgeServer, type BridgeFile, type BridgeReply, type BridgeSession } from './core/bridge';
-import { addContentFiles, countEnabled, installBundledAddon, listBundledAddons, listContent, removeContent, setContentEnabled } from './core/content';
+import { addContentFiles, countEnabled, listContent, removeContent, setContentEnabled } from './core/content';
+import { applyPendingRemovals, installStoreAddon, storeForInstance } from './core/addonstore';
 import { DiscordRpc } from './core/discord';
 import { getFabricGameVersions } from './core/fabric';
-import { exists } from './core/fsutil';
 import { ADDON_DIR, InstanceStore, usesHeldixClient, type InstanceConfig } from './core/instances';
 import { buildLaunchArguments, startGame, type GameAccount, type RunningGame } from './core/launch';
 import { installModrinth, installPerformancePack, searchModrinth } from './core/modrinth';
@@ -76,7 +76,6 @@ function resourceDir(name: string): string {
   return app.isPackaged ? path.join(process.resourcesPath, name) : path.join(app.getAppPath(), 'resources', name);
 }
 const clientModsDir = () => resourceDir('client-mods');
-const bundledAddonsDir = () => resourceDir(ADDON_DIR);
 const loaderDir = () => resourceDir('heldix-loader');
 const fabricLoaderDir = () => resourceDir('heldix-loader-fabric');
 const bridgeDir = () => resourceDir('launcher-bridge');
@@ -478,7 +477,7 @@ async function toInstanceInfo(config: InstanceConfig): Promise<InstanceInfo> {
 
 /** Beim Start: alte Spielordner übernehmen, Standard-Instanz anlegen, Auswahl prüfen. */
 async function ensureInstances(): Promise<void> {
-  const migrated = await instances.migrateLegacy(bundledAddonsDir());
+  const migrated = await instances.migrateLegacy();
   if (migrated > 0) console.log(`[Launcher] ${migrated} bestehende Spielordner als Instanzen übernommen`);
 
   let list = await instances.list();
@@ -490,7 +489,7 @@ async function ensureInstances(): Promise<void> {
       const release = await getVersionManifest(paths).then((r) => r.manifest.latest.release).catch(() => null);
       if (release) data = { name: `Minecraft ${release}`, minecraft: release, loader: 'vanilla', color: '#10b981' };
     }
-    if (data) await instances.create(data, bundledAddonsDir());
+    if (data) await instances.create(data);
     list = await instances.list();
   }
 
@@ -696,17 +695,15 @@ function registerIpc(): void {
       const mods = await findClientMods(clientModsDir(), CLIENT_MOD_PREFIX);
       if (!mods.some((m) => m.minecraft === data.minecraft)) throw new Error(`Für Minecraft ${data.minecraft} gibt es noch keine HeldixClient-Mod.`);
     }
-    const config = await instances.create(data, bundledAddonsDir());
+    const config = await instances.create(data);
     await store.saveSettings({ selectedInstanceId: config.id });
     return toInstanceInfo(config);
   });
   ipcMain.handle('instances:update', async (_e, id: string, patch: InstancePatch) => {
     if (gameInstanceId === id && patch && 'heldixClient' in patch) throw new Error('Bitte erst das Spiel beenden.');
     const updated = await instances.update(id, patch);
-    // HeldixClient in einer Fabric-Instanz eingeschaltet: mitgelieferte Addons dazulegen, falls noch kein Addon-Ordner da ist
-    if (patch?.heldixClient === true && usesHeldixClient(updated) && !(await exists(path.join(instances.dir(updated.id), ADDON_DIR)))) {
-      await instances.installBundledAddons(instances.dir(updated.id), bundledAddonsDir());
-    }
+    // HeldixClient in einer Fabric-Instanz eingeschaltet: Addon-Ordner anlegen (Addons kommen aus dem Addon-Store)
+    if (patch?.heldixClient === true && usesHeldixClient(updated)) await mkdir(path.join(instances.dir(updated.id), ADDON_DIR), { recursive: true });
     return toInstanceInfo(updated);
   });
   ipcMain.handle('instances:delete', async (_e, id: string) => {
@@ -725,6 +722,8 @@ function registerIpc(): void {
 
   ipcMain.handle('content:list', async (_e, id: string, kind: ContentKind) => {
     const instance = await instances.require(id);
+    // im Spiel entfernte Addons (unter Windows bis zum Spielende gesperrt) jetzt löschen
+    if (assertKind(kind) === 'addons' && gameInstanceId !== id) await applyPendingRemovals(instances.dir(instance.id));
     return listContent(instances.dir(instance.id), assertKind(kind), instance.loader);
   });
   ipcMain.handle('content:setEnabled', async (_e, id: string, kind: ContentKind, file: string, enabled: boolean) => {
@@ -750,16 +749,18 @@ function registerIpc(): void {
     return addContentFiles(instances.dir(instance.id), assertKind(kind), sources);
   });
 
-  ipcMain.handle('addons:bundled', async (_e, id: string) => {
+  ipcMain.handle('addons:store', async (_e, id: string) => {
     const instance = await instances.require(id);
     if (!usesHeldixClient(instance)) return [];
-    return listBundledAddons(instances.dir(instance.id), bundledAddonsDir());
+    if (gameInstanceId !== id) await applyPendingRemovals(instances.dir(instance.id));
+    return storeForInstance(instances.dir(instance.id), HELDIX_SERVICE_URL, UPDATE_PUBLIC_KEY);
   });
-  ipcMain.handle('addons:installBundled', async (_e, id: string, file: string) => {
-    if (gameInstanceId === id) throw new Error('Bitte erst das Spiel beenden.');
+  ipcMain.handle('addons:installStore', async (_e, id: string, addonId: string) => {
+    if (gameInstanceId === id) throw new Error('Bitte erst das Spiel beenden – oder im Spiel über Einstellungen → Addons → Store installieren.');
     const instance = await instances.require(id);
     if (!usesHeldixClient(instance)) throw new Error('Heldix-Addons laufen nur in Instanzen mit HeldixClient.');
-    return installBundledAddon(instances.dir(instance.id), bundledAddonsDir(), String(file));
+    await applyPendingRemovals(instances.dir(instance.id));
+    return installStoreAddon(instances.dir(instance.id), HELDIX_SERVICE_URL, UPDATE_PUBLIC_KEY, String(addonId));
   });
 
   ipcMain.handle('modrinth:search', async (_e, id: string, query: string, offset: number) => {
@@ -830,7 +831,7 @@ function registerIpc(): void {
   // zuerst die Neuigkeiten des HeldixClient-Teams, dann Mojangs Patch Notes
   ipcMain.handle('news:list', async () => [...(await listHeldixNews(HELDIX_SERVICE_URL)), ...(await listNews(paths))]);
   ipcMain.handle('web:open', async (_e, page: unknown) => {
-    if (!['neuigkeiten', 'das-team', 'status', 'download', 'hilfe'].includes(String(page))) throw new Error('Unbekannte Seite');
+    if (!['neuigkeiten', 'das-team', 'status', 'download', 'hilfe', 'addons'].includes(String(page))) throw new Error('Unbekannte Seite');
     await shell.openExternal(`${WEBSITE_URL.replace(/\/+$/, '')}/${page}`);
   });
   ipcMain.handle('whatsnew:get', () => whatsNew());
