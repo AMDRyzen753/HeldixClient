@@ -383,7 +383,7 @@ export interface HeldixApi {
   /** öffnet heldixclient.com im Browser, schon angemeldet (Profil, Freunde, Nachrichten, Support, Team-Bereich) */
   openWebAccount(target?: WebTarget): Promise<void>;
   /** öffnet eine öffentliche Seite von heldixclient.com, z. B. "neuigkeiten" */
-  openWebsite(page: 'neuigkeiten' | 'das-team' | 'status'): Promise<void>;
+  openWebsite(page: 'neuigkeiten' | 'das-team' | 'status' | 'download' | 'hilfe'): Promise<void>;
   /** null = nichts Neues zu zeigen */
   getWhatsNew(): Promise<WhatsNew | null>;
   markWhatsNewSeen(): Promise<void>;

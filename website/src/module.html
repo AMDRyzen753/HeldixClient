@@ -1,0 +1,59 @@
+<!--seite {"titel": "Module", "beschreibung": "Alle Module von HeldixClient: HUD-Anzeigen wie FPS, CPS und Koordinaten, Funktionen wie Freelook, Zoom und Wegpunkte – mit Tasten und Einstellungen.", "bild": "/images/spiel-heldix-menue.png"}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<script type="module" src="/module.js"></script>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+{{include:nav.html}}
+
+<main id="inhalt" class="wrap module-page">
+  <div class="page-hero">
+    <span class="eyebrow">Module</span>
+    <h1>{{MODULE_ANZAHL}} Module, <span class="gradient">ein Menü</span></h1>
+    <p class="lead">Jedes Modul schaltest du im Heldix-Menü (rechte Umschalttaste) einzeln an und aus. HUD-Anzeigen ordnest du im HUD-Editor an.</p>
+  </div>
+
+  <div class="module-tools glass" role="search">
+    <label class="search-field">
+      <span class="visually-hidden">Module durchsuchen</span>
+      {{icon:search}}
+      <input type="search" id="modul-suche" placeholder="Modul suchen, z. B. Zoom oder Koordinaten" autocomplete="off">
+    </label>
+    <div class="segmented" role="group" aria-label="Art" id="modul-filter">
+      <button type="button" data-filter="alle" aria-pressed="true">Alle <span class="count-soft">{{MODULE_GESAMT}}</span></button>
+      <button type="button" data-filter="hud" aria-pressed="false">HUD-Anzeigen <span class="count-soft">{{MODULE_HUD_ANZAHL}}</span></button>
+      <button type="button" data-filter="funktion" aria-pressed="false">Funktionen <span class="count-soft">{{MODULE_FUNKTION_ANZAHL}}</span></button>
+      <button type="button" data-filter="addon" aria-pressed="false">Addons <span class="count-soft">{{MODULE_ADDON_ANZAHL}}</span></button>
+    </div>
+  </div>
+  <p class="result-line" id="modul-ergebnis" aria-live="polite"></p>
+
+  <div class="module-grid" id="module-liste">
+{{MODULE_KARTEN_HTML}}
+  </div>
+  <div class="empty" id="modul-leer" hidden>{{icon:search}}<p>Kein Modul passt zu deiner Suche.</p></div>
+
+  <section class="module-howto" aria-labelledby="howto-titel">
+    <div class="story">
+      <div class="story-text">
+        <span class="badge">{{icon:hud}}</span>
+        <h2 id="howto-titel">Alles an seinen Platz</h2>
+        <p>Im HUD-Editor verschiebst und vergrößerst du jede Anzeige, sie rasten an Kanten und aneinander ein. <kbd>Strg</kbd>+<kbd>Z</kbd> macht den letzten Schritt rückgängig.</p>
+        <a class="story-link" href="/hilfe/hud-editor">Zum HUD-Editor{{icon:chevron-right}}</a>
+      </div>
+      <div class="shot"><div class="frame" data-tilt><img src="/images/spiel-hud-editor.png" alt="HUD-Editor im Spiel mit Werkzeugleiste und Elemente-Liste" loading="lazy" width="854" height="480"></div></div>
+    </div>
+  </section>
+</main>
+
+<div class="lightbox" id="lightbox" hidden>
+  <button class="close" type="button" aria-label="Schließen">{{icon:close}}</button>
+  <figure><img alt=""><figcaption></figcaption></figure>
+</div>
+
+{{include:footer.html}}
+</body>
+</html>

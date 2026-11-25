@@ -1,0 +1,43 @@
+<!--seite {"titel": "Hilfe-Center", "beschreibung": "Anleitungen zu HeldixClient: Installation auf Windows und Mac, Anmeldung, Instanzen, Module, Freunde, Leistung und Lösungen für typische Probleme."}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<script type="module" src="/hilfe.js"></script>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+{{include:nav.html}}
+
+<main id="inhalt" class="wrap help-page">
+  <div class="page-hero">
+    <span class="eyebrow">Hilfe-Center</span>
+    <h1>Wobei können wir <span class="gradient">helfen?</span></h1>
+    <p class="lead">{{HILFE_ANZAHL}} Anleitungen – von der Installation bis zur Fehlersuche.</p>
+    <div class="help-search glass" role="search">
+      <label class="search-field big-search">
+        <span class="visually-hidden">Hilfe durchsuchen</span>
+        {{icon:search}}
+        <input type="search" id="hilfe-suche" name="q" placeholder="z. B. Mac öffnen, Freelook, Absturz" autocomplete="off">
+      </label>
+    </div>
+    <div class="topic-chips">{{HILFE_THEMEN_HTML}}</div>
+  </div>
+
+  <div class="search-results" id="hilfe-ergebnisse" aria-live="polite" hidden></div>
+
+  <div class="help-categories" id="hilfe-kategorien">
+{{HILFE_KATEGORIEN_HTML}}
+  </div>
+
+  <aside class="support-box big-support">
+    {{icon:chat}}
+    <div><h2>Nichts gefunden?</h2><p>Schreib dem Team – die Antwort bekommst du in deinem Konto und im Spiel.</p></div>
+    <a class="button" href="/konto#ziel=support">Support-Anfrage stellen</a>
+  </aside>
+</main>
+
+{{include:icons.html}}
+{{include:footer.html}}
+</body>
+</html>

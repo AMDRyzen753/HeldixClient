@@ -1,5 +1,5 @@
 {
-  "_hinweis": "Kopie als site.config.json speichern und ausfüllen. Die Datei enthält persönliche Angaben und wird nicht eingecheckt (.gitignore).",
+  "_hinweis": "Kopie als site.config.json speichern und ausfüllen. Die Datei enthält persönliche Angaben und wird nicht eingecheckt (.gitignore). githubUrl leer lassen, solange das Repository privat ist: Dann zeigt die Seite keine GitHub-Links und keine Hinweise auf Quellcode.",
   "betreiber": "Vorname Nachname",
   "anschrift": ["Straße Hausnummer", "PLZ Ort", "Deutschland"],
   "email": "kontakt@example.de",
@@ -7,6 +7,6 @@
   "hoster": "Name des Hosting-Anbieters, Anschrift",
   "aufsichtsbehoerde": ["optional: zuständige Datenschutz-Aufsichtsbehörde", "Straße", "PLZ Ort"],
   "projektVon": { "name": "optional: Firma oder Marke hinter dem Projekt", "url": "https://example.de" },
-  "downloadUrl": "https://github.com/AMDRyzen753/HeldixClient/releases/latest",
-  "githubUrl": "https://github.com/AMDRyzen753/HeldixClient"
+  "siteUrl": "https://heldixclient.com",
+  "githubUrl": ""
 }

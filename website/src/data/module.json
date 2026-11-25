@@ -1,0 +1,158 @@
+{
+  "armor": {
+    "text": "Zeigt deine Rüstung und die Items in Haupt- und Zweithand mit ihrer Haltbarkeit. Die Zahl ist grün, gelb oder rot, je nachdem wie viel noch übrig ist – so merkst du rechtzeitig, wenn etwas bald kaputtgeht. Bei stapelbaren Items steht stattdessen die Anzahl daneben.",
+    "einstellungen": [
+      "Rüstung",
+      "Items in der Hand",
+      "Haltbarkeit: Zahl, Prozent oder aus",
+      "Anordnung: untereinander oder nebeneinander",
+      "Größe"
+    ]
+  },
+  "chat": {
+    "text": "Verbessert den Minecraft-Chat: Vor jeder Nachricht steht die Uhrzeit, und gleiche Nachrichten direkt hintereinander werden zu einer Zeile mit „(3×)“ zusammengefasst. Mit Strg+Klick kopierst du eine Nachricht in die Zwischenablage – ohne Uhrzeit und Zähler.",
+    "tasten": [
+      "[[Strg]] + Klick auf eine Nachricht im offenen Chat: Text kopieren"
+    ],
+    "einstellungen": [
+      "Uhrzeit",
+      "Uhrzeit-Format: 14:05 oder 14:05:09",
+      "Gleiche Nachrichten stapeln",
+      "Strg+Klick kopiert"
+    ]
+  },
+  "coordinates": {
+    "text": "Zeigt deine Position als X, Y und Z, dazu die Himmelsrichtung, in die du schaust, und das Biom, in dem du gerade stehst. An der Richtung siehst du auch, ob X oder Z beim Laufen größer oder kleiner wird.",
+    "einstellungen": [
+      "Nachkommastellen: 0, 1 oder 2",
+      "Richtung",
+      "Biom",
+      "Größe"
+    ],
+    "bild": "spiel-hud-editor.png"
+  },
+  "cps": {
+    "text": "Zählt deine Klicks pro Sekunde, linke und rechte Maustaste getrennt (zum Beispiel „8 | 2“). Gezählt wird nur im Spiel, Klicks in Menüs zählen nicht mit.",
+    "einstellungen": [
+      "Rechte Maustaste",
+      "Größe",
+      "Position zurücksetzen"
+    ],
+    "bild": "spiel-hud-editor.png"
+  },
+  "crosshair": {
+    "text": "Ersetzt das Fadenkreuz durch ein eigenes, das du nach Form, Farbe und Größe einstellst. Auf Wunsch färbt es sich rot, sobald du auf ein Lebewesen zielst. Wann das Fadenkreuz zu sehen ist und die Angriffsanzeige bleiben wie bei Minecraft.",
+    "einstellungen": [
+      "Form: Kreuz, Kreuz mit Punkt, Punkt, Kreis, Kreis mit Punkt, Winkel",
+      "Farbe: acht Farben von Weiß bis Schwarz",
+      "Größe, Dicke und Lücke",
+      "Deckkraft",
+      "Umrandung",
+      "Rot bei Zielen"
+    ]
+  },
+  "effects": {
+    "text": "Listet deine aktiven Trank-Effekte mit Symbol, Stufe und Restzeit auf, die am längsten laufenden oben. Schädliche Effekte haben einen roten Namen, und in den letzten zehn Sekunden blinkt das Symbol, damit du rechtzeitig nachlegen kannst.",
+    "einstellungen": [
+      "Namen zeigen",
+      "Vanilla-Symbole ausblenden",
+      "Größe",
+      "Position zurücksetzen"
+    ]
+  },
+  "fps": {
+    "text": "Zeigt, wie viele Bilder pro Sekunde dein Spiel gerade schafft. Die Zahl ist grün ab 120, gelb ab 60 und darunter rot – so siehst du sofort, ob Shader oder Grafikeinstellungen dein Spiel ausbremsen.",
+    "einstellungen": [
+      "Farbe nach Wert",
+      "Größe",
+      "Position zurücksetzen"
+    ],
+    "bild": "spiel-hud-editor.png"
+  },
+  "freelook": {
+    "text": "Solange du die Taste hältst, drehst du mit der Maus nur die Kamera: Du schaust dich frei um, während deine Spielfigur weiter in ihre Richtung läuft. Bist du in der Ich-Perspektive, wechselt die Kamera dabei nach hinten in die dritte Person und danach wieder zurück.",
+    "tasten": [
+      "[[Linke Alt]] halten: frei umschauen"
+    ],
+    "einstellungen": [
+      "Taste: Halten oder Umschalten",
+      "Dritte Person"
+    ],
+    "hinweis": "Auf hypixel.net erlauben die Serverregeln kein Freelook, dort bleibt es automatisch aus."
+  },
+  "keystrokes": {
+    "text": "Zeigt live, welche Tasten du drückst: deine Lauftasten, linke und rechte Maustaste mit Klicks pro Sekunde und die Leertaste als Balken. Die Felder tragen die Namen deiner eigenen Tastenbelegung.",
+    "einstellungen": [
+      "Maustasten",
+      "CPS bei den Maustasten",
+      "Leertaste",
+      "Größe"
+    ],
+    "bild": "spiel-hud-editor.png"
+  },
+  "ping": {
+    "text": "Zeigt deine Latenz zum Server in Millisekunden. Grün heißt bis 60 ms, gelb bis 150 ms, alles darüber ist rot – so erkennst du schnell, ob Ruckler an der Verbindung liegen.",
+    "einstellungen": [
+      "Farbe nach Wert",
+      "Größe",
+      "Position zurücksetzen"
+    ],
+    "hinweis": "Sinnvoll vor allem auf Servern – im Einzelspieler steht dort 0 ms.",
+    "bild": "spiel-hud-editor.png"
+  },
+  "togglesprint": {
+    "text": "Du sprintest automatisch, ohne die Sprinttaste zu halten; ein Druck auf die Sprinttaste schaltet den Dauersprint aus und wieder an. Auf Wunsch schaltest du auch Schleichen per Tastendruck um, statt die Taste zu halten. Ob du gerade sprinten darfst (Hunger, Item benutzen …), entscheidet weiterhin Minecraft.",
+    "tasten": [
+      "[[Strg]] (Sprinttaste): Dauersprint an/aus",
+      "[[Umschalt]] (Schleichtaste): Schleichen an/aus, wenn „Schleichen umschalten“ an ist"
+    ],
+    "einstellungen": [
+      "Schleichen umschalten",
+      "Anzeige im HUD",
+      "Größe"
+    ],
+    "hinweis": "Beim Reiten und Fliegen gibt es kein Dauerschleichen, weil die Taste dort absteigen bzw. sinken bedeutet."
+  },
+  "waypoints": {
+    "text": "Merkt sich Orte in deiner Welt: Per Taste setzt du einen Wegpunkt an deiner Position, im Spiel erscheint er als Markierung mit Name und Entfernung, auch durch Wände. Stirbst du, wird automatisch ein Todespunkt gesetzt. Im Heldix-Menü unter Wegpunkte setzt du Wegpunkte mit eigenem Namen, wechselst die Farbe, blendest sie aus oder löschst sie.",
+    "tasten": [
+      "[[B]] Wegpunkt an deiner Position setzen"
+    ],
+    "einstellungen": [
+      "Entfernung zeigen",
+      "Todespunkt merken",
+      "Sichtweite: bis 5000 m oder alle"
+    ],
+    "hinweis": "Wegpunkte gehören zur jeweiligen Welt bzw. zum Server und erscheinen nur in der Dimension, in der du sie gesetzt hast."
+  },
+  "zoom": {
+    "text": "Solange du die Taste hältst, zoomst du ins Bild hinein, um weit entfernte Dinge zu erkennen. Mit dem Mausrad änderst du beim Zoomen die Stärke; beim nächsten Zoom startest du wieder mit dem eingestellten Wert.",
+    "tasten": [
+      "[[C]] halten: zoomen",
+      "Mausrad beim Zoomen: Zoomstärke ändern"
+    ],
+    "einstellungen": [
+      "Zoomstärke: Startwert von 2× bis 20×",
+      "Weich zoomen",
+      "Kinokamera"
+    ],
+    "hinweis": "Die Taste änderst du unter Optionen → Steuerung → HeldixClient."
+  },
+  "spotify": {
+    "text": "Zeigt den Song, der gerade in Spotify läuft, mit Cover, Titel, Künstler und Fortschritt im HUD. Per Taste pausierst du oder springst zum nächsten bzw. vorherigen Song, ohne das Spiel zu verlassen, und bei jedem Songwechsel erscheint kurz eine Einblendung. Schaltest du „Nur Spotify“ aus, steuerst du auch andere Player wie den Browser oder VLC.",
+    "tasten": [
+      "[[Pos1]] Abspielen/Pause",
+      "[[Bild ab]] nächster Song",
+      "[[Bild auf]] vorheriger Song"
+    ],
+    "einstellungen": [
+      "Im HUD anzeigen",
+      "Cover anzeigen",
+      "Fortschritt anzeigen",
+      "Songwechsel einblenden",
+      "Ohne Musik ausblenden",
+      "Nur Spotify"
+    ],
+    "hinweis": "Läuft nur unter Windows und braucht keine Anmeldung, weil das Addon den Song über die Windows-Mediensteuerung liest – starte die Musik zuerst in Spotify selbst."
+  }
+}

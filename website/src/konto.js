@@ -146,7 +146,10 @@ async function start() {
     showApp(me, target === 'team' ? null : target);
     if (notice) toast(notice, 'error');
   } catch (error) {
-    if (error.status === 401) showGuest(notice);
+    if (error.status === 401) {
+      const hint = target === 'support' ? 'Für eine Support-Anfrage meldest du dich zuerst an – ohne Passwort, über den Launcher oder im Spiel (siehe unten). Danach öffnet sich der Reiter Support.' : target ? 'Melde dich zuerst an – ohne Passwort, über den Launcher oder im Spiel (siehe unten).' : null;
+      showGuest(notice ?? hint);
+    }
     else showUnavailable(error);
   }
 }

@@ -1,10 +1,8 @@
+<!--seite {"titel":"Team-Bereich","beschreibung":"Team-Bereich des Heldix-Dienstes für Moderatoren und Admins.","noindex":true}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
-<title>Team – HeldixClient</title>
-<meta name="description" content="Team-Bereich des Heldix-Dienstes für Moderatoren und Admins.">
-<meta name="robots" content="noindex">
 <script type="module" src="/team.js"></script>
 </head>
 <body>
@@ -294,6 +292,20 @@
             </div>
           </li>
         </ol>
+      </div>
+      <div class="app-card">
+        <h2>Mac-Downloads hochladen</h2>
+        <p class="muted small">DMG und ZIP für Apple Silicon und Intel, z. B. aus dem Build-Artefakt <code>HeldixClient-macOS</code> oder aus <code>launcher/release</code> auf einem Mac. Namen wie beim Bauen: <code>HeldixClient-&lt;version&gt;-mac-arm64.dmg</code> bzw. <code>-mac-x64.zip</code>. Die neueste Datei je Prozessor steht sofort auf der Download-Seite – ohne update.json, der Launcher auf dem Mac meldet neue Versionen nur.</p>
+        <div class="file-row">
+          <label class="button small ghost file-button">{{icon:file}}Mac-Dateien wählen …<input type="file" id="upload-mac" accept=".dmg,.zip,application/x-apple-diskimage,application/zip" multiple class="visually-hidden"></label>
+          <span class="file-name muted" id="upload-mac-name">Keine Datei gewählt</span>
+        </div>
+        <div class="upload-progress" id="upload-mac-fortschritt" hidden>
+          <div class="progress" role="progressbar" aria-label="Hochladen" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="upload-mac-balken"><span></span></div>
+          <div class="progress-row"><span id="upload-mac-text">0 %</span><button class="button tiny ghost" type="button" id="upload-mac-abbrechen">Abbrechen</button></div>
+        </div>
+        <p class="form-error" id="upload-mac-fehler" role="alert" hidden></p>
+        <p class="form-ok" id="upload-mac-ok" hidden></p>
       </div>
       <div class="app-card">
         <div class="card-head"><h2>Dateien auf dem Server</h2></div>

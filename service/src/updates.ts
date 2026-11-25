@@ -1,4 +1,5 @@
-// Updates für den Launcher: Installer und update.json liegen im Update-Ordner, der Dienst liefert sie aus.
+// Updates und Downloads des Launchers: Installer (Windows), Mac-Dateien und update.json liegen im Update-Ordner,
+// der Dienst liefert sie aus (das GitHub-Repository ist privat).
 // Hochladen geht per scp (Betreiber) oder im Team-Bereich (Admin). Der Launcher prüft die Signatur selbst; beim
 // Veröffentlichen im Team-Bereich prüft sie zusätzlich der Dienst mit dem öffentlichen Update-Schlüssel.
 import { createHash, randomBytes, verify, type KeyObject } from 'node:crypto';
@@ -9,8 +10,49 @@ import { pipeline, Transform } from 'node:stream';
 import { pipeline as pipelineAsync } from 'node:stream/promises';
 import { HttpError } from './http';
 
-/** Erlaubte Namen der Installer-Dateien, z. B. `HeldixClient-Setup-0.12.0.exe` oder `HeldixClient-Setup-1.0.0-beta.2.exe`. */
+/** Windows-Installer, z. B. `HeldixClient-Setup-0.12.0.exe` oder `HeldixClient-Setup-1.0.0-beta.2.exe` (steht im Manifest). */
 export const SETUP_FILE_RE = /^HeldixClient-Setup-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.exe$/;
+const WINDOWS_FILE_RE = /^HeldixClient-Setup-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\.exe$/;
+/** Mac-Dateien, z. B. `HeldixClient-0.12.1-mac-arm64.dmg` oder `HeldixClient-0.12.1-mac-x64.zip`. */
+export const MAC_FILE_RE = /^HeldixClient-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)-mac-(arm64|x64)\.(dmg|zip)$/;
+
+export type DownloadKind = 'exe' | 'dmg' | 'zip';
+
+export interface DownloadName {
+  platform: 'windows' | 'mac';
+  arch: 'x64' | 'arm64';
+  kind: DownloadKind;
+  version: string;
+}
+
+/** Datei im Update-Ordner mit dem, was ihr Name verrät. */
+export interface DownloadFile extends DownloadName {
+  file: string;
+  size: number;
+  uploadedAt: number;
+}
+
+/** Ziele für `/v1/launcher/download/latest/<ziel>`. */
+export const DOWNLOAD_TARGETS = ['windows', 'mac-arm64', 'mac-x64'] as const;
+export type DownloadTarget = (typeof DOWNLOAD_TARGETS)[number];
+
+const CONTENT_TYPES: Record<DownloadKind, string> = {
+  exe: 'application/vnd.microsoft.portable-executable',
+  dmg: 'application/x-apple-diskimage',
+  zip: 'application/zip',
+};
+
+/** System, Prozessor, Art und Version aus dem Dateinamen; andere Namen gibt es nicht (null). */
+export function parseDownloadName(file: string): DownloadName | null {
+  const windows = WINDOWS_FILE_RE.exec(file);
+  if (windows) return { platform: 'windows', arch: 'x64', kind: 'exe', version: windows[1]! };
+  const mac = MAC_FILE_RE.exec(file);
+  if (mac) return { platform: 'mac', arch: mac[2] as 'arm64' | 'x64', kind: mac[3] as 'dmg' | 'zip', version: mac[1]! };
+  return null;
+}
+
+const INVALID_NAME =
+  'Ungültiger Dateiname (erwartet: HeldixClient-Setup-<version>.exe oder HeldixClient-<version>-mac-<arm64|x64>.<dmg|zip>).';
 export const MANIFEST_FILE = 'update.json';
 /** update.json ist ein paar hundert Byte groß; alles über 64 KB ist sicher ein Versehen. */
 const MAX_MANIFEST_SIZE = 64 * 1024;
@@ -42,11 +84,15 @@ export function compareVersions(a: string, b: string): number {
   return preA < preB ? -1 : 1;
 }
 
-/** SHA-512 einer Datei (base64), gestreamt. */
-async function sha512File(file: string): Promise<string> {
-  const hash = createHash('sha512');
+/** Hash einer Datei, gestreamt (große Dateien blockieren den Dienst nicht). */
+async function hashFile(file: string, algorithm: 'sha256' | 'sha512', encoding: 'hex' | 'base64'): Promise<string> {
+  const hash = createHash(algorithm);
   await pipelineAsync(fs.createReadStream(file), hash);
-  return hash.digest('base64');
+  return hash.digest(encoding);
+}
+
+function sha512File(file: string): Promise<string> {
+  return hashFile(file, 'sha512', 'base64');
 }
 
 /** Inhalt einer gültigen update.json. `manifest` bleibt genau der Text aus der Datei (darüber läuft die Signatur). */
@@ -140,6 +186,9 @@ export class Updates {
 
   /** Installer, die gerade hochgeladen werden (je Datei nur ein Upload gleichzeitig). */
   private readonly uploading = new Set<string>();
+  /** SHA-256 pro Datei, gültig solange Größe und Änderungszeit gleich sind. */
+  private readonly sha256Cache = new Map<string, { size: number; mtimeMs: number; sha256: string }>();
+  private readonly sha256Pending = new Map<string, Promise<string>>();
   private publishing = false;
 
   /**
@@ -229,7 +278,7 @@ export class Updates {
       const end = range?.end ?? size - 1;
       const length = size === 0 ? 0 : end - start + 1;
       const headers: Record<string, string> = {
-        'Content-Type': 'application/vnd.microsoft.portable-executable',
+        'Content-Type': CONTENT_TYPES[parseDownloadName(file)!.kind],
         'Content-Length': String(length),
         'Content-Disposition': `attachment; filename="${file}"`,
         'Accept-Ranges': 'bytes',
@@ -257,21 +306,22 @@ export class Updates {
 
   // ---------- Team-Bereich (Admin) ----------
 
-  /** Installer im Update-Ordner, neueste zuerst. */
-  async files(): Promise<{ file: string; size: number; uploadedAt: number }[]> {
+  /** Alle Dateien im Update-Ordner (Windows und Mac), zuletzt hochgeladene zuerst. */
+  async files(): Promise<DownloadFile[]> {
     let names: string[];
     try {
       names = await fs.promises.readdir(this.dir);
     } catch {
       return [];
     }
-    const files: { file: string; size: number; uploadedAt: number }[] = [];
+    const files: DownloadFile[] = [];
     for (const name of names) {
-      const real = await this.resolve(name);
-      if (real === null) continue;
+      const parsed = parseDownloadName(name);
+      const real = parsed === null ? null : await this.resolve(name);
+      if (parsed === null || real === null) continue;
       try {
         const info = await fs.promises.stat(real);
-        if (info.isFile()) files.push({ file: name, size: info.size, uploadedAt: Math.floor(info.mtimeMs) });
+        if (info.isFile()) files.push({ file: name, ...parsed, size: info.size, uploadedAt: Math.floor(info.mtimeMs) });
       } catch {
         // gerade gelöscht
       }
@@ -279,12 +329,82 @@ export class Updates {
     return files.sort((a, b) => b.uploadedAt - a.uploadedAt || (a.file < b.file ? -1 : 1));
   }
 
+  /** Höchste Version unter den Dateien eines Systems, Prozessors und einer Art. */
+  private newest(files: DownloadFile[], platform: 'windows' | 'mac', arch: 'x64' | 'arm64', kind: DownloadKind): DownloadFile | null {
+    let best: DownloadFile | null = null;
+    for (const f of files) {
+      if (f.platform !== platform || f.arch !== arch || f.kind !== kind) continue;
+      if (best === null || compareVersions(f.version, best.version) > 0) best = f;
+    }
+    return best;
+  }
+
+  /**
+   * Datei für `/v1/launcher/download/latest/<ziel>`: Windows = Installer aus dem Manifest (wenn vollständig da),
+   * Mac = höchste Version unter den vorhandenen `.dmg` dieses Prozessors. Nichts da: null.
+   */
+  async latestFor(target: DownloadTarget): Promise<string | null> {
+    if (target === 'windows') return (await this.latest())?.file ?? null;
+    const arch = target === 'mac-arm64' ? 'arm64' : 'x64';
+    return this.newest(await this.files(), 'mac', arch, 'dmg')?.file ?? null;
+  }
+
+  /** SHA-256 (hex) einer Datei; einmal berechnet und zwischengespeichert, solange Größe und Änderungszeit gleich sind. */
+  private async sha256(file: string, real: string, size: number, mtimeMs: number): Promise<string> {
+    const cached = this.sha256Cache.get(file);
+    if (cached && cached.size === size && cached.mtimeMs === mtimeMs) return cached.sha256;
+    const key = `${file}:${size}:${mtimeMs}`;
+    let pending = this.sha256Pending.get(key);
+    if (!pending) {
+      pending = hashFile(real, 'sha256', 'hex').finally(() => this.sha256Pending.delete(key));
+      this.sha256Pending.set(key, pending);
+    }
+    const sha256 = await pending;
+    this.sha256Cache.set(file, { size, mtimeMs, sha256 });
+    return sha256;
+  }
+
+  /**
+   * `GET /v1/launcher/files`: die neueste Datei je System, Prozessor und Art mit SHA-256 – Windows (der veröffentlichte
+   * Installer aus dem Manifest), Mac Apple Silicon (dmg, zip), Mac Intel (dmg, zip).
+   */
+  async publicFiles() {
+    const all = await this.files();
+    const published = await this.latest();
+    // Einträge für Dateien, die es nicht mehr gibt, aus dem Zwischenspeicher nehmen.
+    for (const name of this.sha256Cache.keys()) if (!all.some((f) => f.file === name)) this.sha256Cache.delete(name);
+    const chosen = [
+      published ? (all.find((f) => f.file === published.file) ?? null) : null,
+      this.newest(all, 'mac', 'arm64', 'dmg'),
+      this.newest(all, 'mac', 'arm64', 'zip'),
+      this.newest(all, 'mac', 'x64', 'dmg'),
+      this.newest(all, 'mac', 'x64', 'zip'),
+    ].filter((f): f is DownloadFile => f !== null);
+    const files = [];
+    for (const f of chosen) {
+      const real = await this.resolve(f.file);
+      const info = real === null ? null : await fs.promises.stat(real).catch(() => null);
+      if (real === null || !info) continue;
+      files.push({
+        file: f.file,
+        platform: f.platform,
+        arch: f.arch,
+        kind: f.kind,
+        version: f.version,
+        size: info.size,
+        sha256: await this.sha256(f.file, real, info.size, info.mtimeMs),
+        uploadedAt: Math.floor(info.mtimeMs),
+      });
+    }
+    return { version: published?.version ?? null, files };
+  }
+
   /**
    * `PUT /v1/team/updates/files/<file>`: speichert den Anfragekörper gestreamt als `<file>.part` und benennt ihn erst
    * am Ende um. Höchstens `maxBytes`; kommt `idleTimeoutMs` lang nichts an, wird abgebrochen.
    */
   async receive(req: IncomingMessage, file: string, maxBytes: number, idleTimeoutMs: number): Promise<{ file: string; size: number; sha512: string }> {
-    if (!SETUP_FILE_RE.test(file)) throw new HttpError(400, 'Ungültiger Dateiname (erwartet: HeldixClient-Setup-<version>.exe).');
+    if (parseDownloadName(file) === null) throw new HttpError(400, INVALID_NAME);
     const tooLarge = () =>
       new HttpError(413, `Die Datei ist zu groß (höchstens ${Math.round(maxBytes / 1024 / 1024)} MB).`, { Connection: 'close' });
     const declared = Number(req.headers['content-length'] ?? '0');
@@ -302,6 +422,7 @@ export class Updates {
       // Reste eines abgebrochenen Uploads weg; 'wx' folgt keinem symbolischen Link.
       await fs.promises.rm(part, { force: true });
       const hash = createHash('sha512');
+      const hash256 = createHash('sha256');
       let size = 0;
       let idle: NodeJS.Timeout | undefined;
       const resetIdle = () => {
@@ -315,6 +436,7 @@ export class Updates {
           size += chunk.length;
           if (size > maxBytes) return callback(tooLarge());
           hash.update(chunk);
+          hash256.update(chunk);
           callback(null, chunk);
         },
       });
@@ -324,8 +446,12 @@ export class Updates {
       } finally {
         if (idle) clearTimeout(idle);
       }
-      await fs.promises.rename(part, path.join(dir, file));
+      const target = path.join(dir, file);
+      await fs.promises.rename(part, target);
       part = undefined;
+      // SHA-256 für /v1/launcher/files gleich mitgerechnet: Die Liste muss die Datei nicht noch einmal lesen.
+      const info = await fs.promises.stat(target);
+      this.sha256Cache.set(file, { size: info.size, mtimeMs: info.mtimeMs, sha256: hash256.digest('hex') });
       return { file, size, sha512: hash.digest('base64') };
     } catch (err) {
       if (err instanceof HttpError) throw err;
@@ -412,7 +538,7 @@ export class Updates {
 
   /** `DELETE /v1/team/updates/files/<file>`: löscht einen Installer, aber nie den veröffentlichten (409). */
   async deleteFile(file: string): Promise<void> {
-    if (!SETUP_FILE_RE.test(file)) throw new HttpError(404, NO_SUCH_FILE);
+    if (parseDownloadName(file) === null) throw new HttpError(404, NO_SUCH_FILE);
     if ((await this.published())?.file === file) {
       throw new HttpError(409, 'Das ist der Installer der veröffentlichten Version. Er lässt sich nicht löschen.');
     }
@@ -445,7 +571,7 @@ export class Updates {
    * oder sie (über einen symbolischen Link) außerhalb des Ordners liegt.
    */
   private async resolve(file: string): Promise<string | null> {
-    if (!SETUP_FILE_RE.test(file)) return null;
+    if (parseDownloadName(file) === null) return null;
     try {
       const dir = await fs.promises.realpath(this.dir);
       const real = await fs.promises.realpath(path.join(dir, file));

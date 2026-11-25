@@ -1,6 +1,7 @@
-// HeldixClient – Webseite: Neuigkeiten auf der Startseite (die neuesten drei, gekürzt mit „Weiterlesen“).
-// Leer oder nicht erreichbar: Der Abschnitt bleibt versteckt.
+// HeldixClient – Webseite: Startseite. Neuigkeiten (die neuesten drei, gekürzt mit „Weiterlesen“; leer oder nicht
+// erreichbar: Abschnitt bleibt versteckt) und Download-Knöpfe mit dem erkannten System beschriften.
 import { clampLongNews, newsCard, publicGet } from './public-cards.js';
+import { detectSystem } from './system.js';
 
 const section = document.getElementById('neuigkeiten');
 const list = document.getElementById('neuigkeiten-liste');
@@ -18,3 +19,19 @@ if (section && list) {
     })
     .catch(() => {});
 }
+
+detectSystem().then((system) => {
+  const label = system.os === 'windows' ? 'Für Windows herunterladen' : system.os === 'mac' ? 'Für Mac herunterladen' : 'Downloads ansehen';
+  const sub =
+    system.os === 'windows'
+      ? 'Windows 10 und 11 · 64 Bit · kostenlos'
+      : system.os === 'mac'
+        ? 'macOS 11 oder neuer · Apple Silicon und Intel'
+        : 'Für Windows und Mac – auf dem PC herunterladen';
+  for (const button of document.querySelectorAll('[data-download-cta]')) {
+    const text = button.querySelector('.cta-label');
+    if (text) text.textContent = label;
+    button.dataset.system = system.os;
+  }
+  for (const element of document.querySelectorAll('[data-download-sub]')) element.textContent = sub;
+});

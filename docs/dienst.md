@@ -7,7 +7,7 @@ Der Heldix-Dienst ist ein kleiner Server (Ordner [service/](../service)). Zusamm
 - **Freunde:** Freundesliste mit Anfragen und Online-Status. Auf Wunsch zeigt sie, auf welchem Server ein Freund gerade spielt, sodass du ihm direkt beitreten kannst.
 - **Nachrichten:** Kurze Direktnachrichten an Freunde, auch wenn ihr gerade nicht auf demselben Server seid.
 - **Blockieren und Melden:** Wer stört, lässt sich blockieren und beim Betreiber melden.
-- **Launcher-Updates:** Der Launcher lädt neue Versionen über den Dienst. Der Download-Knopf der Webseite zeigt auf dieselbe Datei.
+- **Launcher-Updates und Downloads:** Der Launcher lädt neue Versionen über den Dienst. Alle Downloads der Webseite (Windows und macOS, mit Prüfsummen) kommen ebenfalls vom Dienst, nicht von GitHub.
 - **Webseite mit Konto:** Anmelden ohne Passwort über den Launcher oder das Spiel. Auf der Webseite siehst du Freunde, Nachrichten und Einstellungen, lädst deine Daten herunter und siehst deine Meldungen.
 - **Team-Bereich:** Moderatoren und Admins bearbeiten auf der Webseite Meldungen, Sperren und Support-Anfragen und schreiben Neuigkeiten. Admins veröffentlichen außerdem Updates und verwalten das Team. Der Zugang braucht eine Zwei-Faktor-Anmeldung.
 - **Support:** Spieler schreiben dem Team über Webseite, Launcher oder Spiel; Antworten meldet das Spiel sofort.
@@ -160,18 +160,30 @@ Regeln für Anfragen:
 
 ### Launcher-Updates
 
-Der Launcher aktualisiert sich über den Dienst. Signieren und Prüfen übernimmt der Launcher; der Dienst liefert nur Dateien aus, die der Betreiber in den Update-Ordner gelegt hat (siehe [Launcher-Update veröffentlichen](#launcher-update-veröffentlichen)). Diese Wege brauchen keine Anmeldung und antworten immer mit `Access-Control-Allow-Origin: *`, auch bei Fehlern, damit auch die Webseite sie abfragen kann.
+Der Launcher aktualisiert sich über den Dienst, und die Download-Seite der Webseite bietet alle Dateien vom Dienst an (Windows-Installer und Mac-Dateien). Signieren und Prüfen der Windows-Updates übernimmt der Launcher; der Dienst liefert nur Dateien aus, die der Betreiber in den Update-Ordner gelegt hat (siehe [Launcher-Update veröffentlichen](#launcher-update-veröffentlichen)). Diese Wege brauchen keine Anmeldung und antworten immer mit `Access-Control-Allow-Origin: *`, auch bei Fehlern, damit auch die Webseite sie abfragen kann.
 
 | Anfrage | Antwort |
 | --- | --- |
 | `GET /v1/launcher/latest` | Inhalt von `update.json`: `{ "manifest": "<JSON-Text>", "signature": "<Base64>" }`, mit `Cache-Control: no-cache` |
-| `GET /v1/launcher/download/latest` | 302 mit `Location: /v1/launcher/download/<file aus dem Manifest>` (Ziel des Download-Knopfs der Webseite) |
-| `GET`, `HEAD /v1/launcher/download/<file>` | der Installer |
+| `GET`, `HEAD /v1/launcher/download/latest` | 302 mit `Location: /v1/launcher/download/<file aus dem Manifest>` (Windows-Installer) |
+| `GET`, `HEAD /v1/launcher/download/latest/<ziel>` | 302 auf die neueste Datei für `windows`, `mac-arm64` oder `mac-x64`; nichts da: 404 „Für dieses System gibt es noch keinen Download.“ |
+| `GET`, `HEAD /v1/launcher/download/<file>` | die Datei (Windows-Installer oder Mac-Datei) |
+| `GET /v1/launcher/files` | `{ "version": "<Version aus dem Manifest>" \| null, "files": [ { "file", "platform": "windows" \| "mac", "arch": "x64" \| "arm64", "kind": "exe" \| "dmg" \| "zip", "version", "size", "sha256": "<hex>", "uploadedAt": <ms> } ] }`, `Cache-Control: max-age=60` |
 
 - `manifest` ist genau der Text aus `update.json` (darüber läuft die Signatur) und ergibt `{ "v": 1, "version": "0.12.0", "file": "HeldixClient-Setup-0.12.0.exe", "size": <Byte>, "sha512": "<Base64>", "date": "JJJJ-MM-TT", "notes": ["…"] }`.
 - **Prüfung beim Ausliefern:** Die Signatur prüft hier der Launcher. Der Dienst prüft nur die Form: beide Texte vorhanden, `manifest` ist ein JSON-Objekt mit `v` gleich 1, Text `version`, `file` nach dem Namensmuster unten und ganzzahligem `size`. Außerdem muss `file` im Update-Ordner liegen und genau `size` Byte groß sein; sonst ist der Upload noch nicht fertig. Fehlt etwas: 404 „Noch keine Version veröffentlicht.“ und ein Eintrag im Log. Ändert sich `update.json`, liest der Dienst sie beim nächsten Abruf neu, ohne Neustart.
-- **Dateinamen:** `HeldixClient-Setup-<a>.<b>.<c>.exe`, auf Wunsch mit Zusatz wie `-beta.1` (Muster `^HeldixClient-Setup-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.exe$`). Nur solche Dateien direkt im Update-Ordner liefert der Dienst aus. Andere Namen, Unterordner und symbolische Links nach außerhalb ergeben 404.
-- **Download:** mit `Content-Length`, `Content-Type: application/vnd.microsoft.portable-executable`, `Content-Disposition: attachment; filename="<file>"`, `Accept-Ranges: bytes`, `ETag` und `Last-Modified`. Ein Bereich per `Range: bytes=a-b`, `bytes=a-` oder `bytes=-n` ergibt 206 mit `Content-Range`, ein Bereich außerhalb der Datei 416. Mehrere Bereiche oder ungültige Angaben ergeben die ganze Datei (200). `If-Range` mit ETag oder Datum wird beachtet. Höchstens 30 Downloads pro Minute und IP, sonst 429.
+- **Dateinamen** (`<version>` wie `0.12.1`, auf Wunsch mit Zusatz wie `-beta.1`):
+
+  | System | Datei | Beispiel |
+  | --- | --- | --- |
+  | Windows | `HeldixClient-Setup-<version>.exe` (steht im signierten Manifest) | `HeldixClient-Setup-0.12.1.exe` |
+  | macOS Apple Silicon | `HeldixClient-<version>-mac-arm64.dmg` und `.zip` | `HeldixClient-0.12.1-mac-arm64.dmg` |
+  | macOS Intel | `HeldixClient-<version>-mac-x64.dmg` und `.zip` | `HeldixClient-0.12.1-mac-x64.zip` |
+
+  Nur solche Dateien direkt im Update-Ordner liefert der Dienst aus. Andere Namen (auch `.part`, andere Prozessoren oder Endungen), Unterordner und symbolische Links nach außerhalb ergeben 404.
+- **Neueste Datei je System** (`latest/<ziel>`): `windows` ist der Installer aus dem Manifest (sobald er vollständig da ist); `mac-arm64` und `mac-x64` sind die höchste Version unter den vorhandenen `.dmg` dieses Prozessors (Vergleich wie im Launcher: `1.10.0` > `1.2.0`, `1.2.0` > `1.2.0-beta.1`). Die Weiterleitung hat `Cache-Control: no-cache`. Ein unbekanntes Ziel ergibt ebenfalls 404.
+- **Dateiliste** (`files`, für die Download-Seite): je System, Prozessor und Art nur die neueste Version, sortiert Windows, Mac Apple Silicon (dmg, zip), Mac Intel (dmg, zip). Für Windows steht dort der veröffentlichte Installer aus dem Manifest (hochgeladene, noch nicht veröffentlichte Installer nicht); `version` ist die Version aus dem Manifest. `sha256` berechnet der Dienst einmal (gestreamt, bei Uploads im Team-Bereich schon beim Hochladen) und merkt sie sich, solange Name, Größe und Änderungszeit gleich bleiben.
+- **Download:** mit `Content-Length`, `Content-Type` (exe: `application/vnd.microsoft.portable-executable`, dmg: `application/x-apple-diskimage`, zip: `application/zip`), `Content-Disposition: attachment; filename="<file>"`, `Accept-Ranges: bytes`, `ETag` und `Last-Modified`. Ein Bereich per `Range: bytes=a-b`, `bytes=a-` oder `bytes=-n` ergibt 206 mit `Content-Range`, ein Bereich außerhalb der Datei 416. Mehrere Bereiche oder ungültige Angaben ergeben die ganze Datei (200). `If-Range` mit ETag oder Datum wird beachtet. Höchstens 30 Downloads pro Minute und IP, sonst 429.
 - Die Datei wird gestreamt, auch ein langsamer Download läuft also bis zum Ende. Kommt 2 Minuten lang gar nichts beim Client an, trennt der Dienst die Verbindung.
 - Veröffentlichen geht per `scp` (siehe [Betrieb](#launcher-update-veröffentlichen)) oder als Admin im [Team-Bereich](#team-bereich); dort prüft der Dienst zusätzlich die Signatur.
 
@@ -258,7 +270,7 @@ Geprüft wird in dieser Reihenfolge: Rolle vorhanden, 2FA eingerichtet, Code bes
 | `POST /v1/team/news` | `{ "title": "<1–120>", "text": "<1–5000, Zeilenumbrüche erlaubt>", "published": bool }` | `{ "news": News }` |
 | `PUT /v1/team/news/<id>` | Teil davon | `{ "news": News }` |
 | `DELETE /v1/team/news/<id>` | – | `{ "deleted": true }` |
-| `GET /v1/team/updates` (admin) | – | `{ "current": <Manifest-Objekt> \| null, "files": [ { "file", "size", "uploadedAt" } ] }` |
+| `GET /v1/team/updates` (admin) | – | `{ "current": <Manifest-Objekt> \| null, "files": [ { "file", "platform", "arch", "kind", "version", "size", "uploadedAt" } ] }`, alle Dateien, zuletzt hochgeladene zuerst |
 | `PUT /v1/team/updates/files/<file>` (admin) | roher Inhalt (`application/octet-stream`, gestreamt, höchstens 1 GiB) | `{ "file", "size", "sha512": "<base64>" }` |
 | `PUT /v1/team/updates/manifest` (admin) | Inhalt von `update.json` (`{ "manifest", "signature" }`) | `{ "current": <Manifest-Objekt> }` |
 | `DELETE /v1/team/updates/files/<file>` (admin) | – | wie `GET /v1/team/updates` |
@@ -280,7 +292,7 @@ Spieler (`GET /v1/team/players/<uuid>`) = `{ "uuid", "name", "cape", "visible", 
 - **Spieler suchen:** ohne Groß-/Kleinschreibung nach Namensanfang, oder nach UUID (auch mit Bindestrichen); ohne `q` die zuletzt gesehenen. Gesperrte stehen mit drin: Ihr Konto ist gelöscht, deshalb `lastSeen: null` und in der Detailansicht `createdAt: null`, `lastSeen: null`, Schalter `false` und `ban` gesetzt. Etwas anderes als Name oder UUID: 400. `online` ist die echte Verbindung, unabhängig von `presence`.
 - **Spieler löschen** wirkt wie dessen `DELETE /v1/me` (ohne Sperre): Verbindungen enden mit 4001.
 - **Neuigkeiten:** Titel einzeilig, Text mit Zeilenumbrüchen (`\r\n` wird zu `\n`), sonst die Regeln für Nachrichten. Moderatoren dürfen alle Neuigkeiten bearbeiten. Der Autor bleibt der, der sie angelegt hat.
-- **Updates veröffentlichen:** Hochladen streamt in `<file>.part` und benennt erst am Ende um. Name wie beim Download, sonst 400; über 1 GiB: 413; der Installer der veröffentlichten Version lässt sich weder ersetzen noch löschen (409). Beim Manifest prüft der Dienst die Ed25519-Signatur mit dem öffentlichen Update-Schlüssel (`HELDIX_DIENST_UPDATE_KEY`; ohne: 503) und dieselben Regeln wie der Launcher: Dateiname passt zur Version, Größe, `sha512` (400 bei falscher Signatur oder falschem Inhalt). Die Datei muss im Ordner liegen und Größe und SHA-512 müssen stimmen, und die Version muss höher sein als die veröffentlichte (Vorabversionen wie `1.2.0-beta.1` zählen weniger als `1.2.0`), sonst 409. Erst dann ersetzt der Dienst `update.json` atomar (neue Datei schreiben, dann umbenennen). So kann auch ein übernommenes Team-Konto kein fremdes Update ausliefern.
+- **Updates veröffentlichen:** Hochladen streamt in `<file>.part` und benennt erst am Ende um. Erlaubt sind alle Namen wie beim Download, also auch die Mac-Dateien; sonst 400; über 1 GiB: 413; der Windows-Installer der veröffentlichten Version lässt sich weder ersetzen noch löschen (409). Mac-Dateien lassen sich immer löschen, auch die gerade über `latest/<ziel>` angebotene; dann zeigt `latest` auf die nächstältere. Beim Manifest prüft der Dienst die Ed25519-Signatur mit dem öffentlichen Update-Schlüssel (`HELDIX_DIENST_UPDATE_KEY`; ohne: 503) und dieselben Regeln wie der Launcher: Dateiname passt zur Version, Größe, `sha512` (400 bei falscher Signatur oder falschem Inhalt). Die Datei muss im Ordner liegen und Größe und SHA-512 müssen stimmen, und die Version muss höher sein als die veröffentlichte (Vorabversionen wie `1.2.0-beta.1` zählen weniger als `1.2.0`), sonst 409. Erst dann ersetzt der Dienst `update.json` atomar (neue Datei schreiben, dann umbenennen). So kann auch ein übernommenes Team-Konto kein fremdes Update ausliefern.
 - **Mitglieder:** Aufnehmen nur, wer sich schon einmal angemeldet hat (sonst 404); ist er schon im Team, ändert `POST` die Rolle. Ungültige Rolle: 400. Mindestens ein Admin muss bleiben: Den letzten Admin herabstufen, entfernen oder als Spieler löschen ergibt 409 „Es muss mindestens ein Admin bleiben.“ (`DELETE /v1/me` des letzten Admins geht trotzdem; dann legt der Betreiber einen neuen an).
 - **Protokoll:** Jede ändernde Team-Aktion landet im Protokoll; Einträge verfallen nach 365 Tagen. `action` ist eine von: `report.done`, `ban`, `unban`, `player.reset-cape`, `player.delete`, `news.create`, `news.update`, `news.delete`, `update.upload`, `update.publish`, `update.delete`, `team.add`, `team.role`, `team.remove`, `team.reset-2fa`, `team.profile` (nur „öffentlich an“/„öffentlich aus“, ohne Texte), `support.reply`, `support.close`, `2fa.enable`. `target` ist z. B. „Name (uuid)“, „Meldung 12“, „Anfrage 7 (Name)“, „Neuigkeit 3: Titel“ oder ein Dateiname.
 - **Teamprofil:** `public` (Standard `false`: niemand erscheint ohne eigene Zustimmung), `title` (Aufgabe, 0–40 Zeichen, eine Zeile, z. B. „Entwicklung“), `about` (0–200 Zeichen, eine Zeile); sonst 400. Die Zustimmung lässt sich jederzeit zurücknehmen; wer das Team verlässt, verliert das Profil (bei neuer Aufnahme ist es wieder privat).
@@ -447,6 +459,15 @@ Voraussetzung ist ein Linux-Server mit systemd, z. B. Debian 12 oder Ubuntu 22.0
 
 **Im Browser** (Admin im Team-Bereich): Installer hochladen, dann `update.json` hochladen. Der Dienst prüft Signatur, Größe, SHA-512 und Version und veröffentlicht erst dann.
 
+**Mac-Dateien** (`HeldixClient-<version>-mac-arm64.dmg`/`.zip` und `-mac-x64.dmg`/`.zip`, z. B. aus dem Artefakt des Mac-Builds bei GitHub Actions herunterladen): im Team-Bereich hochladen oder per scp in denselben Ordner legen. Ein Manifest gibt es dafür nicht; die Download-Seite bietet sofort die höchste Version an:
+
+```sh
+scp HeldixClient-0.12.1-mac-arm64.dmg HeldixClient-0.12.1-mac-arm64.zip \
+    HeldixClient-0.12.1-mac-x64.dmg HeldixClient-0.12.1-mac-x64.zip root@example.de:/var/lib/heldix-dienst/updates/
+```
+
+Per scp landet eine halb hochgeladene Datei kurz unter ihrem Namen im Ordner; zum Ausprobieren erst `HeldixClient-….dmg.part` hochladen und auf dem Server umbenennen (`mv`), oder den Team-Bereich nehmen (der benennt erst am Ende um). Alte Versionen können liegen bleiben oder im Team-Bereich gelöscht werden.
+
 **Per scp:** Der Launcher-Build erzeugt den Installer `HeldixClient-Setup-<version>.exe` und die signierte `update.json`. Beide kommen in den Update-Ordner, **erst der Installer, `update.json` zuletzt** (scp kopiert in der angegebenen Reihenfolge):
 
 ```sh
@@ -455,7 +476,7 @@ scp HeldixClient-Setup-0.12.0.exe update.json root@example.de:/var/lib/heldix-di
 
 - Ein Neustart ist nicht nötig: Ändert sich `update.json`, liest der Dienst sie beim nächsten Abruf neu. Im Log steht dann „Launcher-Version 0.12.0 ist veröffentlicht“, bei Fehlern der Grund.
 - Solange der Installer fehlt oder noch nicht vollständig hochgeladen ist (Größe wie `size` im Manifest), meldet `/v1/launcher/latest` 404. Der Launcher sieht also nie eine Version, die er nicht laden kann.
-- Die Dateien müssen für den Dienst lesbar sein (bei scp als root der Standard, Rechte 644). Alte Installer können liegen bleiben; ausgeliefert wird jede Datei mit passendem Namen, angeboten nur die aus `update.json`.
+- Die Dateien müssen für den Dienst lesbar sein (bei scp als root der Standard, Rechte 644). Alte Installer können liegen bleiben; ausgeliefert wird jede Datei mit passendem Namen, angeboten wird für Windows nur die aus `update.json`, für Mac die höchste Version.
 - Ohne Installer (Docker, von Hand): Update-Ordner ist `HELDIX_DIENST_UPDATES`, Standard `<Datenordner>/updates`.
 
 ### Verwaltung: Meldungen, Sperren und Team

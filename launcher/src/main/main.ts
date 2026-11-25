@@ -677,7 +677,7 @@ function registerIpc(): void {
   ipcMain.handle('update:state', () => updater.state);
   ipcMain.handle('update:check', () => updater.check());
   ipcMain.handle('update:download-page', async () => {
-    await shell.openExternal(`${WEBSITE_URL.replace(/\/+$/, '')}/#download`);
+    await shell.openExternal(`${WEBSITE_URL.replace(/\/+$/, '')}/download`);
   });
   ipcMain.handle('update:install', async () => {
     if (gameRunning()) throw new Error('Erst das Spiel beenden, dann aktualisieren.');
@@ -830,7 +830,7 @@ function registerIpc(): void {
   // zuerst die Neuigkeiten des HeldixClient-Teams, dann Mojangs Patch Notes
   ipcMain.handle('news:list', async () => [...(await listHeldixNews(HELDIX_SERVICE_URL)), ...(await listNews(paths))]);
   ipcMain.handle('web:open', async (_e, page: unknown) => {
-    if (page !== 'neuigkeiten' && page !== 'das-team' && page !== 'status') throw new Error('Unbekannte Seite');
+    if (!['neuigkeiten', 'das-team', 'status', 'download', 'hilfe'].includes(String(page))) throw new Error('Unbekannte Seite');
     await shell.openExternal(`${WEBSITE_URL.replace(/\/+$/, '')}/${page}`);
   });
   ipcMain.handle('whatsnew:get', () => whatsNew());

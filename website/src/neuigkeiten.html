@@ -1,10 +1,8 @@
+<!--seite {"titel":"Neuigkeiten und Versionen","beschreibung":"Alle Neuigkeiten zu HeldixClient und der Versionsverlauf des Launchers."}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
-<title>Neuigkeiten und Versionen – HeldixClient</title>
-<meta name="description" content="Alle Neuigkeiten zu HeldixClient und der Versionsverlauf des Launchers.">
-<meta property="og:title" content="Neuigkeiten und Versionen – HeldixClient">
 <script type="module" src="/neuigkeiten.js"></script>
 </head>
 <body>
@@ -36,9 +34,9 @@
         <div>
           <p class="release-label">Aktuelle Version</p>
           <p class="release-version" id="release-version">{{VERSION}}</p>
-          <p class="meta" id="download-meta">Installer für Windows 10 und 11 (64 Bit)</p>
+          <p class="meta" id="download-meta">Für Windows und Mac</p>
         </div>
-        <a class="button" id="download-button" href="{{DOWNLOAD_URL}}" data-api="https://__API_DOMAIN__/v1/launcher/download/latest">{{icon:download}}Installer herunterladen</a>
+        <a class="button" id="download-button" href="/download">{{icon:download}}Zum Download</a>
       </div>
       <div id="release-latest-notes"></div>
     </div>

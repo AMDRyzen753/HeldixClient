@@ -112,12 +112,12 @@ Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Laun
 ## Installation
 
 **Windows 10 und 11**
-1. Den Installer `HeldixClient-Setup-<version>.exe` unter [Releases](https://github.com/AMDRyzen753/HeldixClient/releases) herunterladen und starten.
+1. Den Installer `HeldixClient-Setup-<version>.exe` auf [heldixclient.com/download](https://heldixclient.com/download) herunterladen und starten.
 2. Windows SmartScreen warnt beim ersten Start, weil der Installer nicht signiert ist: **Weitere Informationen** → **Trotzdem ausführen**.
 3. Im Launcher mit dem Microsoft-Konto anmelden, eine Instanz wählen und **Spielen** drücken.
 
 **macOS 11 oder neuer** (Apple Silicon und Intel)
-1. Unter [Releases](https://github.com/AMDRyzen753/HeldixClient/releases) `HeldixClient-mac-arm64.dmg` (M1 und neuer) bzw. `HeldixClient-mac-x64.dmg` (Intel) laden, öffnen und HeldixClient in **Programme** ziehen.
+1. Auf [heldixclient.com/download](https://heldixclient.com/download) die Mac-Version laden (Apple Silicon für M1 und neuer, sonst Intel), öffnen und HeldixClient in **Programme** ziehen.
 2. Die App ist nur ad-hoc signiert und nicht von Apple beglaubigt. Beim ersten Start blockiert macOS sie; unter **Systemeinstellungen → Datenschutz & Sicherheit** steht dann **Dennoch öffnen**.
 3. Anmelden und spielen wie unter Windows. Unterschiede: Vulkan gibt es auf dem Mac nicht (Minecraft wählt die Grafik selbst), Updates meldet der Launcher nur und lädt sie nicht selbst, und das Spotify-Addon braucht Windows.
 

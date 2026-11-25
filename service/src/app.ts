@@ -18,7 +18,7 @@ import { Reports } from './reports';
 import { DEFAULT_SKIN_HOSTS, Skins } from './skins';
 import { Support } from './support';
 import { playerLabel, Team, writeAudit, type Actor } from './team';
-import { MAX_SETUP_SIZE, NOTHING_PUBLISHED, Updates } from './updates';
+import { DOWNLOAD_TARGETS, MAX_SETUP_SIZE, NOTHING_PUBLISHED, Updates, type DownloadTarget } from './updates';
 import { DEFAULT_CAPES, isName, isUuid } from './validate';
 import { checkCsrf, checkOrigin, clearSessionCookie, NOT_SIGNED_IN, readSessionCookie, Web, type WebAuth } from './web';
 
@@ -690,6 +690,26 @@ export function createService(options: ServiceOptions): Service {
     return RESPONDED;
   }
 
+  /** `GET /v1/launcher/download/latest/<ziel>`: Weiterleitung auf die neueste Datei für Windows oder Mac (Prozessor). */
+  async function downloadLatestFor(ctx: Context) {
+    const target = ctx.params[0] ?? '';
+    const file = (DOWNLOAD_TARGETS as readonly string[]).includes(target) ? await updates.latestFor(target as DownloadTarget) : null;
+    if (file === null) throw new HttpError(404, 'Für dieses System gibt es noch keinen Download.');
+    ctx.res.writeHead(302, {
+      Location: `/v1/launcher/download/${file}`,
+      'Cache-Control': 'no-cache',
+      'Content-Length': '0',
+    });
+    ctx.res.end();
+    return RESPONDED;
+  }
+
+  /** `GET /v1/launcher/files`: neueste Datei je System, Prozessor und Art mit SHA-256 (Download-Seite). */
+  async function launcherFiles(ctx: Context) {
+    sendJson(ctx.res, 200, await updates.publicFiles(), { 'Cache-Control': 'max-age=60' });
+    return RESPONDED;
+  }
+
   async function download(ctx: Context) {
     rateLimit(downloadLimiter, clientIp(ctx.req), 'Zu viele Downloads. Bitte kurz warten.');
     await updates.serve(ctx.req, ctx.res, ctx.params[0] ?? '', downloadIdleTimeoutMs);
@@ -919,6 +939,9 @@ export function createService(options: ServiceOptions): Service {
     { method: 'GET', pattern: /^\/v1\/launcher\/latest$/, kind: 'public', handler: launcherLatest },
     { method: 'GET', pattern: /^\/v1\/launcher\/download\/latest$/, kind: 'public', handler: downloadLatest },
     { method: 'HEAD', pattern: /^\/v1\/launcher\/download\/latest$/, kind: 'public', handler: downloadLatest },
+    { method: 'GET', pattern: /^\/v1\/launcher\/download\/latest\/([^/]+)$/, kind: 'public', handler: downloadLatestFor },
+    { method: 'HEAD', pattern: /^\/v1\/launcher\/download\/latest\/([^/]+)$/, kind: 'public', handler: downloadLatestFor },
+    { method: 'GET', pattern: /^\/v1\/launcher\/files$/, kind: 'public', handler: launcherFiles },
     { method: 'GET', pattern: /^\/v1\/launcher\/download\/([^/]+)$/, kind: 'public', handler: download },
     { method: 'HEAD', pattern: /^\/v1\/launcher\/download\/([^/]+)$/, kind: 'public', handler: download },
     {

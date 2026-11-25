@@ -45,6 +45,8 @@ import { memberCard, newsCard, publicGet, skinHead } from './public-cards.js';
 setSkinSource('auth');
 
 const SETUP_FILE_RE = /^HeldixClient-Setup-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.exe$/;
+/** Mac-Downloads wie beim Bauen benannt, z. B. HeldixClient-0.13.0-mac-arm64.dmg (gleiches Muster wie im Dienst). */
+const MAC_FILE_RE = /^HeldixClient-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)-mac-(arm64|x64)\.(dmg|zip)$/;
 const MAX_UPLOAD = 1024 ** 3;
 const MAX_REASON = 300;
 const MAX_TITLE = 120;
@@ -64,6 +66,7 @@ const state = {
   uploaded: null, // Antwort des letzten Uploads in dieser Sitzung { file, size, sha512 }
   manifest: null, // { outer, inner }
   uploading: null,
+  macUploading: null,
   auditLimit: AUDIT_STEP,
   supportFilter: 'open',
   supportTickets: [],
@@ -1023,6 +1026,15 @@ function renderUpdates() {
     ];
   });
   const files = [...(state.updates?.files ?? [])].sort((a, b) => (b.uploadedAt ?? 0) - (a.uploadedAt ?? 0));
+  // Mac: die neueste Datei je Prozessor und Art steht auf der Download-Seite (latest/mac-…)
+  const newestMac = new Map();
+  for (const file of files) {
+    if (file.platform !== 'mac' || !file.version) continue;
+    const key = `${file.arch}:${file.kind}`;
+    const best = newestMac.get(key);
+    if (!best || compareVersions(file.version, best.version) > 0) newestMac.set(key, file);
+  }
+  const SYSTEM_LABEL = { arm64: 'Mac Apple Silicon', x64: 'Mac Intel' };
   rerender($('#update-dateien'), JSON.stringify([files, current?.file]), () => {
     if (!files.length) return emptyState('Noch keine Dateien hochgeladen.', 'file');
     return h(
@@ -1030,14 +1042,23 @@ function renderUpdates() {
       { class: 'rows' },
       files.map((file) => {
         const isCurrent = current?.file === file.file;
+        const isMac = file.platform === 'mac';
+        const onDownloadPage = isMac && newestMac.get(`${file.arch}:${file.kind}`)?.file === file.file;
         return h(
           'li',
           { class: 'row' },
-          h('span', { class: 'row-icon', 'aria-hidden': 'true' }, icon('file')),
+          h('span', { class: 'row-icon', 'aria-hidden': 'true' }, icon(isMac ? 'chip' : 'file')),
           h(
             'div',
             { class: 'row-main' },
-            h('div', { class: 'row-title' }, h('code', { class: 'mono', text: file.file }), isCurrent ? chip('veröffentlicht', 'success') : null),
+            h(
+              'div',
+              { class: 'row-title' },
+              h('code', { class: 'mono', text: file.file }),
+              isMac ? chip(SYSTEM_LABEL[file.arch] ?? 'Mac') : chip('Windows'),
+              isCurrent ? chip('veröffentlicht', 'success') : null,
+              onDownloadPage ? chip('auf der Download-Seite', 'success') : null,
+            ),
             h('div', { class: 'row-sub', text: `${formatBytes(file.size)} · hochgeladen ${formatDateTime(file.uploadedAt)}` }),
           ),
           h(
@@ -1068,7 +1089,10 @@ function renderUpdates() {
 async function deleteUpdateFile(file) {
   const ok = await confirmAction({
     title: `${file.file} löschen?`,
-    text: 'Die Datei verschwindet vom Server. Launcher, die gerade diese Version laden, brechen ab.',
+    text:
+      file.platform === 'mac'
+        ? 'Die Datei verschwindet vom Server. Die Download-Seite zeigt dann die nächstältere Version für diesen Prozessor (falls es eine gibt).'
+        : 'Die Datei verschwindet vom Server. Launcher, die gerade diese Version laden, brechen ab.',
     confirmLabel: 'Löschen',
     danger: true,
     onConfirm: async () => {
@@ -1150,6 +1174,89 @@ async function onExeChosen(event) {
     setTimeout(() => {
       if (!state.uploading) $('#upload-fortschritt').hidden = true;
     }, 1500);
+  }
+}
+
+function setMacMessage(kind, text) {
+  const error = $('#upload-mac-fehler');
+  const okBox = $('#upload-mac-ok');
+  error.hidden = kind !== 'error';
+  okBox.hidden = kind !== 'ok';
+  if (kind === 'error') error.textContent = text;
+  if (kind === 'ok') okBox.replaceChildren(icon('check'), h('span', { text }));
+}
+
+/** Mac-Downloads (DMG/ZIP) nacheinander hochladen; sie brauchen keine update.json. */
+async function onMacChosen(event) {
+  const input = event.currentTarget;
+  const chosen = [...(input.files ?? [])];
+  input.value = '';
+  if (!chosen.length) return;
+  $('#upload-mac-name').textContent = chosen.length === 1 ? `${chosen[0].name} · ${formatBytes(chosen[0].size)}` : `${chosen.length} Dateien · ${formatBytes(chosen.reduce((sum, f) => sum + f.size, 0))}`;
+  setMacMessage(null);
+  const wrong = chosen.find((file) => !MAC_FILE_RE.test(file.name));
+  if (wrong) {
+    setMacMessage('error', `${wrong.name}: Mac-Dateien müssen so heißen wie beim Bauen, z. B. HeldixClient-1.4.0-mac-arm64.dmg oder HeldixClient-1.4.0-mac-x64.zip.`);
+    return;
+  }
+  const bad = chosen.find((file) => file.size === 0 || file.size > MAX_UPLOAD);
+  if (bad) {
+    setMacMessage('error', `${bad.name}: ${bad.size ? 'Die Datei ist größer als 1 GB.' : 'Die Datei ist leer.'}`);
+    return;
+  }
+  const existing = chosen.filter((file) => state.updates?.files?.some((entry) => entry.file === file.name));
+  if (existing.length) {
+    const replace = await confirmAction({
+      title: existing.length === 1 ? `${existing[0].name} ersetzen?` : `${existing.length} Dateien ersetzen?`,
+      text: 'Dateien mit diesen Namen liegen schon auf dem Server.',
+      confirmLabel: 'Ersetzen',
+    });
+    if (!replace) return;
+  }
+  const bar = $('#upload-mac-balken');
+  const fill = bar.firstElementChild;
+  const label = $('#upload-mac-text');
+  const chooser = input.closest('label');
+  $('#upload-mac-fortschritt').hidden = false;
+  $('#upload-mac-abbrechen').hidden = false;
+  chooser.classList.add('disabled');
+  input.disabled = true;
+  const done = [];
+  try {
+    for (const [index, file] of chosen.entries()) {
+      const prefix = chosen.length > 1 ? `${index + 1}/${chosen.length} · ` : '';
+      fill.style.width = '0%';
+      bar.setAttribute('aria-valuenow', '0');
+      label.textContent = `${prefix}0 % · 0 von ${formatBytes(file.size)}`;
+      const started = Date.now();
+      const job = upload(`/v1/team/updates/files/${encodeURIComponent(file.name)}`, file, (loaded, total) => {
+        const percent = Math.min(100, Math.floor((loaded / total) * 100));
+        fill.style.width = `${percent}%`;
+        bar.setAttribute('aria-valuenow', String(percent));
+        const seconds = (Date.now() - started) / 1000;
+        const speed = seconds > 0.5 ? ` · ${formatBytes(loaded / seconds)}/s` : '';
+        label.textContent = `${prefix}${percent} % · ${formatBytes(loaded)} von ${formatBytes(total)}${speed}`;
+      });
+      state.macUploading = job;
+      await job.promise;
+      done.push(file.name);
+    }
+    fill.style.width = '100%';
+    label.textContent = '100 %';
+    setMacMessage('ok', done.length === 1 ? `${done[0]} ist hochgeladen und steht auf der Download-Seite.` : `${done.length} Dateien sind hochgeladen und stehen auf der Download-Seite.`);
+    toast(done.length === 1 ? `${done[0]} ist hochgeladen.` : `${done.length} Mac-Dateien sind hochgeladen.`, 'success');
+  } catch (error) {
+    handleAccessError(error);
+    if (!error.handled) setMacMessage('error', done.length ? `${error.message} (schon hochgeladen: ${done.join(', ')})` : error.message);
+  } finally {
+    state.macUploading = null;
+    $('#upload-mac-abbrechen').hidden = true;
+    chooser.classList.remove('disabled');
+    input.disabled = false;
+    setTimeout(() => {
+      if (!state.macUploading) $('#upload-mac-fortschritt').hidden = true;
+    }, 1500);
+    await loadUpdates().catch(showError);
   }
 }
 
@@ -1933,6 +2040,8 @@ function init() {
 
   $('#upload-exe').addEventListener('change', onExeChosen);
   $('#upload-abbrechen').addEventListener('click', () => state.uploading?.abort());
+  $('#upload-mac').addEventListener('change', onMacChosen);
+  $('#upload-mac-abbrechen').addEventListener('click', () => state.macUploading?.abort());
   $('#upload-json').addEventListener('change', onManifestChosen);
   $('#manifest-veroeffentlichen').addEventListener('click', publishManifest);
 
@@ -1969,7 +2078,7 @@ function init() {
   });
 
   window.addEventListener('beforeunload', (event) => {
-    if (state.uploading || editorDirty() || profileDirty()) {
+    if (state.uploading || state.macUploading || editorDirty() || profileDirty()) {
       event.preventDefault();
       event.returnValue = '';
     }

@@ -1,0 +1,153 @@
+<!--seite {"titel": "Download", "beschreibung": "HeldixClient kostenlos herunterladen – für Windows 10 und 11 sowie macOS 11 oder neuer (Apple Silicon und Intel). Mit Prüfsummen und Installationsanleitung.", "bild": "/images/launcher-start.png"}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<script type="module" src="/download.js"></script>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+{{include:nav.html}}
+
+<main id="inhalt" class="wrap download-page" data-api-base="https://__API_DOMAIN__">
+  <div class="page-hero">
+    <span class="eyebrow">Download</span>
+    <h1>HeldixClient <span class="gradient">herunterladen</span></h1>
+    <p class="lead">Kostenlos für Windows und Mac. Installieren, mit deinem Microsoft-Konto anmelden, Instanz wählen, spielen.</p>
+  </div>
+
+  <p class="notice" id="download-fehler" role="status" hidden>Die Liste der Dateien ist gerade nicht erreichbar. Die Download-Knöpfe funktionieren trotzdem, sobald der Server wieder läuft – sonst hilft der <a href="/konto#ziel=support">Support</a>.</p>
+
+  <!-- Empfehlung für das erkannte System -->
+  <div class="recommend glass" id="empfohlen" aria-live="polite">
+    <div class="recommend-main">
+      <span class="recommend-icon" aria-hidden="true">{{icon:download}}</span>
+      <div class="recommend-text">
+        <p class="eyebrow" id="empfohlen-label">Empfohlen</p>
+        <h2 id="empfohlen-titel">Für Windows und Mac</h2>
+        <p class="muted" id="empfohlen-meta">Version {{VERSION}}</p>
+        <p class="recommend-hint" id="empfohlen-hinweis" hidden></p>
+      </div>
+    </div>
+    <div class="recommend-actions" id="empfohlen-aktionen">
+      <a class="button big" id="download-primary" href="https://__API_DOMAIN__/v1/launcher/download/latest/windows">{{icon:download}}<span>Für Windows herunterladen</span></a>
+      <a class="button big ghost" id="download-secondary" href="https://__API_DOMAIN__/v1/launcher/download/latest/mac-arm64">{{icon:download}}<span>Für Mac herunterladen</span></a>
+    </div>
+  </div>
+
+  <!-- Alle Systeme -->
+  <section id="alle-systeme" aria-labelledby="systeme-titel">
+    <div class="section-head">
+      <span class="eyebrow">Alle Systeme</span>
+      <h2 id="systeme-titel">Wähle dein System</h2>
+      <p>Jede Datei kommt direkt von unserem Server. Mit der SHA-256-Prüfsumme kannst du kontrollieren, dass sie unverändert ist.</p>
+    </div>
+    <div class="system-grid">
+      <article class="system-card" id="system-windows" data-ziel="windows">
+        <div class="system-head"><span class="badge">{{icon:monitor}}</span><div><h3>Windows</h3><p>Windows 10 und 11 · 64 Bit</p></div></div>
+        <div class="system-files" data-dateien></div>
+        <p class="system-missing" data-fehlt hidden>Für dieses System gibt es noch keinen Download. Frag gern beim <a href="/konto#ziel=support">Support</a> nach.</p>
+        <a class="button" data-knopf href="https://__API_DOMAIN__/v1/launcher/download/latest/windows">{{icon:download}}Installer laden</a>
+      </article>
+      <article class="system-card" id="system-mac-arm64" data-ziel="mac-arm64">
+        <div class="system-head"><span class="badge">{{icon:chip}}</span><div><h3>Mac mit Apple Silicon</h3><p>macOS 11 oder neuer · M1 und neuer</p></div></div>
+        <div class="system-files" data-dateien></div>
+        <p class="system-missing" data-fehlt hidden>Für dieses System gibt es noch keinen Download. Frag gern beim <a href="/konto#ziel=support">Support</a> nach.</p>
+        <a class="button" data-knopf href="https://__API_DOMAIN__/v1/launcher/download/latest/mac-arm64">{{icon:download}}Disk-Image laden</a>
+      </article>
+      <article class="system-card" id="system-mac-x64" data-ziel="mac-x64">
+        <div class="system-head"><span class="badge">{{icon:chip}}</span><div><h3>Mac mit Intel</h3><p>macOS 11 oder neuer · Intel-Prozessor</p></div></div>
+        <div class="system-files" data-dateien></div>
+        <p class="system-missing" data-fehlt hidden>Für dieses System gibt es noch keinen Download. Frag gern beim <a href="/konto#ziel=support">Support</a> nach.</p>
+        <a class="button" data-knopf href="https://__API_DOMAIN__/v1/launcher/download/latest/mac-x64">{{icon:download}}Disk-Image laden</a>
+      </article>
+    </div>
+    <p class="hint center">Welcher Mac? Unter Apple-Menü → „Über diesen Mac“ steht bei Apple Silicon „Chip“ (M1, M2 …), bei Intel „Prozessor“. Die meisten Macs ab Ende 2020 haben Apple Silicon.</p>
+  </section>
+
+  <!-- Version -->
+  <section id="version" aria-labelledby="version-titel">
+    <div class="version-card glass">
+      <div>
+        <span class="eyebrow">Aktuelle Version</span>
+        <h2 id="version-titel"><span id="version-nummer">{{VERSION}}</span></h2>
+        <p class="muted" id="version-datum"></p>
+      </div>
+      <div class="version-notes" id="version-hinweise"><p class="muted">Was neu ist, steht im <a href="/neuigkeiten#versionen">Versionsverlauf</a>.</p></div>
+    </div>
+  </section>
+
+  <!-- Anleitung -->
+  <section id="anleitung" aria-labelledby="anleitung-titel">
+    <div class="section-head">
+      <span class="eyebrow">Installation</span>
+      <h2 id="anleitung-titel">Schritt für Schritt</h2>
+    </div>
+    <div class="install glass">
+      <div class="tabs install-tabs" role="tablist" aria-label="System" id="anleitung-tabs">
+        <button class="tab" type="button" role="tab" id="tab-windows" data-tab="windows" aria-controls="panel-windows" aria-selected="true">{{icon:monitor}}Windows</button>
+        <button class="tab" type="button" role="tab" id="tab-mac" data-tab="mac" aria-controls="panel-mac" aria-selected="false" tabindex="-1">{{icon:chip}}Mac</button>
+      </div>
+      <div class="install-panel" id="panel-windows" role="tabpanel" aria-labelledby="tab-windows" tabindex="0">
+        <ol class="steps big-steps">
+          <li><span><strong>Installer laden und starten.</strong> Die Datei heißt <code>HeldixClient-Setup-…exe</code>.</span></li>
+          <li><span><strong>Windows SmartScreen:</strong> Erscheint „Der Computer wurde durch Windows geschützt“, klick auf <strong>„Weitere Informationen“</strong> und dann auf <strong>„Trotzdem ausführen“</strong>. Der Installer hat noch keine kostenpflichtige Signatur.</span></li>
+          <li><span><strong>Anmelden</strong> mit dem Microsoft-Konto, mit dem du Minecraft gekauft hast.</span></li>
+          <li><span><strong>Spielen drücken.</strong> Minecraft und Java lädt der Launcher selbst. Später aktualisiert er sich von allein.</span></li>
+        </ol>
+      </div>
+      <div class="install-panel" id="panel-mac" role="tabpanel" aria-labelledby="tab-mac" tabindex="0" hidden>
+        <ol class="steps big-steps">
+          <li><span><strong>Disk-Image laden und öffnen</strong> (Apple Silicon oder Intel, siehe oben).</span></li>
+          <li><span><strong>HeldixClient in „Programme“ ziehen</strong> und von dort starten.</span></li>
+          <li><span><strong>macOS blockiert den ersten Start:</strong> Öffne <strong>Systemeinstellungen → Datenschutz &amp; Sicherheit</strong> und klick unten auf <strong>„Dennoch öffnen“</strong>. Die App ist nicht von Apple beglaubigt.</span></li>
+          <li><span><strong>Anmelden und spielen</strong> wie unter Windows. Neue Versionen meldet der Launcher; du lädst sie dann hier.</span></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- Voraussetzungen und Fragen -->
+  <section id="voraussetzungen" aria-labelledby="voraussetzungen-titel">
+    <div class="two-col">
+      <div class="glass panel-pad">
+        <h2 id="voraussetzungen-titel">Voraussetzungen</h2>
+        <dl class="requirements">
+          <dt>Spiel</dt><dd>Minecraft: Java Edition (gekauft, Microsoft-Konto)</dd>
+          <dt>Windows</dt><dd>Windows 10 oder 11, 64 Bit</dd>
+          <dt>Mac</dt><dd>macOS 11 oder neuer, Apple Silicon oder Intel</dd>
+          <dt>Speicher</dt><dd>4 GB RAM oder mehr</dd>
+          <dt>Java</dt><dd>lädt der Launcher selbst</dd>
+          <dt>Grafik</dt><dd>Vulkan oder OpenGL (Mac: OpenGL)</dd>
+        </dl>
+      </div>
+      <div class="faq compact-faq">
+        <details>
+          <summary>Ist der Download sicher?{{icon:chevron-down}}</summary>
+          <p>Alle Dateien kommen von unserem eigenen Server. Die SHA-256-Prüfsumme oben zeigt, ob deine Datei unverändert ist. Unter Windows prüft der Launcher jedes Update zusätzlich mit einer digitalen Signatur.</p>
+        </details>
+        <details>
+          <summary>Warum warnt mein System?{{icon:chevron-down}}</summary>
+          <p>Die Dateien haben noch keine kostenpflichtige Signatur von Microsoft oder Apple. Deshalb fragt dein System beim ersten Start einmal nach – siehe Anleitung oben.</p>
+        </details>
+        <details>
+          <summary>Wie bekomme ich Updates?{{icon:chevron-down}}</summary>
+          <p>Unter Windows aktualisiert sich der Launcher selbst. Auf dem Mac meldet er neue Versionen; du lädst sie dann auf dieser Seite.</p>
+        </details>
+        <details>
+          <summary>Gibt es HeldixClient für Linux oder das Handy?{{icon:chevron-down}}</summary>
+          <p>Zurzeit nicht – nur für Windows und Mac.</p>
+        </details>
+        <details>
+          <summary>Es klappt nicht – was nun?{{icon:chevron-down}}</summary>
+          <p>Im <a href="/hilfe">Hilfe-Center</a> stehen Lösungen für typische Probleme. Sonst schreib dem Team über eine <a href="/konto#ziel=support">Support-Anfrage</a>.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+{{include:icons.html}}
+{{include:footer.html}}
+</body>
+</html>

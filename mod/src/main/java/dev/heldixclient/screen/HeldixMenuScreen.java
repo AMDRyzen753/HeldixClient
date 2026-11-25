@@ -1370,6 +1370,7 @@ public class HeldixMenuScreen extends ShellScreen {
 							pageMessage("Support ist im Browser geöffnet.", true);
 						})))));
 			}
+			help.add(new SettingRow(new Setting.Action("Hilfe-Center", "Anleitungen und Lösungen zu Anmeldung, Grafik, Modulen und mehr", "Öffnen", () -> openWebsite("hilfe"))));
 			help.add(new SettingRow(new Setting.Action("Neuigkeiten und Versionen", "Was in jeder Version neu ist", "Öffnen", () -> openWebsite("neuigkeiten"))));
 			help.add(new SettingRow(new Setting.Action("Das Team", "Wer hinter HeldixClient steht", "Öffnen", () -> openWebsite("das-team"))));
 			list.add(new Group(help));

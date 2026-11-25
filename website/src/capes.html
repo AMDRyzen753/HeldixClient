@@ -1,0 +1,59 @@
+<!--seite {"titel": "Capes", "beschreibung": "Alle animierten Heldix-Capes in 3D ansehen und anprobieren – mit wehendem Stoff, Leuchten und Elytra-Ansicht.", "bild": "/images/capes.png"}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<script src="/vendor/skinview3d.bundle.js" defer></script>
+<script type="module" src="/capes.js"></script>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+{{include:nav.html}}
+
+<main id="inhalt" class="wrap capes-page">
+  <div class="page-hero">
+    <span class="eyebrow">Capes</span>
+    <h1>{{CAPES_ANZAHL}} Capes, <span class="gradient">die sich bewegen</span></h1>
+    <p class="lead">Wähle ein Cape und dreh die Figur mit der Maus oder dem Finger. Andere HeldixClient-Spieler sehen dein Cape im Spiel.</p>
+  </div>
+
+  <div class="cape-studio">
+    <div class="viewer-box glass" id="cape-viewer">
+      <canvas id="cape-canvas" aria-label="3D-Figur mit dem gewählten Cape. Ziehen zum Drehen." role="img"></canvas>
+      <p class="viewer-hint" id="viewer-hinweis">Ziehen zum Drehen</p>
+      <div class="viewer-fallback" id="viewer-ersatz" hidden>
+        <img src="/images/capes.png" alt="Die animierten Heldix-Capes nebeneinander" width="1304" height="252">
+        <p>Die 3D-Ansicht braucht WebGL. Dein Browser unterstützt es gerade nicht – hier siehst du alle Capes als Bild.</p>
+      </div>
+      <div class="viewer-controls">
+        <button class="button tiny ghost" type="button" id="cape-elytra" aria-pressed="false">{{icon:sparkles}}Elytra</button>
+        <button class="button tiny ghost" type="button" id="cape-animation" aria-pressed="true">{{icon:pause}}<span>Animation</span></button>
+        <button class="button tiny ghost" type="button" id="cape-mein-skin" hidden>{{icon:user}}<span>Mit meinem Skin anprobieren</span></button>
+      </div>
+    </div>
+
+    <div class="cape-side">
+      <div class="cape-info glass">
+        <p class="eyebrow">Ausgewählt</p>
+        <h2 id="cape-name">Heldix</h2>
+        <p class="muted" id="cape-beschreibung"></p>
+        <p class="cape-meta" id="cape-meta"></p>
+      </div>
+      <div class="cape-picker" role="radiogroup" aria-label="Cape wählen" id="cape-auswahl">
+{{CAPES_AUSWAHL_HTML}}
+      </div>
+      <div class="info-box">{{icon:cape}}<p><strong>Cape im Spiel wählen:</strong> Heldix-Menü (rechte Umschalttaste) → Cape. Eigene Cape-Bilder bleiben auf deinem PC. <a href="/hilfe/capes">Mehr dazu</a></p></div>
+    </div>
+  </div>
+
+  <details class="cape-list glass">
+    <summary>Alle Capes im Überblick{{icon:chevron-down}}</summary>
+    <ul>{{CAPES_LISTE_HTML}}</ul>
+  </details>
+  <p class="hint center">3D-Ansicht mit skinview3d und three.js (MIT-Lizenz, <a href="/vendor/skinview3d.LICENSE.txt">skinview3d</a>, <a href="/vendor/three.LICENSE.txt">three.js</a>). Der Standard-Skin ist eine eigene Zeichnung.</p>
+</main>
+
+{{include:icons.html}}
+{{include:footer.html}}
+</body>
+</html>
