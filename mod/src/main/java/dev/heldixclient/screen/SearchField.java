@@ -101,6 +101,17 @@ public class SearchField extends AbstractWidget {
 		}
 	}
 
+	/**
+	 * Seit Minecraft 26.x kommen getippte Zeichen nur an, wenn ein Feld die Texteingabe beim Fenster anmeldet
+	 * (wie EditBox). Ohne das bleibt das Feld stumm, obwohl es ausgewählt aussieht.
+	 */
+	@Override
+	public void setFocused(boolean focused) {
+		if (!isFocused() && !focused) return;
+		super.setFocused(focused);
+		Minecraft.getInstance().onTextInputFocusChange(this, focused);
+	}
+
 	@Override
 	public void onClick(MouseButtonEvent event, boolean doubleClick) {
 		if (!value.isEmpty() && event.x() >= getX() + getWidth() - 16) changed("");

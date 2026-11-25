@@ -30,6 +30,7 @@ import {
   relativeTime,
   rerender,
   ROLE_LABELS,
+  setSkinSource,
   setupTabs,
   showError,
   textBlocks,
@@ -39,6 +40,9 @@ import {
   upload,
 } from './app-common.js';
 import { memberCard, newsCard, publicGet, skinHead } from './public-cards.js';
+
+// Spielerbilder im Team-Bereich: Minecraft-Köpfe über die Cookie-Sitzung (das bestätigte Team darf alle).
+setSkinSource('auth');
 
 const SETUP_FILE_RE = /^HeldixClient-Setup-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.exe$/;
 const MAX_UPLOAD = 1024 ** 3;
@@ -67,7 +71,6 @@ const state = {
   profile: null, // eigenes Teamprofil { public, title, about }
   since: undefined, // „im Team seit“ für die Vorschau
   previewHead: null,
-  previewHeadPublic: null,
 };
 
 let tabs = null;
@@ -296,6 +299,11 @@ function onTab(name) {
   if (name === 'spieler' && !state.players.length && !state.selectedPlayer) $('#spieler-liste').replaceChildren(h('p', { class: 'hint', text: 'Gib einen Namen (oder den Anfang) oder eine UUID ein.' }));
 }
 
+/** Kleiner Kopf + Name als Knopf (Meldungen). */
+function playerWithHead(player) {
+  return h('span', { class: 'player-inline' }, avatar(player?.name, player?.uuid, { size: 'xs' }), playerButton(player));
+}
+
 /** Spielername als Knopf, der die Details öffnet. */
 function playerButton(player) {
   if (!player?.uuid) return h('span', { text: player?.name ?? 'Unbekannt' });
@@ -409,9 +417,9 @@ function reportCard(report) {
     h(
       'p',
       { class: 'report-who' },
-      playerButton(report.reporter),
+      playerWithHead(report.reporter),
       ' hat ',
-      playerButton(reported),
+      playerWithHead(reported),
       ' gemeldet.',
       reported.banned ? h('span', { class: 'chip danger', text: 'gesperrt' }) : null,
     ),
@@ -1477,6 +1485,7 @@ function renderSupportList() {
               dataset: { focusKey: `ticket:${ticket.id}` },
               onClick: () => openTeamTicket(ticket.id),
             },
+            avatar(ticket.player?.name, ticket.player?.uuid, { size: 'sm' }),
             h(
               'span',
               { class: 'row-main' },
@@ -1718,17 +1727,14 @@ function renderProfilePreview() {
   if (!state.profile) return;
   const values = profileValues();
   const savedPublic = state.profile.public;
-  // Den Skin gibt der Dienst nur für öffentliche Profile heraus – sonst gleich Initialen, ohne Anfrage.
-  if (!state.previewHead || state.previewHeadPublic !== savedPublic) {
-    state.previewHead = skinHead(savedPublic ? state.me.uuid : null, state.me.name);
-    state.previewHeadPublic = savedPublic;
-  }
+  // Den eigenen Kopf liefert die angemeldete Route immer – auch solange das Profil privat ist.
+  if (!state.previewHead) state.previewHead = skinHead(state.me.uuid, state.me.name, { source: 'auth' });
   const card = memberCard({ uuid: state.me.uuid, name: state.me.name, role: state.me.role, title: values.title, about: values.about, since: state.since ?? null }, { head: state.previewHead });
   $('#profil-vorschau').replaceChildren(card);
   const status = $('#profil-vorschau-status');
   if (values.public && savedPublic) status.textContent = 'So sieht man dich gerade auf der Teamseite.';
   else if (values.public) status.textContent = 'Noch nicht öffentlich – nach dem Speichern sieht man dich so auf der Teamseite.';
-  else status.textContent = 'Nicht öffentlich – so würde deine Karte aussehen. Den Kopf deines Skins zeigt die Teamseite erst, wenn dein Profil öffentlich ist.';
+  else status.textContent = 'Nicht öffentlich – so würde deine Karte auf der Teamseite aussehen.';
   status.classList.toggle('public', values.public && savedPublic);
   $('#profil-public-text').textContent = values.public ? 'An: Dein Profil erscheint auf der Teamseite.' : 'Aus: Niemand sieht dein Teamprofil.';
   $('#profil-ungespeichert').hidden = !profileDirty();
@@ -1859,7 +1865,7 @@ async function loadAudit() {
               'tr',
               null,
               h('td', { class: 'nowrap', 'data-label': 'Zeit' }, timeEl(entry.at, formatDateTime(entry.at))),
-              h('td', { class: 'nowrap', 'data-label': 'Wer' }, h('strong', { text: entry.actor?.name ?? '?' })),
+              h('td', { class: 'nowrap', 'data-label': 'Wer' }, h('span', { class: 'player-inline' }, avatar(entry.actor?.name, entry.actor?.uuid, { size: 'xs' }), h('strong', { text: entry.actor?.name ?? '?' }))),
               h('td', { 'data-label': 'Aktion' }, label ? h('span', { title: entry.action, text: label }) : h('code', { class: 'mono', text: entry.action ?? '?' })),
               h('td', { 'data-label': 'Betrifft', text: entry.target ?? '–' }),
               h('td', { class: 'muted', 'data-label': 'Details', text: entry.detail ?? '' }),

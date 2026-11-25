@@ -2,7 +2,7 @@
 //
 // - newsCard: eine Neuigkeit (Startseite, /neuigkeiten, Vorschau im Team-Bereich)
 // - memberCard: ein Team-Mitglied (/das-team und die Vorschau unter „Mein Teamprofil“)
-// - skinHead: Kopf aus dem Minecraft-Skin, den der Heldix-Dienst ausliefert (/api/v1/public/skins/<uuid>).
+// - skinHead: großer Kopf aus dem Minecraft-Skin, den der Heldix-Dienst ausliefert (öffentlich oder mit Anmeldung).
 //   Der Browser fragt nie bei Mojang an; ohne Skin erscheinen Initialen.
 // Texte vom Server werden nie als HTML ausgewertet.
 import { avatar, formatDate, h, ROLE_LABELS, textBlocks, timeEl } from './app-common.js';
@@ -45,35 +45,15 @@ export function clampLongNews(root) {
   }
 }
 
-/** Skin-Kopf (8×8 Gesicht + Hut-Ebene) als Canvas; ohne Skin die Initialen. */
-export function skinHead(uuid, name, { pixels = 128 } = {}) {
-  const box = h('span', { class: 'skin-head loading', 'aria-hidden': 'true' });
-  if (!uuid) {
-    box.classList.remove('loading');
-    box.append(avatar(name, uuid, { size: 'xl' }));
-    return box;
-  }
-  const fallback = () => {
-    box.classList.remove('loading');
-    box.replaceChildren(avatar(name, uuid, { size: 'xl' }));
-  };
-  const image = new Image();
-  image.decoding = 'async';
-  image.addEventListener('load', () => {
-    // Skins sind 64×64 (oder alt 64×32); Gesicht bei (8|8), Hut-Ebene bei (40|8).
-    if (image.naturalWidth < 64 || image.naturalHeight < 16 || image.naturalWidth !== 64) return fallback();
-    const canvas = h('canvas', { width: String(pixels), height: String(pixels), class: 'skin-canvas' });
-    const context = canvas.getContext('2d');
-    if (!context) return fallback();
-    context.imageSmoothingEnabled = false;
-    context.drawImage(image, 8, 8, 8, 8, 0, 0, pixels, pixels);
-    context.drawImage(image, 40, 8, 8, 8, 0, 0, pixels, pixels);
-    box.classList.remove('loading');
-    box.replaceChildren(canvas);
-  });
-  image.addEventListener('error', fallback);
-  image.src = `/api/v1/public/skins/${encodeURIComponent(uuid)}`;
-  return box;
+/**
+ * Großer Skin-Kopf für Teamkarten (80 px). source: 'public' (/das-team, nur öffentliche Profile) oder 'auth'
+ * (eigener Kopf in der Vorschau, auch solange das Profil privat ist). Gezeichnet und zwischengespeichert von
+ * avatar() in app-common.js; ohne Skin bleiben die Initialen.
+ */
+export function skinHead(uuid, name, { source = 'public' } = {}) {
+  const head = avatar(name, uuid, { size: 'xl', skin: source });
+  head.classList.add('skin-head');
+  return head;
 }
 
 /**

@@ -227,11 +227,86 @@ export function initials(name) {
  * Farbiges Bild mit Initialen (Bilder von fremden Servern wie Minecraft-Köpfe erlaubt die CSP nicht).
  * online: true/false zeigt einen Status-Punkt, null keinen.
  */
-export function avatar(name, uuid, { size = '', online = null } = {}) {
-  const element = h('span', { class: `avatar${size ? ` avatar-${size}` : ''}`, 'aria-hidden': 'true' }, initials(name));
+export function avatar(name, uuid, { size = '', online = null, skin = defaultSkinSource } = {}) {
+  const element = h('span', { class: `avatar${size ? ` avatar-${size}` : ''}`, 'aria-hidden': 'true' }, h('span', { class: 'avatar-initials', text: initials(name) }));
   element.style.setProperty('--hue', String(hueOf(uuid || name)));
   if (online !== null) element.append(h('span', { class: `presence${online ? ' on' : ''}` }));
+  // Minecraft-Kopf darüberlegen, sobald (und falls) der Skin da ist. Ohne Skin bleiben die Initialen.
+  if (skin && /^[0-9a-f]{32}$/.test(uuid || '')) {
+    const entry = loadHead(uuid, skin);
+    if (entry.head) paintHead(element, entry.head);
+    else if (entry.head === undefined) entry.promise.then((head) => head && paintHead(element, head));
+  }
   return element;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Minecraft-Köpfe aus dem Skin (Gesicht 8×8 bei 8|8, Hut-Ebene bei 40|8), ohne Glättung gezeichnet.
+// Quelle: 'auth' = /api/v1/skins/<uuid> (Cookie-Sitzung: man selbst, Freunde, Anfragen, Blockierte; das
+// bestätigte Team alle) oder 'public' = /api/v1/public/skins/<uuid> (öffentliche Teamprofile).
+// Jeder Skin wird pro Seite nur einmal geladen; 404 oder ein kaputtes Bild merkt sich der Zwischenspeicher
+// ebenfalls – dann bleiben still die Initialen. Der Browser spricht dabei nie mit Mojang.
+// Der Kopf wird einmal pro Spieler auf ein Canvas gezeichnet und als PNG (data:-URL) gemerkt; die Listen zeigen
+// ihn als <img>. Ein Canvas im Dokument kann der Browser verwerfen (Kontextverlust), ein Bild nicht.
+// ---------------------------------------------------------------------------------------------------------
+
+const HEAD_PIXELS = 64;
+const heads = new Map(); // `${quelle}:${uuid}` → { head: data:-URL | null | undefined (lädt), promise }
+let defaultSkinSource = null;
+
+/** Quelle für alle avatar()-Aufrufe ohne eigene Angabe ('auth', 'public' oder null = nur Initialen). */
+export function setSkinSource(source) {
+  defaultSkinSource = source;
+}
+
+function loadHead(uuid, source) {
+  const key = `${source}:${uuid}`;
+  let entry = heads.get(key);
+  if (entry) return entry;
+  entry = { head: undefined, promise: null };
+  entry.promise = new Promise((resolve) => {
+    const done = (head) => {
+      entry.head = head;
+      resolve(head);
+    };
+    const image = new Image();
+    image.decoding = 'async';
+    image.addEventListener('load', () => {
+      // Skins sind 64×64 (oder im alten Format 64×32); alles andere ist kein Skin.
+      if (image.naturalWidth !== 64 || (image.naturalHeight !== 64 && image.naturalHeight !== 32)) return done(null);
+      const canvas = document.createElement('canvas');
+      canvas.width = HEAD_PIXELS;
+      canvas.height = HEAD_PIXELS;
+      const context = canvas.getContext('2d');
+      if (!context) return done(null);
+      context.imageSmoothingEnabled = false;
+      context.drawImage(image, 8, 8, 8, 8, 0, 0, HEAD_PIXELS, HEAD_PIXELS);
+      context.drawImage(image, 40, 8, 8, 8, 0, 0, HEAD_PIXELS, HEAD_PIXELS);
+      let url = null;
+      try {
+        url = canvas.toDataURL('image/png');
+      } catch {
+        url = null;
+      }
+      done(url);
+    });
+    image.addEventListener('error', () => done(null));
+    image.src = `/api/v1/${source === 'public' ? 'public/' : ''}skins/${encodeURIComponent(uuid)}`;
+  });
+  heads.set(key, entry);
+  return entry;
+}
+
+function paintHead(element, url) {
+  if (element.querySelector(':scope > img.head')) return;
+  const image = document.createElement('img');
+  image.className = 'head';
+  image.alt = '';
+  image.width = HEAD_PIXELS;
+  image.height = HEAD_PIXELS;
+  image.addEventListener('load', () => element.classList.add('has-head'));
+  image.src = url;
+  element.prepend(image);
 }
 
 /** Eingebaute Heldix-Capes: dieselben IDs wie im Dienst, Namen wie im Spiel (capes.json der Mod). */

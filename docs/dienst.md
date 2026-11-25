@@ -29,7 +29,7 @@ Ohne eingetragene Adresse des Dienstes sind diese Funktionen aus; der Rest von H
 - **Datenauskunft:** Auf der Webseite lädt „Meine Daten herunterladen“ alles als Datei herunter, was der Dienst über dich speichert (höchstens 5-mal pro Stunde).
 - **Team:** Für Team-Mitglieder speichert der Dienst Rolle, seit wann und von wem, das Geheimnis der Zwei-Faktor-Anmeldung und den zuletzt benutzten Code-Zeitschritt, bis zur Entfernung aus dem Team. Jede ändernde Team-Aktion steht mit Name und Zeitpunkt im Protokoll, das 365 Tage aufbewahrt wird (auch nach dem Löschen der Daten, zur Nachvollziehbarkeit). Neuigkeiten des Teams stehen öffentlich mit dem Namen des Autors auf Webseite und Launcher; löscht der Autor seine Daten, bleibt der Name an der Neuigkeit.
 - **Launcher-Updates:** Beim Abruf der neuesten Version und beim Download speichert der Dienst nichts. Wie oft eine IP-Adresse lädt, zählt er nur kurz im Arbeitsspeicher (für die Begrenzung, eine Minute lang). Der Versionsverlauf enthält nur Versionen, Datum und Änderungen, keine Personen.
-- **Teamseite nur mit Zustimmung:** Auf der öffentlichen Teamseite steht ein Team-Mitglied nur, wenn es das selbst eingeschaltet hat (Standard: aus). Dann zeigt sie Name, Rolle, Aufgabe, einen kurzen Text, seit wann es dabei ist und den Minecraft-Skin. Den Skin lädt der Dienst selbst bei Mojang und gibt ihn weiter; der Browser der Besucher fragt nie bei Mojang. Ausschalten oder das Verlassen des Teams nimmt den Eintrag sofort heraus.
+- **Teamseite nur mit Zustimmung:** Auf der öffentlichen Teamseite steht ein Team-Mitglied nur, wenn es das selbst eingeschaltet hat (Standard: aus). Dann zeigt sie Name, Rolle, Aufgabe, einen kurzen Text, seit wann es dabei ist und den Minecraft-Skin. Den Skin lädt der Dienst selbst bei Mojang und gibt ihn weiter; der Browser der Besucher fragt nie bei Mojang. Genauso zeigt die Webseite angemeldeten Spielern die Skins ihrer Freunde, Anfragen und Blockierten (und dem Team die von Spielern, um die es geht); andere Skins gibt der Dienst nicht heraus. Ausschalten oder das Verlassen des Teams nimmt den Eintrag sofort heraus.
 - **Support-Anfragen** sehen nur du und das Team. Antworten des Teams zeigen dir den Namen des Mitglieds nur, wenn es auf der Teamseite steht, sonst „HeldixClient-Team“. Geschlossene Anfragen löscht der Dienst 90 Tage nach dem Schließen, andere 180 Tage nach der letzten Nachricht. „Daten löschen“ und eine Sperre löschen deine Anfragen sofort; sie stehen in deiner Datenauskunft.
 - **Status:** Die öffentliche Status-Abfrage zeigt nur Summen (wie viele Spieler online und insgesamt angemeldet sind), keine Namen.
 - **Einstellungen im Heldix-Menü:** „Für andere erkennbar“, „Online-Status für Freunde“, „Server für Freunde sichtbar“, „Nachrichten von Freunden annehmen“.
@@ -319,6 +319,11 @@ Die Routen für das Team (`/v1/team/support…`, jede Rolle) stehen beim [Team-B
 - `since`: seit wann im Team. Das Teamprofil bearbeitet jedes Mitglied selbst (`/v1/team/me/profile`, siehe [Team-Bereich](#team-bereich)).
 - **Skins:** Der Dienst fragt `<Session-Server>/session/minecraft/profile/<uuid>` (dieselbe Adresse wie bei der Anmeldung) und liest die Skin-Adresse aus der Eigenschaft `textures` (Base64-JSON). Erlaubt sind nur Skin-Dateien von `textures.minecraft.net`, geladen immer über HTTPS (Mojang nennt `http://`), ohne Weiterleitungen, mit Zeitgrenze, höchstens 256 KB und nur, wenn die Datei mit der PNG-Signatur beginnt. Der Dienst hält Skins 6 Stunden im Arbeitsspeicher (höchstens 100), fehlende 10 Minuten. Kein Skin oder ein Fehler: 404 (die Webseite zeigt dann Initialen). Für andere Spieler fragt der Dienst Mojang gar nicht erst; so ist er kein offener Proxy.
 
+**Skins für Angemeldete:** `GET /v1/skins/<uuid>` (Bearer-Token oder Cookie; als GET ohne CSRF-Header) liefert denselben Skin (gleiche Prüfungen und derselbe Zwischenspeicher), mit `Cache-Control: private, max-age=3600` und ohne CORS.
+- Erlaubt nur für: dich selbst, Freunde, Spieler mit offener Anfrage in eine der beiden Richtungen, Spieler, die du blockiert hast, und für Team-Mitglieder mit bestätigter Zwei-Faktor-Anmeldung (über das Cookie, jede Rolle) für alle Spieler, z. B. für die Köpfe bei Meldungen, Support, Spielern, Mitgliedern und im Protokoll.
+- Alles andere und eine ungültige UUID: 404 „Kein Skin gefunden.“, ohne Mojang zu fragen. So verrät die Antwort keine Beziehungen, und der Dienst ist kein offener Proxy.
+- Höchstens 300 pro Minute und Spieler (eigene Grenze statt der allgemeinen 120 pro Minute), sonst 429.
+
 ### Neuigkeiten (öffentlich)
 
 `GET /v1/news?limit=<1–50, Standard 10>&before=<id>` ohne Anmeldung → `{ "news": [ { "id", "title", "text", "at", "author" } ], "more": bool }`, nur veröffentlichte, neueste zuerst, mit `Cache-Control: max-age=60`. Webseite (Startseite und Archiv) und Launcher zeigen sie. Der Text wird nie als HTML ausgewertet; Zeilenumbrüche werden zu Absätzen.
@@ -357,6 +362,7 @@ Der Dienst schließt Verbindungen mit Code 4000 („Zeitüberschreitung“), 400
 - Übrige Anfragen: höchstens 120 pro Minute und Token, sonst 429.
 - Webseite: höchstens 10 Anmelde-Links pro Minute und Spieler, 5 Versuche für den 2FA-Code pro 10 Minuten und Spieler, 5 Datenexporte pro Stunde und Spieler.
 - Support: höchstens 3 offene Anfragen, 5 neue in 24 Stunden und 30 Nachrichten pro Stunde und Spieler.
+- Skins für Angemeldete (`/v1/skins/<uuid>`): höchstens 300 pro Minute und Spieler; sie zählen nicht zur allgemeinen Grenze.
 - Nachrichten: höchstens 20 pro Minute und Spieler. Meldungen: einmal pro Spieler und höchstens 10 in 24 Stunden. Blockierungen: höchstens 500. Downloads der Launcher-Installer: höchstens 30 pro Minute und IP.
 - Hinter einem Reverse-Proxy zählt `X-Forwarded-For` nur mit `HELDIX_DIENST_TRUST_PROXY=1`.
 
@@ -553,5 +559,5 @@ Auf dem Server mit sudo (der Befehl läuft als Benutzer des Dienstes, mit dessen
   }
   ```
 - **Überwachung:** `GET /health` antwortet mit `{ "ok": true }` (nutzt auch der Docker-Healthcheck). Ohne Anmeldung, ohne Daten. `GET /v1/status` zeigt dazu Version, Start, Spieler online und insgesamt und die veröffentlichte Launcher-Version.
-- **Verbindungen nach außen:** Außer zu Mojang für die Anmeldung (`sessionserver.mojang.com`) verbindet sich der Dienst nur für die Skins der öffentlichen Teamseite (`sessionserver.mojang.com`, `textures.minecraft.net`, jeweils HTTPS).
+- **Verbindungen nach außen:** Außer zu Mojang für die Anmeldung (`sessionserver.mojang.com`) verbindet sich der Dienst nur für Skins (Teamseite und `/v1/skins`: `sessionserver.mojang.com`, `textures.minecraft.net`, jeweils HTTPS).
 - **Adresse im Client:** In [launcher/src/main/config.ts](../launcher/src/main/config.ts) bei `HELDIX_SERVICE_URL` eintragen (oder beim Bauen die Umgebungsvariable `HELDIX_SERVICE_URL` setzen). Der Launcher gibt sie dem Spiel als `-Dheldixclient.service=<url>` mit.

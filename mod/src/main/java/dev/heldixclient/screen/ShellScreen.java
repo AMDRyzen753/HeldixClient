@@ -146,6 +146,11 @@ public abstract class ShellScreen extends Screen {
 		return null;
 	}
 
+	/** Eigenes Bild statt des Icons vor dem Seitentitel (z. B. Kopf eines Spielers); true = gezeichnet */
+	protected boolean drawHeaderImage(GuiGraphicsExtractor g, int x, int y, int size) {
+		return false;
+	}
+
 	/** Icon vor dem Seitentitel (Standard: Icon der Kategorie) */
 	protected String headerIcon() {
 		return page.head().icon;
@@ -190,8 +195,10 @@ public abstract class ShellScreen extends Screen {
 		int titleY = sub != null ? window.y() + 11 : window.y() + (HEADER_H - 12) / 2 + 1;
 		String icon = headerIcon();
 		if (icon != null) {
-			Ui.rect(g, x, window.y() + (HEADER_H - 22) / 2f + 1, 22, 22, 6, Ui.withAlpha(Ui.ACCENT_SOFT, fade));
-			Ui.icon(g, icon, x + 5.5f, window.y() + (HEADER_H - 11) / 2f + 1, 11, Ui.withAlpha(Ui.ACCENT_TEXT, fade));
+			if (!drawHeaderImage(g, x, window.y() + (HEADER_H - 22) / 2 + 1, 22)) {
+				Ui.rect(g, x, window.y() + (HEADER_H - 22) / 2f + 1, 22, 22, 6, Ui.withAlpha(Ui.ACCENT_SOFT, fade));
+				Ui.icon(g, icon, x + 5.5f, window.y() + (HEADER_H - 11) / 2f + 1, 11, Ui.withAlpha(Ui.ACCENT_TEXT, fade));
+			}
 			x += 30;
 		}
 		Ui.text(g, headerTitle().getString(), x, titleY, Ui.withAlpha(Ui.TEXT, fade), Ui.Font.TITLE);

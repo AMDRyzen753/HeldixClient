@@ -2,9 +2,8 @@
 # Jede Zeile mit "- " erscheint im Launcher unter „Was ist neu“ und im Versionsverlauf auf heldixclient.com.
 # Vor jedem "npm run release" anpassen. Zeilen mit # werden ignoriert.
 
-- Neu: Nachrichten zwischen Freunden im Heldix-Menü, mit Blockieren und Melden
-- Neu: „Beitreten“ bringt dich mit einem Klick auf den Server eines Freundes
-- Neu: Der Launcher aktualisiert sich ab jetzt selbst
-- Neu: Konto auf heldixclient.com mit Profil, Freunden, Nachrichten und Support – ohne Passwort
-- Neu: Menüs mit Ober-Kategorien und Reitern, neues Pausemenü mit Schnellschaltern und Sitzung
-- Neu: Neuigkeiten des Teams im Launcher und im Spiel
+- Neu: Chat überarbeitet – in breiten Fenstern die Unterhaltungen daneben, Köpfe neben den Nachrichten, „Beitreten“ direkt im Chat
+- Neu: Links in Nachrichten lassen sich öffnen, Rechtsklick kopiert eine Nachricht, nicht gesendete Nachrichten mit einem Klick erneut senden
+- Neu: Linie „Neue Nachrichten“ und Knopf „Neue Nachricht ↓“, wenn du hochgescrollt hast
+- Behoben: Freunde, Anfragen und Chats zeigen im Spiel wieder die echten Minecraft-Skins
+- Behoben: In Eingabefeldern des Heldix-Menüs (Chat, Spielername, Suche, Wegpunkt) lässt sich wieder tippen

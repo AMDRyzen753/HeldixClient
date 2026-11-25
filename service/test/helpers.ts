@@ -92,6 +92,7 @@ export async function startService(options: Partial<ServiceOptions> = {}): Promi
     webLinkRateLimit: 1000,
     totpRateLimit: 1000,
     exportRateLimit: 1000,
+    skinRateLimit: 1000,
     ...options,
   });
   const url = await listen(service.server);

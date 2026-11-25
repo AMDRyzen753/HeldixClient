@@ -114,7 +114,7 @@ test('/v1/status: Version, online (eindeutige Spieler mit WebSocket, ohne Web-Si
       const { since, ...rest } = res.body;
       assert.deepEqual(rest, { ok: true, service: pkg.version, online: 2, players: 4, launcher: '2.3.4' });
       assert.ok(since >= started - 5000 && since <= Date.now());
-      assert.equal(pkg.version, '1.2.0');
+      assert.equal(pkg.version, '1.2.1');
     } finally {
       for (const client of clients) await client.close();
     }

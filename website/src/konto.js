@@ -28,6 +28,7 @@ import {
   REPORT_REASONS,
   rerender,
   ROLE_LABELS,
+  setSkinSource,
   setupTabs,
   shortWhen,
   showError,
@@ -36,6 +37,9 @@ import {
   toast,
   uid,
 } from './app-common.js';
+
+// Alle Spielerbilder auf dieser Seite: Minecraft-Köpfe über die Cookie-Sitzung (sonst Initialen).
+setSkinSource('auth');
 
 const SETTINGS = [
   ['visible', 'Für andere erkennbar', 'Andere HeldixClient-Spieler sehen das Heldix-Symbol vor deinem Namen und dein Cape.'],

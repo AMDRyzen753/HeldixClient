@@ -195,6 +195,17 @@ final class FeatureTests {
 		t.waitTicks(10);
 	}
 
+	/** Ist die Texteingabe des Fensters gerade an? (Minecraft hat dafür keinen Getter) */
+	private static boolean textInputEnabled(net.minecraft.client.Minecraft mc) {
+		try {
+			Field field = mc.textInputManager().getClass().getDeclaredField("textInputEnabled");
+			field.setAccessible(true);
+			return field.getBoolean(mc.textInputManager());
+		} catch (ReflectiveOperationException e) {
+			throw new IllegalStateException(e);
+		}
+	}
+
 	private static void setToggle(Module module, String label, boolean value) {
 		module.settings().stream()
 				.filter(s -> s instanceof dev.heldixclient.module.Setting.Toggle && s.label().equals(label))
@@ -290,6 +301,12 @@ final class FeatureTests {
 			t.waitSoft(mc -> Social.friends().stream().anyMatch(f -> "hypixel.net".equals(f.server())), 10);
 			t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.FRIENDS));
 			t.waitTicks(8);
+			// Köpfe in Listen: echter Skin per UUID (öffentliches Profil von Notch), nicht der Standard-Skin
+			UUID notch = UUID.fromString("069a79f4-44e9-4726-a5be-fca90e38aaf5");
+			String standard = t.compute(mc -> dev.heldixclient.screen.FriendWidget.skinOf(notch, "Notch").body().texturePath().toString());
+			t.waitSoft(mc -> !dev.heldixclient.screen.FriendWidget.skinOf(notch, "Notch").body().texturePath().toString().equals(standard), 20);
+			String loaded = t.compute(mc -> dev.heldixclient.screen.FriendWidget.skinOf(notch, "Notch").body().texturePath().toString());
+			t.check("Kopf mit echtem Skin (" + standard + " → " + loaded + ")", !loaded.equals(standard) && !loaded.contains("entity/player/"));
 			t.check("Knopf „Beitreten“ bei der Freundin (hypixel.net)", t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).canJoin(friendId)));
 			t.screenshot("heldix-27-freunde");
 			AutoTest.openPage(t, "PRIVACY");
@@ -315,12 +332,23 @@ final class FeatureTests {
 			t.waitSoft(mc -> !Messages.history(friendId).isEmpty(), 10);
 			t.waitSoft(mc -> Messages.unread(friendId) == 0, 5);
 			t.check("Offener Chat gilt als gelesen", t.compute(mc -> Messages.unread(friendId)) == 0);
+			// Tippen wie mit der Tastatur: das Feld muss die Texteingabe anmelden (Minecraft 26.x), sonst kommt nichts an
+			t.check("Chat-Feld meldet die Texteingabe an", t.compute(FeatureTests::textInputEnabled));
+			t.run(mc -> mc.keyboardHandler.textInput(mc.getWindow().handle(), "Getippt im Chat"));
+			t.pressKey(InputConstants.KEY_RETURN);
+			t.waitSoft(mc -> Messages.history(friendId).stream().anyMatch(m -> m.text().equals("Getippt im Chat")), 10);
+			t.check("Getippte Nachricht mit Enter gesendet", t.compute(mc -> Messages.history(friendId).stream().anyMatch(m -> m.text().equals("Getippt im Chat"))));
 			java.util.concurrent.CompletableFuture<Void> sent = t.compute(mc -> Messages.send(friendId, "Klar, bin gleich da!"));
 			sent.get(10, TimeUnit.SECONDS);
 			t.waitSoft(mc -> Messages.history(friendId).size() >= 2, 10);
 			JsonObject chat = request(base, "GET", "/v1/messages/" + Social.compact(ownId), null, token);
 			t.check("Antwort kommt bei der Freundin an", chat.toString().contains("Klar, bin gleich da!"));
-			t.waitTicks(4);
+			JsonObject link = new JsonObject();
+			link.addProperty("text", "Super! Die Neuigkeiten stehen hier: https://heldixclient.com/neuigkeiten");
+			request(base, "POST", "/v1/messages/" + Social.compact(ownId), link, token);
+			t.waitSoft(mc -> Messages.history(friendId).stream().anyMatch(m -> m.text().contains("heldixclient.com/neuigkeiten")), 10);
+			t.moveMouse(5, 5);
+			t.waitTicks(6);
 			t.screenshot("heldix-27d-chat");
 			java.util.concurrent.CompletableFuture<Void> reported = t.compute(mc -> Messages.report(friendId, "other", "Autotest"));
 			String reportResult;

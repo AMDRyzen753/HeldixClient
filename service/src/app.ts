@@ -98,6 +98,8 @@ export interface ServiceOptions {
   /** Erlaubte Hosts für Skin-Dateien der Teamseite (Standard: textures.minecraft.net) und Zeitgrenze pro Abfrage. */
   skinHosts?: readonly string[];
   skinTimeoutMs?: number;
+  /** Skins für angemeldete Spieler (`GET /v1/skins/<uuid>`) pro Spieler und Zeitraum (rateWindowMs). */
+  skinRateLimit?: number;
   /** Support: nicht geschlossene Anfragen pro Spieler, neue pro 24 Stunden, Nachrichten pro Stunde. */
   supportMaxOpen?: number;
   supportDailyLimit?: number;
@@ -147,6 +149,8 @@ interface Route {
   kind: Kind;
   /** Mindestrolle für Team-Routen (Standard: moderator) */
   role?: TeamRole;
+  /** Eigene Begrenzung im Endpunkt statt der allgemeinen (z. B. viele Köpfe auf einer Seite) */
+  ownRateLimit?: boolean;
   handler: (ctx: Context) => unknown;
 }
 
@@ -227,6 +231,7 @@ export function createService(options: ServiceOptions): Service {
   const apiLimiter = new RateLimiter(options.apiRateLimit ?? 120, rateWindowMs);
   const messageLimiter = new RateLimiter(options.messageRateLimit ?? 20, rateWindowMs);
   const downloadLimiter = new RateLimiter(options.downloadRateLimit ?? 30, rateWindowMs);
+  const skinLimiter = new RateLimiter(options.skinRateLimit ?? 300, rateWindowMs);
   const linkLimiter = new RateLimiter(options.webLinkRateLimit ?? 10, rateWindowMs);
   const totpLimiter = new RateLimiter(options.totpRateLimit ?? 5, options.totpWindowMs ?? 10 * 60_000);
   const exportLimiter = new RateLimiter(options.exportRateLimit ?? 5, options.exportWindowMs ?? 60 * 60_000);
@@ -547,15 +552,46 @@ export function createService(options: ServiceOptions): Service {
   async function publicSkin(ctx: Context) {
     const uuid = ctx.params[0];
     const png = isUuid(uuid) && store.isPublicTeamMember(uuid) ? await skins.get(uuid) : null;
+    return sendSkin(ctx, png, 'max-age=3600');
+  }
+
+  function sendSkin(ctx: Context, png: Buffer | null, cacheControl: string) {
     if (!png) throw new HttpError(404, 'Kein Skin gefunden.');
     ctx.res.writeHead(200, {
       'Content-Type': 'image/png',
       'Content-Length': String(png.length),
-      'Cache-Control': 'max-age=3600',
+      'Cache-Control': cacheControl,
       'X-Content-Type-Options': 'nosniff',
     });
     ctx.res.end(png);
     return RESPONDED;
+  }
+
+  /**
+   * Darf `user` den Skin von `uuid` sehen? Er selbst, Freunde, Anfragen in beide Richtungen, von ihm Blockierte,
+   * und Team-Mitglieder mit bestätigter 2FA (über das Cookie) für alle.
+   */
+  function maySeeSkin(ctx: Context, uuid: string): boolean {
+    const me = ctx.user.uuid;
+    return (
+      uuid === me ||
+      store.friendsSince(me, uuid) !== undefined ||
+      store.hasRequest(me, uuid) ||
+      store.hasRequest(uuid, me) ||
+      store.isBlocked(me, uuid) ||
+      (ctx.session !== undefined && web.passesTeamGate(ctx.user, ctx.session))
+    );
+  }
+
+  /**
+   * `GET /v1/skins/<uuid>` (angemeldet): derselbe Skin wie auf der Teamseite, für bekannte Spieler. Alles andere und
+   * eine ungültige UUID: 404, ohne Mojang zu fragen (kein offener Proxy, verrät keine Beziehungen).
+   */
+  async function userSkin(ctx: Context) {
+    rateLimit(skinLimiter, ctx.user.uuid, 'Zu viele Skins auf einmal. Bitte kurz warten.');
+    const uuid = ctx.params[0];
+    const png = isUuid(uuid) && maySeeSkin(ctx, uuid) ? await skins.get(uuid) : null;
+    return sendSkin(ctx, png, 'private, max-age=3600');
   }
 
   /** `GET /v1/launcher/versions`: Versionsverlauf, neueste zuerst. */
@@ -875,6 +911,7 @@ export function createService(options: ServiceOptions): Service {
       },
     },
     { method: 'GET', pattern: /^\/v1\/public\/skins\/([^/]+)$/, kind: 'public', handler: publicSkin },
+    { method: 'GET', pattern: /^\/v1\/skins\/([^/]+)$/, kind: 'user', ownRateLimit: true, handler: userSkin },
     { method: 'GET', pattern: /^\/v1\/launcher\/versions$/, kind: 'public', handler: launcherVersions },
     { method: 'GET', pattern: /^\/v1\/status$/, kind: 'public', handler: status },
     ...teamRoutes,
@@ -929,7 +966,7 @@ export function createService(options: ServiceOptions): Service {
       rateLimit(authLimiter, clientIp(req));
     } else if (route.kind !== 'public') {
       const auth = authenticateFor(req, route.kind);
-      rateLimit(apiLimiter, auth.key);
+      if (!route.ownRateLimit) rateLimit(apiLimiter, auth.key);
       user = auth.user;
       session = auth.session;
       if (route.kind === 'team') member = web.teamGate(auth.user, auth.session!, route.role ?? 'moderator');

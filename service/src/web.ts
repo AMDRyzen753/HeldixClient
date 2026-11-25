@@ -294,6 +294,12 @@ export class Web {
    * Zugang zu `/v1/team/*`: Team-Rolle, eingerichtete 2FA und in dieser Sitzung bestätigter Code; für Admin-Routen die
    * Rolle `admin`. Sonst 403 mit `code`.
    */
+  /** Wie teamGate (jede Rolle), aber ohne Fehler: true, wenn der Team-Bereich offen wäre. */
+  passesTeamGate(user: UserRow, session: WebSessionRow): boolean {
+    const member = this.store.getTeamMember(user.uuid);
+    return member !== undefined && member.totpSecret !== null && this.isVerified(session);
+  }
+
   teamGate(user: UserRow, session: WebSessionRow, role: TeamRole): TeamMemberRow {
     const member = this.store.getTeamMember(user.uuid);
     if (!member) throw new HttpError(403, 'Dieser Bereich ist nur für das HeldixClient-Team.', {}, 'forbidden');

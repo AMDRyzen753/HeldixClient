@@ -103,6 +103,9 @@ public final class AutoTest implements HeldixModInitializer {
 
 	private static void scenario(TestContext t) throws Exception {
 		t.waitFor("Hauptmenü nach dem Laden", mc -> mc.gui.screen() instanceof TitleScreen && mc.gui.overlay() == null, 300);
+		// Ohne Fokus (jemand arbeitet nebenher am PC) würde „Hintergrund-FPS“ die Bildrate senken; Prüfungen,
+		// die auf ein gezeichnetes Bild warten (Zoom, Freelook, HUD-Größe), liefen dann ins Leere.
+		t.run(mc -> HeldixConfig.get().backgroundFps = false);
 		t.waitTicks(20);
 		t.log(t.compute(mc -> "Fenster " + mc.getWindow().getScreenWidth() + "x" + mc.getWindow().getScreenHeight()
 				+ ", GUI " + mc.getWindow().getGuiScaledWidth() + "x" + mc.getWindow().getGuiScaledHeight()

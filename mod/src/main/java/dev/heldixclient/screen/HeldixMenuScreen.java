@@ -178,6 +178,16 @@ public class HeldixMenuScreen extends ShellScreen {
 	private boolean confirmingBlock;
 	/** nach "Melden"/"Blockieren": zum Anfang des Chats, wo die Bestätigung steht */
 	private boolean chatToTop;
+	/** eigene Nachrichten, die gerade gesendet werden oder nicht ankamen */
+	private final List<PendingMessage> pendingMessages = new ArrayList<>();
+	/** ungelesene Nachrichten beim Öffnen des Chats (für die Linie „Neue Nachrichten“) */
+	private int unreadAtOpen;
+	private UUID chatOpenedFor;
+	/** Anzahl Nachrichten, als der Verlauf zuletzt ganz unten war (neue darunter: Knopf „Neue Nachricht“) */
+	private int seenMessages;
+	/** Liste der Unterhaltungen links neben dem Chat (breite Fenster) */
+	private double listScroll;
+	private static final int LIST_ITEM = 32;
 	private String reportReason = "spam";
 	/** umbrochene Zeilen der Sprechblasen (je Nachricht und Breite) */
 	private final Map<Long, List<FormattedCharSequence>> bubbleLines = new HashMap<>();
@@ -214,9 +224,27 @@ public class HeldixMenuScreen extends ShellScreen {
 	// Layout
 	// ======================================================================================
 
+	/** Chat mit Liste der Unterhaltungen daneben? (breite Fenster) */
+	private boolean chatSplit() {
+		return openChat != null && contentW >= 470;
+	}
+
+	private int chatListW() {
+		return Math.clamp(contentW * 30 / 100, 150, 200);
+	}
+
+	/** linke Kante und Breite des Chats */
+	private int chatX() {
+		return chatSplit() ? contentX + chatListW() + 10 : contentX;
+	}
+
+	private int chatW() {
+		return chatSplit() ? contentW - chatListW() - 10 : contentW;
+	}
+
 	private void layout() {
-		bodyX = contentX;
-		bodyW = contentW - 8;
+		bodyX = openChat != null ? chatX() : contentX;
+		bodyW = (openChat != null ? chatW() : contentW) - 8;
 		bodyY = contentY;
 		bodyH = contentH - (openChat != null ? 30 : 0);
 		rows = buildRows();
@@ -382,13 +410,35 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	/** Chat: Zurück, Melden und Blockieren im Kopf, Eingabe und Senden unten */
 	private void initChat() {
+		if (!openChat.equals(chatOpenedFor)) {
+			chatOpenedFor = openChat;
+			unreadAtOpen = Messages.unread(openChat);
+			seenMessages = 0;
+		}
 		Messages.setViewing(openChat);
 		Messages.loadHistory(openChat, false);
+		if (chatSplit()) Messages.loadConversations();
 		int right = headerRight();
 		String back = "Zurück";
 		int bw = ActionButton.widthFor(back, "back");
 		addRenderableWidget(new ActionButton(right - bw, headerButtonY(), bw, 20, back, false, this::closeChat).withIcon("back"));
 		right -= bw + 6;
+		Social.Friend friend = friendOf(openChat);
+		if (friend != null && joinable(friend) && contentW >= 360) {
+			String join = "Beitreten";
+			int jw = ActionButton.widthFor(join, "play");
+			addRenderableWidget(new ActionButton(right - jw, headerButtonY(), jw, 20, join, true, () -> {
+				// aus einer Welt heraus: erst bestätigen (wie in der Freundesliste)
+				if (minecraft.level != null && !(friend.uuid().equals(confirmJoin) && System.currentTimeMillis() - confirmJoinAt < 4000)) {
+					confirmJoin = friend.uuid();
+					confirmJoinAt = System.currentTimeMillis();
+					pageMessage("Nochmal „Beitreten“ klicken: Du verlässt deine Welt und gehst auf " + friend.server() + ".", true);
+					return;
+				}
+				joinFriend(friend);
+			}).withIcon("play").withTooltip("Auf " + friend.server() + " mitspielen"));
+			right -= jw + 6;
+		}
 		addRenderableWidget(ActionButton.icon(right - 20, headerButtonY(), 20, "ban", openChatName + " blockieren", () -> {
 			confirmingBlock = true;
 			reporting = false;
@@ -404,8 +454,10 @@ public class HeldixMenuScreen extends ShellScreen {
 		String send = "Senden";
 		int sw = ActionButton.widthFor(send, "send");
 		int y = contentY + contentH - 20;
-		addRenderableWidget(new ActionButton(contentX + contentW - sw, y, sw, 20, send, true, this::sendChat).withIcon("send"));
-		chatInput = new SearchField(contentX, y, contentW - sw - 6, 20, "Nachricht an " + openChatName).withIcon("chat").withMaxLength(Messages.MAX_LENGTH);
+		int cx = chatX();
+		int cw = chatW();
+		addRenderableWidget(new ActionButton(cx + cw - sw, y, sw, 20, send, true, this::sendChat).withIcon("send"));
+		chatInput = new SearchField(cx, y, cw - sw - 6, 20, "Nachricht an " + openChatName).withIcon("chat").withMaxLength(Messages.MAX_LENGTH);
 		chatInput.setValue(chatText);
 		chatInput.setResponder(text -> chatText = text);
 		chatInput.setOnEnter(this::sendChat);
@@ -419,16 +471,23 @@ public class HeldixMenuScreen extends ShellScreen {
 		if (text.isEmpty() || openChat == null) return;
 		chatText = "";
 		if (chatInput != null) chatInput.setValue("");
-		chatFromBottom = 0;
 		click();
+		sendText(text);
+	}
+
+	/** Nachricht senden: erscheint sofort (blass), ist sie angekommen, steht sie im Verlauf; sonst rot mit „erneut senden“ */
+	private void sendText(String text) {
+		PendingMessage pending = new PendingMessage(openChat, text);
+		pendingMessages.add(pending);
+		chatFromBottom = 0;
+		unreadAtOpen = 0;
 		Messages.send(openChat, text).whenComplete((ok, error) -> minecraft.execute(() -> {
-			if (error == null) return;
-			pageMessage(errorText(error), false);
-			// Text nicht verlieren
-			if (chatText.isEmpty()) {
-				chatText = text;
-				if (chatInput != null) chatInput.setValue(text);
+			if (error == null) {
+				pendingMessages.remove(pending);
+				return;
 			}
+			pending.failed = true;
+			pending.error = errorText(error);
 		}));
 	}
 
@@ -444,12 +503,14 @@ public class HeldixMenuScreen extends ShellScreen {
 		chatFromBottom = 0;
 		reporting = false;
 		confirmingBlock = false;
+		chatOpenedFor = null;
 		rebuildWidgets();
 	}
 
 	private void closeChat() {
 		Messages.setViewing(null);
 		openChat = null;
+		chatOpenedFor = null;
 		reporting = false;
 		confirmingBlock = false;
 		scroll = 0;
@@ -685,6 +746,18 @@ public class HeldixMenuScreen extends ShellScreen {
 	protected Component headerTitle() {
 		if (openChat != null) return Component.literal(openChatName);
 		return openModule != null ? Component.literal(openModule.name()) : super.headerTitle();
+	}
+
+	@Override
+	protected boolean drawHeaderImage(GuiGraphicsExtractor g, int x, int y, int size) {
+		if (openChat == null) return false;
+		Social.Friend friend = friendOf(openChat);
+		FriendWidget.face(g, openChat, openChatName, x, y, size, fade);
+		if (friend != null && friend.online()) {
+			Ui.circle(g, x + size, y + size, 4, Ui.withAlpha(0xFF0F1420, fade));
+			Ui.circle(g, x + size, y + size, 3, Ui.withAlpha(Ui.SUCCESS, fade));
+		}
+		return true;
 	}
 
 	@Override
@@ -1025,18 +1098,42 @@ public class HeldixMenuScreen extends ShellScreen {
 			list.add(new EmptyState("chat", "Noch keine Nachrichten", "Schreib unten die erste Nachricht an " + openChatName
 					+ ". Nachrichten liegen höchstens 30 Tage beim Heldix-Dienst und sind nicht Ende-zu-Ende verschlüsselt."));
 		}
+		// erste ungelesene Nachricht beim Öffnen: die n-letzte des Freundes
+		long firstUnread = Long.MAX_VALUE;
+		if (unreadAtOpen > 0) {
+			int seen = 0;
+			for (int i = history.size() - 1; i >= 0; i--) {
+				if (history.get(i).mine()) continue;
+				firstUnread = history.get(i).id();
+				if (++seen >= unreadAtOpen) break;
+			}
+		}
 		java.time.LocalDate lastDay = null;
 		Messages.Message previous = null;
-		for (Messages.Message message : history) {
+		for (int i = 0; i < history.size(); i++) {
+			Messages.Message message = history.get(i);
 			java.time.LocalDate day = day(message.at());
 			if (!day.equals(lastDay)) {
 				list.add(new DayRow(dayLabel(day)));
 				lastDay = day;
 				previous = null;
 			}
+			if (message.id() == firstUnread) {
+				list.add(new NewDivider());
+				previous = null;
+			}
+			Messages.Message next = i + 1 < history.size() ? history.get(i + 1) : null;
 			boolean continued = previous != null && previous.from().equals(message.from()) && message.at() - previous.at() < 5 * 60_000;
-			list.add(new Bubble(message, continued));
+			boolean last = next == null || !next.from().equals(message.from()) || next.at() - message.at() >= 5 * 60_000
+					|| !day(next.at()).equals(day) || next.id() == firstUnread;
+			list.add(new Bubble(message, continued, last));
 			previous = message;
+		}
+		boolean afterMine = previous != null && previous.mine();
+		for (PendingMessage pending : pendingMessages) {
+			if (!pending.to.equals(openChat)) continue;
+			list.add(new Bubble(pending, afterMine));
+			afterMine = true;
 		}
 		// Hinweise (z. B. Senden fehlgeschlagen) unten, direkt über der Eingabe
 		addPageMessage(list);
@@ -1310,6 +1407,11 @@ public class HeldixMenuScreen extends ShellScreen {
 		void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY);
 
 		default boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			return false;
+		}
+
+		/** Rechtsklick (z. B. Nachricht kopieren) */
+		default boolean secondaryClick(double mouseX, double mouseY, int x, int y, int w) {
 			return false;
 		}
 
@@ -2722,55 +2824,192 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 	}
 
-	/** Eine Nachricht als Sprechblase: eigene rechts in Blau, die des Freundes links */
+	/**
+	 * Eine Nachricht als Sprechblase: eigene rechts in Blau, die des Freundes links mit seinem Kopf neben der letzten
+	 * Blase einer Gruppe. Uhrzeit nur an der letzten Blase einer Gruppe (sonst als Tooltip). Links lassen sich öffnen,
+	 * Rechtsklick kopiert den Text. Ausstehende oder fehlgeschlagene eigene Nachrichten erscheinen blass bzw. rot.
+	 */
 	private final class Bubble implements Row {
-		private final Messages.Message message;
+		private static final int HEAD = 14;
+		private final long key;
+		private final String text;
+		private final long at;
+		private final boolean mine;
 		/** direkt nach einer Nachricht desselben Absenders: weniger Abstand */
 		private final boolean continued;
+		/** letzte Blase der Gruppe: Uhrzeit und (beim Freund) Kopf */
+		private final boolean last;
+		/** null = gesendet; sonst die ausstehende/fehlgeschlagene Nachricht */
+		private final PendingMessage pending;
+		private final String link;
 
-		Bubble(Messages.Message message, boolean continued) {
-			this.message = message;
-			this.continued = continued;
+		Bubble(Messages.Message message, boolean continued, boolean last) {
+			this(message.id(), message.text(), message.at(), message.mine(), continued, last, null);
 		}
 
-		private int maxWidth(int w) {
-			return Math.min(w * 3 / 4, 320);
+		Bubble(PendingMessage pending, boolean continued) {
+			this(-pending.localId, pending.text, pending.at, true, continued, true, pending);
+		}
+
+		private Bubble(long key, String text, long at, boolean mine, boolean continued, boolean last, PendingMessage pending) {
+			this.key = key;
+			this.text = Messages.clean(text);
+			this.at = at;
+			this.mine = mine;
+			this.continued = continued;
+			this.last = last;
+			this.pending = pending;
+			java.util.regex.Matcher matcher = LINK.matcher(this.text);
+			this.link = matcher.find() ? matcher.group() : null;
+		}
+
+		/** Breite für Text: höchstens drei Viertel der Fläche, links Platz für den Kopf */
+		private int maxText(int w) {
+			return Math.min((w - HEAD - 6) * 3 / 4, 340) - 18;
 		}
 
 		private List<FormattedCharSequence> lines(int w) {
-			int maxW = maxWidth(w) - 18;
-			long key = message.id() * 4096 + maxW;
-			return bubbleLines.computeIfAbsent(key, k -> Ui.wrap(Messages.clean(message.text()), maxW, Ui.Font.BODY));
+			int maxW = maxText(w);
+			long cacheKey = key * 4096 + maxW;
+			return bubbleLines.computeIfAbsent(cacheKey, k -> Ui.wrap(text, maxW, Ui.Font.BODY));
+		}
+
+		/** Fußzeile in der Blase: Uhrzeit, "wird gesendet …", Fehler, Link */
+		private String footer() {
+			if (pending != null) return pending.failed ? "Nicht gesendet · klicken zum erneut Senden" : "wird gesendet …";
+			if (link != null) return (last ? clock(at) + "  ·  " : "") + "Link öffnen";
+			return last ? clock(at) : null;
+		}
+
+		private int bubbleHeight(int w) {
+			return 8 + lines(w).size() * 11 + (footer() != null ? 10 : 0) + (footer() == null ? 2 : 0);
 		}
 
 		@Override
 		public int height(int width) {
-			return (continued ? 0 : 4) + 8 + lines(width).size() * 11 + 11;
+			return (continued ? 0 : 5) + bubbleHeight(width);
 		}
 
 		@Override
 		public int gapAfter() {
-			return 3;
+			return last ? 4 : 2;
+		}
+
+		/** {x, y, Breite, Höhe} der Blase */
+		private int[] box(int x, int y, int w) {
+			List<FormattedCharSequence> lines = lines(w);
+			String footer = footer();
+			int textW = footer != null ? Ui.width(footer, Ui.Font.SMALL) : 0;
+			for (FormattedCharSequence line : lines) textW = Math.max(textW, font.width(line));
+			int bw = textW + 18;
+			int bh = bubbleHeight(w);
+			int by = y + (continued ? 0 : 5);
+			int bx = mine ? x + w - bw - 2 : x + HEAD + 6;
+			return new int[] {bx, by, bw, bh};
 		}
 
 		@Override
 		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
-			boolean mine = message.mine();
-			List<FormattedCharSequence> lines = lines(w);
-			String time = clock(message.at());
-			int textW = Ui.width(time, Ui.Font.SMALL);
-			for (FormattedCharSequence line : lines) textW = Math.max(textW, font.width(line));
-			int bw = textW + 18;
-			int bh = 8 + lines.size() * 11 + 11;
-			int by = y + (continued ? 0 : 4);
-			int bx = mine ? x + w - bw - 2 : x + 2;
-			Ui.rect(g, bx, by, bw, bh, 9, mine ? Ui.ACCENT : 0x24FFFFFF);
-			int ly = by + 6;
-			for (FormattedCharSequence line : lines) {
-				g.text(font, line, bx + 9, ly, mine ? 0xFFFFFFFF : Ui.TEXT, false);
+			int[] b = box(x, y, w);
+			boolean hover = Ui.inside(mouseX, mouseY, b[0], b[1], b[2], b[3]);
+			boolean failed = pending != null && pending.failed;
+			int fill;
+			if (failed) fill = (Ui.DANGER & 0xFFFFFF) | 0x2E000000;
+			else if (mine) fill = pending != null ? Ui.withAlpha(Ui.ACCENT, 0.55f) : hover ? Ui.ACCENT_HOVER : Ui.ACCENT;
+			else fill = hover ? 0x30FFFFFF : 0x24FFFFFF;
+			Ui.rect(g, b[0], b[1], b[2], b[3], 9, fill);
+			if (failed) Ui.outline(g, b[0], b[1], b[2], b[3], 9, (Ui.DANGER & 0xFFFFFF) | 0x99000000);
+			int ly = b[1] + 6;
+			int color = mine && !failed ? 0xFFFFFFFF : Ui.TEXT;
+			for (FormattedCharSequence line : lines(w)) {
+				g.text(font, line, b[0] + 9, ly, color, false);
 				ly += 11;
 			}
-			Ui.textRight(g, time, bx + bw - 8, by + bh - 9, mine ? 0xC8FFFFFF : Ui.FAINT, Ui.Font.SMALL);
+			String footer = footer();
+			if (footer != null) {
+				int footerColor = failed ? Ui.DANGER : mine ? 0xC8FFFFFF : link != null ? Ui.ACCENT_TEXT : Ui.FAINT;
+				Ui.textRight(g, footer, b[0] + b[2] - 8, b[1] + b[3] - 10, footerColor, Ui.Font.SMALL);
+			}
+			// Kopf des Freundes neben der letzten Blase seiner Gruppe
+			if (!mine && last && openChat != null) FriendWidget.face(g, openChat, openChatName, x + 2, b[1] + b[3] - HEAD, HEAD, 1f);
+			if (hover) {
+				String when = java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy, HH:mm").format(java.time.Instant.ofEpochMilli(at).atZone(java.time.ZoneId.systemDefault()));
+				Ui.requestTooltip(failed && pending.error != null ? pending.error : when + (link != null ? " · Klick öffnet den Link" : "") + " · Rechtsklick kopiert", mouseX, mouseY);
+			}
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			int[] b = box(x, y, w);
+			if (!Ui.inside(mouseX, mouseY, b[0], b[1], b[2], b[3])) return false;
+			if (pending != null && pending.failed) {
+				HeldixMenuScreen.this.click();
+				pendingMessages.remove(pending);
+				sendText(pending.text);
+				return true;
+			}
+			if (link != null) {
+				try {
+					java.net.URI uri = java.net.URI.create(link);
+					HeldixMenuScreen.this.click();
+					net.minecraft.client.gui.screens.ConfirmLinkScreen.confirmLinkNow(HeldixMenuScreen.this, uri);
+					return true;
+				} catch (IllegalArgumentException e) {
+					return false;
+				}
+			}
+			return false;
+		}
+
+		@Override
+		public boolean secondaryClick(double mouseX, double mouseY, int x, int y, int w) {
+			int[] b = box(x, y, w);
+			if (!Ui.inside(mouseX, mouseY, b[0], b[1], b[2], b[3])) return false;
+			minecraft.keyboardHandler.setClipboard(text);
+			HeldixMenuScreen.this.click();
+			pageMessage("Nachricht kopiert", true);
+			return true;
+		}
+	}
+
+	/** https://… bzw. http://… in einer Nachricht */
+	private static final java.util.regex.Pattern LINK = java.util.regex.Pattern.compile("https?://[^\\s]+");
+
+	/** Eigene Nachricht, die gerade gesendet wird oder nicht ankam */
+	private static final class PendingMessage {
+		private static long next = 1;
+		final long localId = next++;
+		final UUID to;
+		final String text;
+		final long at = System.currentTimeMillis();
+		boolean failed;
+		String error;
+
+		PendingMessage(UUID to, String text) {
+			this.to = to;
+			this.text = text;
+		}
+	}
+
+	/** Linie „Neue Nachrichten“ vor der ersten ungelesenen Nachricht */
+	private final class NewDivider implements Row {
+		@Override
+		public int height(int width) {
+			return 16;
+		}
+
+		@Override
+		public int gapAfter() {
+			return 2;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			String label = "Neue Nachrichten";
+			int lw = Ui.width(label, Ui.Font.SMALL) + 14;
+			Ui.hline(g, x + 4, x + w - lw - 8, y + 8, Ui.ACCENT_LINE);
+			Ui.rect(g, x + w - lw - 4, y + 2, lw, 12, 6, Ui.ACCENT_SOFT);
+			Ui.textCentered(g, label, x + w - lw / 2 - 4, y + 4, Ui.ACCENT_TEXT, Ui.Font.SMALL);
 		}
 	}
 
@@ -3087,6 +3326,122 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 		g.disableScissor();
 		Ui.scrollbar(g, bodyX + bodyW + 4, bodyY, bodyH, scroll, maxScroll());
+		if (openChat != null) drawChatExtras(g, mouseX, mouseY);
+	}
+
+	/** Liste der Unterhaltungen links (breite Fenster), „Neue Nachricht ↓“, Zeichenzähler */
+	private void drawChatExtras(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+		int count = Messages.history(openChat).size();
+		if (chatFromBottom < 2) seenMessages = count;
+		if (chatSplit()) drawChatList(g, mouseX, mouseY);
+		// Knopf zum Ende des Chats, wenn hochgescrollt
+		if (chatFromBottom > 30) {
+			boolean fresh = count > seenMessages;
+			String label = fresh ? "Neue Nachricht" : null;
+			int[] b = downButton();
+			boolean over = Ui.inside(mouseX, mouseY, b[0], b[1], b[2], b[3]);
+			Ui.shadow(g, b[0], b[1], b[2], b[3], 0.4f);
+			Ui.rect(g, b[0], b[1], b[2], b[3], b[3] / 2f, fresh ? (over ? Ui.ACCENT_HOVER : Ui.ACCENT) : (over ? 0xFF2A3244 : 0xFF202736));
+			if (label != null) Ui.text(g, label, b[0] + 10, b[1] + 6, 0xFFFFFFFF, Ui.Font.SMALL);
+			Ui.icon(g, "chevron-down", b[0] + b[2] - 16, b[1] + 5, 10, fresh ? 0xFFFFFFFF : Ui.TEXT);
+		}
+		// Zeichenzähler kurz vor der Grenze
+		if (chatText.length() >= Messages.MAX_LENGTH - 100 && chatInput != null) {
+			String counter = chatText.length() + "/" + Messages.MAX_LENGTH;
+			Ui.textRight(g, counter, chatInput.getX() + chatInput.getWidth() - 4, chatInput.getY() - 10,
+					chatText.length() >= Messages.MAX_LENGTH ? Ui.WARNING : Ui.FAINT, Ui.Font.SMALL);
+		}
+	}
+
+	/** {x, y, Breite, Höhe} des Knopfs „nach unten“ */
+	private int[] downButton() {
+		boolean fresh = Messages.history(openChat).size() > seenMessages;
+		int w = fresh ? Ui.width("Neue Nachricht", Ui.Font.SMALL) + 34 : 22;
+		return new int[] {bodyX + bodyW - w - 4, bodyY + bodyH - 26, w, 20};
+	}
+
+	/** Einträge der Liste links: Unterhaltungen, dann Freunde ohne Unterhaltung */
+	private List<UUID[]> chatListEntries() {
+		List<UUID[]> entries = new ArrayList<>();
+		Set<UUID> seen = new java.util.HashSet<>();
+		for (Messages.Conversation c : Messages.conversations()) {
+			entries.add(new UUID[] {c.uuid()});
+			seen.add(c.uuid());
+		}
+		for (Social.Friend friend : sortedFriends()) if (seen.add(friend.uuid())) entries.add(new UUID[] {friend.uuid()});
+		return entries;
+	}
+
+	private void drawChatList(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+		int x = contentX;
+		int w = chatListW();
+		int y = contentY;
+		int h = contentH;
+		Ui.rect(g, x, y, w, h, 10, Ui.SURFACE);
+		Ui.outline(g, x, y, w, h, 10, Ui.LINE);
+		Ui.text(g, "UNTERHALTUNGEN", x + 10, y + 9, Ui.FAINT, Ui.Font.SMALL);
+		List<UUID[]> entries = chatListEntries();
+		int top = y + 24;
+		int room = h - 28;
+		double max = Math.max(0, entries.size() * LIST_ITEM - room);
+		listScroll = Math.clamp(listScroll, 0, max);
+		g.enableScissor(x + 1, top, x + w - 1, top + room);
+		int iy = top - (int) listScroll;
+		Map<UUID, Messages.Conversation> byUuid = new HashMap<>();
+		for (Messages.Conversation c : Messages.conversations()) byUuid.put(c.uuid(), c);
+		for (UUID[] entry : entries) {
+			UUID uuid = entry[0];
+			if (iy + LIST_ITEM >= top && iy <= top + room) {
+				Social.Friend friend = friendOf(uuid);
+				Messages.Conversation conversation = byUuid.get(uuid);
+				String name = friend != null ? friend.name() : conversation != null ? conversation.name() : "?";
+				boolean selected = uuid.equals(openChat);
+				boolean over = Ui.inside(mouseX, mouseY, x + 4, iy, w - 8, LIST_ITEM - 2) && mouseY >= top && mouseY < top + room;
+				if (selected) Ui.rect(g, x + 4, iy, w - 8, LIST_ITEM - 2, 7, Ui.ACCENT_SOFT);
+				else if (over) Ui.rect(g, x + 4, iy, w - 8, LIST_ITEM - 2, 7, Ui.SURFACE_HOVER);
+				FriendWidget.face(g, uuid, name, x + 10, iy + 7, 16, friend != null && friend.online() ? 1f : 0.55f);
+				if (friend != null && friend.online()) {
+					Ui.circle(g, x + 26, iy + 23, 3.5f, 0xFF161C28);
+					Ui.circle(g, x + 26, iy + 23, 2.5f, Ui.SUCCESS);
+				}
+				int unread = selected ? 0 : Messages.unread(uuid);
+				int textW = w - 44 - (unread > 0 ? 18 : 0);
+				Ui.text(g, Ui.ellipsize(name, textW, Ui.Font.LABEL), x + 34, iy + 6, selected ? Ui.TEXT : Ui.TEXT, Ui.Font.LABEL);
+				String preview = conversation != null ? (conversation.last().mine() ? "Du: " : "") + Messages.clean(conversation.last().text())
+						: friend != null ? friend.activity() : "";
+				Ui.text(g, Ui.ellipsize(preview, textW, Ui.Font.SMALL), x + 34, iy + 18, unread > 0 ? Ui.TEXT : Ui.FAINT, Ui.Font.SMALL);
+				if (unread > 0) {
+					String label = Integer.toString(Math.min(unread, 99));
+					int bw = Math.max(12, Ui.width(label, Ui.Font.SMALL) + 7);
+					Ui.rect(g, x + w - 12 - bw, iy + 10, bw, 11, 5.5f, Ui.ACCENT);
+					Ui.textCentered(g, label, x + w - 12 - bw / 2, iy + 12, 0xFFFFFFFF, Ui.Font.SMALL);
+				}
+			}
+			iy += LIST_ITEM;
+		}
+		g.disableScissor();
+		if (entries.isEmpty()) Ui.text(g, "Noch keine Freunde", x + 10, top + 6, Ui.MUTED, Ui.Font.SMALL);
+	}
+
+	/** Klick in die Liste links: anderen Chat öffnen */
+	private boolean clickChatList(double mx, double my) {
+		int x = contentX;
+		int w = chatListW();
+		int top = contentY + 24;
+		int room = contentH - 28;
+		if (!Ui.inside(mx, my, x, top, w, room)) return false;
+		int index = (int) ((my - top + listScroll) / LIST_ITEM);
+		List<UUID[]> entries = chatListEntries();
+		if (index < 0 || index >= entries.size()) return true;
+		UUID uuid = entries.get(index)[0];
+		if (uuid.equals(openChat)) return true;
+		Social.Friend friend = friendOf(uuid);
+		String name = friend != null ? friend.name() : "?";
+		for (Messages.Conversation c : Messages.conversations()) if (c.uuid().equals(uuid)) name = c.name();
+		click();
+		Messages.setViewing(null);
+		openChat(uuid, name);
+		return true;
 	}
 
 	/** Weicher Übergang zum Zielwert (für Schalter und Hover). */
@@ -3131,6 +3486,10 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		if (chatSplit() && Ui.inside(mouseX, mouseY, contentX, contentY, chatListW(), contentH)) {
+			listScroll = Math.max(0, listScroll - scrollY * 20);
+			return true;
+		}
 		if (maxScroll() > 0) {
 			scroll = Math.clamp(scroll - scrollY * 20, 0, maxScroll());
 			if (openChat != null) chatFromBottom = maxScroll() - scroll;
@@ -3150,10 +3509,30 @@ public class HeldixMenuScreen extends ShellScreen {
 			pageInput.setFocused(false);
 			if (getFocused() == pageInput) setFocused(null);
 		}
-		if (event.button() != InputConstants.MOUSE_BUTTON_LEFT) return false;
 		layout();
 		double mx = event.x();
 		double my = event.y();
+		if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT && openChat != null && Ui.inside(mx, my, bodyX, bodyY, bodyW, bodyH)) {
+			int ry = bodyY - (int) scroll;
+			for (Row row : rows) {
+				int h = row.height(bodyW);
+				if (my >= ry && my < ry + h && row.secondaryClick(mx, my, bodyX, ry, bodyW)) return true;
+				ry += h + row.gapAfter();
+			}
+			return false;
+		}
+		if (event.button() != InputConstants.MOUSE_BUTTON_LEFT) return false;
+		if (openChat != null) {
+			if (chatSplit() && clickChatList(mx, my)) return true;
+			if (chatFromBottom > 30) {
+				int[] b = downButton();
+				if (Ui.inside(mx, my, b[0], b[1], b[2], b[3])) {
+					click();
+					chatFromBottom = 0;
+					return true;
+				}
+			}
+		}
 		if (Ui.inside(mx, my, bodyX, bodyY, bodyW, bodyH)) {
 			int y = bodyY - (int) scroll;
 			for (Row row : rows) {

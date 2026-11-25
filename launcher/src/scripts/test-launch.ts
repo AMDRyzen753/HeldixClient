@@ -263,7 +263,11 @@ main().catch((error) => {
   process.exit(1);
 });
 
-/** Setzt guiScale in der options.txt der Testinstanz und blendet die Tutorial-Hinweise aus (andere Optionen bleiben). */
+/**
+ * Setzt guiScale in der options.txt der Testinstanz und blendet die Tutorial-Hinweise aus (andere Optionen bleiben).
+ * Außerdem pausiert das Spiel nicht, wenn das Fenster den Fokus verliert – sonst stört jedes Klicken in ein anderes
+ * Fenster den Test (Pausemenü statt der erwarteten Seite).
+ */
 async function setGuiScale(gameDir: string, scale: number): Promise<void> {
   const file = path.join(gameDir, 'options.txt');
   let text = '';
@@ -272,7 +276,7 @@ async function setGuiScale(gameDir: string, scale: number): Promise<void> {
   } catch {
     // noch keine options.txt: Minecraft legt sie beim Start an
   }
-  const lines = text.split(/\r?\n/).filter((line) => line && !line.startsWith('guiScale:') && !line.startsWith('tutorialStep:'));
-  lines.push(`guiScale:${Number.isFinite(scale) ? scale : 0}`, 'tutorialStep:none');
+  const lines = text.split(/\r?\n/).filter((line) => line && !line.startsWith('guiScale:') && !line.startsWith('tutorialStep:') && !line.startsWith('pauseOnLostFocus:'));
+  lines.push(`guiScale:${Number.isFinite(scale) ? scale : 0}`, 'tutorialStep:none', 'pauseOnLostFocus:false');
   await writeFile(file, lines.join('\n') + '\n');
 }

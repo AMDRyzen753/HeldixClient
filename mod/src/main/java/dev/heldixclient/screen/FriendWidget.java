@@ -19,8 +19,17 @@ import java.util.function.Supplier;
 
 /** Zeile mit einem Freund: Kopf des Skins, Name, was er gerade macht (grün = online). Klick öffnet die Seite Freunde. */
 public class FriendWidget extends AbstractButton {
-	/** Skins nach UUID (lädt Minecraft im Hintergrund; bis dahin der Standard-Skin) */
-	private static final Map<UUID, Supplier<PlayerSkin>> SKINS = new HashMap<>();
+	/** Skins nach UUID, sobald das Profil mit den Skin-Daten da ist */
+	private static final Map<UUID, Supplier<PlayerSkin>> SKINS = new java.util.concurrent.ConcurrentHashMap<>();
+	/** bis dahin: Standard-Skin passend zur UUID */
+	private static final Map<UUID, Supplier<PlayerSkin>> FALLBACK = new HashMap<>();
+	/** wann ein Profil zuletzt angefragt wurde (fehlgeschlagen: nach fünf Minuten noch einmal) */
+	private static final Map<UUID, Long> REQUESTED = new java.util.concurrent.ConcurrentHashMap<>();
+	private static final java.util.concurrent.ExecutorService PROFILES = java.util.concurrent.Executors.newSingleThreadExecutor(runnable -> {
+		Thread thread = new Thread(runnable, "Heldix-Skins");
+		thread.setDaemon(true);
+		return thread;
+	});
 
 	private final Supplier<Social.Friend> friend;
 	private final Runnable action;
@@ -32,11 +41,38 @@ public class FriendWidget extends AbstractButton {
 		this.action = action;
 	}
 
-	/** Kopf eines Spielers (Skin per UUID, Mojang liefert ihn nach) */
+	/**
+	 * Kopf eines Spielers. Eine UUID allein reicht Minecraft nicht für den Skin: Das Profil mit den Skin-Daten
+	 * holen wir einmal im Hintergrund (wie bei Köpfen von Spielern), bis dahin erscheint der Standard-Skin.
+	 */
 	public static void face(GuiGraphicsExtractor g, UUID uuid, String name, int x, int y, int size, float alpha) {
-		Supplier<PlayerSkin> skin = SKINS.computeIfAbsent(uuid,
-				id -> Minecraft.getInstance().getSkinManager().createLookup(new GameProfile(id, name == null ? "" : name), false));
-		PlayerFaceExtractor.extractRenderState(g, skin.get(), x, y, size, Ui.withAlpha(0xFFFFFFFF, alpha));
+		PlayerFaceExtractor.extractRenderState(g, skinOf(uuid, name), x, y, size, Ui.withAlpha(0xFFFFFFFF, alpha));
+	}
+
+	/** Skin eines Spielers per UUID (Standard-Skin, bis das Profil geladen ist) */
+	public static PlayerSkin skinOf(UUID uuid, String name) {
+		Supplier<PlayerSkin> skin = SKINS.get(uuid);
+		if (skin == null) {
+			skin = FALLBACK.computeIfAbsent(uuid, id -> Minecraft.getInstance().getSkinManager().createLookup(new GameProfile(id, name == null ? "" : name), false));
+			requestProfile(uuid);
+		}
+		return skin.get();
+	}
+
+	private static void requestProfile(UUID uuid) {
+		long now = System.currentTimeMillis();
+		Long last = REQUESTED.get(uuid);
+		if (last != null && now - last < 5 * 60_000) return;
+		REQUESTED.put(uuid, now);
+		Minecraft minecraft = Minecraft.getInstance();
+		PROFILES.execute(() -> {
+			try {
+				java.util.Optional<GameProfile> profile = minecraft.services().profileResolver().fetchById(uuid);
+				profile.ifPresent(found -> minecraft.execute(() -> SKINS.put(uuid, minecraft.getSkinManager().createLookup(found, false))));
+			} catch (RuntimeException e) {
+				dev.heldixclient.HeldixClient.LOGGER.debug("Skin von {} nicht ladbar ({})", uuid, e.toString());
+			}
+		});
 	}
 
 	@Override
