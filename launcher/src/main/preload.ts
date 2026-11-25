@@ -8,6 +8,8 @@ function subscribe<T>(channel: string, callback: (value: T) => void): () => void
 }
 
 const api: HeldixApi = {
+  platform: process.platform,
+  openUpdateDownload: () => ipcRenderer.invoke('update:download-page'),
   appInfo: () => ipcRenderer.invoke('app:info'),
   listVersions: () => ipcRenderer.invoke('versions:list'),
   getSettings: () => ipcRenderer.invoke('settings:get'),

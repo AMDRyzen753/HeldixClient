@@ -111,16 +111,22 @@ Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Laun
 
 ## Installation
 
+**Windows 10 und 11**
 1. Den Installer `HeldixClient-Setup-<version>.exe` unter [Releases](https://github.com/AMDRyzen753/HeldixClient/releases) herunterladen und starten.
 2. Windows SmartScreen warnt beim ersten Start, weil der Installer nicht signiert ist: **Weitere Informationen** → **Trotzdem ausführen**.
 3. Im Launcher mit dem Microsoft-Konto anmelden, eine Instanz wählen und **Spielen** drücken.
+
+**macOS 11 oder neuer** (Apple Silicon und Intel)
+1. Unter [Releases](https://github.com/AMDRyzen753/HeldixClient/releases) `HeldixClient-mac-arm64.dmg` (M1 und neuer) bzw. `HeldixClient-mac-x64.dmg` (Intel) laden, öffnen und HeldixClient in **Programme** ziehen.
+2. Die App ist nur ad-hoc signiert und nicht von Apple beglaubigt. Beim ersten Start blockiert macOS sie; unter **Systemeinstellungen → Datenschutz & Sicherheit** steht dann **Dennoch öffnen**.
+3. Anmelden und spielen wie unter Windows. Unterschiede: Vulkan gibt es auf dem Mac nicht (Minecraft wählt die Grafik selbst), Updates meldet der Launcher nur und lädt sie nicht selbst, und das Spotify-Addon braucht Windows.
 
 > [!NOTE]
 > Die Anmeldung mit Microsoft-Konten braucht eine App-ID, die Mojang freigeschaltet hat. Solange die Freigabe aussteht, lehnt Minecraft die Anmeldung ab. Bis dahin gibt es **Über Minecraft Launcher anmelden**: Der offizielle Minecraft Launcher meldet an, gespielt wird mit HeldixClient. Hintergründe stehen in [docs/einrichtung.md](docs/einrichtung.md).
 
 ## Selbst bauen
 
-Voraussetzungen: Windows, [Node.js](https://nodejs.org) 22 oder neuer und ein JDK 25 (z. B. [Temurin](https://adoptium.net)).
+Voraussetzungen: Windows oder macOS, [Node.js](https://nodejs.org) 22 oder neuer und ein JDK 25 (z. B. [Temurin](https://adoptium.net)).
 
 ```powershell
 git clone https://github.com/AMDRyzen753/HeldixClient.git
@@ -129,7 +135,10 @@ npm install
 npm run mod      # baut Heldix Loader, Client-Mod und Addons
 npm start        # startet den Launcher im Entwicklungsmodus
 npm run dist     # erzeugt den Installer in launcher\release\
+npm run dist:mac # nur auf einem Mac: DMG und ZIP für Apple Silicon und Intel
 ```
+
+Die Mac-App baut auch GitHub Actions bei jedem Push (Job „macOS-App bauen“) und hängt sie bei einem Versions-Tag an das Release.
 
 Beim ersten Bauen lädt Gradle die Minecraft-Client-JAR zum Kompilieren direkt von Mojang. Sie landet nur in `mod/.gradle/` und wird nie eingecheckt oder ausgeliefert.
 

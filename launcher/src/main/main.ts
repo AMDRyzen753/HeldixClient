@@ -153,6 +153,8 @@ const updater = new Updater({
   dir: path.join(paths.root, 'updates'),
   publicKey: UPDATE_PUBLIC_KEY,
   log: (line) => console.log(line),
+  // Der Installer im Update ist für Windows; auf dem Mac nur melden, laden geht über die Webseite
+  downloadInstaller: process.platform === 'win32',
 });
 updater.onState = (state) => send('update:state', state);
 /** Einstellung "Updates automatisch" (für den Zeitgeber und das Installieren beim Beenden) */
@@ -674,6 +676,9 @@ function registerIpc(): void {
   });
   ipcMain.handle('update:state', () => updater.state);
   ipcMain.handle('update:check', () => updater.check());
+  ipcMain.handle('update:download-page', async () => {
+    await shell.openExternal(`${WEBSITE_URL.replace(/\/+$/, '')}/#download`);
+  });
   ipcMain.handle('update:install', async () => {
     if (gameRunning()) throw new Error('Erst das Spiel beenden, dann aktualisieren.');
     if (!(await updater.install(true))) throw new Error(updater.state.error ?? 'Kein Update bereit.');
@@ -880,6 +885,45 @@ function registerIpc(): void {
 
 // ---------- Fenster ----------
 
+/** App-Menü für macOS: HeldixClient (Über, Ausblenden, Beenden), Bearbeiten, Fenster */
+function macMenu(): Menu {
+  return Menu.buildFromTemplate([
+    {
+      label: LAUNCHER_NAME,
+      submenu: [
+        { role: 'about', label: `Über ${LAUNCHER_NAME}` },
+        { type: 'separator' },
+        { role: 'hide', label: `${LAUNCHER_NAME} ausblenden` },
+        { role: 'hideOthers', label: 'Andere ausblenden' },
+        { role: 'unhide', label: 'Alle einblenden' },
+        { type: 'separator' },
+        { role: 'quit', label: `${LAUNCHER_NAME} beenden` },
+      ],
+    },
+    {
+      label: 'Bearbeiten',
+      submenu: [
+        { role: 'undo', label: 'Widerrufen' },
+        { role: 'redo', label: 'Wiederholen' },
+        { type: 'separator' },
+        { role: 'cut', label: 'Ausschneiden' },
+        { role: 'copy', label: 'Kopieren' },
+        { role: 'paste', label: 'Einsetzen' },
+        { role: 'selectAll', label: 'Alles auswählen' },
+      ],
+    },
+    {
+      label: 'Fenster',
+      submenu: [
+        { role: 'minimize', label: 'Im Dock ablegen' },
+        { role: 'zoom', label: 'Zoomen' },
+        { type: 'separator' },
+        { role: 'front', label: 'Alle nach vorne bringen' },
+      ],
+    },
+  ]);
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1180,
@@ -889,8 +933,10 @@ function createWindow(): void {
     show: false,
     title: LAUNCHER_NAME,
     backgroundColor: '#080b12',
-    titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#00000000', symbolColor: '#9ba6b8', height: 44 },
+    // Windows: eigene Titelleiste mit den Fensterknöpfen rechts; macOS: Ampel-Knöpfe oben links über der Seitenleiste
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 18, y: 18 } }
+      : { titleBarStyle: 'hidden' as const, titleBarOverlay: { color: '#00000000', symbolColor: '#9ba6b8', height: 44 } }),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -938,7 +984,8 @@ app.on('second-instance', () => focusWindow());
 
 if (singleInstance) {
   app.whenReady().then(async () => {
-    Menu.setApplicationMenu(null);
+    // macOS braucht ein App-Menü, sonst gehen Kopieren, Einfügen und Beenden (⌘C, ⌘V, ⌘Q) nicht
+    Menu.setApplicationMenu(process.platform === 'darwin' ? macMenu() : null);
     registerIpc();
     await ensureInstances().catch((error) => console.error('[Launcher] Instanzen konnten nicht vorbereitet werden', error));
     createWindow();

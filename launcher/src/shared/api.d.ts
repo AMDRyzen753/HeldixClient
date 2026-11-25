@@ -58,7 +58,8 @@ export type WebTarget = 'profil' | 'freunde' | 'nachrichten' | 'privatsphaere' |
 
 /** Stand der automatischen Updates (siehe main/core/updater.ts) */
 export interface UpdateState {
-  phase: 'disabled' | 'idle' | 'checking' | 'current' | 'downloading' | 'ready' | 'error';
+  /** available = neue Version, nur zum Herunterladen von der Webseite (macOS) */
+  phase: 'disabled' | 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'error';
   current: string;
   version?: string;
   notes?: string[];
@@ -301,6 +302,10 @@ export type DiscordStatus =
   | { state: 'error'; message: string };
 
 export interface HeldixApi {
+  /** Betriebssystem: win32, darwin oder linux */
+  platform: string;
+  /** Download-Seite der Webseite öffnen (macOS: neue Version von Hand laden) */
+  openUpdateDownload(): Promise<void>;
   appInfo(): Promise<AppInfo>;
   listVersions(): Promise<VersionListResult>;
   getSettings(): Promise<Settings>;

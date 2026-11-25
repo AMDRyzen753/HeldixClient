@@ -16,14 +16,14 @@
 
 <main id="inhalt">
   <div class="wrap hero">
-    <span class="pill"><span class="dot"></span>Version {{VERSION}} · für Windows · kostenlos</span>
+    <span class="pill"><span class="dot"></span>Version {{VERSION}} · für Windows und macOS · kostenlos</span>
     <h1>Minecraft, so wie du es <span class="gradient">spielen willst.</span></h1>
     <p class="lead">HeldixClient bringt einen eigenen Launcher, einen eigenen Mod-Loader und 13 Module mit – vom HUD-Editor über Freelook bis zu animierten Capes, die auch deine Freunde sehen.</p>
     <div class="hero-actions">
-      <a class="button" href="#download">{{icon:download}}Für Windows herunterladen</a>
+      <a class="button" href="#download">{{icon:download}}Herunterladen</a>
       <a class="button ghost" href="#funktionen">Funktionen ansehen</a>
     </div>
-    <p class="hero-note">Für Minecraft: Java Edition · Windows 10 und 11 (64 Bit)</p>
+    <p class="hero-note">Für Minecraft: Java Edition · Windows 10 und 11 (64 Bit) · macOS 11 oder neuer</p>
     <div class="shot">
       <div class="frame"><img src="/images/launcher-start.png" alt="Startseite des HeldixClient-Launchers mit Spielfigur, Spielen-Knopf und Instanzen" width="1180" height="740"></div>
     </div>
@@ -150,7 +150,7 @@
         </div>
         <ul class="checks">
           <li>{{icon:check}}<span>Kein Tracking und keine Werbung – auch nicht auf dieser Seite. Ein Cookie gibt es nur, wenn du dich im Konto anmeldest.</span></li>
-          <li>{{icon:check}}<span>Die Microsoft-Anmeldung bleibt auf deinem PC, verschlüsselt mit Windows.</span></li>
+          <li>{{icon:check}}<span>Die Microsoft-Anmeldung bleibt auf deinem Rechner, verschlüsselt mit Windows bzw. im Schlüsselbund von macOS.</span></li>
           <li>{{icon:check}}<span>Online-Status, Server und Cape einzeln abschaltbar.</span></li>
           <li>{{icon:check}}<span>Alles löschen mit einem Klick: Heldix-Menü → Freunde → Privatsphäre oder hier im <a href="/konto">Konto</a>.</span></li>
         </ul>
@@ -167,21 +167,26 @@
       </div>
       <div class="download">
         <div class="card main">
-          <h3>HeldixClient für Windows</h3>
+          <h3>HeldixClient herunterladen</h3>
           <p class="meta" id="download-meta">Version {{VERSION}} · Installer für Windows 10 und 11 (64 Bit)</p>
           <a class="button" id="download-button" href="{{DOWNLOAD_URL}}" data-api="https://__API_DOMAIN__/v1/launcher/download/latest">{{icon:download}}Installer herunterladen</a>
+          <div class="download-alt">
+            <span class="download-alt-label">macOS 11 oder neuer:</span>
+            <a class="button small ghost" href="{{GITHUB_URL}}/releases/latest/download/HeldixClient-mac-arm64.dmg">{{icon:download}}Apple Silicon (M1 und neuer)</a>
+            <a class="button small ghost" href="{{GITHUB_URL}}/releases/latest/download/HeldixClient-mac-x64.dmg">{{icon:download}}Intel</a>
+          </div>
           <dl class="requirements">
             <dt>Spiel</dt><dd>Minecraft: Java Edition (gekauft, Microsoft-Konto)</dd>
-            <dt>System</dt><dd>Windows 10 oder 11, 64 Bit, 4 GB RAM oder mehr</dd>
+            <dt>System</dt><dd>Windows 10 oder 11 (64 Bit) oder macOS 11 oder neuer, 4 GB RAM oder mehr</dd>
             <dt>Java</dt><dd>lädt der Launcher selbst</dd>
             <dt>Quellcode</dt><dd><a href="{{GITHUB_URL}}">auf GitHub</a></dd>
           </dl>
         </div>
         <div class="card">
           <h3>So geht's</h3>
-          <p class="meta">Der Installer ist (noch) nicht signiert, deshalb fragt Windows einmal nach. Danach aktualisiert sich der Launcher selbst.</p>
+          <p class="meta">Der Download ist (noch) nicht von Microsoft bzw. Apple beglaubigt, deshalb fragt das System beim ersten Start einmal nach.</p>
           <ol class="steps">
-            <li><span><strong>Installer starten.</strong> Bei der Windows-Warnung auf „Weitere Informationen“ und dann „Trotzdem ausführen“ klicken.</span></li>
+            <li><span><strong>Installieren.</strong> Windows: Installer starten, bei der Warnung „Weitere Informationen“ → „Trotzdem ausführen“. Mac: DMG öffnen, HeldixClient in „Programme“ ziehen; beim ersten Start unter Systemeinstellungen → Datenschutz &amp; Sicherheit „Dennoch öffnen“ wählen.</span></li>
             <li><span><strong>Anmelden</strong> mit dem Microsoft-Konto, mit dem du Minecraft gekauft hast.</span></li>
             <li><span><strong>Spielen drücken.</strong> Die passende Minecraft- und Java-Version lädt der Launcher automatisch.</span></li>
             <li><span><strong>Rechte Umschalttaste</strong> im Spiel öffnet das Heldix-Menü mit allen Modulen.</span></li>
@@ -211,8 +216,8 @@
           <p>HeldixClient bringt nur Funktionen mit, die übliche Clients auch haben – keine Cheats. Manche Server verbieten einzelne Funktionen: Freelook ist zum Beispiel auf hypixel.net automatisch abgeschaltet. Halte dich an die Regeln des jeweiligen Servers.</p>
         </details>
         <details>
-          <summary>Warum warnt Windows beim Installieren?{{icon:chevron-down}}</summary>
-          <p>Der Installer hat noch keine kostenpflichtige Code-Signatur. Windows SmartScreen warnt deshalb bei neuen Programmen. Über „Weitere Informationen“ → „Trotzdem ausführen“ geht es weiter; den Quellcode kannst du auf GitHub ansehen.</p>
+          <summary>Warum warnt Windows bzw. macOS beim ersten Start?{{icon:chevron-down}}</summary>
+          <p>HeldixClient hat noch keine kostenpflichtige Code-Signatur von Microsoft oder Apple. Windows SmartScreen warnt deshalb bei neuen Programmen; über „Weitere Informationen“ → „Trotzdem ausführen“ geht es weiter. Auf dem Mac blockiert Gatekeeper den ersten Start; unter Systemeinstellungen → Datenschutz &amp; Sicherheit steht dann „Dennoch öffnen“. Den Quellcode kannst du auf GitHub ansehen.</p>
         </details>
         <details>
           <summary>Was speichert der Heldix-Dienst über mich?{{icon:chevron-down}}</summary>
@@ -220,7 +225,7 @@
         </details>
         <details>
           <summary>Gibt es HeldixClient für Mac oder Linux?{{icon:chevron-down}}</summary>
-          <p>Zurzeit gibt es den Installer nur für Windows.</p>
+          <p>Für den Mac ja: macOS 11 oder neuer, für Apple Silicon (M1 und neuer) und Intel. Die passende Java-Version lädt der Launcher selbst. Auf dem Mac aktualisiert sich der Launcher noch nicht von allein: Er meldet neue Versionen, geladen wird über diese Seite. Unterschiede zu Windows: Vulkan gibt es auf dem Mac nicht (Minecraft wählt die Grafik selbst), und das Spotify-Addon braucht die Windows-Mediensteuerung. Linux gibt es zurzeit nicht.</p>
         </details>
       </div>
     </div>

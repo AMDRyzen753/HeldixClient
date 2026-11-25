@@ -23,7 +23,9 @@ if (!env.JAVA_HOME) {
 }
 
 const gradlew = path.join(modDir, process.platform === 'win32' ? 'gradlew.bat' : 'gradlew');
-const result = spawnSync(`"${gradlew}" build`, { cwd: modDir, env, stdio: 'inherit', shell: true });
+// macOS/Linux: über sh starten (gradlew ist im Repository nicht als ausführbar markiert)
+const command = process.platform === 'win32' ? `"${gradlew}" build` : `sh "${gradlew}" build`;
+const result = spawnSync(command, { cwd: modDir, env, stdio: 'inherit', shell: true });
 if (result.status !== 0) process.exit(result.status ?? 1);
 
 const jarsIn = async (dir, filter) =>

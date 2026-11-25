@@ -68,6 +68,10 @@ async function main(): Promise<void> {
     check('neue Version wird geladen und geprüft', state.phase === 'ready' && state.version === '0.12.0', state.error);
     check('Pfad des Installers', u.installerPath()?.endsWith('HeldixClient-Setup-0.12.0.exe') === true);
 
+    const macLike = new Updater({ baseUrl: url, currentVersion: '0.11.0', dir, publicKey: pem, log: () => undefined, downloadInstaller: false });
+    state = await macLike.check();
+    check('Mac: neue Version nur melden, nichts laden', state.phase === 'available' && state.version === '0.12.0' && macLike.installerPath() === null, state.phase);
+
     state = await updater('0.12.0').check();
     check('gleiche Version: aktuell', state.phase === 'current', state.phase);
     state = await updater('0.13.0').check();

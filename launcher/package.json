@@ -28,7 +28,8 @@
     "capes": "electron scripts/render-capes.mjs",
     "update-key": "npm run build && node dist/scripts/release.js --init",
     "release": "npm run dist && node dist/scripts/release.js",
-    "test:update": "npm run build && node dist/scripts/test-update.js"
+    "test:update": "npm run build && node dist/scripts/test-update.js",
+    "dist:mac": "npm run mod && npm run build && electron-builder --mac"
   },
   "build": {
     "appId": "dev.heldixclient.launcher",
@@ -106,6 +107,55 @@
       "createStartMenuShortcut": true,
       "shortcutName": "HeldixClient",
       "artifactName": "HeldixClient-Setup-${version}.exe"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.games",
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "darkModeSupport": true,
+      "minimumSystemVersion": "11.0",
+      "artifactName": "HeldixClient-mac-${arch}.${ext}",
+      "extendInfo": {
+        "NSHumanReadableCopyright": "© 2026 HeldixClient"
+      }
+    },
+    "dmg": {
+      "title": "HeldixClient ${version}",
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "contents": [
+        {
+          "x": 140,
+          "y": 190,
+          "type": "file"
+        },
+        {
+          "x": 400,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     }
   },
   "dependencies": {

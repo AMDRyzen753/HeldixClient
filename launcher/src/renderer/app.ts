@@ -860,7 +860,12 @@ function renderPerformance(s: Settings): void {
   document.querySelectorAll<HTMLButtonElement>('#graphics-api button').forEach((button) => {
     button.classList.toggle('active', button.dataset.api === s.graphicsApi);
   });
-  $('#graphics-hint').textContent = `${GRAPHICS_HINTS[s.graphicsApi]} Gilt für Heldix-Instanzen ab Minecraft 26.x; Fabric und Vanilla nutzen die Einstellung im Spiel.`;
+  $('#graphics-hint').textContent = api.platform === 'darwin'
+    ? 'Auf dem Mac gibt es kein Vulkan: Minecraft wählt die Grafik-API selbst. Die Auswahl gilt nur unter Windows.'
+    : `${GRAPHICS_HINTS[s.graphicsApi]} Gilt für Heldix-Instanzen ab Minecraft 26.x; Fabric und Vanilla nutzen die Einstellung im Spiel.`;
+  document.querySelectorAll<HTMLButtonElement>('#graphics-api button').forEach((button) => {
+    button.disabled = api.platform === 'darwin';
+  });
   $<HTMLInputElement>('#jvm-tuning-toggle').checked = s.jvmTuning;
 }
 
@@ -907,6 +912,7 @@ function renderUpdate(u: UpdateState): void {
     idle: `Version ${u.current} installiert.`,
     checking: 'Suche nach Updates …',
     current: `Version ${u.current} ist aktuell.`,
+    available: `Version ${u.version} ist da. Auf dem Mac lädst du sie über heldixclient.com.`,
     downloading: `Lade Version ${u.version} … ${percent} %`,
     ready: `Version ${u.version} ist bereit. Sie wird beim Beenden installiert oder sofort mit „Neu starten“.`,
     error: u.error ?? 'Update fehlgeschlagen.',
@@ -914,10 +920,11 @@ function renderUpdate(u: UpdateState): void {
   const status = $('#update-status');
   status.dataset.state = u.phase;
   $('#update-status-text').textContent = texts[u.phase];
-  $<HTMLButtonElement>('#update-check').disabled = u.phase === 'disabled' || u.phase === 'checking' || u.phase === 'downloading' || u.phase === 'ready';
-  $('#update-install').hidden = u.phase !== 'ready';
+  $<HTMLButtonElement>('#update-check').disabled = u.phase === 'disabled' || u.phase === 'checking' || u.phase === 'downloading' || u.phase === 'ready' || u.phase === 'available';
+  $('#update-install').hidden = u.phase !== 'ready' && u.phase !== 'available';
+  $('#update-install').lastChild!.textContent = u.phase === 'available' ? 'Herunterladen' : 'Neu starten und installieren';
   const notes = $('#update-notes');
-  const lines = u.phase === 'downloading' || u.phase === 'ready' ? u.notes ?? [] : [];
+  const lines = u.phase === 'downloading' || u.phase === 'ready' || u.phase === 'available' ? u.notes ?? [] : [];
   notes.replaceChildren(...lines.map((note) => {
     const li = document.createElement('li');
     li.textContent = note;
@@ -927,16 +934,21 @@ function renderUpdate(u: UpdateState): void {
 
   // Hinweis in der Seitenleiste nur, wenn eine neue Version kommt oder bereit ist
   const card = $('#update-card');
-  card.hidden = u.phase !== 'downloading' && u.phase !== 'ready';
-  $('#update-card-title').textContent = u.phase === 'ready' ? `Version ${u.version} bereit` : `Update ${u.version ?? ''}`;
-  $('#update-card-sub').textContent = u.phase === 'ready' ? 'Neu starten zum Installieren' : `wird geladen … ${percent} %`;
+  card.hidden = u.phase !== 'downloading' && u.phase !== 'ready' && u.phase !== 'available';
+  $('#update-card-title').textContent = u.phase === 'ready' ? `Version ${u.version} bereit` : u.phase === 'available' ? `Version ${u.version} ist da` : `Update ${u.version ?? ''}`;
+  $('#update-card-sub').textContent = u.phase === 'ready' ? 'Neu starten zum Installieren' : u.phase === 'available' ? 'auf heldixclient.com laden' : `wird geladen … ${percent} %`;
   $('#update-bar').hidden = u.phase !== 'downloading';
   $('#update-bar-fill').style.width = `${percent}%`;
-  $('#update-card-install').hidden = u.phase !== 'ready';
+  $('#update-card-install').hidden = u.phase !== 'ready' && u.phase !== 'available';
+  $('#update-card-install').textContent = u.phase === 'available' ? 'Herunterladen' : 'Neu starten';
   card.dataset.label = u.phase === 'ready' ? `Version ${u.version} bereit: Neu starten` : `Update wird geladen (${percent} %)`;
 }
 
 async function installUpdate(): Promise<void> {
+  if (api.platform === 'darwin') {
+    await api.openUpdateDownload();
+    return;
+  }
   try {
     await api.installUpdate();
   } catch (error) {
@@ -1087,6 +1099,7 @@ $('#kill-game').addEventListener('click', () => api.killGame());
 // ---------- Start ----------
 async function init(): Promise<void> {
   const started = performance.now();
+  document.body.classList.add(`platform-${api.platform}`);
   [state.info, state.settings, state.game] = await Promise.all([api.appInfo(), api.getSettings(), api.getGameState()]);
   initInstances(showView);
   renderSettings();

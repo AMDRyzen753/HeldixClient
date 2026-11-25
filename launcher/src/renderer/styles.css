@@ -488,3 +488,7 @@ input::placeholder { color: var(--faint); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* macOS: Ampel-Knöpfe oben links über der Seitenleiste, rechts keine Fensterknöpfe */
+.platform-darwin .sidebar { padding-top: 30px; }
+.platform-darwin .titlebar { padding-right: 28px; }

@@ -38,7 +38,7 @@ let cachedCode: string | null = null;
 
 /**
  * Kennung dieses PCs, z. B. "3F2A-91C0-7B44-E0D1": ein Hash der Windows-MachineGuid
- * (unter Linux /etc/machine-id). Die ID selbst wird nirgends gespeichert oder verschickt.
+ * (macOS: IOPlatformUUID, Linux: /etc/machine-id). Die ID selbst wird nirgends gespeichert oder verschickt.
  */
 export function machineCode(): string {
   if (cachedCode) return cachedCode;
@@ -50,6 +50,9 @@ export function machineCode(): string {
         windowsHide: true,
       });
       raw = /MachineGuid\s+REG_SZ\s+(\S+)/i.exec(out)?.[1] ?? '';
+    } else if (process.platform === 'darwin') {
+      const out = execFileSync('ioreg', ['-rd1', '-c', 'IOPlatformExpertDevice'], { encoding: 'utf8' });
+      raw = /"IOPlatformUUID"\s*=\s*"([^"]+)"/.exec(out)?.[1] ?? '';
     } else if (process.platform === 'linux') {
       raw = readFileSync('/etc/machine-id', 'utf8').trim();
     }

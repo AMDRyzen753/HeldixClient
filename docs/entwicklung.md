@@ -2,7 +2,7 @@
 
 ## Voraussetzungen
 
-- Windows
+- Windows, für die Mac-App macOS (oder GitHub Actions, siehe unten)
 - [Node.js](https://nodejs.org) 22 oder neuer
 - JDK 25, z. B. [Temurin](https://adoptium.net). Alternativ ein entpacktes JDK unter `.tools/jdk-25/` im Projektordner; das nutzen die Skripte automatisch.
 
@@ -15,6 +15,15 @@ npm run mod      # baut Heldix Loader, Client-Mod und Addons und legt sie in res
 npm start        # baut und startet den Launcher im Entwicklungsmodus
 npm run dist     # Java-Teile + Launcher bauen und Installer erzeugen
 ```
+
+### macOS
+
+`npm run dist:mac` geht nur auf einem Mac (electron-builder braucht dafür macOS). Ohne Mac baut GitHub Actions die App bei jedem Push im Job „macOS-App bauen“; das Ergebnis liegt als Artefakt `HeldixClient-macOS` am Lauf, bei einem Tag wie `v0.13.0` auch im Release.
+
+- Ergebnis: `HeldixClient-mac-arm64.dmg`/`.zip` (Apple Silicon) und `HeldixClient-mac-x64.dmg`/`.zip` (Intel). Die Namen haben keine Versionsnummer, damit die Download-Knöpfe der Webseite (`releases/latest/download/…`) immer auf die neueste Version zeigen.
+- **Signatur:** ad-hoc (`identity: "-"`), ohne Apple-Entwicklerkonto. Das reicht, damit die App auf Apple Silicon startet; Gatekeeper fragt beim ersten Start trotzdem nach. Für eine beglaubigte App (keine Warnung) braucht es ein Apple-Developer-Konto (99 USD im Jahr), ein „Developer ID Application“-Zertifikat und Notarisierung; electron-builder übernimmt beides, wenn `CSC_LINK`/`CSC_KEY_PASSWORD` und `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` gesetzt sind und `identity` aus der Konfiguration entfernt wird.
+- **Was auf dem Mac anders ist:** Ampel-Knöpfe statt eigener Fensterknöpfe und ein App-Menü (für ⌘C/⌘V/⌘Q); kein Vulkan (`graphicsArguments` gibt auf dem Mac nichts vor); der Updater meldet neue Versionen nur (`downloadInstaller: false`) und schickt zur Download-Seite, weil das Update-Manifest den Windows-Installer beschreibt; die PC-Kennung für Entwickler-Schlüssel kommt aus `IOPlatformUUID`. Java (`mac-os-arm64`/`mac-os`), die macOS-Natives und `-XstartOnFirstThread` kommen wie beim offiziellen Launcher aus Mojangs Daten.
+- Getestet werden kann die Mac-App nur auf einem Mac; die Spieltests (`npm run test:launch`) laufen dort genauso.
 
 Das Ergebnis von `npm run dist` liegt in `launcher/release/`:
 - `HeldixClient-Setup-<version>.exe` ist der Installer.

@@ -26,6 +26,8 @@ export function supportsGraphicsApi(clientJar: string): boolean {
  * und nimmt OpenGL, falls der PC kein Vulkan kann. "default" überlässt Minecraft die Wahl.
  */
 export function graphicsArguments(api: GraphicsApi, clientJar: string): string[] {
+  // macOS hat kein Vulkan: dort entscheidet Minecraft selbst
+  if (process.platform === 'darwin') return [];
   if (api === 'default' || !supportsGraphicsApi(clientJar)) return [];
   return ['--graphicsBackend', api];
 }

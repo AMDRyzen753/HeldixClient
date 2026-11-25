@@ -26,7 +26,7 @@ export interface UpdateManifest {
   notes: string[];
 }
 
-export type UpdatePhase = 'disabled' | 'idle' | 'checking' | 'current' | 'downloading' | 'ready' | 'error';
+export type UpdatePhase = 'disabled' | 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'error';
 
 export interface UpdateState {
   phase: UpdatePhase;
@@ -52,6 +52,8 @@ export interface UpdaterOptions {
   /** öffentlicher Update-Schlüssel (PEM); null = dieser Build nimmt keine Updates an */
   publicKey: string | null;
   log?: (line: string) => void;
+  /** false = neue Version nur melden (Phase "available"), z. B. auf dem Mac, wo der Windows-Installer nicht passt */
+  downloadInstaller?: boolean;
 }
 
 const VERSION_RE = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.]+))?$/;
@@ -147,7 +149,7 @@ export class Updater {
   /** Nach einem Update fragen und es gleich laden. Mehrfache Aufrufe teilen sich eine Prüfung. */
   check(): Promise<UpdateState> {
     if (!this.enabled()) return Promise.resolve(this.state);
-    if (this.state.phase === 'ready') return Promise.resolve(this.state);
+    if (this.state.phase === 'ready' || this.state.phase === 'available') return Promise.resolve(this.state);
     this.running ??= this.run().finally(() => {
       this.running = null;
     });
@@ -176,6 +178,10 @@ export class Updater {
       }
       this.log(`Neue Version ${manifest.version} gefunden`);
       this.manifest = manifest;
+      if (this.options.downloadInstaller === false) {
+        this.set({ phase: 'available', version: manifest.version, notes: manifest.notes, date: manifest.date, checkedAt: Date.now() });
+        return this.state;
+      }
       this.set({ phase: 'downloading', version: manifest.version, notes: manifest.notes, date: manifest.date, progress: 0, checkedAt: Date.now() });
       await this.download(manifest);
       this.set({ phase: 'ready', progress: 1 });
