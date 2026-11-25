@@ -5,7 +5,9 @@ import com.mojang.realmsclient.RealmsMainScreen;
 import dev.heldixclient.HeldixClient;
 import dev.heldixclient.config.HeldixConfig;
 import dev.heldixclient.loader.HeldixLoader;
+import dev.heldixclient.social.Social;
 import dev.heldixclient.ui.Shell;
+import dev.heldixclient.ui.Tips;
 import dev.heldixclient.ui.Ui;
 import dev.heldixclient.ui.WidgetStyle;
 import net.minecraft.SharedConstants;
@@ -43,33 +45,27 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 
 /**
  * Startseite im Hauptmenü von Minecraft (eingebaut über HeldixPatches/Hooks, die Klasse bleibt ein TitleScreen):
- * oben Logo, Profil und System-Knöpfe, in der Mitte Begrüßung, "Weiterspielen", die drei Spielarten
- * und die Heldix-Bereiche, in breiten Fenstern rechts daneben „Zuletzt gespielt“; unten Versionen und Copyright.
+ * oben Logo, Profil und System-Knöpfe, in der Mitte Begrüßung mit der eigenen Spielfigur (mit Cape), "Weiterspielen",
+ * die drei Spielarten und die Heldix-Bereiche; in breiten Fenstern rechts daneben „Zuletzt gespielt“ und „Freunde“;
+ * unten Versionen und Copyright.
  */
 public class HeldixTitle {
-	private static final String[] TIPS = {
-			"Rechte Umschalttaste öffnet im Spiel das Heldix-Menü.",
-			"Halte C zum Zoomen, mit dem Mausrad änderst du die Stärke.",
-			"Im HUD-Editor ziehst du an der Ecke eines Elements, um es zu vergrößern.",
-			"Rechtsklick auf ein Element im HUD-Editor öffnet seine Einstellungen.",
-			"Doppelklick auf eine Welt oder einen Server startet sofort.",
-			"Unter Shader findest du Farbstile und die Shader-Engine mit Bloom und SSAO.",
-	};
 	private static final int GAP = 6;
 	private static final int SIDE_GAP = 14;
 	private static final int ROW_H = 34;
+	/** Höhe des Kopfes einer Tafel rechts (Icon und Titel) */
+	private static final int PANEL_HEAD = 30;
 	private static final int REALMS = 0xFF8B5CF6;
 	private static final int SERVERS = 0xFF22D3EE;
 	private static final int WORLDS = 0xFF34D399;
 
 	private final Minecraft minecraft;
 	private final long openedAt = Shell.openedAt();
-	private final String tip = TIPS[ThreadLocalRandom.current().nextInt(TIPS.length)];
+	private final Tips.Tip tip = Tips.random();
 	private final List<AbstractWidget> widgets = new ArrayList<>();
 	private float fade = 1f;
 	private Layout layout;
@@ -83,10 +79,15 @@ public class HeldixTitle {
 	private final Map<String, Identifier> images = new HashMap<>();
 	private volatile List<RecentRow.Entry> recent = List.of();
 	private Supplier<PlayerSkin> skin;
+	/** schmale Fenster: „2 Freunde online“ unter den Knöpfen (statt der Tafel rechts) */
+	private FriendsStrip friendsStrip;
 
-	/** Maße der Startseite (GUI-Pixel); sideW = 0: keine Spalte „Zuletzt gespielt“ */
+	/**
+	 * Maße der Startseite (GUI-Pixel); sideW = 0: keine rechte Spalte; figH = 0: keine Spielfigur.
+	 * Rechts zwei Tafeln: „Zuletzt gespielt“ (recentY, recentH) und „Freunde“ (friendsY, friendsH).
+	 */
 	private record Layout(int edge, int columnX, int columnW, boolean compact, int greetY, int heroY, int heroH, int tilesY, int tileH,
-			int pillsY, int tipY, int sideX, int sideW) {
+			int pillsY, int tipY, int sideX, int sideW, int recentY, int recentH, int friendsY, int friendsH, int figX, int figY, int figW, int figH) {
 	}
 
 	public HeldixTitle(Minecraft minecraft) {
@@ -190,8 +191,17 @@ public class HeldixTitle {
 		int heroY = y + greetH + 10;
 		int tilesY = heroY + heroH + GAP + 2;
 		int pillsY = tilesY + tileH + GAP + 2;
-		return new Layout(edge, columnX, columnW, compact, y, heroY, heroH, tilesY, tileH, pillsY, compact ? -1 : pillsY + pillH + 12,
-				columnX + columnW + SIDE_GAP, sideW);
+		int tipY = compact ? -1 : pillsY + pillH + 12;
+		// rechte Spalte so hoch wie die linke (mit Tipp): oben Zuletzt gespielt, unten Freunde
+		int sideBottom = tipY >= 0 ? tipY + 10 : pillsY + pillH;
+		int half = (sideBottom - y - GAP) / 2;
+		// Spielfigur steht rechts auf der Karte „Weiterspielen“, so hoch, wie über der Begrüßung Platz ist
+		int figH = Math.min(112, heroY + 4 - (top + 4));
+		if (figH < 40) figH = 0;
+		int figW = Math.round(figH * 0.62f);
+		return new Layout(edge, columnX, columnW, compact, y, heroY, heroH, tilesY, tileH, pillsY, tipY,
+				columnX + columnW + SIDE_GAP, sideW, y, half, y + half + GAP, sideBottom - y - half - GAP,
+				columnX + columnW - figW - 6, heroY + 4 - figH, figW, figH);
 	}
 
 	// ---------- Widgets ----------
@@ -217,12 +227,17 @@ public class HeldixTitle {
 				"Realms", "realms", REALMS, () -> new StartCard.Content("Realms", "Welten von Mojang", true),
 				() -> minecraft.gui.setScreen(new RealmsMainScreen(screen))));
 
+		// eigene Spielfigur mit Cape (Klick: Cape-Auswahl)
+		if (l.figH() > 0) {
+			widgets.add(new FigureWidget(l.figX(), l.figY(), l.figW(), l.figH(), () -> Shell.open(minecraft, Shell.Page.CAPE, screen)));
+		}
+
 		// Heldix-Bereiche
-		String[][] pills = {{"Module", "modules"}, {"Shader", "shader"}, {"HUD-Editor", "hud"}, {"Einstellungen", "settings"}};
-		Shell.Page[] pages = {Shell.Page.MODULES, Shell.Page.SHADER, Shell.Page.HUD, Shell.Page.SETTINGS};
+		String[][] pills = {{"Module", "modules"}, {"Cape", "cape"}, {"Grafik", "shader"}, {"HUD-Editor", "hud"}, {"Einstellungen", "settings"}};
+		Shell.Page[] pages = {Shell.Page.MODULES, Shell.Page.CAPE, Shell.Page.SHADER, Shell.Page.HUD, Shell.Page.SETTINGS};
 		// Breite nach Beschriftung; übriger Platz wird gleichmäßig verteilt, reicht er nicht, nur Icons
 		int[] natural = new int[pills.length];
-		int sum = 3 * GAP;
+		int sum = (pills.length - 1) * GAP;
 		for (int i = 0; i < pills.length; i++) {
 			natural[i] = Ui.width(pills[i][0], Ui.Font.LABEL) + 30;
 			sum += natural[i];
@@ -232,7 +247,7 @@ public class HeldixTitle {
 		int px = l.columnX();
 		for (int i = 0; i < pills.length; i++) {
 			Shell.Page page = pages[i];
-			int w = iconOnly ? (l.columnW() - 3 * GAP) / 4 : natural[i] + extra;
+			int w = iconOnly ? (l.columnW() - (pills.length - 1) * GAP) / pills.length : natural[i] + extra;
 			if (i == pills.length - 1) w = l.columnX() + l.columnW() - px;
 			ActionButton pill = iconOnly
 					? ActionButton.icon(px, l.pillsY(), 20, pills[i][1], pills[i][0], () -> Shell.open(minecraft, page, screen))
@@ -243,20 +258,34 @@ public class HeldixTitle {
 			widgets.add(pill);
 		}
 
-		// rechts: Zuletzt gespielt, darunter Wege zu allen Welten und Servern
+		// schmale Fenster: Freunde als Zeile unter den Knöpfen (anstelle des Tipps)
+		friendsStrip = null;
+		if (l.sideW() == 0) {
+			int stripY = l.tipY() >= 0 ? l.tipY() - 5 : l.pillsY() + 20 + 8;
+			if (stripY + 18 <= height - l.edge() - 14) {
+				friendsStrip = new FriendsStrip(l.columnX(), stripY, l.columnW(), 18, () -> Shell.open(minecraft, Shell.Page.FRIENDS, screen));
+				widgets.add(friendsStrip);
+			}
+		}
+
+		// rechts: Zuletzt gespielt und Freunde
 		if (l.sideW() > 0) {
-			int buttonY = l.pillsY() + 20 - 8 - 20;
-			int rows = Math.clamp((buttonY - 12 - (l.greetY() + 30)) / (ROW_H + 2), 1, 4);
-			for (int i = 0; i < rows; i++) {
+			int recentRows = Math.clamp((l.recentH() - PANEL_HEAD - 4) / (ROW_H + 2), 1, 3);
+			for (int i = 0; i < recentRows; i++) {
 				int index = i;
-				widgets.add(new RecentRow(l.sideX() + 6, l.greetY() + 30 + i * (ROW_H + 2), l.sideW() - 12, ROW_H,
+				widgets.add(new RecentRow(l.sideX() + 6, l.recentY() + PANEL_HEAD + i * (ROW_H + 2), l.sideW() - 12, ROW_H,
 						() -> index < recent.size() ? recent.get(index) : null));
 			}
-			int half = (l.sideW() - 20 - GAP) / 2;
-			widgets.add(new ActionButton(l.sideX() + 10, buttonY, half, 20, "Alle Welten", false, () -> minecraft.gui.setScreen(new WorldsScreen()))
-					.withIcon("world").withVariant(ActionButton.Variant.GHOST));
-			widgets.add(new ActionButton(l.sideX() + 10 + half + GAP, buttonY, l.sideW() - 20 - half - GAP, 20, "Server-Liste", false,
-					() -> Shell.open(minecraft, Shell.Page.SERVERS, screen)).withIcon("server").withVariant(ActionButton.Variant.GHOST));
+			int friendRows = Math.clamp((l.friendsH() - PANEL_HEAD - 4) / (ROW_H + 2), 1, 3);
+			for (int i = 0; i < friendRows; i++) {
+				int index = i;
+				widgets.add(new FriendWidget(l.sideX() + 6, l.friendsY() + PANEL_HEAD + i * (ROW_H + 2), l.sideW() - 12, ROW_H,
+						() -> friendAt(index), () -> Shell.open(minecraft, Shell.Page.FRIENDS, screen)));
+			}
+			String all = "Alle";
+			int aw = ActionButton.widthFor(all, "chevron-right") - 4;
+			widgets.add(new ActionButton(l.sideX() + l.sideW() - 8 - aw, l.friendsY() + 6, aw, 18, all, false,
+					() -> Shell.open(minecraft, Shell.Page.FRIENDS, screen)).withIcon("chevron-right").withVariant(ActionButton.Variant.GHOST));
 		}
 
 		// oben rechts: Optionen, Sprache, Barrierefreiheit, Beenden
@@ -278,6 +307,13 @@ public class HeldixTitle {
 		widgets.add(new TextLink(width - l.edge() - cw, height - l.edge() - 9, cw, 10, copyright,
 				() -> minecraft.gui.setScreen(new CreditsAndAttributionScreen(screen))));
 		return widgets;
+	}
+
+	/** Freund Nummer index für die Tafel: online zuerst (die Liste ist schon so sortiert) */
+	private static Social.Friend friendAt(int index) {
+		if (!Social.online()) return null;
+		List<Social.Friend> friends = Social.friends();
+		return index < friends.size() ? friends.get(index) : null;
 	}
 
 	private static String count(int n, String one, String many) {
@@ -390,36 +426,48 @@ public class HeldixTitle {
 		int hour = LocalTime.now().getHour();
 		String greeting = hour < 5 ? "Gute Nacht" : hour < 11 ? "Guten Morgen" : hour < 18 ? "Hallo" : "Guten Abend";
 		if (l.compact()) {
+			int greetW = Ui.width(greeting + ", ", Ui.Font.TITLE);
+			int compactNameW = l.columnW() - greetW - (l.figH() > 0 ? l.figW() + 14 : 0);
 			Ui.text(g, greeting + ", ", l.columnX(), l.greetY(), Ui.withAlpha(Ui.MUTED, fade), Ui.Font.TITLE);
-			Ui.text(g, name, l.columnX() + Ui.width(greeting + ", ", Ui.Font.TITLE), l.greetY(), Ui.withAlpha(Ui.TEXT, fade), Ui.Font.TITLE);
+			Ui.text(g, Ui.ellipsize(name, compactNameW, Ui.Font.TITLE), l.columnX() + greetW, l.greetY(), Ui.withAlpha(Ui.TEXT, fade), Ui.Font.TITLE);
 		} else {
+			int greetNameW = l.columnW() - (l.figH() > 0 ? l.figW() + 14 : 0);
 			Ui.text(g, greeting + ",", l.columnX() + 1, l.greetY(), Ui.withAlpha(Ui.MUTED, fade), Ui.Font.BODY);
-			Ui.text(g, name, l.columnX(), l.greetY() + 11, Ui.withAlpha(Ui.TEXT, fade), Ui.Font.HERO);
+			Ui.text(g, Ui.ellipsize(name, greetNameW, Ui.Font.HERO), l.columnX(), l.greetY() + 11, Ui.withAlpha(Ui.TEXT, fade), Ui.Font.HERO);
 		}
 
-		// rechte Spalte: Zuletzt gespielt
+		// rechte Spalte: Zuletzt gespielt und Freunde
 		if (l.sideW() > 0) {
-			int top = l.greetY();
-			int panelH = l.pillsY() + 20 - top;
-			Ui.shadow(g, l.sideX(), top, l.sideW(), panelH, 0.3f * fade);
-			Ui.rect(g, l.sideX(), top, l.sideW(), panelH, 12, Ui.withAlpha(0xD90F1420, fade));
-			Ui.outline(g, l.sideX(), top, l.sideW(), panelH, 12, Ui.withAlpha(Ui.LINE_STRONG, fade));
-			Ui.rect(g, l.sideX() + 10, top + 9, 16, 16, 5, Ui.withAlpha(Ui.ACCENT_SOFT, fade));
-			Ui.icon(g, "clock", l.sideX() + 13, top + 12, 10, Ui.withAlpha(Ui.ACCENT_TEXT, fade));
-			Ui.text(g, "Zuletzt gespielt", l.sideX() + 32, top + 13, Ui.withAlpha(Ui.TEXT, fade), Ui.Font.LABEL);
+			panel(g, l, l.recentY(), l.recentH(), "clock", "Zuletzt gespielt", null);
 			if (recent.isEmpty()) {
 				String empty = worldCount < 0 ? "Lädt …" : "Deine Welten und Server erscheinen hier.";
-				Ui.text(g, Ui.ellipsize(empty, l.sideW() - 24, Ui.Font.SMALL), l.sideX() + 12, top + 40, Ui.withAlpha(Ui.FAINT, fade), Ui.Font.SMALL);
+				Ui.text(g, Ui.ellipsize(empty, l.sideW() - 24, Ui.Font.SMALL), l.sideX() + 12, l.recentY() + PANEL_HEAD + 8,
+						Ui.withAlpha(Ui.FAINT, fade), Ui.Font.SMALL);
 			}
-			Ui.hline(g, l.sideX() + 10, l.sideX() + l.sideW() - 10, l.pillsY() + 20 - 8 - 20 - 8, Ui.withAlpha(Ui.LINE, fade));
+			List<Social.Friend> friends = Social.online() ? Social.friends() : List.of();
+			long online = friends.stream().filter(Social.Friend::online).count();
+			panel(g, l, l.friendsY(), l.friendsH(), "friends", "Freunde", friends.isEmpty() ? null : online + " von " + friends.size() + " online");
+			String hint = FriendWidget.serviceHint();
+			if (hint == null && friends.isEmpty()) hint = "Noch keine Freunde – unter „Alle“ fügst du welche hinzu.";
+			if (hint != null) {
+				int ty = l.friendsY() + PANEL_HEAD + 8;
+				for (net.minecraft.util.FormattedCharSequence line : Ui.wrap(hint, l.sideW() - 24, Ui.Font.SMALL)) {
+					g.text(font, line, l.sideX() + 12, ty, Ui.withAlpha(Ui.FAINT, fade), false);
+					ty += 10;
+				}
+			}
 		}
 
+		// Freunde-Zeile nur mit Freunden; sonst an ihrer Stelle der Tipp
+		boolean strip = friendsStrip != null && FriendsStrip.hasContent();
+		if (friendsStrip != null) friendsStrip.visible = strip;
+
 		// Tipp unter den Knöpfen
-		if (l.tipY() >= 0 && l.tipY() + 10 < height - edge - 16) {
-			String text = Ui.ellipsize(tip, l.columnW() - 20, Ui.Font.SMALL);
+		if (!strip && l.tipY() >= 0 && l.tipY() + 10 < height - edge - 16) {
+			String text = Ui.ellipsize(tip.text(), l.columnW() - 20, Ui.Font.SMALL);
 			int tw = Ui.width(text, Ui.Font.SMALL) + 14;
 			int tx = l.columnX() + (l.columnW() - tw) / 2;
-			Ui.icon(g, "lightbulb", tx, l.tipY() - 1, 9, Ui.withAlpha(Ui.WARNING, fade));
+			Ui.icon(g, tip.icon(), tx, l.tipY() - 1, 9, Ui.withAlpha(Ui.WARNING, fade));
 			Ui.text(g, text, tx + 14, l.tipY(), Ui.withAlpha(Ui.MUTED, fade), Ui.Font.SMALL);
 		}
 
@@ -427,6 +475,19 @@ public class HeldixTitle {
 		String version = "Minecraft " + SharedConstants.getCurrentVersion().name() + "  ·  HeldixClient " + HeldixClient.version
 				+ "  ·  Heldix Loader " + HeldixLoader.version();
 		Ui.text(g, version, edge, height - edge - 9, Ui.withAlpha(Ui.FAINT, fade), Ui.Font.SMALL);
+	}
+
+	/** Tafel rechts: Fläche, Icon, Titel und optional ein Zusatz rechts daneben */
+	private void panel(GuiGraphicsExtractor g, Layout l, int top, int height, String icon, String title, String extra) {
+		Ui.shadow(g, l.sideX(), top, l.sideW(), height, 0.3f * fade);
+		Ui.rect(g, l.sideX(), top, l.sideW(), height, 12, Ui.withAlpha(0xD90F1420, fade));
+		Ui.outline(g, l.sideX(), top, l.sideW(), height, 12, Ui.withAlpha(Ui.LINE_STRONG, fade));
+		Ui.rect(g, l.sideX() + 10, top + 8, 16, 16, 5, Ui.withAlpha(Ui.ACCENT_SOFT, fade));
+		Ui.icon(g, icon, l.sideX() + 13, top + 11, 10, Ui.withAlpha(Ui.ACCENT_TEXT, fade));
+		Ui.text(g, title, l.sideX() + 32, top + 12, Ui.withAlpha(Ui.TEXT, fade), Ui.Font.LABEL);
+		if (extra != null) {
+			Ui.text(g, extra, l.sideX() + 38 + Ui.width(title, Ui.Font.LABEL), top + 13, Ui.withAlpha(Ui.FAINT, fade), Ui.Font.SMALL);
+		}
 	}
 
 	/** Nach den Widgets: Tooltips der Knöpfe */

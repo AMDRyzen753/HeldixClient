@@ -34,3 +34,6 @@ developer*.key
 service/node_modules/
 service/dist/
 service/data/
+service/release/
+website/dist/
+website/site.config.json

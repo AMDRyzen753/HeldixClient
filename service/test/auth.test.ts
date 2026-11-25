@@ -40,7 +40,7 @@ describe('Anmeldung über Mojang', () => {
 
     const me = await api(service.url, 'GET', '/v1/me', { token: res.body.token });
     assert.equal(me.status, 200);
-    assert.deepEqual(me.body, { uuid, name: 'Heldix_1', cape: '', visible: true, presence: true, showServer: true });
+    assert.deepEqual(me.body, { uuid, name: 'Heldix_1', cape: '', visible: true, presence: true, showServer: true, messages: true });
 
     // Parameter kommen URL-kodiert beim Session-Server an.
     const last = mojang.requests.at(-1)!;

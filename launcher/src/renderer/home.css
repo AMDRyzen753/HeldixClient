@@ -232,3 +232,11 @@
   .home-greeting { margin-top: 10px; }
   .play-row { margin-top: 18px; }
 }
+
+/* Neuigkeit des HeldixClient-Teams: Logo statt Vorschaubild */
+.row-icon.thumb.heldix { object-fit: contain; padding: 7px; background: var(--accent-soft); }
+
+/* Was ist neu */
+.whatsnew h4 { margin: 14px 0 6px; font-size: 13px; color: var(--accent-text); }
+.whatsnew h4:first-child { margin-top: 0; }
+.whatsnew ul { margin: 0; padding-left: 18px; line-height: 1.6; }

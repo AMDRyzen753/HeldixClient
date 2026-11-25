@@ -17,7 +17,7 @@ import java.util.function.Consumer;
 
 /** Suchfeld im Heldix-Design (Lupe, Platzhalter, eigene Schrift). Geschrieben wird immer am Ende. */
 public class SearchField extends AbstractWidget {
-	private static final int MAX_LENGTH = 48;
+	private int maxLength = 48;
 
 	private final String hint;
 	private String value = "";
@@ -50,13 +50,19 @@ public class SearchField extends AbstractWidget {
 		return this;
 	}
 
+	/** höchstens so viele Zeichen (Standard 48) */
+	public SearchField withMaxLength(int maxLength) {
+		this.maxLength = maxLength;
+		return this;
+	}
+
 	/** Enter im Feld löst das aus (z. B. „Anfrage senden“) */
 	public void setOnEnter(Runnable onEnter) {
 		this.onEnter = onEnter;
 	}
 
 	private void changed(String newValue) {
-		if (newValue.length() > MAX_LENGTH) newValue = newValue.substring(0, MAX_LENGTH);
+		if (newValue.length() > maxLength) newValue = newValue.substring(0, maxLength);
 		if (newValue.equals(value)) return;
 		value = newValue;
 		responder.accept(value);

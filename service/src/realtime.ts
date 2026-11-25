@@ -46,6 +46,11 @@ export class Realtime implements PresenceSource {
     return this.connections.has(uuid);
   }
 
+  /** Spieler mit mindestens einer offenen Verbindung (für /v1/status; Web-Sitzungen zählen nicht). */
+  onlineCount(): number {
+    return this.connections.size;
+  }
+
   connectionCount(uuid: string): number {
     return this.connections.get(uuid)?.size ?? 0;
   }
@@ -171,6 +176,13 @@ export class Realtime implements PresenceSource {
     const { type, state, server } = message as { type?: unknown; state?: unknown; server?: unknown };
 
     if (type === 'ping') {
+      // Konto inzwischen gesperrt oder gelöscht (z. B. über heldix-dienst-admin, das diese Verbindung nicht erreicht):
+      // spätestens beim nächsten Lebenszeichen trennen.
+      if (!this.store.getUser(conn.uuid)) {
+        const banned = this.store.getBan(conn.uuid) !== undefined;
+        this.disconnectUser(conn.uuid, banned ? 4003 : 4001, banned ? 'Gesperrt' : 'Konto gelöscht');
+        return;
+      }
       this.sendTo(conn, { type: 'pong' });
     } else if (type === 'status') {
       if (!isState(state)) return;

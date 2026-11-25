@@ -2,7 +2,7 @@
 
 export const CLIENT_NAME = 'HeldixClient';
 export const LAUNCHER_NAME = 'HeldixClient';
-export const LAUNCHER_VERSION = '0.11.0';
+export const LAUNCHER_VERSION = '0.12.0';
 
 /** Ordnername für alle Spieldaten (Windows: %APPDATA%\.heldixclient) */
 export const DATA_DIR_NAME = '.heldixclient';
@@ -30,4 +30,7 @@ export const DISCORD_CLIENT_ID: string = process.env.HELDIX_DISCORD_CLIENT_ID ??
  * Adresse des Heldix-Dienstes (Capes für alle, Heldix-Symbol in der Tab-Liste, Freunde), z. B. https://dienst.example.de.
  * Leer = diese Funktionen sind aus. Siehe docs/dienst.md. Alternativ per Umgebungsvariable HELDIX_SERVICE_URL setzen.
  */
-export const HELDIX_SERVICE_URL: string = process.env.HELDIX_SERVICE_URL ?? '';
+export const HELDIX_SERVICE_URL: string = process.env.HELDIX_SERVICE_URL ?? 'https://api.heldixclient.com';
+
+/** Webseite (Neuigkeiten, Versionsverlauf, Teamseite, Status) */
+export const WEBSITE_URL: string = process.env.HELDIX_WEBSITE_URL ?? 'https://heldixclient.com';

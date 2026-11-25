@@ -46,6 +46,8 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 	private static final String CHAT_SCREEN = "net/minecraft/client/gui/screens/ChatScreen";
 	private static final String TAB_LIST = "net/minecraft/client/gui/components/PlayerTabOverlay";
 	private static final String COMPONENT = "Lnet/minecraft/network/chat/Component;";
+	private static final String LEVEL_LOADING = "net/minecraft/client/gui/screens/LevelLoadingScreen";
+	private static final String CONNECT = "net/minecraft/client/gui/screens/ConnectScreen";
 	private static final String DELTA = "Lnet/minecraft/client/DeltaTracker;";
 
 	private static final String G = "L" + GRAPHICS + ";";
@@ -56,7 +58,7 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 	@Override
 	public Set<String> targets() {
 		return Set.of(CAMERA, MINECRAFT, MOUSE, GRAPHICS, SELECTION_LIST, TITLE, GAME_RENDERER, DEBUG_OVERLAY, FRAMERATE, LOADING, GUI, CLIENT_PLAYER, CAPE_LAYER,
-				HUD, ENTITY, KEYBOARD_INPUT, CHAT, CHAT_SCREEN, TAB_LIST);
+				HUD, ENTITY, KEYBOARD_INPUT, CHAT, CHAT_SCREEN, TAB_LIST, LEVEL_LOADING, CONNECT);
 	}
 
 	@Override
@@ -102,6 +104,12 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 						i -> Code.begin().invokeStatic(HOOKS, "capeModel", "(L" + COLLECTOR + ";" + SUBMIT_MODEL.substring(1)));
 			}
 			case HUD -> hud(node);
+			// Ladebildschirme (Welt laden, verbinden): Tipp-Karte mit Spielfigur
+			case LEVEL_LOADING, CONNECT -> {
+				MethodNode render = Patches.method(node, "extractRenderState", "(" + G + "IIF)V");
+				Patches.beforeReturns(render, () -> Code.begin().loadThis().loadArg(render, 0)
+						.invokeStatic(HOOKS, "loadingTips", "(L" + SCREEN + ";" + G + ")V"));
+			}
 			// Freelook: Mausbewegung dreht nur die Kamera
 			case ENTITY -> {
 				MethodNode turn = Patches.method(node, "turn", "(DD)V");

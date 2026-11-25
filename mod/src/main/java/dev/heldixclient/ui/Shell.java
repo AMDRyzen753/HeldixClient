@@ -9,6 +9,7 @@ import dev.heldixclient.screen.PauseMenuScreen;
 import dev.heldixclient.screen.ServersScreen;
 import dev.heldixclient.screen.ShellNavButton;
 import dev.heldixclient.screen.WorldsScreen;
+import dev.heldixclient.social.Social;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -29,39 +30,86 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * Die gemeinsame Oberfläche von HeldixClient: ein mittiges Fenster mit Seitenleiste (Icons und Text) und Inhalt.
+ * Die gemeinsame Oberfläche von HeldixClient: ein mittiges Fenster mit Seitenleiste (Ober-Kategorien mit Icons) und Inhalt;
+ * Kategorien mit mehreren Seiten zeigen ihre Unterseiten als Reiter unter dem Seitenkopf.
  * Einzelspieler, Mehrspieler, Heldix-Menü und Einstellungen sind Seiten dieses Fensters;
  * beim Wechsel zwischen ihnen gibt es keine neue Einblend-Animation.
  */
 public final class Shell {
-	/** Seiten der Oberfläche, in der Reihenfolge der Seitenleiste. */
+	/**
+	 * Ziele der Oberfläche. Ober-Kategorien stehen in der Seitenleiste (in dieser Reihenfolge, nach Abschnitten);
+	 * Unterseiten (mit {@code parent}) erscheinen als Reiter unter dem Kopf ihrer Kategorie.
+	 */
 	public enum Page {
 		RESUME("Zurück zum Spiel", "play", Section.PLAY),
+		PAUSE("Pausemenü", "pause", Section.PLAY),
 		START("Start", "home", Section.PLAY),
 		WORLDS("Einzelspieler", "world", Section.PLAY),
 		SERVERS("Mehrspieler", "server", Section.PLAY),
 		REALMS("Realms", "realms", Section.PLAY),
+		OVERVIEW("Übersicht", "sparkles", Section.HELDIX),
 		MODULES("Module", "modules", Section.HELDIX),
-		CAPE("Cape", "cape", Section.HELDIX),
-		FRIENDS("Freunde", "friends", Section.HELDIX),
+		SHADER("Shader", "shader", Section.HELDIX, "Grafik"),
+		PERFORMANCE("Leistung", "performance", SHADER),
 		WAYPOINTS("Wegpunkte", "pin", Section.HELDIX),
-		SHADER("Shader", "shader", Section.HELDIX),
-		PERFORMANCE("Leistung", "performance", Section.HELDIX),
-		ADDONS("Addons", "addons", Section.HELDIX),
-		HUD("HUD-Editor", "hud", Section.HELDIX),
-		SETTINGS("Einstellungen", "settings", Section.HELDIX),
+		CAPE("Cape", "cape", Section.PROFILE),
+		FRIENDS("Freunde", "friends", Section.PROFILE),
+		MESSAGES("Nachrichten", "chat", FRIENDS),
+		REQUESTS("Anfragen", "user-plus", FRIENDS),
+		PRIVACY("Privatsphäre", "shield", FRIENDS),
+		SETTINGS("Allgemein", "settings", Section.SYSTEM, "Einstellungen"),
+		ADDONS("Addons", "addons", SETTINGS),
+		INFO("Info", "info", SETTINGS),
+		/** eigener Bildschirm, nicht in der Seitenleiste (Knöpfe bei Module, Übersicht, Einstellungen) */
+		HUD("HUD-Editor", "hud", Section.SYSTEM),
 		OPTIONS("Optionen", "options", Section.SYSTEM),
-		PAUSE("Pausemenü", "pause", Section.SYSTEM),
 		QUIT("Beenden", "quit", Section.SYSTEM);
 
+		/** Name als Reiter (bzw. in der Seitenleiste, wenn es kein eigener Kategoriename ist) */
 		public final String label;
 		public final String icon;
 		final Section section;
+		/** Ober-Kategorie (null = selbst eine) */
+		private final Page parent;
+		/** Name der Kategorie, wenn er vom Namen des ersten Reiters abweicht (Grafik → Shader) */
+		private final String categoryName;
 
 		Page(String label, String icon, Section section) {
+			this(label, icon, section, null);
+		}
+
+		Page(String label, String icon, Section section, String categoryName) {
 			this.label = label;
 			this.icon = icon;
 			this.section = section;
+			this.parent = null;
+			this.categoryName = categoryName;
+		}
+
+		Page(String label, String icon, Page parent) {
+			this.label = label;
+			this.icon = icon;
+			this.section = parent.section;
+			this.parent = parent;
+			this.categoryName = null;
+		}
+
+		/** die Ober-Kategorie (für Unterseiten der Eintrag in der Seitenleiste) */
+		public Page head() {
+			return parent == null ? this : parent;
+		}
+
+		/** Name der Kategorie: in der Seitenleiste und als Seitentitel */
+		public String title() {
+			Page head = head();
+			return head.categoryName != null ? head.categoryName : head.label;
+		}
+
+		/** alle Seiten der Kategorie, als Reiter (eine Seite allein: keine Reiter) */
+		public List<Page> group() {
+			List<Page> list = new ArrayList<>();
+			for (Page page : values()) if (page.head() == head()) list.add(page);
+			return list;
 		}
 
 		/** Seiten, die es nur im Hauptmenü bzw. nur im Spiel gibt. */
@@ -72,11 +120,17 @@ public final class Shell {
 				default -> true;
 			};
 		}
+
+		/** Eintrag in der Seitenleiste? */
+		boolean inSidebar(boolean inGame) {
+			return parent == null && this != HUD && visible(inGame);
+		}
 	}
 
 	enum Section {
 		PLAY("Spielen"),
 		HELDIX("Heldix"),
+		PROFILE("Profil"),
 		SYSTEM("System");
 
 		final String label;
@@ -134,29 +188,52 @@ public final class Shell {
 	private record NavLayout(int itemH, int captionH, boolean footer, int top) {
 	}
 
+	/** Einträge der Seitenleiste: nur die Ober-Kategorien */
 	private static List<Page> pages(boolean inGame) {
 		List<Page> list = new ArrayList<>();
-		for (Page page : Page.values()) if (page.visible(inGame)) list.add(page);
+		for (Page page : Page.values()) if (page.inSidebar(inGame)) list.add(page);
 		return list;
+	}
+
+	private static int sections(List<Page> pages) {
+		int count = 0;
+		Section section = null;
+		for (Page page : pages) {
+			if (page.section != section) {
+				section = page.section;
+				count++;
+			}
+		}
+		return count;
 	}
 
 	/** Zeilenhöhen so wählen, dass alles auch in kleinen Fenstern passt. */
 	private static NavLayout navLayout(Rect window, boolean inGame) {
-		int items = pages(inGame).size();
+		List<Page> pages = pages(inGame);
+		int items = pages.size();
+		int captions = sections(pages);
 		int top = window.y() + 40;
 		int roomWithFooter = window.bottom() - 34 - top;
-		if (items * 18 + 3 * 13 <= roomWithFooter) return new NavLayout(18, 13, true, top);
-		if (items * 16 + 3 * 12 <= roomWithFooter) return new NavLayout(16, 12, true, top);
+		if (items * 20 + captions * 15 <= roomWithFooter) return new NavLayout(20, 15, true, top);
+		if (items * 18 + captions * 13 <= roomWithFooter) return new NavLayout(18, 13, true, top);
+		if (items * 16 + captions * 12 <= roomWithFooter) return new NavLayout(16, 12, true, top);
 		int room = window.bottom() - 6 - top;
-		if (items * 15 + 3 * 10 <= room) return new NavLayout(15, 10, false, top);
-		return new NavLayout(Math.max(12, Math.min(16, room / items)), 0, false, top);
+		if (items * 15 + captions * 10 <= room) return new NavLayout(15, 10, false, top);
+		// eng: Abschnitte nur als feine Linie zwischen den Gruppen
+		if (items * 15 + (captions - 1) * 7 <= room) return new NavLayout(15, 7, false, top);
+		return new NavLayout(Math.max(12, Math.min(16, (room - (captions - 1) * 5) / items)), 5, false, top);
+	}
+
+	/** Abschnittstitel als Text (sonst nur eine Linie zwischen den Abschnitten) */
+	private static boolean captionText(NavLayout layout) {
+		return layout.captionH() >= 10;
 	}
 
 	// ======================================================================================
 	// Seitenleiste
 	// ======================================================================================
 
-	/** Legt die Einträge der Seitenleiste als Widgets an. */
+	/** Legt die Einträge der Seitenleiste als Widgets an; aktiv ist die Kategorie der offenen Seite. */
 	public static List<ShellNavButton> createNav(Screen screen, Page active, boolean inGame, Consumer<AbstractWidget> add) {
 		List<ShellNavButton> buttons = new ArrayList<>();
 		Rect window = window(screen.width, screen.height);
@@ -168,16 +245,31 @@ public final class Shell {
 		Section section = null;
 		for (Page page : pages(inGame)) {
 			if (page.section != section) {
+				if (section != null || captionText(layout)) y += layout.captionH();
 				section = page.section;
-				y += layout.captionH();
 			}
-			ShellNavButton button = new ShellNavButton(x, y, w, layout.itemH() - 2, page, page == active, compact,
+			ShellNavButton button = new ShellNavButton(x, y, w, layout.itemH() - 2, page, page == active.head(), compact,
 					() -> open(Minecraft.getInstance(), page, screen));
 			buttons.add(button);
 			add.accept(button);
 			y += layout.itemH();
 		}
 		return buttons;
+	}
+
+	/**
+	 * Zahl neben einem Eintrag der Seitenleiste bzw. einem Reiter, sonst null:
+	 * Freunde = offene Anfragen und ungelesene Nachrichten, Anfragen bzw. Nachrichten jeweils für sich.
+	 */
+	public static String badge(Page page) {
+		if (!Social.online()) return null;
+		int count = switch (page) {
+			case FRIENDS -> Social.incoming().size() + dev.heldixclient.social.Messages.unreadTotal();
+			case REQUESTS -> Social.incoming().size();
+			case MESSAGES -> dev.heldixclient.social.Messages.unreadTotal();
+			default -> 0;
+		};
+		return count > 0 ? Integer.toString(Math.min(count, 99)) : null;
 	}
 
 	/** Fenster mit Schatten, Seitenleiste (Logo, Abschnitte, Profil) und Trennlinie. */
@@ -207,15 +299,23 @@ public final class Shell {
 
 		// Abschnittstitel
 		NavLayout layout = navLayout(win, inGame);
-		if (layout.captionH() > 0 && !compact) {
+		if (layout.captionH() > 0) {
 			int y = layout.top();
 			Section section = null;
 			for (Page page : pages(inGame)) {
 				if (page.section != section) {
+					boolean text = captionText(layout);
+					if (text || section != null) {
+						if (text && !compact) {
+							Ui.text(g, page.section.label.toUpperCase(java.util.Locale.ROOT), win.x() + 14, y + layout.captionH() - 10,
+									Ui.withAlpha(Ui.FAINT, alpha), Ui.Font.SMALL);
+						} else if (section != null) {
+							int lineY = y + layout.captionH() / 2 - 1;
+							Ui.hline(g, win.x() + (compact ? 6 : 14), win.x() + side - (compact ? 6 : 14), lineY, Ui.withAlpha(Ui.LINE, alpha));
+						}
+						y += layout.captionH();
+					}
 					section = page.section;
-					Ui.text(g, section.label.toUpperCase(java.util.Locale.ROOT), win.x() + 14, y + layout.captionH() - 10,
-							Ui.withAlpha(Ui.FAINT, alpha), Ui.Font.SMALL);
-					y += layout.captionH();
 				}
 				y += layout.itemH();
 			}
@@ -263,7 +363,8 @@ public final class Shell {
 			case WORLDS -> minecraft.gui.setScreen(new WorldsScreen());
 			case SERVERS -> minecraft.gui.setScreen(minecraft.options.skipMultiplayerWarning ? new ServersScreen() : new SafetyScreen(from));
 			case REALMS -> minecraft.gui.setScreen(new RealmsMainScreen(from));
-			case MODULES, CAPE, FRIENDS, WAYPOINTS, SHADER, PERFORMANCE, ADDONS, SETTINGS -> minecraft.gui.setScreen(new HeldixMenuScreen(back, page));
+			case OVERVIEW, MODULES, CAPE, FRIENDS, MESSAGES, REQUESTS, PRIVACY, WAYPOINTS, SHADER, PERFORMANCE, SETTINGS, ADDONS, INFO ->
+					minecraft.gui.setScreen(new HeldixMenuScreen(back, page));
 			case HUD -> minecraft.gui.setScreen(new HudEditorScreen(from));
 			case OPTIONS -> minecraft.gui.setScreen(new OptionsScreen(from, minecraft.options));
 			case PAUSE -> minecraft.gui.setScreen(new PauseMenuScreen());

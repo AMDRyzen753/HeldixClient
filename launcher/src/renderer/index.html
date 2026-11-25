@@ -41,6 +41,19 @@
 
     <div class="spacer"></div>
 
+    <!-- neue Launcher-Version: Fortschritt bzw. "Neu starten" -->
+    <div class="update-card" id="update-card" hidden data-label="Update">
+      <div class="update-card-head">
+        <span class="update-card-icon"><svg data-icon="download"></svg></span>
+        <span class="update-card-text">
+          <span class="update-card-title" id="update-card-title">Update</span>
+          <span class="update-card-sub" id="update-card-sub"></span>
+        </span>
+      </div>
+      <div class="update-bar" id="update-bar"><span id="update-bar-fill"></span></div>
+      <button class="primary small" id="update-card-install" type="button" hidden>Neu starten</button>
+    </div>
+
     <button class="account-button" id="account-button" data-label="Konto">
       <span class="avatar-wrap">
         <span class="avatar" id="account-avatar"></span>
@@ -347,6 +360,24 @@
 
           <div class="card">
             <div class="card-head">
+              <div class="card-icon"><svg data-icon="download"></svg></div>
+              <div><h3>Updates</h3><p class="hint">Neue Versionen des Launchers kommen über heldixclient.com.</p></div>
+            </div>
+            <label class="toggle-row">
+              <span>Automatisch aktualisieren<small class="toggle-sub">im Hintergrund laden, beim Beenden installieren</small></span>
+              <input type="checkbox" class="switch" id="update-toggle">
+            </label>
+            <div class="discord-status" id="update-status"><span class="discord-dot"></span><span id="update-status-text"></span></div>
+            <ul class="update-notes" id="update-notes" hidden></ul>
+            <div class="button-row">
+              <button class="ghost" id="update-check" type="button"><svg data-icon="refresh" class="btn-icon"></svg>Nach Updates suchen</button>
+              <button class="primary" id="update-install" type="button" hidden><svg data-icon="download" class="btn-icon"></svg>Neu starten und installieren</button>
+              <button class="ghost" id="open-versions" type="button"><svg data-icon="external" class="btn-icon"></svg>Versionsverlauf</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
               <div class="card-icon"><svg data-icon="cup"></svg></div>
               <div><h3>Java</h3><p class="hint">Leer lassen: Der Launcher nimmt automatisch die passende Version.</p></div>
             </div>
@@ -536,6 +567,9 @@
   <div class="popover" id="account-popover" hidden>
     <div class="popover-title">Konten</div>
     <div class="account-list" id="account-list"></div>
+    <button class="ghost full" id="open-web-account" type="button"><svg data-icon="external" class="btn-icon"></svg>Auf heldixclient.com anmelden</button>
+    <p class="hint small">Profil, Freunde und Nachrichten im Browser – ohne Passwort.</p>
+    <button class="ghost full" id="open-support" type="button"><svg data-icon="chat" class="btn-icon"></svg>Hilfe &amp; Support</button>
     <button class="primary full" id="add-microsoft"><svg data-icon="microsoft" class="btn-icon"></svg>Mit Microsoft anmelden</button>
     <p class="hint small" id="ms-hint" hidden>Für den Microsoft-Login fehlt noch die Azure-Client-ID (siehe README).</p>
     <button class="ghost full" id="add-launcher"><svg data-icon="external" class="btn-icon"></svg>Über Minecraft Launcher anmelden</button>

@@ -124,6 +124,9 @@ const ICONS = {
   crosshair: `<circle cx="12" cy="12" r="7"/><path d="M12 2.5 V7.5 M12 16.5 V21.5 M2.5 12 H7.5 M16.5 12 H21.5"/><circle cx="12" cy="12" r="0.6" ${FILL}/>`,
   pin: '<path d="M12 21 C12 21 18.5 14.6 18.5 9.5 A6.5 6.5 0 0 0 5.5 9.5 C5.5 14.6 12 21 12 21 Z"/><circle cx="12" cy="9.5" r="2.3"/>',
   friends: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20 A6.5 6.5 0 0 1 15.5 20"/><path d="M15.5 4.8 A3.5 3.5 0 0 1 15.5 11.2 M18 14.2 A6.5 6.5 0 0 1 21.5 20"/>',
+  send: '<path d="M20.5 3.5 L3.5 10.5 L10.5 13.5 L13.5 20.5 Z"/><path d="M20.5 3.5 L10.5 13.5"/>',
+  ban: '<circle cx="12" cy="12" r="8.5"/><path d="M6 6 L18 18"/>',
+  flag: '<path d="M5.5 21 V3.5"/><path d="M5.5 4 H18 L15.5 8.5 L18 13 H5.5"/>',
 };
 
 const NAMES = Object.keys(ICONS);

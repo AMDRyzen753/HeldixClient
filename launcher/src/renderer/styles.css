@@ -233,6 +233,25 @@ img { -webkit-user-drag: none; }
 }
 .avatar.small { width: 32px; height: 32px; border-radius: 8px; font-size: 13px; }
 
+/* Update-Hinweis unten in der Seitenleiste */
+.update-card { position: relative; display: flex; flex-direction: column; gap: 8px; margin: 0 0 10px; padding: 10px 11px; border-radius: 12px; background: var(--accent-soft); border: 1px solid rgba(59, 130, 246, 0.35); }
+.update-card[hidden] { display: none; }
+.update-card-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.update-card-icon { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--accent); color: #fff; flex: none; }
+.update-card-icon svg { width: 14px; height: 14px; }
+.update-card-text { display: flex; flex-direction: column; min-width: 0; }
+.update-card-title { font-size: 12.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.update-card-sub { font-size: 11.5px; color: var(--accent-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.update-bar { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.update-bar[hidden] { display: none; }
+.update-bar span { display: block; height: 100%; width: 0; border-radius: 2px; background: var(--accent); transition: width 0.3s ease; }
+.update-card button { width: 100%; }
+.update-notes { margin: 0; padding: 0 0 0 18px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.update-notes[hidden] { display: none; }
+#update-status[data-state="ready"] .discord-dot, #update-status[data-state="current"] .discord-dot { background: var(--ok); }
+#update-status[data-state="checking"] .discord-dot, #update-status[data-state="downloading"] .discord-dot { background: var(--accent); }
+#update-status[data-state="error"] .discord-dot { background: var(--danger); }
+
 /* schmale Fenster: nur Icons in der Seitenleiste */
 @media (max-width: 1060px) {
   :root { --sidebar: 72px; }
@@ -244,6 +263,9 @@ img { -webkit-user-drag: none; }
   .nav-item svg { width: 19px; height: 19px; }
   .badge-dot { position: absolute; top: 8px; right: 8px; }
   .account-button { width: auto; padding: 5px; border-radius: 11px; }
+  .update-card { width: 46px; padding: 8px 0; align-items: center; }
+  .update-card-text, .update-card button { display: none !important; }
+  .update-bar { width: 30px; }
   [data-label]:hover::after {
     content: attr(data-label);
     position: absolute;

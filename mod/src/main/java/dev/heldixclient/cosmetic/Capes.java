@@ -614,6 +614,20 @@ public final class Capes {
 	 * @param cape null = ohne Heldix-Cape (ein Cape des Minecraft-Kontos bleibt sichtbar)
 	 */
 	public static void drawPlayer(GuiGraphicsExtractor g, PlayerSkin baseSkin, Cape cape, int x0, int y0, int x1, int y1, float seconds) {
+		// von hinten, langsam hin und her gedreht, damit man das Cape auch etwas von der Seite sieht
+		drawFigure(g, baseSkin, cape, x0, y0, x1, y1, seconds, (float) Math.sin(seconds * 0.7) * 32f);
+	}
+
+	/**
+	 * Spielerfigur, die sich langsam um sich selbst dreht (Gesicht, Seite, Cape …) – für Hauptmenü und Übersicht.
+	 *
+	 * @param cape null = ohne Heldix-Cape (ein Cape des Minecraft-Kontos bleibt sichtbar)
+	 */
+	public static void drawShowcase(GuiGraphicsExtractor g, PlayerSkin baseSkin, Cape cape, int x0, int y0, int x1, int y1, float seconds) {
+		drawFigure(g, baseSkin, cape, x0, y0, x1, y1, seconds, 180f + seconds * 24f % 360f);
+	}
+
+	private static void drawFigure(GuiGraphicsExtractor g, PlayerSkin baseSkin, Cape cape, int x0, int y0, int x1, int y1, float seconds, float bodyRot) {
 		PlayerSkin skin = cape == null ? baseSkin : apply(baseSkin, cape);
 		AvatarRenderState state = new AvatarRenderState();
 		state.entityType = EntityTypes.PLAYER;
@@ -631,9 +645,7 @@ public final class Capes {
 		state.eyeHeight = 1.62f;
 		state.pose = Pose.STANDING;
 		state.ageInTicks = seconds * 20f;
-		// von hinten, langsam hin und her gedreht, damit man das Cape auch etwas von der Seite sieht
-		float sway = (float) Math.sin(seconds * 0.7) * 32f;
-		state.bodyRot = sway;
+		state.bodyRot = bodyRot;
 		state.yRot = 0;
 		state.xRot = 0;
 		// das Cape weht leicht

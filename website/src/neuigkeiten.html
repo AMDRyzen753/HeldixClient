@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<title>Neuigkeiten und Versionen – HeldixClient</title>
+<meta name="description" content="Alle Neuigkeiten zu HeldixClient und der Versionsverlauf des Launchers.">
+<meta property="og:title" content="Neuigkeiten und Versionen – HeldixClient">
+<script type="module" src="/neuigkeiten.js"></script>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+{{include:nav.html}}
+
+<main id="inhalt" class="wrap public-page">
+  <div class="page-head">
+    <span class="eyebrow">Neuigkeiten</span>
+    <h1>Was sich bei HeldixClient tut</h1>
+    <p class="lead">Ankündigungen des Teams, Wartungen und neue Versionen – die neuesten zuerst.</p>
+    <p class="page-jump"><a href="#versionen">Zum Versionsverlauf{{icon:chevron-down}}</a></p>
+  </div>
+
+  <div class="news-archive" id="archiv" aria-live="polite" aria-busy="true">
+    <div class="loading-inline" role="status"><span class="spinner" aria-hidden="true"></span><span>Wird geladen …</span></div>
+  </div>
+  <p class="section-more"><button class="button ghost small" type="button" id="archiv-mehr" hidden>Ältere Neuigkeiten laden</button></p>
+  <noscript><p class="notice">Die Neuigkeiten brauchen JavaScript.</p></noscript>
+
+  <section id="versionen" aria-labelledby="versionen-titel">
+    <div class="section-head">
+      <span class="eyebrow">Launcher</span>
+      <h2 id="versionen-titel">Versionsverlauf</h2>
+      <p>Der Launcher aktualisiert sich selbst. Hier steht, was in jeder Version neu ist.</p>
+    </div>
+    <div class="release-latest card main">
+      <div class="release-latest-head">
+        <div>
+          <p class="release-label">Aktuelle Version</p>
+          <p class="release-version" id="release-version">{{VERSION}}</p>
+          <p class="meta" id="download-meta">Installer für Windows 10 und 11 (64 Bit)</p>
+        </div>
+        <a class="button" id="download-button" href="{{DOWNLOAD_URL}}" data-api="https://__API_DOMAIN__/v1/launcher/download/latest">{{icon:download}}Installer herunterladen</a>
+      </div>
+      <div id="release-latest-notes"></div>
+    </div>
+    <ol class="release-list" id="release-liste" aria-label="Frühere Versionen"></ol>
+    <p class="muted center" id="release-status" hidden></p>
+  </section>
+</main>
+
+{{include:icons.html}}
+{{include:footer.html}}
+</body>
+</html>

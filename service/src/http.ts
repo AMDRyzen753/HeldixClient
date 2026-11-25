@@ -2,12 +2,13 @@
 import { STATUS_CODES, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 
-/** Fehler mit HTTP-Status und deutschem Text für den Spieler. */
+/** Fehler mit HTTP-Status und deutschem Text für den Spieler; `code` zusätzlich für Programme (Team-Bereich). */
 export class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
     readonly headers: Record<string, string> = {},
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -31,7 +32,7 @@ export function sendJson(res: ServerResponse, status: number, body: unknown, hea
 }
 
 export function sendError(res: ServerResponse, err: HttpError): void {
-  sendJson(res, err.status, { error: err.message }, err.headers);
+  sendJson(res, err.status, err.code === undefined ? { error: err.message } : { error: err.message, code: err.code }, err.headers);
 }
 
 /** Antwort auf eine abgelehnte WebSocket-Anfrage direkt auf den Socket schreiben. */
@@ -50,11 +51,14 @@ export function rejectUpgrade(socket: Duplex, err: HttpError): void {
   socket.end(`HTTP/1.1 ${err.status} ${STATUS_CODES[err.status] ?? ''}\r\n${head}\r\n\r\n${text}`);
 }
 
+/** So lange darf das Senden eines JSON-Körpers höchstens dauern (die Grenze des Servers ist wegen der Uploads lang). */
+export const BODY_TIMEOUT_MS = 15_000;
+
 /**
- * Liest den Anfragekörper als JSON-Objekt. Höchstens `limit` Byte, sonst 413.
+ * Liest den Anfragekörper als JSON-Objekt. Höchstens `limit` Byte, sonst 413; höchstens `timeoutMs` lang, sonst 408.
  * Ein leerer Körper ergibt `{}`.
  */
-export function readJsonObject(req: IncomingMessage, limit: number): Promise<Record<string, unknown>> {
+export function readJsonObject(req: IncomingMessage, limit: number, timeoutMs = BODY_TIMEOUT_MS): Promise<Record<string, unknown>> {
   const tooLarge = () =>
     new HttpError(413, `Die Anfrage ist zu groß (höchstens ${Math.floor(limit / 1024)} KB).`, { Connection: 'close' });
   const declared = Number(req.headers['content-length'] ?? '0');
@@ -66,9 +70,14 @@ export function readJsonObject(req: IncomingMessage, limit: number): Promise<Rec
     const chunks: Buffer[] = [];
     let size = 0;
     let done = false;
+    const timer = setTimeout(() => {
+      finish(new HttpError(408, 'Die Anfrage kam zu langsam an.', { Connection: 'close' }));
+    }, timeoutMs);
+    timer.unref();
     const finish = (err: HttpError | null, value?: Record<string, unknown>) => {
       if (done) return;
       done = true;
+      clearTimeout(timer);
       if (err) reject(err);
       else resolve(value!);
     };

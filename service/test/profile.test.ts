@@ -17,24 +17,28 @@ describe('Eigenes Profil', () => {
     const res = await api(service.url, 'GET', '/v1/me', { token: player.token });
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
-    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: '', visible: true, presence: true, showServer: true });
+    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: '', visible: true, presence: true, showServer: true, messages: true });
   });
 
   test('PUT ändert nur die angegebenen Felder', async () => {
     let res = await api(service.url, 'PUT', '/v1/me', { token: player.token, body: { cape: 'aurora' } });
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: 'aurora', visible: true, presence: true, showServer: true });
+    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: 'aurora', visible: true, presence: true, showServer: true, messages: true });
 
     res = await api(service.url, 'PUT', '/v1/me', { token: player.token, body: { visible: false, showServer: false } });
-    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: 'aurora', visible: false, presence: true, showServer: false });
+    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: 'aurora', visible: false, presence: true, showServer: false, messages: true });
 
     res = await api(service.url, 'PUT', '/v1/me', { token: player.token, body: { presence: false, cape: '' } });
-    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: '', visible: false, presence: false, showServer: false });
+    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: '', visible: false, presence: false, showServer: false, messages: true });
+
+    res = await api(service.url, 'PUT', '/v1/me', { token: player.token, body: { messages: false } });
+    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: '', visible: false, presence: false, showServer: false, messages: false });
 
     // Leeres Objekt: nichts ändert sich.
     res = await api(service.url, 'PUT', '/v1/me', { token: player.token, body: {} });
     assert.equal(res.status, 200);
     assert.equal(res.body.presence, false);
+    assert.equal(res.body.messages, false);
 
     const get = await api(service.url, 'GET', '/v1/me', { token: player.token });
     assert.deepEqual(get.body, res.body);
@@ -58,6 +62,8 @@ describe('Eigenes Profil', () => {
       { visible: 'ja' },
       { presence: 1 },
       { showServer: null },
+      { messages: 'ja' },
+      { messages: 0 },
       { cape: 'glut', visible: 'nein' },
     ]) {
       const res = await api(service.url, 'PUT', '/v1/me', { token: player.token, body });

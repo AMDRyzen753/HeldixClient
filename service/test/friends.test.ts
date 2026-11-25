@@ -25,7 +25,7 @@ describe('Freundschaftsanfragen', () => {
   test('am Anfang leer', async () => {
     const res = await friendsOf(anna);
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body, { friends: [], incoming: [], outgoing: [] });
+    assert.deepEqual(res.body, { friends: [], incoming: [], outgoing: [], unread: {} });
   });
 
   test('unbekannter Name: 404 mit Text für den Spieler', async () => {

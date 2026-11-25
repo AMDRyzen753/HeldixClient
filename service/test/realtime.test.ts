@@ -375,3 +375,39 @@ describe('Verbindungsdauer', () => {
     }
   });
 });
+
+describe('Server mit Port im Online-Status', () => {
+  test('ein Port außer 25565 bleibt erhalten (zum Beitreten), 25565 fällt weg', async () => {
+    const service = await startService({ dev: true });
+    try {
+      const anna = await devPlayer(service.url, 'Anna');
+      const ben = await devPlayer(service.url, 'Ben');
+      await befriend(service, anna, ben);
+      const { client: benClient } = await connect(service.wsUrl, ben.token);
+      const { client: annaClient } = await connect(service.wsUrl, anna.token);
+      try {
+        await benClient.next((m) => m.type === 'friend' && m.friend.online);
+        const cases: [string, string | null][] = [
+          ['Play.Example.org:25570', 'play.example.org:25570'],
+          ['play.example.org:25565', 'play.example.org'],
+          ['mc.example.net', 'mc.example.net'],
+          ['play.example.org:0', null],
+          ['mc.example.net:19132', 'mc.example.net:19132'],
+          ['192.168.178.20:25570', null],
+        ];
+        for (const [server, expected] of cases) {
+          annaClient.send({ type: 'status', state: 'multiplayer', server });
+          const msg = await benClient.next('friend');
+          assert.equal(msg.friend.server, expected, server);
+          const list = await api(service.url, 'GET', '/v1/friends', { token: ben.token });
+          assert.equal(list.body.friends[0].server, expected, server);
+        }
+      } finally {
+        await annaClient.close();
+        await benClient.close();
+      }
+    } finally {
+      await service.close();
+    }
+  });
+});

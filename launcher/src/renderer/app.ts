@@ -1,4 +1,4 @@
-import type { AccountInfo, BridgeState, DeveloperStatus, DiscordStatus, InstanceInfo, LogLine, QuickPlayList, QuickPlayTarget, Settings, SkinInfo } from '../shared/api';
+import type { AccountInfo, BridgeState, DeveloperStatus, DiscordStatus, InstanceInfo, LogLine, QuickPlayList, QuickPlayTarget, Settings, SkinInfo, UpdateState } from '../shared/api';
 import {
   $,
   api,
@@ -843,6 +843,7 @@ function renderSettings(): void {
     ? `Entwickleroptionen aktiv (${developer.keyName}) · ${loader}`
     : `${loader} · Minecraft-Dateien kommen direkt von Mojang.`;
   $<HTMLInputElement>('#discord-toggle').checked = s.discordPresence;
+  $<HTMLInputElement>('#update-toggle').checked = s.autoUpdate;
   $<HTMLInputElement>('#discord-server-toggle').checked = s.discordShowServer;
   $('#discord-server-row').classList.toggle('disabled', !s.discordPresence);
   renderPerformance(s);
@@ -897,6 +898,115 @@ $('#discord-toggle').addEventListener('change', (e) => save({ discordPresence: (
 $('#discord-server-toggle').addEventListener('change', (e) => save({ discordShowServer: (e.target as HTMLInputElement).checked }));
 api.onDiscordStatus(renderDiscordStatus);
 void api.getDiscordStatus().then(renderDiscordStatus);
+
+// ---------- Updates ----------
+function renderUpdate(u: UpdateState): void {
+  const percent = Math.round((u.progress ?? 0) * 100);
+  const texts: Record<UpdateState['phase'], string> = {
+    disabled: 'In diesem Build nicht verfügbar (Entwicklungsversion).',
+    idle: `Version ${u.current} installiert.`,
+    checking: 'Suche nach Updates …',
+    current: `Version ${u.current} ist aktuell.`,
+    downloading: `Lade Version ${u.version} … ${percent} %`,
+    ready: `Version ${u.version} ist bereit. Sie wird beim Beenden installiert oder sofort mit „Neu starten“.`,
+    error: u.error ?? 'Update fehlgeschlagen.',
+  };
+  const status = $('#update-status');
+  status.dataset.state = u.phase;
+  $('#update-status-text').textContent = texts[u.phase];
+  $<HTMLButtonElement>('#update-check').disabled = u.phase === 'disabled' || u.phase === 'checking' || u.phase === 'downloading' || u.phase === 'ready';
+  $('#update-install').hidden = u.phase !== 'ready';
+  const notes = $('#update-notes');
+  const lines = u.phase === 'downloading' || u.phase === 'ready' ? u.notes ?? [] : [];
+  notes.replaceChildren(...lines.map((note) => {
+    const li = document.createElement('li');
+    li.textContent = note;
+    return li;
+  }));
+  notes.hidden = lines.length === 0;
+
+  // Hinweis in der Seitenleiste nur, wenn eine neue Version kommt oder bereit ist
+  const card = $('#update-card');
+  card.hidden = u.phase !== 'downloading' && u.phase !== 'ready';
+  $('#update-card-title').textContent = u.phase === 'ready' ? `Version ${u.version} bereit` : `Update ${u.version ?? ''}`;
+  $('#update-card-sub').textContent = u.phase === 'ready' ? 'Neu starten zum Installieren' : `wird geladen … ${percent} %`;
+  $('#update-bar').hidden = u.phase !== 'downloading';
+  $('#update-bar-fill').style.width = `${percent}%`;
+  $('#update-card-install').hidden = u.phase !== 'ready';
+  card.dataset.label = u.phase === 'ready' ? `Version ${u.version} bereit: Neu starten` : `Update wird geladen (${percent} %)`;
+}
+
+async function installUpdate(): Promise<void> {
+  try {
+    await api.installUpdate();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    toast(message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 'error');
+  }
+}
+
+async function openWeb(button: HTMLButtonElement, target?: 'support'): Promise<void> {
+  button.disabled = true;
+  try {
+    await api.openWebAccount(target);
+    toast(target === 'support' ? 'Support ist im Browser geöffnet.' : 'heldixclient.com ist im Browser geöffnet.', 'success');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    toast(message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+$('#open-support').addEventListener('click', (event) => void openWeb(event.currentTarget as HTMLButtonElement, 'support'));
+$('#open-versions').addEventListener('click', () => void api.openWebsite('neuigkeiten'));
+
+/** "Was ist neu" einmal nach einem Update */
+async function showWhatsNew(): Promise<void> {
+  const info = await api.getWhatsNew().catch(() => null);
+  if (!info) return;
+  const body = h('div', { class: 'news-body whatsnew' });
+  for (const entry of info.entries) {
+    body.append(h('h4', { text: `Version ${entry.version}${entry.date ? ` · ${formatDate(entry.date)}` : ''}` }));
+    body.append(h('ul', {}, ...entry.notes.map((note) => h('li', { text: note }))));
+  }
+  const close = () => {
+    backdrop.remove();
+    void api.markWhatsNewSeen();
+  };
+  const backdrop = h('div', { class: 'modal-backdrop', onclick: (event: Event) => event.target === backdrop && close() },
+    h('div', { class: 'modal wide news-modal' },
+      h('div', { class: 'modal-head' },
+        h('div', {},
+          h('h3', { class: 'modal-title', text: `Neu in HeldixClient ${info.version}` }),
+          h('p', { class: 'modal-sub', text: 'Der Launcher hat sich gerade aktualisiert.' })),
+        h('button', { class: 'icon-button', title: 'Schließen', onclick: close }, uiIcon('close'))),
+      body,
+      h('div', { class: 'button-row' },
+        h('button', { class: 'ghost', type: 'button', onclick: () => void api.openWebsite('neuigkeiten') }, 'Alle Versionen'),
+        h('button', { class: 'primary', type: 'button', onclick: close }, 'Los geht\'s'))));
+  document.body.append(backdrop);
+}
+
+$('#open-web-account').addEventListener('click', async (event) => {
+  const button = event.currentTarget as HTMLButtonElement;
+  button.disabled = true;
+  try {
+    await api.openWebAccount();
+    toast('heldixclient.com ist im Browser geöffnet.', 'success');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    toast(message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('#update-toggle').addEventListener('change', (e) => save({ autoUpdate: (e.target as HTMLInputElement).checked }));
+$('#update-check').addEventListener('click', () => void api.checkForUpdate().then(renderUpdate));
+$('#update-install').addEventListener('click', () => void installUpdate());
+$('#update-card-install').addEventListener('click', () => void installUpdate());
+api.onUpdateState(renderUpdate);
+void api.getUpdateState().then(renderUpdate);
 
 async function save(patch: Partial<Settings>): Promise<void> {
   state.settings = await api.saveSettings(patch);
@@ -984,6 +1094,7 @@ async function init(): Promise<void> {
   await loadDeveloper();
   await reloadInstances();
   void loadNews();
+  void showWhatsNew();
   // echte Logos von Fabric und Minecraft (aus den Dateien im Datenordner); danach Kacheln neu zeichnen
   void api.loaderLogos().then((logos) => {
     state.logos = logos;

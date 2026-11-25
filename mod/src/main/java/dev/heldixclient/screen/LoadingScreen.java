@@ -37,6 +37,8 @@ public final class LoadingScreen {
 	private static final VarHandle PROGRESS = progressHandle();
 
 	private static boolean texturesReady;
+	/** Schriften geladen (erst nach dem ersten Start): dann zeigt der Ladebildschirm einen Tipp */
+	public static volatile boolean fontsReady;
 	private static float shownProgress;
 
 	private LoadingScreen() {
@@ -142,6 +144,17 @@ public final class LoadingScreen {
 			int from = Math.max(x, shineX);
 			int to = Math.min(x + fill, shineX + shine);
 			if (to > from) g.fill(from, y, to, y + barH, Draw.withAlpha(0x66E0F2FE, alpha / 255f));
+		}
+		// beim Neuladen (Schriften da): Tipp unter dem Balken
+		if (fontsReady) {
+			dev.heldixclient.ui.Tips.Tip tip = dev.heldixclient.ui.Tips.rotating(6);
+			String text = dev.heldixclient.ui.Ui.ellipsize(tip.text(), Math.max(120, g.guiWidth() - 40), dev.heldixclient.ui.Ui.Font.SMALL);
+			int tw = dev.heldixclient.ui.Ui.width(text, dev.heldixclient.ui.Ui.Font.SMALL) + 14;
+			int tx = (g.guiWidth() - tw) / 2;
+			int ty = y + barH + 12;
+			float a = alpha / 255f;
+			dev.heldixclient.ui.Ui.icon(g, tip.icon(), tx, ty - 1, 9, Draw.withAlpha(Theme.ACCENT_LIGHT, a));
+			dev.heldixclient.ui.Ui.text(g, text, tx + 14, ty, Draw.withAlpha(0xFFB9CBE6, a), dev.heldixclient.ui.Ui.Font.SMALL);
 		}
 	}
 }

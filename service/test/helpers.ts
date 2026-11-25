@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
-import { createServer, type Server } from 'node:http';
+import { createServer, request as httpRequest, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -87,6 +87,11 @@ export async function startService(options: Partial<ServiceOptions> = {}): Promi
     log: (line) => logs.push(line),
     authRateLimit: 1000,
     apiRateLimit: 1000,
+    messageRateLimit: 1000,
+    downloadRateLimit: 1000,
+    webLinkRateLimit: 1000,
+    totpRateLimit: 1000,
+    exportRateLimit: 1000,
     ...options,
   });
   const url = await listen(service.server);
@@ -259,4 +264,36 @@ export async function waitFor(check: () => Promise<boolean> | boolean, timeoutMs
     if (Date.now() > deadline) throw new Error('Bedingung nicht rechtzeitig erfüllt.');
     await sleep(10);
   }
+}
+
+/** Macht zwei Spieler zu Freunden (a fragt an, b nimmt an). */
+export async function befriend(base: string, a: Player, b: Player): Promise<void> {
+  const sent = await api(base, 'POST', '/v1/friends/requests', { token: a.token, body: { name: b.name } });
+  assert.equal(sent.status, 200, JSON.stringify(sent.body));
+  const accepted = await api(base, 'POST', `/v1/friends/requests/${a.uuid}/accept`, { token: b.token });
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+}
+
+export interface RawResponse {
+  status: number;
+  headers: IncomingHttpHeaders;
+  body: Buffer;
+}
+
+/**
+ * HTTP-Anfrage ohne fetch: Der Pfad geht genau so raus (kein Auflösen von `..`), Weiterleitungen
+ * werden nicht verfolgt, HEAD-Antworten bleiben ohne Körper.
+ */
+export function rawRequest(base: string, method: string, pathname: string, headers: Record<string, string> = {}): Promise<RawResponse> {
+  const url = new URL(base);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: url.hostname, port: url.port, method, path: pathname, headers }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks) }));
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.end();
+  });
 }

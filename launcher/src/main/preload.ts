@@ -67,6 +67,16 @@ const api: HeldixApi = {
   onGameState: (callback) => subscribe('game:state', callback),
   getDiscordStatus: () => ipcRenderer.invoke('discord:status'),
   onDiscordStatus: (callback) => subscribe('discord:status', callback),
+
+  getUpdateState: () => ipcRenderer.invoke('update:state'),
+  checkForUpdate: () => ipcRenderer.invoke('update:check'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  onUpdateState: (callback) => subscribe('update:state', callback),
+
+  openWebAccount: (target) => ipcRenderer.invoke('web:account', target),
+  openWebsite: (page) => ipcRenderer.invoke('web:open', page),
+  getWhatsNew: () => ipcRenderer.invoke('whatsnew:get'),
+  markWhatsNewSeen: () => ipcRenderer.invoke('whatsnew:seen'),
 };
 
 contextBridge.exposeInMainWorld('heldix', api);

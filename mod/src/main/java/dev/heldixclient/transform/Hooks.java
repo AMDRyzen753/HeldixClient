@@ -169,6 +169,8 @@ public final class Hooks {
 	/** Ersetzt den Aufbau des Hauptmenüs. true = Vanilla-init überspringen. */
 	public static boolean titleInit(TitleScreen screen) {
 		Minecraft minecraft = Minecraft.getInstance();
+		// ab jetzt sind die Schriften geladen: der Ladebildschirm darf beim nächsten Neuladen Tipps zeigen
+		LoadingScreen.fontsReady = true;
 		if (!HeldixTitle.shouldReplace(minecraft)) return false;
 		HeldixTitle title = TITLES.computeIfAbsent(screen, s -> new HeldixTitle(minecraft));
 		for (AbstractWidget widget : title.createWidgets(screen, screen.width, screen.height)) {
@@ -250,6 +252,15 @@ public final class Hooks {
 	public static net.minecraft.network.chat.Component tabName(net.minecraft.network.chat.Component name, net.minecraft.client.multiplayer.PlayerInfo info) {
 		if (name == null || info == null || !dev.heldixclient.social.Social.isHeldix(info.getProfile().id())) return name;
 		return dev.heldixclient.social.Badge.prefix(name);
+	}
+
+	/** LevelLoadingScreen/ConnectScreen: Tipp-Karte mit Spielfigur unten. */
+	public static void loadingTips(Screen screen, GuiGraphicsExtractor g) {
+		try {
+			dev.heldixclient.screen.LoadingTips.draw(screen, g);
+		} catch (RuntimeException e) {
+			HeldixClient.LOGGER.warn("Tipp auf dem Ladebildschirm fehlgeschlagen", e);
+		}
 	}
 
 	// --- Menüs -----------------------------------------------------------------------------

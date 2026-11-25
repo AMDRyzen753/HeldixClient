@@ -33,6 +33,8 @@ public final class Targets {
 	public static final String CHAT_COMPONENT = "net.minecraft.client.gui.components.ChatComponent";
 	public static final String CHAT_SCREEN = "net.minecraft.client.gui.screens.ChatScreen";
 	public static final String PLAYER_TAB_OVERLAY = "net.minecraft.client.gui.components.PlayerTabOverlay";
+	public static final String LEVEL_LOADING_SCREEN = "net.minecraft.client.gui.screens.LevelLoadingScreen";
+	public static final String CONNECT_SCREEN = "net.minecraft.client.gui.screens.ConnectScreen";
 
 	public static final List<String> ALL = List.of(
 			MINECRAFT,
@@ -58,7 +60,9 @@ public final class Targets {
 			KEYBOARD_INPUT,
 			CHAT_COMPONENT,
 			CHAT_SCREEN,
-			PLAYER_TAB_OVERLAY);
+			PLAYER_TAB_OVERLAY,
+			LEVEL_LOADING_SCREEN,
+			CONNECT_SCREEN);
 
 	private Targets() {
 	}

@@ -34,6 +34,46 @@ function toNews(entry: FeedEntry): NewsEntry {
   };
 }
 
+interface HeldixNews {
+  id: number | string;
+  title: string;
+  text: string;
+  at: number;
+  author?: string;
+}
+
+let heldixNews: { at: number; entries: NewsEntry[] } | null = null;
+
+/** Neuigkeiten des HeldixClient-Teams (GET /v1/news); fünf Minuten zwischengespeichert, Fehler = keine. */
+export async function listHeldixNews(serviceUrl: string, limit = 3): Promise<NewsEntry[]> {
+  const base = serviceUrl.replace(/\/+$/, '');
+  if (!base) return [];
+  if (heldixNews && Date.now() - heldixNews.at < 5 * 60 * 1000) return heldixNews.entries;
+  try {
+    const response = await fetch(`${base}/v1/news?limit=${limit}`, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error(String(response.status));
+    const data = (await response.json()) as { news?: HeldixNews[] };
+    const entries = (data.news ?? [])
+      .filter((n) => typeof n.title === 'string' && typeof n.text === 'string' && typeof n.at === 'number')
+      .slice(0, limit)
+      .map((n): NewsEntry => ({
+        id: `heldix-${String(n.id)}`,
+        title: n.title.slice(0, 120),
+        version: '',
+        type: 'heldix',
+        date: new Date(n.at).toISOString(),
+        summary: n.text.replace(/\s+/g, ' ').slice(0, 160),
+        image: null,
+        text: n.text.slice(0, 5000),
+        author: typeof n.author === 'string' ? n.author.slice(0, 32) : undefined,
+      }));
+    heldixNews = { at: Date.now(), entries };
+    return entries;
+  } catch {
+    return heldixNews?.entries ?? [];
+  }
+}
+
 /** Die neuesten Einträge; offline aus dem Zwischenspeicher. */
 export async function listNews(paths: LauncherPaths, limit = 6): Promise<NewsEntry[]> {
   const cacheFile = path.join(paths.cache, 'java-patch-notes.json');

@@ -87,6 +87,8 @@ public final class HeldixConfig {
 		public boolean socialNotifications = true;
 		/** Heldix-Capes anderer Spieler zeigen */
 		public boolean socialCapes = true;
+		/** Nachrichten von Freunden annehmen */
+		public boolean socialMessages = true;
 		/** zuletzt betretener Server (für "Weiterspielen" im Hauptmenü) */
 		public String lastServerIp;
 		public String lastServerName;

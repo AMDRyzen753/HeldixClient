@@ -38,6 +38,8 @@ function defaultSettings(): Settings {
     javaPath: '',
     discordPresence: true,
     discordShowServer: true,
+    autoUpdate: true,
+    lastSeenVersion: null,
     graphicsApi: 'vulkan',
     jvmTuning: true,
     developerMode: false,

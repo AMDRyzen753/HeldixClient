@@ -13,14 +13,26 @@ import java.util.List;
 /**
  * Basis für alle Seiten der Heldix-Oberfläche: Fenster mit Seitenleiste links, Kopfzeile und Inhalt rechts.
  * Unterklassen legen in {@link #initContent()} ihre Widgets an und zeichnen in {@link #drawContent}.
+ * Liefert {@link #subTabs()} Reiter, stehen sie als Unter-Menü unter dem Seitentitel.
  */
 public abstract class ShellScreen extends Screen {
 	protected static final int PAD = 16;
 	protected static final int HEADER_H = 42;
+	/** Höhe der Reiterzeile unter dem Seitentitel */
+	protected static final int TABS_H = 24;
+	/** Strich unter dem aktiven Reiter: Lage im letzten Bild (gleitet beim Wechsel, auch über Seiten derselben Kategorie hinweg) */
+	private static float lineX = -1;
+	private static float lineW;
+	private static Shell.Page lineHead;
+	private int tabPadding;
+	private boolean tabIcons;
 
 	protected final Shell.Page page;
 	protected final long openedAt = Shell.openedAt();
 	protected List<ShellNavButton> nav = new ArrayList<>();
+	protected List<ShellTab> tabs = new ArrayList<>();
+	/** Unterkante des Seitenkopfs (mit Reitern) */
+	protected int headerBottom;
 	/** Fenster und Inhaltsbereich unter der Kopfzeile */
 	protected Shell.Rect window;
 	protected int contentX;
@@ -46,9 +58,79 @@ public abstract class ShellScreen extends Screen {
 		int pad = content.w() < 260 ? 10 : PAD;
 		contentX = content.x() + pad;
 		contentW = content.w() - pad * 2;
-		contentY = window.y() + HEADER_H + 8;
+		tabs = new ArrayList<>();
+		headerBottom = window.y() + HEADER_H;
+		List<ShellTab.Spec> specs = subTabs();
+		if (!specs.isEmpty()) {
+			createTabs(specs, window.y() + HEADER_H - 2);
+			headerBottom += TABS_H - 4;
+		}
+		contentY = headerBottom + 8;
 		contentH = window.bottom() - 10 - contentY;
 		initContent();
+	}
+
+	/** Reiter nebeneinander; reicht der Platz nicht, zuerst ohne Icons, dann enger */
+	private void createTabs(List<ShellTab.Spec> specs, int y) {
+		int padding = 9;
+		boolean icons = true;
+		int total = tabsWidth(specs, true, padding);
+		if (total > contentW) {
+			icons = false;
+			total = tabsWidth(specs, false, padding);
+		}
+		if (total > contentW) padding = 5;
+		tabPadding = padding;
+		tabIcons = icons;
+		int x = contentX - padding + 2;
+		for (ShellTab.Spec spec : specs) {
+			int w = ShellTab.widthFor(spec, icons, padding);
+			if (x + w > contentX + contentW) w = contentX + contentW - x;
+			if (w < 24) break;
+			ShellTab tab = new ShellTab(x, y, w, TABS_H - 2, spec, icons);
+			tabs.add(tab);
+			addRenderableWidget(tab);
+			x += w;
+		}
+	}
+
+	/** Breiten nachführen, wenn sich eine Zahl an einem Reiter ändert (z. B. erstes eigenes Cape) */
+	private void relayoutTabs() {
+		if (tabs.isEmpty()) return;
+		int x = tabs.getFirst().getX();
+		for (ShellTab tab : tabs) {
+			int w = ShellTab.widthFor(tab.spec(), tabIcons, tabPadding);
+			if (x + w > contentX + contentW) w = Math.max(24, contentX + contentW - x);
+			tab.setX(x);
+			tab.setWidth(w);
+			x += w;
+		}
+	}
+
+	private static int tabsWidth(List<ShellTab.Spec> specs, boolean icons, int padding) {
+		int total = 0;
+		for (ShellTab.Spec spec : specs) total += ShellTab.widthFor(spec, icons, padding);
+		return total;
+	}
+
+	/** Unter-Menü der Seite (leer = keine Reiter); wird bei jedem Aufbau der Widgets abgefragt */
+	protected List<ShellTab.Spec> subTabs() {
+		return List.of();
+	}
+
+	/**
+	 * Reiter für die Unterseiten der Kategorie (z. B. Grafik: Shader, Leistung). {@code open} öffnet eine andere Unterseite.
+	 */
+	protected List<ShellTab.Spec> pageTabs(java.util.function.Consumer<Shell.Page> open) {
+		List<Shell.Page> group = page.group();
+		if (group.size() < 2) return List.of();
+		List<ShellTab.Spec> specs = new ArrayList<>();
+		for (Shell.Page target : group) {
+			// die Zahl der Kategorie (z. B. offene Anfragen) steht am Reiter der Unterseite, nicht am ersten Reiter
+			specs.add(new ShellTab.Spec(target.name(), target.label, target.icon, () -> target == target.head() ? null : Shell.badge(target), true,
+					() -> target == page, () -> open.accept(target)));
+		}
+		return specs;
 	}
 
 	/** Widgets der Seite anlegen (Inhaltsbereich ist berechnet). */
@@ -64,9 +146,9 @@ public abstract class ShellScreen extends Screen {
 		return null;
 	}
 
-	/** Icon vor dem Seitentitel (Standard: Icon der Seite) */
+	/** Icon vor dem Seitentitel (Standard: Icon der Kategorie) */
 	protected String headerIcon() {
-		return page.icon;
+		return page.head().icon;
 	}
 
 	/** Eigene Zeichnung im Inhaltsbereich (unter den Widgets). */
@@ -97,6 +179,8 @@ public abstract class ShellScreen extends Screen {
 	public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
 		fade = Shell.frame(openedAt);
 		for (ShellNavButton button : nav) button.setAlpha(fade);
+		relayoutTabs();
+		for (ShellTab tab : tabs) tab.setAlpha(fade);
 		Shell.drawWindow(g, width, height, inGame(), fade);
 
 		// Kopfzeile: Icon, Titel, Untertitel, Trennlinie
@@ -112,7 +196,8 @@ public abstract class ShellScreen extends Screen {
 		}
 		Ui.text(g, headerTitle().getString(), x, titleY, Ui.withAlpha(Ui.TEXT, fade), Ui.Font.TITLE);
 		if (sub != null) Ui.text(g, sub, x, titleY + 14, Ui.withAlpha(Ui.FAINT, fade), Ui.Font.SMALL);
-		Ui.hline(g, content.x() + 1, content.right() - 1, window.y() + HEADER_H, Ui.withAlpha(Ui.LINE, fade));
+		Ui.hline(g, content.x() + 1, content.right() - 1, headerBottom, Ui.withAlpha(Ui.LINE, fade));
+		drawTabLine(g);
 
 		// Inhalt gleitet beim ersten Öffnen leicht herein
 		int offset = Math.round((1 - fade) * 8);
@@ -123,6 +208,25 @@ public abstract class ShellScreen extends Screen {
 		super.extractRenderState(g, mouseX, mouseY, delta);
 		drawOverlay(g, mouseX, mouseY, delta);
 		Ui.drawTooltip(g, width, height);
+	}
+
+	/** blauer Strich unter dem aktiven Reiter; gleitet zum neuen Reiter */
+	private void drawTabLine(GuiGraphicsExtractor g) {
+		ShellTab active = null;
+		for (ShellTab tab : tabs) if (tab.selected()) active = tab;
+		if (active == null) return;
+		float targetX = active.getX() + 6;
+		float targetW = active.getWidth() - 12;
+		if (lineX < 0 || lineHead != page.head()) {
+			lineX = targetX;
+			lineW = targetW;
+		}
+		lineHead = page.head();
+		lineX += (targetX - lineX) * 0.3f;
+		lineW += (targetW - lineW) * 0.3f;
+		if (Math.abs(targetX - lineX) < 0.3f) lineX = targetX;
+		if (Math.abs(targetW - lineW) < 0.3f) lineW = targetW;
+		Ui.rect(g, lineX, headerBottom - 1, lineW, 2, 1, Ui.withAlpha(Ui.ACCENT, fade));
 	}
 
 	/** Zeichnung über den Widgets (z. B. Aufklapplisten) */

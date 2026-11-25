@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<title>Team – HeldixClient</title>
+<meta name="description" content="Team-Bereich des Heldix-Dienstes für Moderatoren und Admins.">
+<meta name="robots" content="noindex">
+<script type="module" src="/team.js"></script>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+{{include:nav.html}}
+
+<main id="inhalt" class="wrap app">
+  <noscript><p class="notice">Für den Team-Bereich braucht dein Browser JavaScript.</p></noscript>
+
+  <div class="app-loading" id="team-laden" role="status">
+    <span class="spinner" aria-hidden="true"></span><span>Zugang wird geprüft …</span>
+  </div>
+
+  <!-- Dienst nicht erreichbar -->
+  <div class="gate" id="team-fehler" hidden>
+    <div class="gate-head">
+      <div class="badge-lg warn">{{icon:warning}}</div>
+      <h1>Der Heldix-Dienst antwortet gerade nicht</h1>
+      <p class="lead" id="team-fehler-text">Bitte versuche es in ein paar Minuten noch einmal.</p>
+      <p><button class="button" type="button" id="team-erneut">{{icon:refresh}}Erneut versuchen</button></p>
+    </div>
+  </div>
+
+  <!-- Nicht angemeldet -->
+  <div class="gate" id="team-gast" hidden>
+    <div class="gate-head">
+      <div class="badge-lg">{{icon:shield}}</div>
+      <h1>Team-Bereich</h1>
+      <p class="lead">Für Moderatoren und Admins des Heldix-Dienstes. Melde dich zuerst im Konto-Bereich an – über den Launcher oder im Spiel, ohne Passwort.</p>
+      <p class="notice" id="team-gast-hinweis" role="alert" hidden></p>
+      <p><a class="button" href="/konto">{{icon:user}}Zum Konto-Bereich</a></p>
+    </div>
+  </div>
+
+  <!-- Keine Rolle -->
+  <div class="gate" id="team-kein-zugang" hidden>
+    <div class="gate-head">
+      <div class="badge-lg warn">{{icon:lock}}</div>
+      <h1>Kein Zugang</h1>
+      <p class="lead">Der Team-Bereich ist nur für Moderatoren und Admins des Heldix-Dienstes. Dein Konto <strong id="kein-zugang-name"></strong> gehört nicht zum Team.</p>
+      <p><a class="button ghost" href="/konto">Zurück zum Konto</a></p>
+    </div>
+  </div>
+
+  <!-- 2FA einrichten -->
+  <div class="gate" id="team-2fa-einrichten" hidden>
+    <div class="gate-head">
+      <div class="badge-lg">{{icon:lock}}</div>
+      <h1>Zwei-Faktor-Anmeldung einrichten</h1>
+      <p class="lead">Wer Meldungen liest und Spieler sperren kann, braucht einen zweiten Schutz. Dafür nutzt du eine Authenticator-App auf deinem Handy, die alle 30 Sekunden einen 6-stelligen Code zeigt.</p>
+    </div>
+    <div class="app-card setup">
+      <ol class="setup-steps">
+        <li>
+          <h2>Schlüssel erzeugen</h2>
+          <p class="muted">Jede Authenticator-App funktioniert, zum Beispiel Aegis, 2FAS, Google Authenticator oder Microsoft Authenticator.</p>
+          <p><button class="button small" type="button" id="setup-start">{{icon:lock}}Schlüssel erzeugen</button></p>
+          <p class="form-error" id="setup-start-fehler" role="alert" hidden></p>
+        </li>
+        <li id="setup-schluessel" class="step-disabled">
+          <h2>In der App eintragen</h2>
+          <div id="setup-schluessel-inhalt" hidden>
+            <p class="muted">Auf dem Handy: Link antippen, die App öffnet sich. Am PC: in der App „Schlüssel eingeben“ wählen, als Konto <strong>HeldixClient</strong> und diesen Schlüssel eintragen (zeitbasiert).</p>
+            <div class="secret-box">
+              <code class="secret" id="setup-secret" aria-label="Geheimer Schlüssel"></code>
+              <button class="button tiny ghost" type="button" id="setup-kopieren">{{icon:copy}}Kopieren</button>
+            </div>
+            <p class="card-actions"><a class="button small ghost" id="setup-link" href="#">{{icon:external}}In Authenticator-App öffnen</a></p>
+            <p class="hint">Den Schlüssel nicht weitergeben und keinen Screenshot davon teilen. Wer ihn hat, kann Codes erzeugen.</p>
+          </div>
+        </li>
+        <li id="setup-code" class="step-disabled">
+          <h2>Code bestätigen</h2>
+          <form class="code-form" id="setup-form" novalidate>
+            <label class="field">
+              <span>6-stelliger Code aus der App</span>
+              <input class="input otp" id="setup-code-input" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="7" placeholder="123456" disabled>
+            </label>
+            <button class="button small" type="submit" id="setup-aktivieren" disabled>{{icon:check}}Aktivieren</button>
+          </form>
+          <p class="form-error" id="setup-fehler" role="alert" hidden></p>
+        </li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- 2FA bestätigen -->
+  <div class="gate narrow" id="team-2fa-pruefen" hidden>
+    <div class="gate-head">
+      <div class="badge-lg">{{icon:lock}}</div>
+      <h1>Code bestätigen</h1>
+      <p class="lead">Gib den 6-stelligen Code aus deiner Authenticator-App ein. Die Bestätigung gilt 12 Stunden für diesen Browser.</p>
+    </div>
+    <div class="app-card">
+      <form class="code-form" id="verify-form" novalidate>
+        <label class="field">
+          <span>Code</span>
+          <input class="input otp" id="verify-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="7" placeholder="123456">
+        </label>
+        <button class="button small" type="submit">{{icon:check}}Bestätigen</button>
+      </form>
+      <p class="form-error" id="verify-fehler" role="alert" hidden></p>
+      <p class="hint">Kein Zugriff mehr auf die App? Ein Admin kann deine Zwei-Faktor-Anmeldung zurücksetzen.</p>
+    </div>
+  </div>
+
+  <!-- Team-Bereich -->
+  <div id="team-app" hidden>
+    <div class="account-head">
+      <span class="badge-md">{{icon:shield}}</span>
+      <div class="who">
+        <h1>Team-Bereich</h1>
+        <p class="meta" id="team-meta"></p>
+      </div>
+      <div class="account-actions">
+        <a class="button small ghost" href="/konto">{{icon:user}}Mein Konto</a>
+        <button class="button small ghost" type="button" id="team-abmelden">Abmelden</button>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="Bereiche des Teams" id="team-tabs">
+      <button class="tab" type="button" role="tab" id="tab-meldungen" data-tab="meldungen" aria-controls="panel-meldungen" aria-selected="true">{{icon:flag}}Meldungen<span class="count" id="count-meldungen" hidden></span></button>
+      <button class="tab" type="button" role="tab" id="tab-support" data-tab="support" aria-controls="panel-support" aria-selected="false" tabindex="-1">{{icon:info}}Support<span class="count" id="count-support" hidden></span></button>
+      <button class="tab" type="button" role="tab" id="tab-spieler" data-tab="spieler" aria-controls="panel-spieler" aria-selected="false" tabindex="-1">{{icon:search}}Spieler</button>
+      <button class="tab" type="button" role="tab" id="tab-sperren" data-tab="sperren" aria-controls="panel-sperren" aria-selected="false" tabindex="-1">{{icon:ban}}Sperren</button>
+      <button class="tab" type="button" role="tab" id="tab-neuigkeiten" data-tab="neuigkeiten" aria-controls="panel-neuigkeiten" aria-selected="false" tabindex="-1">{{icon:news}}Neuigkeiten</button>
+      <button class="tab" type="button" role="tab" id="tab-updates" data-tab="updates" data-admin aria-controls="panel-updates" aria-selected="false" tabindex="-1" hidden>{{icon:download}}Updates</button>
+      <button class="tab" type="button" role="tab" id="tab-team" data-tab="team" data-admin aria-controls="panel-team" aria-selected="false" tabindex="-1" hidden>{{icon:friends}}Team</button>
+      <button class="tab" type="button" role="tab" id="tab-protokoll" data-tab="protokoll" data-admin aria-controls="panel-protokoll" aria-selected="false" tabindex="-1" hidden>{{icon:clock}}Protokoll</button>
+      <button class="tab" type="button" role="tab" id="tab-profil" data-tab="profil" aria-controls="panel-profil" aria-selected="false" tabindex="-1">{{icon:user}}Mein Teamprofil</button>
+    </div>
+
+    <!-- Meldungen -->
+    <div class="panel" id="panel-meldungen" role="tabpanel" aria-labelledby="tab-meldungen" tabindex="0">
+      <div class="toolbar">
+        <div class="segmented" role="group" aria-label="Meldungen filtern" id="meldungen-filter">
+          <button type="button" data-status="open" aria-pressed="true">Offen</button>
+          <button type="button" data-status="done" aria-pressed="false">Erledigt</button>
+          <button type="button" data-status="all" aria-pressed="false">Alle</button>
+        </div>
+        <button class="button tiny ghost" type="button" id="meldungen-neu">{{icon:refresh}}Aktualisieren</button>
+      </div>
+      <div id="meldungen" class="stack"></div>
+    </div>
+
+    <!-- Support -->
+    <div class="panel" id="panel-support" role="tabpanel" aria-labelledby="tab-support" tabindex="0" hidden>
+      <div class="toolbar">
+        <div class="segmented" role="group" aria-label="Anfragen filtern" id="support-filter">
+          <button type="button" data-status="open" aria-pressed="true">Offen</button>
+          <button type="button" data-status="answered" aria-pressed="false">Beantwortet</button>
+          <button type="button" data-status="closed" aria-pressed="false">Geschlossen</button>
+          <button type="button" data-status="all" aria-pressed="false">Alle</button>
+        </div>
+        <button class="button tiny ghost" type="button" id="support-neu-laden">{{icon:refresh}}Aktualisieren</button>
+      </div>
+      <div class="split support-split">
+        <div class="app-card">
+          <div id="team-support-liste" aria-live="polite"></div>
+        </div>
+        <div class="app-card detail" id="team-ticket" tabindex="-1">
+          <div class="empty placeholder">{{icon:chat}}<p>Wähle links eine Anfrage, um den Verlauf zu sehen und zu antworten.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Spieler -->
+    <div class="panel" id="panel-spieler" role="tabpanel" aria-labelledby="tab-spieler" tabindex="0" hidden>
+      <div class="split">
+        <div class="app-card">
+          <form class="search-form" id="spieler-suche" role="search" novalidate>
+            <label class="field">
+              <span>Spieler suchen</span>
+              <span class="input-icon">{{icon:search}}<input class="input" type="search" id="spieler-q" name="q" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="40" placeholder="Name-Anfang oder UUID"></span>
+            </label>
+          </form>
+          <div id="spieler-liste" class="list-gap" aria-live="polite"></div>
+        </div>
+        <div class="app-card detail" id="spieler-detail" tabindex="-1">
+          <div class="empty placeholder">{{icon:user}}<p>Wähle links einen Spieler, um Details zu sehen.</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sperren -->
+    <div class="panel" id="panel-sperren" role="tabpanel" aria-labelledby="tab-sperren" tabindex="0" hidden>
+      <div class="app-card">
+        <h2>Spieler sperren</h2>
+        <p class="muted small">Gesperrte Spieler können den Heldix-Dienst nicht mehr nutzen: keine Freunde, keine Nachrichten, kein Cape für andere. Offene Verbindungen werden sofort getrennt.</p>
+        <form class="ban-form" id="sperre-form" novalidate>
+          <label class="field">
+            <span>Spielername</span>
+            <input class="input" id="sperre-name" name="name" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="16" required>
+          </label>
+          <label class="field grow">
+            <span>Grund <span class="counter" id="sperre-zaehler"></span></span>
+            <input class="input" id="sperre-grund" name="reason" autocomplete="off" maxlength="300" required placeholder="z. B. Beleidigungen im Chat (Meldung #12)">
+          </label>
+          <button class="button small danger" type="submit">{{icon:ban}}Sperren</button>
+        </form>
+        <p class="form-error" id="sperre-fehler" role="alert" hidden></p>
+      </div>
+      <div class="app-card">
+        <div class="card-head">
+          <h2>Gesperrte Spieler <span class="muted" id="sperren-anzahl"></span></h2>
+        </div>
+        <div id="sperren"></div>
+      </div>
+    </div>
+
+    <!-- Neuigkeiten -->
+    <div class="panel" id="panel-neuigkeiten" role="tabpanel" aria-labelledby="tab-neuigkeiten" tabindex="0" hidden>
+      <div class="toolbar">
+        <p class="muted small">Veröffentlichte Neuigkeiten erscheinen auf der Startseite und im Launcher, mit deinem Spielernamen als Autor.</p>
+        <button class="button small" type="button" id="news-neu">{{icon:plus}}Neue Neuigkeit</button>
+      </div>
+      <div class="editor" id="news-editor" hidden>
+        <form class="app-card editor-form" id="news-form" novalidate>
+          <h2 id="news-editor-titel">Neue Neuigkeit</h2>
+          <label class="field">
+            <span class="field-row"><span>Titel</span><span class="counter" id="news-titel-zaehler"></span></span>
+            <input class="input" id="news-titel" name="title" maxlength="120" autocomplete="off" required>
+          </label>
+          <label class="field">
+            <span class="field-row"><span>Text</span><span class="counter" id="news-text-zaehler"></span></span>
+            <textarea class="input textarea" id="news-text" name="text" maxlength="5000" rows="12" required></textarea>
+          </label>
+          <p class="hint">Nur Text, kein HTML. Leerzeilen trennen Absätze.</p>
+          <label class="check-row"><input type="checkbox" id="news-veroeffentlicht"><span>Veröffentlichen – auf der Startseite und im Launcher sichtbar</span></label>
+          <p class="form-error" id="news-fehler" role="alert" hidden></p>
+          <div class="card-actions">
+            <button class="button small" type="submit" id="news-speichern">{{icon:check}}Speichern</button>
+            <button class="button small ghost" type="button" id="news-abbrechen">Abbrechen</button>
+          </div>
+        </form>
+        <div class="preview">
+          <p class="eyebrow">Vorschau</p>
+          <div id="news-vorschau"></div>
+        </div>
+      </div>
+      <div id="news-liste" class="stack"></div>
+    </div>
+
+    <!-- Updates -->
+    <div class="panel" id="panel-updates" role="tabpanel" aria-labelledby="tab-updates" tabindex="0" hidden>
+      <div class="panel-grid">
+        <div class="app-card">
+          <h2>Veröffentlichte Version</h2>
+          <div id="update-aktuell" class="list-gap"></div>
+        </div>
+        <div class="app-card">
+          <h2>So kommt ein Update zu den Spielern</h2>
+          <ol class="steps small-steps">
+            <li><span>Auf dem Entwickler-PC im Ordner <code>launcher</code> <code>npm run release</code> ausführen. Das baut den Installer und signiert <code>update.json</code> mit dem privaten Update-Schlüssel.</span></li>
+            <li><span>Hier zuerst den Installer <code>release/HeldixClient-Setup-&lt;version&gt;.exe</code> hochladen.</span></li>
+            <li><span>Dann <code>release/update/update.json</code> wählen und veröffentlichen.</span></li>
+          </ol>
+          <p class="info-box small">{{icon:shield}}<span>Der Dienst prüft die Signatur mit dem öffentlichen Update-Schlüssel, Größe und SHA-512 des Installers und dass die Version neuer ist. Ohne gültige Signatur wird nichts veröffentlicht – auch nicht von einem übernommenen Team-Konto.</span></p>
+        </div>
+      </div>
+      <div class="app-card">
+        <h2>Neue Version veröffentlichen</h2>
+        <ol class="upload-steps">
+          <li>
+            <h3>1. Installer hochladen</h3>
+            <div class="file-row">
+              <label class="button small ghost file-button">{{icon:file}}Installer wählen …<input type="file" id="upload-exe" accept=".exe,application/vnd.microsoft.portable-executable,application/x-msdownload" class="visually-hidden"></label>
+              <span class="file-name muted" id="upload-exe-name">Keine Datei gewählt</span>
+            </div>
+            <div class="upload-progress" id="upload-fortschritt" hidden>
+              <div class="progress" role="progressbar" aria-label="Hochladen" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="upload-balken"><span></span></div>
+              <div class="progress-row"><span id="upload-text">0 %</span><button class="button tiny ghost" type="button" id="upload-abbrechen">Abbrechen</button></div>
+            </div>
+            <p class="form-error" id="upload-exe-fehler" role="alert" hidden></p>
+            <p class="form-ok" id="upload-exe-ok" hidden></p>
+          </li>
+          <li>
+            <h3>2. update.json veröffentlichen</h3>
+            <div class="file-row">
+              <label class="button small ghost file-button">{{icon:file}}update.json wählen …<input type="file" id="upload-json" accept=".json,application/json" class="visually-hidden"></label>
+              <span class="file-name muted" id="upload-json-name">Keine Datei gewählt</span>
+            </div>
+            <div id="manifest-pruefung" hidden></div>
+            <p class="form-error" id="upload-json-fehler" role="alert" hidden></p>
+            <div class="card-actions" id="manifest-aktionen" hidden>
+              <button class="button small" type="button" id="manifest-veroeffentlichen">{{icon:check}}Veröffentlichen</button>
+            </div>
+          </li>
+        </ol>
+      </div>
+      <div class="app-card">
+        <div class="card-head"><h2>Dateien auf dem Server</h2></div>
+        <div id="update-dateien"></div>
+      </div>
+    </div>
+
+    <!-- Team -->
+    <div class="panel" id="panel-team" role="tabpanel" aria-labelledby="tab-team" tabindex="0" hidden>
+      <div class="app-card">
+        <h2>Mitglied hinzufügen</h2>
+        <p class="muted small">Der Spieler muss sich schon einmal mit HeldixClient beim Dienst angemeldet haben. Danach richtet er im Team-Bereich seine Zwei-Faktor-Anmeldung ein.</p>
+        <form class="ban-form" id="mitglied-form" novalidate>
+          <label class="field">
+            <span>Spielername</span>
+            <input class="input" id="mitglied-name" name="name" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="16" required>
+          </label>
+          <label class="field">
+            <span>Rolle</span>
+            <select class="input select" id="mitglied-rolle" name="role">
+              <option value="moderator">Moderator</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <button class="button small" type="submit">{{icon:user-plus}}Hinzufügen</button>
+        </form>
+        <p class="form-error" id="mitglied-fehler" role="alert" hidden></p>
+        <p class="hint"><strong>Moderatoren</strong> sehen Meldungen, Spieler und Sperren und schreiben Neuigkeiten. <strong>Admins</strong> zusätzlich: Updates, Team, Protokoll, Cape zurücksetzen und Spielerdaten löschen.</p>
+      </div>
+      <div class="app-card">
+        <div class="card-head"><h2>Mitglieder <span class="muted" id="mitglieder-anzahl"></span></h2></div>
+        <div id="mitglieder"></div>
+      </div>
+    </div>
+
+    <!-- Protokoll -->
+    <div class="panel" id="panel-protokoll" role="tabpanel" aria-labelledby="tab-protokoll" tabindex="0" hidden>
+      <div class="app-card">
+        <div class="card-head">
+          <div>
+            <h2>Protokoll</h2>
+            <p>Jede Änderung durch das Team, neueste zuerst. Einträge werden nach 365 Tagen gelöscht.</p>
+          </div>
+          <button class="button tiny ghost" type="button" id="protokoll-neu">{{icon:refresh}}Aktualisieren</button>
+        </div>
+        <div id="protokoll"></div>
+        <div class="card-actions">
+          <button class="button small ghost" type="button" id="protokoll-mehr" hidden>Ältere Einträge laden</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mein Teamprofil -->
+    <div class="panel" id="panel-profil" role="tabpanel" aria-labelledby="tab-profil" tabindex="0" hidden>
+      <div class="editor profile-editor">
+        <form class="app-card editor-form" id="profil-form" novalidate>
+          <div class="card-head">
+            <div>
+              <h2>Mein Teamprofil</h2>
+              <p>Auf <a href="/das-team">heldixclient.com/das-team</a> stellt sich das Team vor – aber nur, wer das selbst einschaltet.</p>
+            </div>
+            <span class="saved" id="profil-gespeichert" aria-live="polite"></span>
+          </div>
+          <label class="switch-row">
+            <span class="switch-text"><strong>Auf der Teamseite zeigen</strong><small id="profil-public-text">Aus: Niemand sieht dein Teamprofil.</small></span>
+            <input type="checkbox" class="switch" role="switch" id="profil-public" aria-describedby="profil-public-text profil-erklaerung">
+          </label>
+          <p class="info-box small" id="profil-erklaerung">{{icon:eye}}<span>Eingeschaltet erscheinen auf der Teamseite <strong>öffentlich</strong>: dein Spielername, deine Rolle, deine Aufgabe, dein Text und der Kopf deines Minecraft-Skins. Bei deinen Support-Antworten sehen Spieler dann deinen Namen statt „HeldixClient-Team“. Ausschalten geht jederzeit; wenn du das Team verlässt, ist das Profil weg.</span></p>
+          <label class="field">
+            <span class="field-row"><span>Aufgabe</span><span class="counter" id="profil-titel-zaehler"></span></span>
+            <input class="input" id="profil-titel" maxlength="40" autocomplete="off" placeholder="z. B. Entwicklung, Moderation, Support">
+          </label>
+          <label class="field">
+            <span class="field-row"><span>Über dich</span><span class="counter" id="profil-text-zaehler"></span></span>
+            <textarea class="input textarea small-textarea" id="profil-text" maxlength="200" rows="3" placeholder="Ein Satz über dich – was du im Team machst oder spielst."></textarea>
+          </label>
+          <p class="hint">Je eine Zeile, nur Text. Aufgabe bis 40, Text bis 200 Zeichen.</p>
+          <p class="form-error" id="profil-fehler" role="alert" hidden></p>
+          <div class="card-actions">
+            <button class="button small" type="submit" id="profil-speichern">{{icon:check}}Speichern</button>
+            <span class="hint unsaved" id="profil-ungespeichert" hidden>Nicht gespeicherte Änderungen</span>
+          </div>
+        </form>
+        <div class="preview">
+          <p class="eyebrow">Vorschau</p>
+          <p class="preview-state" id="profil-vorschau-status"></p>
+          <div class="team-grid single" id="profil-vorschau"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+{{include:icons.html}}
+{{include:footer.html}}
+</body>
+</html>

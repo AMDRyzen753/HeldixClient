@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<title>Status – HeldixClient</title>
+<meta name="description" content="Läuft der Heldix-Dienst? Freunde, Nachrichten und Capes im Überblick.">
+<script type="module" src="/status.js"></script>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+{{include:nav.html}}
+
+<main id="inhalt" class="wrap public-page">
+  <div class="page-head">
+    <span class="eyebrow">Status</span>
+    <h1>Status des Heldix-Dienstes</h1>
+    <p class="lead">Der Heldix-Dienst stellt Freunde, Nachrichten, Capes für andere und Updates bereit. Diese Seite fragt alle 30 Sekunden neu nach, solange sie geöffnet ist.</p>
+  </div>
+
+  <div class="status-hero" id="status-hero" data-state="unknown" role="status" aria-live="polite">
+    <span class="status-icon" id="status-icon" aria-hidden="true"><span class="spinner"></span></span>
+    <div class="status-text">
+      <h2 id="status-titel">Wird geprüft …</h2>
+      <p id="status-zeile">Einen Moment.</p>
+    </div>
+    <button class="button small ghost" type="button" id="status-neu">{{icon:refresh}}Jetzt prüfen</button>
+  </div>
+
+  <div class="stat-grid" id="status-werte">
+    <div class="stat-tile">
+      <p class="stat-label">Heldix-Dienst</p>
+      <p class="stat-value" id="wert-dienst">–</p>
+      <p class="stat-note" id="wert-dienst-version"></p>
+    </div>
+    <div class="stat-tile">
+      <p class="stat-label">Spieler online</p>
+      <p class="stat-value" id="wert-online">–</p>
+      <p class="stat-note">mit HeldixClient verbunden</p>
+    </div>
+    <div class="stat-tile">
+      <p class="stat-label">Spieler insgesamt</p>
+      <p class="stat-value" id="wert-spieler">–</p>
+      <p class="stat-note">schon einmal angemeldet</p>
+    </div>
+    <div class="stat-tile">
+      <p class="stat-label">Aktuelle Launcher-Version</p>
+      <p class="stat-value" id="wert-launcher">–</p>
+      <p class="stat-note"><a href="/neuigkeiten#versionen">Versionsverlauf</a></p>
+    </div>
+    <div class="stat-tile">
+      <p class="stat-label">Läuft seit</p>
+      <p class="stat-value" id="wert-seit">–</p>
+      <p class="stat-note" id="wert-seit-datum"></p>
+    </div>
+  </div>
+  <p class="hint center">Hier stehen nur Summen – keine Namen, keine einzelnen Spieler.</p>
+</main>
+
+{{include:icons.html}}
+{{include:footer.html}}
+</body>
+</html>

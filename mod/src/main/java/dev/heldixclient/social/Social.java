@@ -87,7 +87,7 @@ public final class Social {
 
 	// HTTP/1.1: sonst versucht Java bei http:// ein Upgrade auf HTTP/2 (h2c), das der Dienst nicht kennt
 	private static final HttpClient HTTP = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(10)).build();
-	private static final ScheduledExecutorService NET = Executors.newSingleThreadScheduledExecutor(runnable -> {
+	static final ScheduledExecutorService NET = Executors.newSingleThreadScheduledExecutor(runnable -> {
 		Thread thread = new Thread(runnable, "Heldix-Dienst");
 		thread.setDaemon(true);
 		return thread;
@@ -213,6 +213,7 @@ public final class Social {
 		incoming = List.of();
 		outgoing = List.of();
 		LOOKUP.clear();
+		Messages.reset();
 		state = newState;
 	}
 
@@ -299,6 +300,7 @@ public final class Social {
 		body.addProperty("visible", config.socialVisible);
 		body.addProperty("presence", config.socialPresence);
 		body.addProperty("showServer", config.socialShowServer);
+		body.addProperty("messages", config.socialMessages);
 		call("PUT", "/v1/me", body, true);
 	}
 
@@ -376,10 +378,8 @@ public final class Social {
 		status.addProperty("state", statusMode);
 		String server = statusServer;
 		if (server != null) {
-			// Port abschneiden; ob die Adresse öffentlich ist, prüft der Dienst
-			String host = server.trim().toLowerCase(java.util.Locale.ROOT);
-			if (host.indexOf(':') == host.lastIndexOf(':') && host.contains(":")) host = host.substring(0, host.indexOf(':'));
-			status.addProperty("server", host);
+			// mit Port (Freunde können so beitreten); ob die Adresse öffentlich ist, prüft der Dienst
+			status.addProperty("server", server.trim().toLowerCase(java.util.Locale.ROOT));
 		} else {
 			status.add("server", null);
 		}
@@ -443,6 +443,15 @@ public final class Social {
 		HeldixConfig.Data config = HeldixConfig.get();
 		switch (type) {
 			case "friends" -> applyFriends(message);
+			case "message" -> Messages.onMessage(message);
+			case "support" -> {
+				if (config.socialNotifications) {
+					String subject = string(message, "subject");
+					Notifications.show("support-" + string(message, "id"), "Antwort vom HeldixClient-Team",
+							subject != null ? subject + " · Heldix-Menü → Einstellungen → Info" : "Heldix-Menü → Einstellungen → Info", null);
+				}
+			}
+			case "read" -> Messages.onRead(message);
 			case "friend" -> {
 				Friend friend = friend(message.getAsJsonObject("friend"));
 				if (friend == null) return;
@@ -487,6 +496,12 @@ public final class Social {
 		friends = sorted(list);
 		incoming = requests(array(json, "incoming"));
 		outgoing = requests(array(json, "outgoing"));
+		Messages.applyUnread(json);
+	}
+
+	/** Freundesliste neu holen (im Netzwerk-Thread, z. B. nach dem Blockieren) */
+	static void refreshFriends() throws Exception {
+		applyFriends(call("GET", "/v1/friends", null, true));
 	}
 
 	private static List<Friend> sorted(List<Friend> list) {
@@ -530,6 +545,84 @@ public final class Social {
 	/** Anfrage ablehnen oder eigene zurückziehen */
 	public static CompletableFuture<Void> cancelRequest(UUID uuid) {
 		return friendsCall("DELETE", "/v1/friends/requests/" + compact(uuid), null);
+	}
+
+	/**
+	 * Einmal-Link zur Webseite (POST /v1/web/link): öffnet heldixclient.com schon angemeldet, ohne Passwort.
+	 * Ergebnis: die Adresse (2 Minuten gültig, nur einmal nutzbar).
+	 */
+	public static CompletableFuture<String> webLink() {
+		return webLink(null);
+	}
+
+	/** wie {@link #webLink()}, öffnet nach der Anmeldung einen Bereich (z. B. "support") */
+	public static CompletableFuture<String> webLink(String target) {
+		CompletableFuture<String> result = new CompletableFuture<>();
+		if (!online()) {
+			result.completeExceptionally(new ServiceException("Nicht mit dem Heldix-Dienst verbunden"));
+			return result;
+		}
+		NET.execute(() -> {
+			try {
+				JsonObject body = null;
+				if (target != null) {
+					body = new JsonObject();
+					body.addProperty("target", target);
+				}
+				String url = string(call("POST", "/v1/web/link", body, true), "url");
+				URI uri = url == null ? null : URI.create(url);
+				boolean local = uri != null && "http".equals(uri.getScheme()) && ("127.0.0.1".equals(uri.getHost()) || "localhost".equals(uri.getHost()));
+				if (uri == null || !("https".equals(uri.getScheme()) || local)) throw new ServiceException("Der Heldix-Dienst hat einen ungültigen Link geliefert");
+				result.complete(url);
+			} catch (Exception e) {
+				result.completeExceptionally(e instanceof ServiceException ? e : new ServiceException("Dienst nicht erreichbar"));
+			}
+		});
+		return result;
+	}
+
+	/** Neuigkeit des HeldixClient-Teams (GET /v1/news) */
+	public record News(String title, String text, long at, String author) {
+	}
+
+	private static volatile List<News> news = List.of();
+	private static volatile long newsLoadedAt;
+
+	/** zuletzt geladene Neuigkeiten (leer, solange nichts geladen ist) */
+	public static List<News> news() {
+		return news;
+	}
+
+	/** Neuigkeiten neu laden, höchstens alle zehn Minuten; braucht keine Anmeldung */
+	public static void refreshNews() {
+		if (baseUrl().isEmpty() || System.currentTimeMillis() - newsLoadedAt < 10 * 60_000) return;
+		newsLoadedAt = System.currentTimeMillis();
+		NET.execute(() -> {
+			try {
+				List<News> list = new ArrayList<>();
+				for (JsonElement element : array(call("GET", "/v1/news?limit=2", null, false), "news")) {
+					JsonObject object = element.getAsJsonObject();
+					String title = string(object, "title");
+					String text = string(object, "text");
+					if (title == null || text == null) continue;
+					list.add(new News(title, text, object.has("at") ? object.get("at").getAsLong() : 0, string(object, "author")));
+				}
+				news = List.copyOf(list);
+			} catch (Exception e) {
+				HeldixClient.LOGGER.debug("Heldix-Dienst: keine Neuigkeiten ({})", e.toString());
+			}
+		});
+	}
+
+	/** Adresse der Webseite (api.example.de → https://example.de), null ohne Dienst */
+	public static String websiteUrl() {
+		String base = baseUrl();
+		if (base.isEmpty()) return null;
+		URI uri = URI.create(base);
+		String host = uri.getHost();
+		if (host == null) return null;
+		if (host.startsWith("api.")) host = host.substring(4);
+		return ("127.0.0.1".equals(host) || "localhost".equals(host) ? "http" : "https") + "://" + host;
 	}
 
 	public static CompletableFuture<Void> removeFriend(UUID uuid) {
@@ -632,7 +725,7 @@ public final class Social {
 		}
 	}
 
-	private static JsonObject call(String method, String path, JsonObject body, boolean auth) throws IOException, InterruptedException, ServiceException {
+	static JsonObject call(String method, String path, JsonObject body, boolean auth) throws IOException, InterruptedException, ServiceException {
 		HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(baseUrl() + path))
 				.timeout(Duration.ofSeconds(15))
 				.header("Accept", "application/json")
@@ -670,7 +763,7 @@ public final class Social {
 		}
 	}
 
-	private static String string(JsonObject object, String key) {
+	static String string(JsonObject object, String key) {
 		if (object == null || !object.has(key) || object.get(key).isJsonNull()) return null;
 		return object.get(key).getAsString();
 	}

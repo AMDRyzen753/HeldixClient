@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<title>Impressum – HeldixClient</title>
+<meta name="robots" content="noindex">
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+{{include:nav.html}}
+
+<main id="inhalt" class="wrap legal">
+  <h1>Impressum</h1>
+  {{CONFIG_WARNING}}
+
+  <h2>Angaben gemäß § 5 DDG</h2>
+  <address>{{BETREIBER}}<br>{{ANSCHRIFT_HTML}}</address>
+  {{PROJEKT_HTML}}
+
+  <h2>Kontakt</h2>
+  <p>E-Mail: <a href="mailto:{{EMAIL}}">{{EMAIL}}</a>{{TELEFON_HTML}}</p>
+
+  <h2>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV</h2>
+  <p>{{BETREIBER}}, Anschrift wie oben.</p>
+
+  <h2>Hinweis</h2>
+  <p>HeldixClient ist kein offizielles Minecraft-Produkt und nicht von Mojang oder Microsoft genehmigt oder mit ihnen verbunden. „Minecraft“ ist eine Marke von Mojang AB.</p>
+  <p>Für Inhalte externer Seiten, auf die wir verlinken, sind deren Betreiber verantwortlich.</p>
+</main>
+
+{{include:footer.html}}
+</body>
+</html>

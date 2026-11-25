@@ -26,6 +26,7 @@ import {
   DATA_DIR_NAME,
   DISCORD_CLIENT_ID,
   HELDIX_SERVICE_URL,
+  WEBSITE_URL,
   LAUNCHER_NAME,
   LAUNCHER_VERSION,
   MICROSOFT_CLIENT_ID,
@@ -52,8 +53,11 @@ import { buildActivity, parseStatusLine, type GameStatus } from './core/presence
 import { listQuickPlay, validateQuickPlay } from './core/quickplay';
 import { loaderLogos } from './core/loaderlogos';
 import { installOfficialProfile, officialLauncherRunning, officialProfileInstalled, openOfficialLauncher } from './core/officiallauncher';
-import { listNews, newsBody } from './core/news';
+import { listHeldixNews, listNews, newsBody } from './core/news';
+import { webLoginUrl } from './core/weblogin';
 import { skinFor } from './core/skins';
+import { Updater, compareVersions } from './core/updater';
+import { UPDATE_PUBLIC_KEY } from './update-public-key';
 import { Store, type StoredAccount } from './store';
 
 const paths = createPaths(process.env.HELDIX_DATA_DIR ?? defaultDataRoot(DATA_DIR_NAME));
@@ -89,6 +93,71 @@ function setGameState(state: GameState): void {
   gameState = state;
   send('game:state', state);
 }
+
+/**
+ * "Was ist neu": nach einem Update die Hinweise aller Versionen seit der zuletzt gesehenen (GET /v1/launcher/versions).
+ * Bei der ersten Installation nichts zeigen, nur merken.
+ */
+async function whatsNew(): Promise<import('../shared/api').WhatsNew | null> {
+  const current = app.getVersion();
+  const settings = await store.getSettings();
+  const last = settings.lastSeenVersion;
+  if (!last) {
+    await store.saveSettings({ lastSeenVersion: current });
+    return null;
+  }
+  try {
+    if (compareVersions(current, last) <= 0) return null;
+  } catch {
+    return null;
+  }
+  try {
+    const response = await fetch(`${HELDIX_SERVICE_URL.replace(/\/+$/, '')}/v1/launcher/versions?limit=20`, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error(String(response.status));
+    const data = (await response.json()) as { versions?: { version?: unknown; date?: unknown; notes?: unknown }[] };
+    const entries = (data.versions ?? [])
+      .filter((v): v is { version: string; date: unknown; notes: unknown } => typeof v.version === 'string')
+      .filter((v) => {
+        try {
+          return compareVersions(v.version, last) > 0 && compareVersions(v.version, current) <= 0;
+        } catch {
+          return false;
+        }
+      })
+      .map((v) => ({
+        version: v.version,
+        date: typeof v.date === 'string' ? v.date : '',
+        notes: Array.isArray(v.notes) ? v.notes.filter((n): n is string => typeof n === 'string').slice(0, 30) : [],
+      }));
+    if (entries.length === 0 || entries.every((e) => e.notes.length === 0)) {
+      await store.saveSettings({ lastSeenVersion: current });
+      return null;
+    }
+    return { version: current, entries };
+  } catch {
+    // Dienst nicht erreichbar: beim nächsten Start noch einmal
+    return null;
+  }
+}
+
+function gameRunning(): boolean {
+  return gameState.state === 'preparing' || gameState.state === 'running';
+}
+
+// ---------- Automatische Updates (über die Schnittstelle des Heldix-Dienstes) ----------
+
+// In der Entwicklung nur mit HELDIX_UPDATE_URL (zum Testen); die fertige App fragt den Heldix-Dienst.
+const updater = new Updater({
+  baseUrl: process.env.HELDIX_UPDATE_URL ?? (app.isPackaged ? HELDIX_SERVICE_URL : ''),
+  currentVersion: app.getVersion(),
+  dir: path.join(paths.root, 'updates'),
+  publicKey: UPDATE_PUBLIC_KEY,
+  log: (line) => console.log(line),
+});
+updater.onState = (state) => send('update:state', state);
+/** Einstellung "Updates automatisch" (für den Zeitgeber und das Installieren beim Beenden) */
+let autoUpdate = true;
+let quittingForUpdate = false;
 
 // ---------- Discord-Status (Rich Presence) ----------
 
@@ -600,7 +669,16 @@ function registerIpc(): void {
   ipcMain.handle('settings:save', async (_e, patch: Partial<Settings>) => {
     const next = await store.saveSettings(patch);
     applyPresenceSettings(next);
+    autoUpdate = next.autoUpdate;
     return next;
+  });
+  ipcMain.handle('update:state', () => updater.state);
+  ipcMain.handle('update:check', () => updater.check());
+  ipcMain.handle('update:install', async () => {
+    if (gameRunning()) throw new Error('Erst das Spiel beenden, dann aktualisieren.');
+    if (!(await updater.install(true))) throw new Error(updater.state.error ?? 'Kein Update bereit.');
+    quittingForUpdate = true;
+    app.quit();
   });
   ipcMain.handle('discord:status', () => discord.connection);
 
@@ -744,7 +822,28 @@ function registerIpc(): void {
     const account = await store.getActiveAccount();
     return account ? skinFor(paths, account) : null;
   });
-  ipcMain.handle('news:list', () => listNews(paths));
+  // zuerst die Neuigkeiten des HeldixClient-Teams, dann Mojangs Patch Notes
+  ipcMain.handle('news:list', async () => [...(await listHeldixNews(HELDIX_SERVICE_URL)), ...(await listNews(paths))]);
+  ipcMain.handle('web:open', async (_e, page: unknown) => {
+    if (page !== 'neuigkeiten' && page !== 'das-team' && page !== 'status') throw new Error('Unbekannte Seite');
+    await shell.openExternal(`${WEBSITE_URL.replace(/\/+$/, '')}/${page}`);
+  });
+  ipcMain.handle('whatsnew:get', () => whatsNew());
+  ipcMain.handle('whatsnew:seen', async () => {
+    await store.saveSettings({ lastSeenVersion: app.getVersion() });
+  });
+  ipcMain.handle('web:account', async (_e, rawTarget?: unknown) => {
+    const targets = ['profil', 'freunde', 'nachrichten', 'privatsphaere', 'daten', 'support', 'team'];
+    const target = typeof rawTarget === 'string' && targets.includes(rawTarget) ? rawTarget : undefined;
+    const account = await store.getActiveAccount();
+    if (!account) throw new Error('Bitte zuerst ein Konto hinzufügen.');
+    // Offline-Konten haben keine Mojang-Anmeldung; nur zum Testen gegen einen lokalen Dienst (HELDIX_WEB_LOGIN_DEV=1)
+    const devAuth = process.env.HELDIX_WEB_LOGIN_DEV === '1';
+    if (account.type === 'offline' && !devAuth) throw new Error('Für die Webseite brauchst du ein Microsoft-Konto.');
+    const session = await sessionFor(account);
+    const url = await webLoginUrl(HELDIX_SERVICE_URL, session, devAuth, target);
+    await shell.openExternal(url);
+  });
   ipcMain.handle('loader:logos', () => loaderLogos(paths));
   ipcMain.handle('news:body', (_e, id: string) => newsBody(String(id)));
   ipcMain.handle('accounts:addMicrosoft', async () => {
@@ -843,12 +942,22 @@ if (singleInstance) {
     registerIpc();
     await ensureInstances().catch((error) => console.error('[Launcher] Instanzen konnten nicht vorbereitet werden', error));
     createWindow();
-    applyPresenceSettings(await store.getSettings());
+    const settings = await store.getSettings();
+    applyPresenceSettings(settings);
+    autoUpdate = settings.autoUpdate;
+    updater.start(() => autoUpdate);
     await startBridge().catch((error) => console.error('[Launcher] Brücke zum Minecraft Launcher nicht verfügbar', error));
   });
 }
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  // geladenes Update still installieren (nicht, solange das Spiel läuft – es nutzt Dateien des Launchers)
+  if (!quittingForUpdate && autoUpdate && updater.installerPath() && !gameRunning()) {
+    event.preventDefault();
+    quittingForUpdate = true;
+    updater.install(false).finally(() => app.quit());
+    return;
+  }
   // Discord-Status löschen, Port der Brücke austragen
   discord.stop();
   let current: BridgeFile | null = null;

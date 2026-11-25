@@ -83,6 +83,9 @@
     "sprint",
     "crosshair",
     "pin",
-    "friends"
+    "friends",
+    "send",
+    "ban",
+    "flag"
   ]
 }

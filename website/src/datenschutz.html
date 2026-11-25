@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<title>Datenschutz – HeldixClient</title>
+<meta name="description" content="Datenschutzerklärung für die Webseite, den Heldix-Dienst und HeldixClient.">
+<meta name="robots" content="noindex">
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+{{include:nav.html}}
+
+<main id="inhalt" class="wrap legal">
+  <h1>Datenschutz&shy;erklärung</h1>
+  <p class="updated">Stand: {{STAND}}</p>
+  {{CONFIG_WARNING}}
+
+  <h2>Kurz gesagt</h2>
+  <ul>
+    <li>Diese Webseite nutzt kein Tracking und lädt nichts von fremden Servern – auch keine Schriften. Ein Cookie setzt sie nur, wenn du dich im Konto-Bereich anmeldest; es ist technisch nötig und dient nur dieser Anmeldung.</li>
+    <li>HeldixClient selbst schickt keine Nutzungsdaten an uns.</li>
+    <li>Auf der Teamseite steht nur, wer im Team ist und das selbst einschaltet. Die Statusseite zeigt nur Summen, keine Namen.</li>
+    <li>Nur wenn du Freunde, Capes für andere und das Heldix-Symbol nutzt, speichert der Heldix-Dienst deine Minecraft-UUID, deinen Spielernamen, dein Heldix-Cape, deine Einstellungen und deine Freundschaften. Du kannst das jederzeit selbst herunterladen und löschen – im Spiel oder unter <a href="/konto">Konto</a>.</li>
+  </ul>
+
+  <h2>Verantwortlich</h2>
+  <address>{{BETREIBER}}<br>{{ANSCHRIFT_HTML}}<br>E-Mail: <a href="mailto:{{EMAIL}}">{{EMAIL}}</a></address>
+
+  <h2>1. Diese Webseite</h2>
+  <p>Beim Aufruf einer Seite verarbeitet unser Server technisch notwendige Angaben, um sie auszuliefern: deine IP-Adresse, Datum und Uhrzeit, die aufgerufene Adresse und die Kennung deines Browsers. Wir speichern dazu keine Zugriffsprotokolle; die Angaben werden nur für die Dauer der Verbindung verarbeitet.</p>
+  <p>Rechtsgrundlage ist unser berechtigtes Interesse an einer sicheren und funktionierenden Webseite (Art. 6 Abs. 1 lit. f DSGVO).</p>
+  <p>Die Verbindung ist mit HTTPS verschlüsselt. Die Zertifikate dafür stellt Let's Encrypt aus; dabei werden keine Daten von Besuchern übermittelt.</p>
+  <p>Unten auf der Seite steht, ob der Heldix-Dienst erreichbar ist. Die Startseite und die Seiten „Neuigkeiten“, „Status“ und „Das Team“ laden ihre Inhalte (Neuigkeiten, Versionsverlauf, Summen, öffentliche Teamprofile) ebenfalls von unserem eigenen Server. Dafür fragt dein Browser nur bei uns nach; es wird nichts gespeichert. Auch die Köpfe der Team-Mitglieder kommen von unserem Server – dein Browser verbindet sich dafür nicht mit Mojang.</p>
+  <p>Hosting von Webseite und Heldix-Dienst: {{HOSTER}}.</p>
+
+  <h2>2. Heldix-Dienst</h2>
+  <p>Der Heldix-Dienst unter <strong>__API_DOMAIN__</strong> stellt in HeldixClient die Freundesliste, Nachrichten zwischen Freunden, die Capes anderer Spieler und das Heldix-Symbol in der Tab-Liste bereit. Außerdem liefert er neue Versionen des Launchers aus (siehe Abschnitt 3). HeldixClient verbindet sich nur damit, wenn du ein Microsoft-Konto nutzt und den Dienst nicht ausgeschaltet hast (Heldix-Menü → Freunde → Privatsphäre → „Heldix-Dienst nutzen“).</p>
+
+  <h3>Anmeldung</h3>
+  <p>Die Anmeldung läuft wie beim Betreten eines Minecraft-Servers: HeldixClient meldet bei Mojang (Microsoft), dass du dem Heldix-Dienst beitrittst. Der Heldix-Dienst fragt danach bei Mojang nach und erhält von dort deine Minecraft-UUID und deinen Spielernamen. Dein Passwort und dein Zugangs-Token für Minecraft erhält der Dienst nie. Für die Verarbeitung bei Microsoft gilt deren <a href="https://privacy.microsoft.com/de-de/privacystatement">Datenschutzerklärung</a>.</p>
+
+  <h3>Welche Daten gespeichert werden</h3>
+  <ul>
+    <li>Minecraft-UUID und Spielername</li>
+    <li>dein gewähltes Heldix-Cape (eigene Bilder bleiben auf deinem PC und werden nie übertragen)</li>
+    <li>deine Einstellungen: „Für andere erkennbar“, „Online-Status für Freunde“, „Server für Freunde sichtbar“, „Nachrichten von Freunden“</li>
+    <li>Freundschaften und offene Freundschaftsanfragen mit Zeitpunkt</li>
+    <li><strong>Nachrichten</strong> zwischen dir und deinen Freunden: Text, Absender, Empfänger, Zeitpunkt und ob sie gelesen wurden</li>
+    <li>Spieler, die du blockiert hast, mit Zeitpunkt</li>
+    <li><strong>Meldungen:</strong> wer wen wann aus welchem Grund gemeldet hat, ein optionaler Hinweis, die letzten 20 Nachrichten des betroffenen Chats und ob die Meldung erledigt ist (wann und von wem)</li>
+    <li>bei einer Sperre durch den Betreiber oder das Team: UUID, letzter Spielername, Datum, Grund und wer gesperrt hat</li>
+    <li>Zeitpunkt der Anmeldung und der letzten Verbindung</li>
+    <li>Anmelde-Schlüssel des Dienstes, nur als nicht umkehrbarer Hash; sie gelten 7 Tage</li>
+    <li><strong>Anmeldungen auf dieser Webseite</strong> (Konto-Bereich): Zeitpunkt der Anmeldung und der letzten Nutzung und ein kurzer Gerätename aus der Kennung deines Browsers, etwa „Firefox · Windows“; der Sitzungsschlüssel nur als nicht umkehrbarer Hash</li>
+    <li><strong>Support-Anfragen:</strong> Kategorie, Betreff, deine Nachrichten und die Antworten des Teams mit Zeitpunkten, der Status der Anfrage und wann du sie zuletzt geöffnet hast</li>
+  </ul>
+  <p>Nur im Arbeitsspeicher und nur solange HeldixClient verbunden ist: ob du online bist, ob du im Menü, im Einzel- oder Mehrspieler bist und – wenn du es freigibst – die Adresse des Servers mit Port (nur öffentliche Domains wie „hypixel.net“, nie IP-Adressen), damit Freunde dir dorthin folgen können. Zum Schutz vor Missbrauch zählt der Dienst Anfragen je IP-Adresse; diese Zähler liegen ebenfalls nur im Arbeitsspeicher und verfallen nach einer Minute.</p>
+
+  <h3>Wer was sieht</h3>
+  <ul>
+    <li><strong>Andere HeldixClient-Spieler</strong>, die deine UUID kennen – etwa weil ihr auf demselben Server seid –, sehen, dass du HeldixClient nutzt, und dein Heldix-Cape. Das gilt nur, solange du online bist und „Für andere erkennbar“ an ist.</li>
+    <li><strong>Deine Freunde</strong> sehen deinen Spielernamen und, je nach Einstellung, ob du online bist und auf welchem Server du spielst. Spielst du auf einem öffentlichen Server, können sie über „Beitreten“ dorthin folgen.</li>
+    <li>Wer dir eine Freundschaftsanfrage schickt, braucht dafür deinen Spielernamen.</li>
+    <li><strong>Nachrichten</strong> sehen nur du und der Freund, mit dem du schreibst. Ob du eine Nachricht gelesen hast, erfährt er nicht. Die Nachrichten sind auf dem Weg verschlüsselt (HTTPS), liegen beim Dienst aber <strong>nicht Ende-zu-Ende verschlüsselt</strong>. Wir sehen sie uns nur an, wenn ein Chat gemeldet wurde.</li>
+    <li>Wen du blockierst, erfährt das nicht; seine Anfragen an dich werden abgewiesen, als gäbe es dich beim Dienst nicht.</li>
+    <li>Meldest du einen Spieler, sehen wir als Betreiber und unser Team (siehe „Team des Heldix-Dienstes“) die Meldung und die letzten 20 Nachrichten eures Chats, um Missbrauch zu prüfen. Der gemeldete Spieler erfährt nicht, wer ihn gemeldet hat. Ob deine Meldung erledigt ist, siehst du unter Konto → Privatsphäre.</li>
+  </ul>
+
+  <h3>Anmeldung auf dieser Webseite (Konto)</h3>
+  <p>Unter <a href="/konto">Konto</a> kannst du dein Cape, deine Einstellungen, Freunde, Nachrichten, Blockierte und deine Daten auch im Browser verwalten. Ein Passwort gibt es dafür nicht und auch keine Microsoft-Anmeldung auf der Webseite: Der Launcher (Konto-Menü → „Auf heldixclient.com anmelden“) oder das Spiel (Heldix-Menü → Freunde → Privatsphäre → „Im Browser anmelden“), die schon beim Heldix-Dienst angemeldet sind, holen einen Einmal-Link und öffnen damit diese Seite. Der Code darin steht hinter dem #-Zeichen der Adresse, damit er nicht in Server-Protokollen landet. Er gilt 120 Sekunden und nur ein einziges Mal; die Seite entfernt ihn sofort aus der Adresszeile.</p>
+  <p>Nach der Anmeldung setzt die Webseite ein <strong>Cookie</strong> namens <code>__Host-heldix_web</code>. Es enthält nur einen zufälligen Sitzungsschlüssel und ist technisch notwendig, damit du angemeldet bleibst (§ 25 Abs. 2 Nr. 2 TDDDG); eine Einwilligung braucht es dafür nicht. Es gilt nur für diese Webseite, ist für Skripte nicht lesbar (HttpOnly) und wird nur verschlüsselt übertragen. Es gilt höchstens 30 Tage und endet nach 7 Tagen ohne Nutzung, beim Abmelden sofort. Unter <strong>Konto → Meine Daten</strong> siehst du alle angemeldeten Browser und kannst sie einzeln abmelden. Eine Anmeldung im Browser macht dich für Freunde nicht „online“.</p>
+  <p>Unter <strong>Konto → Meine Daten</strong> kannst du außerdem alles, was der Dienst über dich gespeichert hat, als Datei herunterladen (Art. 15 und 20 DSGVO) – Profil, Einstellungen, Freunde, Anfragen, alle gespeicherten Nachrichten, Blockierte, deine Meldungen, deine Support-Anfragen und deine Anmeldungen im Browser – und alles löschen.</p>
+
+  <h3>Support-Anfragen</h3>
+  <p>Unter <strong>Konto → Support</strong> kannst du dem Team schreiben. Die Anfrage (Kategorie, Betreff, Nachrichten, Zeitpunkte) sehen nur du und das Team; das Team sieht dazu deinen Spielernamen und kann von dort aus dein Profil wie unten beschrieben ansehen. In deiner Ansicht steht bei Antworten „HeldixClient-Team“, außer das antwortende Mitglied hat sein Teamprofil öffentlich gemacht – dann sein Spielername. Antwortet das Team, blendet HeldixClient im Spiel einen Hinweis ein.</p>
+  <p>Die Anfragen verarbeiten wir, um dir zu helfen (Art. 6 Abs. 1 lit. b DSGVO). Geschlossene Anfragen löscht der Dienst 90 Tage nach dem Schließen, alle anderen 180 Tage nach der letzten Nachricht. Löschst du deine Daten oder wird dein Konto gesperrt, verschwinden auch deine Anfragen sofort. Sie sind Teil des Daten-Exports.</p>
+
+  <h3>Team des Heldix-Dienstes</h3>
+  <p>Meldungen, Sperren und Neuigkeiten bearbeiten wir mit einem kleinen Team aus Moderatoren und Admins, die sich auf dieser Webseite mit ihrem Spielerkonto und einem zweiten Faktor (Code aus einer Authenticator-App) anmelden. Team-Mitglieder sehen Meldungen samt den mitgeschickten Nachrichten und können Spieler suchen; dabei sehen sie Profil, Einstellungen, die Zeitpunkte von Anmeldung und letzter Verbindung, die Zahl der Freunde und Blockierten und ob es Meldungen oder eine Sperre gibt – aber keine anderen Nachrichten. Admins können außerdem ein Cape zurücksetzen, die Daten eines Spielers löschen und neue Launcher-Versionen veröffentlichen.</p>
+  <p>Für Team-Mitglieder speichert der Dienst zusätzlich die Rolle, wann und von wem sie hinzugefügt wurden und das Geheimnis für die Zwei-Faktor-Anmeldung (TOTP). Jede Änderung durch das Team – zum Beispiel eine Sperre, eine erledigte Meldung, gelöschte Daten, eine Neuigkeit oder ein Update – landet mit Zeitpunkt, handelndem Mitglied und Betroffenem in einem <strong>Protokoll</strong>. Das dient der Nachvollziehbarkeit und dem Schutz vor Missbrauch (Art. 6 Abs. 1 lit. f DSGVO).</p>
+
+  <h3>Teamseite</h3>
+  <p>Auf <a href="/das-team">Das Team</a> stellen sich Team-Mitglieder vor – aber <strong>nur, wenn sie das selbst einschalten</strong> (Einwilligung, Art. 6 Abs. 1 lit. a DSGVO); von sich aus ist niemand zu sehen. Gezeigt werden dann Spielername, Rolle, eine selbst gewählte Aufgabe (bis 40 Zeichen), ein kurzer Text (bis 200 Zeichen), seit wann jemand im Team ist und der Kopf des Minecraft-Skins. Bei Support-Antworten erscheint dann auch der Spielername statt „HeldixClient-Team“.</p>
+  <p>Den Skin holt <strong>unser Server</strong> bei Mojang (Microsoft) zur UUID des Mitglieds ab, hält ihn höchstens 6 Stunden im Arbeitsspeicher und liefert ihn selbst aus. Dein Browser fragt dafür nie bei Mojang an. Die Einwilligung lässt sich jederzeit unter Team-Bereich → „Mein Teamprofil“ zurücknehmen; mit dem Verlassen des Teams ist das Profil gelöscht. Im Protokoll steht dazu nur, wann das Profil öffentlich oder wieder privat wurde.</p>
+
+  <h3>Statusseite und Versionsverlauf</h3>
+  <p>Die Seite <a href="/status">Status</a> zeigt nur Summen: wie viele Spieler gerade mit HeldixClient verbunden sind, wie viele sich insgesamt schon angemeldet haben, die aktuelle Launcher-Version und seit wann der Dienst läuft – keine Namen, keine einzelnen Spieler. Der Versionsverlauf unter <a href="/neuigkeiten">Neuigkeiten</a> enthält nur Versionsnummern, Datum und Änderungen.</p>
+
+  <h3>Neuigkeiten</h3>
+  <p>Neuigkeiten des Teams erscheinen auf der Startseite und im Launcher, jeweils mit dem Spielernamen des Autors. Gespeichert werden Titel, Text, Zeitpunkte und Autor, bis die Neuigkeit gelöscht wird.</p>
+
+  <h3>Zweck, Rechtsgrundlage, Speicherdauer</h3>
+  <p>Die Daten werden verarbeitet, um dir die Funktionen bereitzustellen, die du in HeldixClient nutzt (Art. 6 Abs. 1 lit. b DSGVO), und um den Dienst vor Missbrauch zu schützen (Art. 6 Abs. 1 lit. f DSGVO); Letzteres gilt auch für Meldungen und Sperren.</p>
+  <ul>
+    <li><strong>Nachrichten</strong> löscht der Dienst nach spätestens 30 Tagen, sofort, wenn die Freundschaft endet (Entfernen, Blockieren) oder einer von euch seine Daten löscht. Pro Chat bleiben höchstens die letzten 500 Nachrichten.</li>
+    <li><strong>Meldungen</strong> werden nach 90 Tagen gelöscht, auch wenn sie schon erledigt sind. Löschst du deine Daten, verschwinden auch deine eigenen Meldungen; Meldungen über dich bleiben bis zum Ablauf der 90 Tage, damit Missbrauch geprüft werden kann.</li>
+    <li><strong>Sperren</strong> bleiben, bis wir sie aufheben, auch wenn das gesperrte Konto seine Daten löscht.</li>
+    <li><strong>Anmeldungen auf dieser Webseite</strong> enden nach 30 Tagen, nach 7 Tagen ohne Nutzung oder beim Abmelden und werden dann gelöscht.</li>
+    <li><strong>Team-Mitgliedschaft</strong> und TOTP-Geheimnis bleiben, bis das Mitglied aus dem Team entfernt wird; das <strong>Protokoll</strong> der Team-Aktionen wird nach 365 Tagen gelöscht.</li>
+    <li><strong>Neuigkeiten</strong> bleiben mit dem Namen des Autors, bis sie gelöscht werden.</li>
+    <li><strong>Support-Anfragen</strong> werden 90 Tage nach dem Schließen gelöscht, sonst 180 Tage nach der letzten Nachricht – und sofort, wenn du deine Daten löschst oder gesperrt wirst.</li>
+    <li><strong>Öffentliche Teamprofile</strong> bleiben, bis das Mitglied die Zustimmung zurücknimmt oder das Team verlässt; Skin-Bilder liegen höchstens 6 Stunden im Arbeitsspeicher des Dienstes.</li>
+  </ul>
+  <p>Alles andere bleibt gespeichert, bis du es löschst. Unter <strong>Heldix-Menü → Freunde → Privatsphäre → „Daten beim Dienst löschen“</strong> entfernt der Dienst sofort alles über dich – auch deine Freundschaften und Anfragen in beide Richtungen – und HeldixClient schaltet die Verbindung ab. Das geht auch im Browser unter <strong>Konto → Meine Daten</strong>; dabei enden auch alle Anmeldungen, deine Support-Anfragen und eine Team-Mitgliedschaft samt Teamprofil.</p>
+
+  <h2>3. Launcher und Client</h2>
+  <p>Launcher und Client laufen auf deinem PC. Die Anmeldedaten deines Microsoft-Kontos speichert der Launcher nur dort, verschlüsselt mit Windows (DPAPI). HeldixClient sendet keine Nutzungs- oder Absturzdaten an uns.</p>
+  <p><strong>Updates:</strong> Der Launcher fragt beim Start und danach alle sechs Stunden bei <strong>__API_DOMAIN__</strong> nach einer neuen Version und lädt sie von dort. Dabei verarbeitet unser Server nur technisch notwendige Angaben wie deine IP-Adresse; er speichert dazu keine Protokolle. Jede Version ist von uns digital signiert, der Launcher installiert nur geprüfte Dateien. Abschaltbar im Launcher unter Einstellungen → Updates.</p>
+  <p>Wenn du die jeweilige Funktion nutzt, verbindet sich HeldixClient direkt mit diesen Diensten; für sie gelten deren Datenschutzerklärungen:</p>
+  <ul>
+    <li><strong>Microsoft und Mojang</strong> – Anmeldung, Spieldateien, Skins und Minecraft-Neuigkeiten</li>
+    <li><strong>Modrinth</strong> – Suche und Download von Mods und Shaderpacks</li>
+    <li><strong>Discord</strong> – der Discord-Status; HeldixClient spricht dafür nur mit der Discord-App auf deinem PC (abschaltbar)</li>
+    <li><strong>der offizielle Minecraft Launcher</strong> – falls du dich darüber anmeldest; die Übergabe an HeldixClient bleibt auf deinem PC</li>
+  </ul>
+  <p>Das Spotify-Addon liest den laufenden Song nur aus der Mediensteuerung von Windows und verbindet sich nicht mit dem Internet.</p>
+
+  <h2>4. Deine Rechte</h2>
+  <p>Du hast das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16), Löschung (Art. 17), Einschränkung der Verarbeitung (Art. 18), Datenübertragbarkeit (Art. 20) und Widerspruch (Art. 21). Schreib uns dazu an <a href="mailto:{{EMAIL}}">{{EMAIL}}</a> – die meisten Daten kannst du im Heldix-Menü oder unter <a href="/konto">Konto</a> auch direkt selbst ändern, herunterladen oder löschen.</p>
+  {{AUFSICHT_HTML}}
+</main>
+
+{{include:footer.html}}
+</body>
+</html>

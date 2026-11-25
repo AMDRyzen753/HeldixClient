@@ -14,6 +14,7 @@ import dev.heldixclient.module.impl.ChatModule;
 import dev.heldixclient.module.impl.WaypointsModule;
 import dev.heldixclient.screen.HeldixMenuScreen;
 import dev.heldixclient.social.Badge;
+import dev.heldixclient.social.Messages;
 import dev.heldixclient.social.Social;
 import dev.heldixclient.transform.Hooks;
 import dev.heldixclient.ui.Shell;
@@ -259,6 +260,13 @@ final class FeatureTests {
 			t.check("Freundschaftsanfrage kommt in Echtzeit an", t.compute(mc -> Social.incoming().stream().anyMatch(r -> r.uuid().equals(friendId))));
 			t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.FRIENDS));
 			t.waitTicks(8);
+			t.check("Freunde: Reiter Freunde, Anfragen, Privatsphäre",
+					t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabIds()).equals(List.of("FRIENDS", "MESSAGES", "REQUESTS", "PRIVACY")));
+			t.check("Seitenleiste zeigt die offene Anfrage", "1".equals(t.compute(mc -> Shell.badge(Shell.Page.FRIENDS))));
+			t.screenshot("heldix-26a-freunde-hinweis");
+			AutoTest.openPage(t, "REQUESTS");
+			t.moveMouse(5, 5);
+			t.waitTicks(4);
 			t.screenshot("heldix-26-freunde-anfrage");
 			t.run(mc -> Social.accept(friendId));
 			t.waitSoft(mc -> Social.friends().stream().anyMatch(f -> f.uuid().equals(friendId) && f.online()), 10);
@@ -271,8 +279,58 @@ final class FeatureTests {
 			friendSocket.sendText(status.toString(), true).get(5, TimeUnit.SECONDS);
 			t.waitSoft(mc -> Social.friends().stream().anyMatch(f -> "Spielt auf hypixel.net".equals(f.activity())), 10);
 			t.check("Status der Freundin: Spielt auf hypixel.net", t.compute(mc -> Social.friends().stream().anyMatch(f -> "Spielt auf hypixel.net".equals(f.activity()))));
-			t.waitTicks(4);
+
+			// Server mit eigenem Port: der Port bleibt erhalten (zum Beitreten nötig)
+			status.addProperty("server", "mc.heldix-test.de:25570");
+			friendSocket.sendText(status.toString(), true).get(5, TimeUnit.SECONDS);
+			t.waitSoft(mc -> Social.friends().stream().anyMatch(f -> "mc.heldix-test.de:25570".equals(f.server())), 10);
+			t.check("Server mit Port: mc.heldix-test.de:25570", t.compute(mc -> Social.friends().stream().anyMatch(f -> "mc.heldix-test.de:25570".equals(f.server()))));
+			status.addProperty("server", "hypixel.net");
+			friendSocket.sendText(status.toString(), true).get(5, TimeUnit.SECONDS);
+			t.waitSoft(mc -> Social.friends().stream().anyMatch(f -> "hypixel.net".equals(f.server())), 10);
+			t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.FRIENDS));
+			t.waitTicks(8);
+			t.check("Knopf „Beitreten“ bei der Freundin (hypixel.net)", t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).canJoin(friendId)));
 			t.screenshot("heldix-27-freunde");
+			AutoTest.openPage(t, "PRIVACY");
+			t.moveMouse(5, 5);
+			t.waitTicks(4);
+			t.screenshot("heldix-27b-privatsphaere");
+
+			// Nachrichten: Freundin schreibt, ungelesen in der Seitenleiste, Chat öffnen, antworten, melden
+			UUID ownId = t.compute(mc -> mc.getUser().getProfileId());
+			JsonObject hello = new JsonObject();
+			hello.addProperty("text", "Hallo! Kommst du mit auf hypixel.net?");
+			request(base, "POST", "/v1/messages/" + Social.compact(ownId), hello, token);
+			t.waitSoft(mc -> Messages.unread(friendId) >= 1, 10);
+			t.check("Nachricht kommt in Echtzeit an (ungelesen)", t.compute(mc -> Messages.unread(friendId)) == 1);
+			t.check("Reiter Nachrichten zeigt die ungelesene Nachricht", "1".equals(t.compute(mc -> Shell.badge(Shell.Page.MESSAGES))));
+			t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.MESSAGES));
+			t.waitSoft(mc -> Messages.conversationsLoaded() && !Messages.conversations().isEmpty(), 10);
+			t.check("Unterhaltung in der Liste", t.compute(mc -> Messages.conversations().stream().anyMatch(c -> c.uuid().equals(friendId))));
+			t.moveMouse(5, 5);
+			t.waitTicks(4);
+			t.screenshot("heldix-27c-nachrichten");
+			t.setScreen(() -> new HeldixMenuScreen(null, friendId, "Freundin"));
+			t.waitSoft(mc -> !Messages.history(friendId).isEmpty(), 10);
+			t.waitSoft(mc -> Messages.unread(friendId) == 0, 5);
+			t.check("Offener Chat gilt als gelesen", t.compute(mc -> Messages.unread(friendId)) == 0);
+			java.util.concurrent.CompletableFuture<Void> sent = t.compute(mc -> Messages.send(friendId, "Klar, bin gleich da!"));
+			sent.get(10, TimeUnit.SECONDS);
+			t.waitSoft(mc -> Messages.history(friendId).size() >= 2, 10);
+			JsonObject chat = request(base, "GET", "/v1/messages/" + Social.compact(ownId), null, token);
+			t.check("Antwort kommt bei der Freundin an", chat.toString().contains("Klar, bin gleich da!"));
+			t.waitTicks(4);
+			t.screenshot("heldix-27d-chat");
+			java.util.concurrent.CompletableFuture<Void> reported = t.compute(mc -> Messages.report(friendId, "other", "Autotest"));
+			String reportResult;
+			try {
+				reported.get(10, TimeUnit.SECONDS);
+				reportResult = "ok";
+			} catch (Exception e) {
+				reportResult = String.valueOf(e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
+			}
+			t.check("Melden geht (" + reportResult + ")", "ok".equals(reportResult));
 
 			// Heldix-Symbol vor dem eigenen Namen in der Tab-Liste
 			t.setScreen(() -> null);
@@ -306,8 +364,33 @@ final class FeatureTests {
 			t.waitTicks(10);
 			t.screenshot("heldix-29-cape-anderer-spieler");
 
-			t.run(mc -> Social.removeFriend(friendId));
-			t.waitSoft(mc -> Social.friends().isEmpty(), 10);
+			// Blockieren: Freundschaft und Chat weg, Freundin kann keine Anfrage mehr schicken; dann freigeben
+			t.run(mc -> Messages.block(friendId));
+			t.waitSoft(mc -> Social.friends().isEmpty() && Messages.blocked().stream().anyMatch(b -> b.uuid().equals(friendId)), 10);
+			t.check("Blockiert: Freundschaft weg, Freundin in der Liste der Blockierten",
+					t.compute(mc -> Social.friends().isEmpty() && Messages.blocked().stream().anyMatch(b -> b.uuid().equals(friendId))));
+			String blockedReply;
+			try {
+				request(base, "POST", "/v1/friends/requests", friendRequest, token);
+				blockedReply = "angenommen";
+			} catch (IllegalStateException e) {
+				blockedReply = e.getMessage();
+			}
+			t.check("Blockierte Spielerin kann keine Anfrage schicken (" + blockedReply + ")", blockedReply.contains(": 404 "));
+			String chatAfterBlock;
+			try {
+				chatAfterBlock = request(base, "GET", "/v1/messages/" + Social.compact(ownId), null, token).toString();
+			} catch (IllegalStateException e) {
+				chatAfterBlock = e.getMessage();
+			}
+			t.check("Chat nach dem Blockieren gelöscht", !chatAfterBlock.contains("Klar, bin gleich da!"));
+			t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.PRIVACY));
+			t.waitTicks(8);
+			t.screenshot("heldix-27e-blockiert");
+			t.run(mc -> Messages.unblock(friendId));
+			t.waitSoft(mc -> Messages.blocked().isEmpty(), 10);
+			t.check("Freigegeben", t.compute(mc -> Messages.blocked().isEmpty()));
+			t.setScreen(() -> null);
 			t.check("Freundin entfernt", t.compute(mc -> Social.friends().stream().noneMatch(f -> f.uuid().equals(friendId))));
 
 			// Daten beim Dienst löschen: danach ist der Dienst aus und kennt den Spieler nicht mehr

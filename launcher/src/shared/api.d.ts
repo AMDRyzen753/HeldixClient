@@ -41,6 +41,31 @@ export interface Settings {
   jvmTuning: boolean;
   /** Entwickleroptionen (Offline-Konten ohne Microsoft-Konto, nur mit Entwickler-Schlüssel) */
   developerMode: boolean;
+  /** neue Launcher-Versionen im Hintergrund laden und beim Beenden installieren */
+  autoUpdate: boolean;
+  /** zuletzt gesehene Version für "Was ist neu" (null = noch nie) */
+  lastSeenVersion: string | null;
+}
+
+/** "Was ist neu" nach einem Update: alle Versionen seit der zuletzt gesehenen */
+export interface WhatsNew {
+  version: string;
+  entries: { version: string; date: string; notes: string[] }[];
+}
+
+/** Bereich auf heldixclient.com nach der Anmeldung */
+export type WebTarget = 'profil' | 'freunde' | 'nachrichten' | 'privatsphaere' | 'daten' | 'support' | 'team';
+
+/** Stand der automatischen Updates (siehe main/core/updater.ts) */
+export interface UpdateState {
+  phase: 'disabled' | 'idle' | 'checking' | 'current' | 'downloading' | 'ready' | 'error';
+  current: string;
+  version?: string;
+  notes?: string[];
+  date?: string;
+  progress?: number;
+  error?: string;
+  checkedAt?: number;
 }
 
 export interface DeveloperStatus {
@@ -239,11 +264,15 @@ export interface NewsEntry {
   id: string;
   title: string;
   version: string;
-  type: 'release' | 'snapshot';
+  /** heldix = Neuigkeit vom HeldixClient-Team (über den Heldix-Dienst) */
+  type: 'release' | 'snapshot' | 'heldix';
   /** ISO-Datum */
   date: string;
   summary: string;
   image: string | null;
+  /** nur bei heldix: ganzer Text (reiner Text, Absätze durch Leerzeilen) und Autor */
+  text?: string;
+  author?: string;
 }
 
 export interface QuickPlayTarget {
@@ -339,4 +368,18 @@ export interface HeldixApi {
   onGameState(callback: (state: GameState) => void): () => void;
   getDiscordStatus(): Promise<DiscordStatus>;
   onDiscordStatus(callback: (status: DiscordStatus) => void): () => void;
+
+  getUpdateState(): Promise<UpdateState>;
+  checkForUpdate(): Promise<UpdateState>;
+  /** startet den Installer und beendet den Launcher (er öffnet sich danach neu) */
+  installUpdate(): Promise<void>;
+  onUpdateState(callback: (state: UpdateState) => void): () => void;
+
+  /** öffnet heldixclient.com im Browser, schon angemeldet (Profil, Freunde, Nachrichten, Support, Team-Bereich) */
+  openWebAccount(target?: WebTarget): Promise<void>;
+  /** öffnet eine öffentliche Seite von heldixclient.com, z. B. "neuigkeiten" */
+  openWebsite(page: 'neuigkeiten' | 'das-team' | 'status'): Promise<void>;
+  /** null = nichts Neues zu zeigen */
+  getWhatsNew(): Promise<WhatsNew | null>;
+  markWhatsNewSeen(): Promise<void>;
 }

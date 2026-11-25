@@ -183,6 +183,10 @@ public final class AutoTest implements HeldixModInitializer {
 		int[] multiplayer = t.widgetCenter(w -> w.getMessage().getString().equals("Mehrspieler"), "Mehrspieler");
 		t.moveMouse(multiplayer[0], multiplayer[1]);
 		t.screenshot("heldix-01-hauptmenue");
+		t.check("Hauptmenü zeigt die Spielfigur mit Cape", t.compute(mc -> mc.gui.screen().children().stream()
+				.anyMatch(w -> w instanceof dev.heldixclient.screen.FigureWidget)));
+		t.check("Hauptmenü hat den Knopf Cape", t.compute(mc -> mc.gui.screen().children().stream()
+				.anyMatch(w -> w instanceof net.minecraft.client.gui.components.AbstractWidget a && "Cape".equals(a.getMessage().getString()))));
 
 		// Weg 1: Hauptmenü → Seitenleiste "Module" → Karte anklicken
 		t.clickWidget("Module");
@@ -221,11 +225,15 @@ public final class AutoTest implements HeldixModInitializer {
 
 		t.setScreen(() -> new HeldixMenuScreen(null));
 		t.waitTicks(10);
-		t.screenshot("heldix-03-heldix-menue");
+		t.check("Heldix-Menü öffnet mit der Übersicht", "OVERVIEW".equals(t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).currentTab())));
+		t.screenshot("heldix-03a-uebersicht");
 		clickTest(t, "direkt geöffnet");
+		t.screenshot("heldix-03-heldix-menue");
 
-		int[] addonsTab = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).addonsTabCenter());
-		t.click(addonsTab[0], addonsTab[1]);
+		// Unter-Menüs: Einstellungen → Reiter Addons (Seitenleiste, dann Reiter)
+		openPage(t, "ADDONS");
+		t.check("Einstellungen haben die Reiter Allgemein, Addons und Info",
+				t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabIds()).equals(java.util.List.of("SETTINGS", "ADDONS", "INFO")));
 		t.moveMouse(350, 235);
 		t.waitTicks(5);
 		t.screenshot("heldix-03b-addons");
@@ -281,8 +289,9 @@ public final class AutoTest implements HeldixModInitializer {
 		hudEditorTest(t, start, leftButton);
 
 		t.setScreen(() -> new PauseScreen(true));
-		t.waitTicks(5);
+		t.waitTicks(8);
 		t.screenshot("heldix-05-pausemenue");
+		pauseTest(t);
 		t.setScreen(() -> null);
 
 		// Zoom mit Bezugsobjekt in Blickrichtung (Süden)
@@ -532,7 +541,7 @@ public final class AutoTest implements HeldixModInitializer {
 
 	/** Shader-Stile, F3-Menü, FPS-Boost und Hintergrund-FPS in der Testwelt. */
 	private static void graphicsTest(TestContext t) {
-		t.setScreen(() -> new HeldixMenuScreen(null));
+		t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.MODULES));
 		t.waitTicks(5);
 		// Untermenü eines Moduls über das Regler-Symbol (erste Karte: FPS)
 		int[] gear = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).settingsIconCenter(0));
@@ -573,13 +582,20 @@ public final class AutoTest implements HeldixModInitializer {
 		t.moveMouse(chip[0], chip[1]);
 		t.waitTicks(5);
 		t.screenshot("heldix-03c-shader");
-		for (String name : new String[] {"PERFORMANCE", "SETTINGS"}) {
-			int[] other = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabCenter(name));
-			t.click(other[0], other[1]);
-			t.moveMouse(other[0], other[1]);
+		for (String name : new String[] {"PERFORMANCE", "SETTINGS", "INFO"}) {
+			openPage(t, name);
+			t.moveMouse(5, 5);
 			t.waitTicks(4);
 			t.screenshot("heldix-03d-" + name.toLowerCase(java.util.Locale.ROOT));
 		}
+		// Reiter der Seite Module filtern die Kacheln
+		openPage(t, "MODULES");
+		int[] hudTab = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabCenter("filter:HUD"));
+		t.click(hudTab[0], hudTab[1]);
+		t.waitTicks(3);
+		t.moveMouse(5, 5);
+		t.waitTicks(4);
+		t.screenshot("heldix-03e-module-hud");
 		t.setScreen(() -> null);
 
 		// Iris-Shaderpack aktiv (Fabric-Instanz mit z. B. BSL): Heldix-Shader müssen pausieren
@@ -668,16 +684,58 @@ public final class AutoTest implements HeldixModInitializer {
 				.orElseThrow(() -> new IllegalStateException(module.id() + " hat keinen Regler " + label));
 	}
 
+	/** Öffnet im Heldix-Menü eine Seite wie ein Spieler: Kategorie in der Seitenleiste, dann der Reiter. */
+	static void openPage(TestContext t, String name) {
+		for (int i = 0; i < 3 && !name.equals(t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).currentTab())); i++) {
+			int[] center = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabCenter(name));
+			t.click(center[0], center[1]);
+			t.waitTicks(3);
+		}
+		t.check("Seite " + name + " ist offen", name.equals(t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).currentTab())));
+	}
+
 	/** Klickt im offenen Heldix-Menü auf die erste Modul-Karte und prüft, dass sie umschaltet (und schaltet zurück). */
 	private static void clickTest(TestContext t, String way) {
 		String screen = t.compute(mc -> String.valueOf(mc.gui.screen()));
 		t.check(way + ": Heldix-Menü ist offen", screen.contains("HeldixMenuScreen"));
+		if (!"MODULES".equals(t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).currentTab()))) {
+			int[] modules = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabCenter("MODULES"));
+			t.click(modules[0], modules[1]);
+			t.waitTicks(3);
+		}
 		boolean before = t.compute(mc -> ModuleManager.all().getFirst().isEnabled());
 		int[] card = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).cardCenter(0));
 		t.click(card[0], card[1]);
 		boolean after = t.compute(mc -> ModuleManager.all().getFirst().isEnabled());
 		t.check(way + ": Klick auf Karte schaltet das Modul um", before != after);
 		t.click(card[0], card[1]);
+	}
+
+	/** Pausemenü: in breiten Fenstern Karten mit Freunden, Wegpunkten und Schnellschaltern */
+	private static void pauseTest(TestContext t) {
+		t.check("Pausemenü ist das Heldix-Pausemenü (neu)", t.compute(mc -> mc.gui.screen() instanceof PauseMenuScreen));
+		java.util.List<dev.heldixclient.screen.ToggleChip> toggles = t.compute(mc -> ((PauseMenuScreen) mc.gui.screen()).toggles());
+		if (toggles.isEmpty()) {
+			t.log("Pausemenü ohne Schnellschalter (sehr kleines Fenster)");
+			return;
+		}
+		t.check("Pausemenü: mindestens vier Schnellschalter (" + toggles.size() + ")", toggles.size() >= 4);
+		dev.heldixclient.screen.ToggleChip first = toggles.getFirst();
+		boolean before = first.isOn();
+		t.click(first.getX() + first.getWidth() / 2.0, first.getY() + first.getHeight() / 2.0);
+		t.check("Schnellschalter schaltet das Modul um", first.isOn() != before);
+		t.click(first.getX() + first.getWidth() / 2.0, first.getY() + first.getHeight() / 2.0);
+		int count = t.compute(mc -> dev.heldixclient.waypoint.Waypoints.current(mc).size());
+		int[] setHere = t.widgetCenter(w -> w.getMessage().getString().equals("Hier setzen") || w.getMessage().getString().equals("Wegpunkt"), "Wegpunkt setzen");
+		t.click(setHere[0], setHere[1]);
+		t.check("Pausemenü: Wegpunkt hier setzen", t.compute(mc -> dev.heldixclient.waypoint.Waypoints.current(mc).size()) == count + 1);
+		t.run(mc -> {
+			java.util.List<dev.heldixclient.waypoint.Waypoints.Waypoint> list = dev.heldixclient.waypoint.Waypoints.current(mc);
+			list.removeLast();
+			dev.heldixclient.waypoint.Waypoints.save();
+		});
+		t.waitTicks(3);
+		t.screenshot("heldix-05b-pausemenue-karten");
 	}
 
 	private static void createFlatWorld(TestContext t) {
@@ -693,6 +751,10 @@ public final class AutoTest implements HeldixModInitializer {
 		});
 		t.waitTicks(2);
 		t.clickTranslatable("selectWorld.create");
+		if (t.waitSoft(mc -> mc.gui.screen() instanceof net.minecraft.client.gui.screens.LevelLoadingScreen, 20)) {
+			t.waitTicks(4);
+			t.screenshot("heldix-01d-welt-laden");
+		}
 		t.waitFor("Welt geladen", mc -> mc.level != null && mc.player != null && mc.gui.screen() == null, 180);
 		if (!t.waitSoft(mc -> mc.levelRenderer.hasRenderedAllSections(), 30)) t.log("Nicht alle Chunks gezeichnet, mache trotzdem weiter");
 		t.waitTicks(20);

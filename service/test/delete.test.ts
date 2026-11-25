@@ -104,7 +104,7 @@ describe('Konto löschen', () => {
 
         // Wer offline war, sieht es beim nächsten Abruf.
         const offlineList = await api(service.url, 'GET', '/v1/friends', { token: freundOffline.token });
-        assert.deepEqual(offlineList.body, { friends: [], incoming: [], outgoing: [] });
+        assert.deepEqual(offlineList.body, { friends: [], incoming: [], outgoing: [], unread: {} });
 
         // Das alte Token gilt nicht mehr, auch nicht für den WebSocket.
         assert.equal((await api(service.url, 'GET', '/v1/me', { token: weg.token })).status, 401);
@@ -131,9 +131,9 @@ describe('Konto löschen', () => {
       const again = await api(service.url, 'POST', '/v1/auth/dev', { body: { name: 'Loeschmich', uuid: weg.uuid } });
       assert.equal(again.status, 200);
       const me = await api(service.url, 'GET', '/v1/me', { token: again.body.token });
-      assert.deepEqual(me.body, { uuid: weg.uuid, name: 'Loeschmich', cape: '', visible: true, presence: true, showServer: true });
+      assert.deepEqual(me.body, { uuid: weg.uuid, name: 'Loeschmich', cape: '', visible: true, presence: true, showServer: true, messages: true });
       const list = await api(service.url, 'GET', '/v1/friends', { token: again.body.token });
-      assert.deepEqual(list.body, { friends: [], incoming: [], outgoing: [] });
+      assert.deepEqual(list.body, { friends: [], incoming: [], outgoing: [], unread: {} });
       // Die anderen Spieler sind davon unberührt.
       assert.equal((await api(service.url, 'GET', '/v1/me', { token: freund.token })).status, 200);
     } finally {
@@ -186,7 +186,7 @@ describe('Konto löschen', () => {
 
       const fresh = await login();
       const me = await api(service.url, 'GET', '/v1/me', { token: fresh });
-      assert.deepEqual(me.body, { uuid, name: 'Wiederkehr', cape: '', visible: true, presence: true, showServer: true });
+      assert.deepEqual(me.body, { uuid, name: 'Wiederkehr', cape: '', visible: true, presence: true, showServer: true, messages: true });
     } finally {
       await service.close();
       await mojang.close();

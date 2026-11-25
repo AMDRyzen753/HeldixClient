@@ -71,6 +71,8 @@ public class HeldixClient implements HeldixModInitializer {
 
 		// zuletzt besuchten Server merken (Startseite: "Weiterspielen" bzw. Mehrspieler-Karte)
 		WorldEvents.JOIN.register(HeldixClient::rememberServer);
+		// Spielzeit der Sitzung für das Pausemenü
+		dev.heldixclient.screen.PauseMenuScreen.trackSession();
 
 		// Pausemenü: direkter Zugang zum Heldix-Menü
 		ScreenEvents.AFTER_INIT.register((minecraft, screen, width, height) -> {

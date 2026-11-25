@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<title>Das Team – HeldixClient</title>
+<meta name="description" content="Die Menschen hinter HeldixClient: Entwicklung, Moderation und Support.">
+<meta property="og:title" content="Das Team – HeldixClient">
+<script type="module" src="/das-team.js"></script>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"></div>
+{{include:nav.html}}
+
+<main id="inhalt" class="wrap public-page">
+  <div class="page-head">
+    <span class="eyebrow">Das Team</span>
+    <h1>Die Menschen hinter HeldixClient</h1>
+    <p class="lead">HeldixClient ist ein kleines, quelloffenes Projekt. Diese Leute entwickeln es weiter, prüfen Meldungen und beantworten Support-Anfragen. Hier steht nur, wer das selbst möchte.</p>
+  </div>
+
+  <div class="team-grid" id="team-liste" aria-live="polite" aria-busy="true">
+    <div class="loading-inline" role="status"><span class="spinner" aria-hidden="true"></span><span>Wird geladen …</span></div>
+  </div>
+  <noscript><p class="notice">Die Teamseite braucht JavaScript.</p></noscript>
+
+  <section class="contact" aria-labelledby="kontakt-titel">
+    <div class="section-head">
+      <span class="eyebrow">Kontakt</span>
+      <h2 id="kontakt-titel">So erreichst du das Team</h2>
+    </div>
+    <div class="contact-grid">
+      <div class="app-card contact-card">
+        <span class="way-icon">{{icon:info}}</span>
+        <h3>Support-Anfrage</h3>
+        <p>Fragen, Fehler oder Probleme mit deinem Konto: Schreib uns unter <strong>Konto → Support</strong>. Die Antwort siehst du dort und im Spiel.</p>
+        <p><a class="button small" href="/konto#support">Zum Support</a></p>
+      </div>
+      <div class="app-card contact-card">
+        <span class="way-icon">{{icon:flag}}</span>
+        <h3>Spieler melden</h3>
+        <p>Belästigt dich jemand im Chat, melde ihn direkt in der Unterhaltung – im Spiel oder unter <strong>Konto → Nachrichten</strong>. Das Team sieht dann die letzten Nachrichten.</p>
+      </div>
+      <div class="app-card contact-card">
+        <span class="way-icon">{{icon:file}}</span>
+        <h3>Rechtliches</h3>
+        <p>Für alles andere gibt es die Kontaktdaten im <a href="/impressum">Impressum</a>. Was wir speichern, steht in der <a href="/datenschutz">Datenschutzerklärung</a>.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+{{include:icons.html}}
+{{include:footer.html}}
+</body>
+</html>

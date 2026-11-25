@@ -34,12 +34,17 @@ export interface FriendsPayload {
   friends: Friend[];
   incoming: FriendRequest[];
   outgoing: FriendRequest[];
+  /** Ungelesene Nachrichten pro Freund (nur Freunde mit mindestens einer). */
+  unread: Record<string, number>;
 }
 
 export interface FriendLimits {
   maxFriends: number;
   maxOutgoing: number;
 }
+
+/** Text für unbekannte Namen. Wer blockiert wurde, bekommt genau denselben (die Blockierung bleibt verborgen). */
+export const UNKNOWN_PLAYER = 'Dieser Spieler nutzt HeldixClient nicht (oder war noch nie online).';
 
 export function friendView(user: UserRow, since: number, presence: Presence): Friend {
   return {
@@ -58,6 +63,7 @@ export function friendsPayload(store: Store, presence: PresenceSource, uuid: str
     friends: store.listFriends(uuid).map(({ user, since }) => friendView(user, since, presence.presenceOf(user))),
     incoming: store.listIncoming(uuid),
     outgoing: store.listOutgoing(uuid),
+    unread: store.unreadCounts(uuid),
   };
 }
 
@@ -75,8 +81,12 @@ export class Friends {
   /** `POST /v1/friends/requests` mit `{ name }`. */
   request(me: UserRow, name: string): FriendsPayload {
     const target = this.store.findUserByName(name);
-    if (!target) throw new HttpError(404, 'Dieser Spieler nutzt HeldixClient nicht (oder war noch nie online).');
+    // Hat der andere mich blockiert, sieht es aus wie ein unbekannter Name.
+    if (!target || this.store.isBlocked(target.uuid, me.uuid)) throw new HttpError(404, UNKNOWN_PLAYER);
     if (target.uuid === me.uuid) throw new HttpError(400, 'Du kannst dir nicht selbst eine Freundschaftsanfrage schicken.');
+    if (this.store.isBlocked(me.uuid, target.uuid)) {
+      throw new HttpError(409, 'Du hast diesen Spieler blockiert. Gib ihn zuerst frei.');
+    }
     if (this.store.friendsSince(me.uuid, target.uuid) !== undefined) {
       throw new HttpError(409, `Du bist schon mit ${target.name} befreundet.`);
     }
@@ -126,7 +136,7 @@ export class Friends {
     return this.list(me.uuid);
   }
 
-  /** `DELETE /v1/friends/<uuid>`: Freundschaft beenden. */
+  /** `DELETE /v1/friends/<uuid>`: Freundschaft beenden (die Unterhaltung wird mit gelöscht). */
   removeFriend(me: UserRow, otherUuid: string): FriendsPayload {
     if (this.store.removeFriendship(me.uuid, otherUuid)) {
       this.realtime.pushFriends(otherUuid);
