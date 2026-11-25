@@ -63,6 +63,8 @@
     "palette",
     "monitor",
     "star",
+    "cape",
+    "image",
     "loader-heldix",
     "loader-fabric",
     "loader-vanilla",
@@ -75,6 +77,12 @@
     "copy",
     "news",
     "user-plus",
-    "microsoft"
+    "microsoft",
+    "shield",
+    "potion",
+    "sprint",
+    "crosshair",
+    "pin",
+    "friends"
   ]
 }

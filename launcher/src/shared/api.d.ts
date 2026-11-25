@@ -176,8 +176,15 @@ export interface AccountInfo {
   name: string;
   uuid: string;
   skinUrl?: string;
+  /** angemeldet über den offiziellen Minecraft Launcher */
+  via?: 'launcher';
   active: boolean;
 }
+
+/** Warten auf die Anmeldung über den offiziellen Minecraft Launcher */
+export type BridgeState =
+  | { waiting: false }
+  | { waiting: true; /** nur anmelden oder danach das Spiel starten */ purpose: 'login' | 'launch'; /** war der Minecraft Launcher schon offen? */ launcherWasRunning: boolean };
 
 export interface ProgressEvent {
   stage: string;
@@ -308,6 +315,13 @@ export interface HeldixApi {
   getNewsBody(id: string): Promise<string>;
   addMicrosoftAccount(): Promise<AccountInfo>;
   addOfflineAccount(name: string): Promise<AccountInfo>;
+  /** Anmeldung über den offiziellen Minecraft Launcher (Installation „HeldixClient“ dort starten) */
+  addAccountViaLauncher(): Promise<AccountInfo>;
+  cancelBridge(): Promise<void>;
+  reopenOfficialLauncher(): Promise<void>;
+  onBridgeState(callback: (state: BridgeState) => void): () => void;
+  /** Konten haben sich geändert (z. B. Anmeldung über den Minecraft Launcher) */
+  onAccountsChanged(callback: () => void): () => void;
   getDeveloperStatus(): Promise<DeveloperStatus>;
   /** Signaturschlüssel (signing-key.pem) oder Entwickler-Schlüssel (developer.key) auswählen; null = abgebrochen */
   importDeveloperKey(): Promise<DeveloperStatus | null>;

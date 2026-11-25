@@ -148,6 +148,8 @@ async function main(): Promise<void> {
   const tuningArgs = tuning ? tunedJvmArguments(prepared.javaMajor, []) : [];
   const testArgs: string[] = [];
   if (autotest) testArgs.push('-Dheldix.autotest=true');
+  // --service=<url>: Heldix-Dienst im Entwicklungsmodus (Anmeldung ohne Mojang, nur für Tests)
+  if (flag('service')) testArgs.push(`-Dheldixclient.service=${flag('service')}`, '-Dheldixclient.service.dev=true');
   if (autotest && graphicsArgs.length) testArgs.push(`-Dheldix.autotest.backend=${graphicsApi === 'vulkan' ? 'Vulkan' : 'OpenGL'}`);
   if (benchmark) {
     testArgs.push('-Dheldix.benchmark=true', `-Dheldix.benchmark.seconds=${benchmarkSeconds}`);

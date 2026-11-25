@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import dev.heldixclient.HeldixClient;
 import dev.heldixclient.addon.AddonManager;
 import dev.heldixclient.config.HeldixConfig;
+import dev.heldixclient.cosmetic.Capes;
 import dev.heldixclient.loader.HeldixLoader;
 import dev.heldixclient.loader.api.HeldixModInitializer;
 import dev.heldixclient.loader.api.ModInfo;
@@ -26,6 +27,8 @@ import dev.heldixclient.screen.ServersScreen;
 import dev.heldixclient.screen.StartCard;
 import dev.heldixclient.screen.WorldsScreen;
 import dev.heldixclient.ui.Shell;
+import com.mojang.blaze3d.platform.NativeImage;
+import net.minecraft.client.CameraType;
 import net.minecraft.client.CloudStatus;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.PauseScreen;
@@ -50,6 +53,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Method;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -187,6 +191,15 @@ public final class AutoTest implements HeldixModInitializer {
 		t.setScreen(TitleScreen::new);
 		t.waitForScreen(TitleScreen.class, 10);
 
+		// Cape-Seite im Hauptmenü: Spielerfigur ohne Welt
+		t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.CAPE));
+		// Vorschaubilder werden im Hintergrund geladen
+		t.waitTicks(40);
+		t.check("Cape-Seite im Hauptmenü", t.compute(mc -> mc.gui.screen() instanceof HeldixMenuScreen menu && "CAPE".equals(menu.currentTab())));
+		t.screenshot("heldix-01c-cape-hauptmenue");
+		t.setScreen(TitleScreen::new);
+		t.waitForScreen(TitleScreen.class, 10);
+
 		// --- Welt ---------------------------------------------------------------------------
 		createFlatWorld(t);
 		t.check("Welt-betreten-Event", joined);
@@ -287,6 +300,9 @@ public final class AutoTest implements HeldixModInitializer {
 		t.run(mc -> HeldixClient.zoomKey.setDown(false));
 
 		graphicsTest(t);
+		// Rüstung, Trank-Effekte, Dauersprint, Freelook, Fadenkreuz, Chat, Wegpunkte; Heldix-Dienst (mit --service)
+		FeatureTests.modules(t);
+		FeatureTests.social(t);
 
 		// Welt verlassen
 		t.run(mc -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));
@@ -411,6 +427,109 @@ public final class AutoTest implements HeldixModInitializer {
 		});
 	}
 
+	/** Capes: Auswahl über die Kacheln, Skin des eigenen Spielers, eigenes Bild, Ansicht von hinten. */
+	private static void capeTest(TestContext t) {
+		// Cape-Bilder werden im Hintergrund geladen: kurz warten
+		t.waitSoft(mc -> capePathNow(mc).contains("cape/heldix"), 10);
+		t.check("Eigener Spieler trägt das Heldix-Cape", capePath(t).contains("cape/heldix"));
+		t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.CAPE));
+		t.waitTicks(8);
+		int[] aurora = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).capeCenter(3));
+		t.moveMouse(aurora[0], aurora[1]);
+		t.waitTicks(6);
+		t.screenshot("heldix-03g-cape");
+		t.click(aurora[0], aurora[1]);
+		t.waitSoft(mc -> capePathNow(mc).contains("cape/aurora"), 10);
+		t.check("Klick auf eine Cape-Kachel wählt das Cape", "aurora".equals(t.compute(mc -> HeldixConfig.get().cape)) && capePath(t).contains("cape/aurora"));
+		int[] none = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).capeCenter(0));
+		t.click(none[0], none[1]);
+		t.waitTicks(2);
+		t.check("Kachel Ohne entfernt das Cape", capePath(t).isEmpty());
+
+		// eigenes Bild (kein Cape-Format): wird auf die Rückseite gelegt
+		Path dir = Capes.directory();
+		Path picture = dir.resolve("autotest-bild.png");
+		t.run(mc -> {
+			try {
+				java.nio.file.Files.createDirectories(dir);
+				try (NativeImage image = new NativeImage(90, 60, false)) {
+					for (int y = 0; y < 60; y++) {
+						for (int x = 0; x < 90; x++) image.setPixel(x, y, 0xFF000000 | (x * 2) << 16 | (y * 4) << 8 | 0xC0);
+					}
+					image.writeToFile(picture);
+				}
+			} catch (Exception e) {
+				throw new RuntimeException(e);
+			}
+			Capes.reloadCustom();
+		});
+		t.check("Eigenes Bild erscheint als Cape", t.compute(mc -> Capes.custom().stream().anyMatch(c -> c.id().equals("datei:autotest-bild.png"))));
+		t.run(mc -> Capes.select(Capes.byId("datei:autotest-bild.png")));
+		t.waitTicks(4);
+		t.check("Eigenes Cape am Spieler", capePath(t).contains("cape/custom/"));
+		t.moveMouse(4, 4);
+		t.waitTicks(3);
+		t.screenshot("heldix-03h-cape-eigenes");
+
+		// Ansicht von hinten: erst mit dem eigenen Bild, dann mit dem Heldix-Cape
+		t.run(mc -> {
+			mc.gui.setScreen(null);
+			mc.options.setCameraType(CameraType.THIRD_PERSON_BACK);
+		});
+		t.waitTicks(10);
+		t.screenshot("heldix-03i-cape-f5-eigenes");
+		t.run(mc -> Capes.select(Capes.byId("heldix")));
+		t.waitSoft(mc -> capePathNow(mc).contains("cape/heldix"), 10);
+		t.waitTicks(5);
+		t.screenshot("heldix-03i-cape-f5");
+		// beim Laufen weht der Stoff stärker
+		t.run(mc -> mc.options.keyUp.setDown(true));
+		t.waitTicks(14);
+		t.screenshot("heldix-03k-cape-laufen");
+		t.run(mc -> mc.options.keyUp.setDown(false));
+
+		// Animation: das Bild der Animation wechselt mit der Zeit; Leuchten gehört zum aktuellen Bild
+		String first = capePath(t);
+		t.waitTicks(5);
+		String later = capePath(t);
+		t.check("Cape ist animiert (" + first + " → " + later + ")", !first.equals(later));
+		t.check("Heldix-Cape hat leuchtende Teile", t.compute(mc -> {
+			var cape = mc.player.getSkin().cape();
+			return cape != null && Capes.glowFor(cape.texturePath()) != null;
+		}));
+
+		// nachts: Glut-Cape mit leuchtenden Flammen und Funken
+		t.serverCommand("time set 18000");
+		t.run(mc -> Capes.select(Capes.byId("glut")));
+		t.waitSoft(mc -> capePathNow(mc).contains("cape/glut"), 10);
+		t.waitTicks(10);
+		t.screenshot("heldix-03j-cape-nacht");
+		t.serverCommand("time set 1000");
+		t.run(mc -> Capes.select(Capes.byId("heldix")));
+		t.run(mc -> {
+			mc.options.setCameraType(CameraType.FIRST_PERSON);
+			try {
+				java.nio.file.Files.deleteIfExists(picture);
+			} catch (Exception e) {
+				LOG.warn("Testbild nicht löschbar", e);
+			}
+			Capes.reloadCustom();
+		});
+		t.waitSoft(mc -> capePathNow(mc).contains("cape/heldix"), 10);
+		t.check("Heldix-Cape wieder angelegt", capePath(t).contains("cape/heldix"));
+	}
+
+	/** Pfad der Cape-Textur des eigenen Spielers ("" = kein Cape) */
+	private static String capePath(TestContext t) {
+		return t.compute(AutoTest::capePathNow);
+	}
+
+	private static String capePathNow(Minecraft mc) {
+		if (mc.player == null) return "";
+		var cape = mc.player.getSkin().cape();
+		return cape == null ? "" : cape.texturePath().getPath();
+	}
+
 	/** Shader-Stile, F3-Menü, FPS-Boost und Hintergrund-FPS in der Testwelt. */
 	private static void graphicsTest(TestContext t) {
 		t.setScreen(() -> new HeldixMenuScreen(null));
@@ -432,6 +551,7 @@ public final class AutoTest implements HeldixModInitializer {
 			t.check("Addon-Modul hat eigenes Icon", "music".equals(spotify.icon()));
 			t.screenshot("heldix-03f-addon-einstellungen");
 		}
+		capeTest(t);
 
 		// HUD-Größe über die Einstellung des Moduls
 		int normalWidth = t.compute(mc -> ModuleManager.hud().getFirst().width());
@@ -439,7 +559,7 @@ public final class AutoTest implements HeldixModInitializer {
 		t.setScreen(() -> null);
 		t.waitTicks(3);
 		int bigWidth = t.compute(mc -> ModuleManager.hud().getFirst().width());
-		t.check("Größe des HUD-Elements (" + normalWidth + " → " + bigWidth + " px)", bigWidth >= normalWidth * 1.4);
+		t.check("Größe des HUD-Elements (" + normalWidth + " → " + bigWidth + " px)", bigWidth >= normalWidth * 1.25); // FPS-Ziffern können sich dazwischen ändern
 		t.run(mc -> sliderOf(ModuleManager.hud().getFirst(), "Größe").set().accept(1.0));
 
 		t.setScreen(() -> new HeldixMenuScreen(null));

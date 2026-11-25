@@ -62,6 +62,8 @@ export const UI_ICONS: Record<string, string> = {
   "palette": "<path d=\"M12 3.5 A8.5 8.5 0 0 0 12 20.5 C13.3 20.5 13.8 19.6 13.3 18.6 C12.6 17.2 13.6 15.8 15.1 15.8 H17 A3.5 3.5 0 0 0 20.5 12.3 C20.5 7.4 16.7 3.5 12 3.5 Z\"/><circle cx=\"8\" cy=\"11\" r=\"1.2\" fill=\"currentColor\"/><circle cx=\"11\" cy=\"7.5\" r=\"1.2\" fill=\"currentColor\"/><circle cx=\"15.5\" cy=\"8.5\" r=\"1.2\" fill=\"currentColor\"/>",
   "monitor": "<rect x=\"3\" y=\"4.5\" width=\"18\" height=\"12\" rx=\"2\"/><path d=\"M9 20 H15 M12 16.5 V20\"/>",
   "star": "<path d=\"M12 3.8 L14.5 9 L20.2 9.7 L16 13.6 L17.1 19.3 L12 16.5 L6.9 19.3 L8 13.6 L3.8 9.7 L9.5 9 Z\"/>",
+  "cape": "<path d=\"M7.5 4.5 H16.5 L19.5 19 Q15.8 20.6 12 18.6 Q8.2 20.6 4.5 19 Z\"/><path d=\"M9.2 4.5 Q12 8 14.8 4.5\"/>",
+  "image": "<rect x=\"3.5\" y=\"5\" width=\"17\" height=\"14\" rx=\"2.2\"/><circle cx=\"9\" cy=\"10\" r=\"1.7\"/><path d=\"M4 17.5 L9.5 12.8 L13 15.8 L16 13.3 L20 16.8\"/>",
   "loader-heldix": "<rect x=\"4\" y=\"4.2\" width=\"5\" height=\"15.6\" rx=\"1.3\" fill=\"currentColor\" stroke=\"none\"/><rect x=\"15\" y=\"4.2\" width=\"5\" height=\"15.6\" rx=\"1.3\" fill=\"currentColor\" stroke=\"none\"/><path d=\"M9 13.1 L15 9.2 L15 13.9 L9 17.8 Z\" fill=\"currentColor\" stroke=\"none\"/>",
   "loader-fabric": "<rect x=\"5.5\" y=\"3.5\" width=\"13\" height=\"3\" rx=\"1.2\"/><rect x=\"5.5\" y=\"17.5\" width=\"13\" height=\"3\" rx=\"1.2\"/><path d=\"M8 6.5 V17.5 M16 6.5 V17.5 M8 9.5 L16 11.5 M8 13 L16 15\"/>",
   "loader-vanilla": "<path d=\"M12 3 L20 7.5 V16.5 L12 21 L4 16.5 V7.5 Z\"/><path d=\"M12 3 L20 7.5 L12 12 L4 7.5 Z\" fill=\"currentColor\" stroke=\"none\"/><path d=\"M12 12 V21\"/>",
@@ -74,5 +76,11 @@ export const UI_ICONS: Record<string, string> = {
   "copy": "<rect x=\"8\" y=\"8\" width=\"12\" height=\"12\" rx=\"2\"/><path d=\"M16 8 V6 A2 2 0 0 0 14 4 H6 A2 2 0 0 0 4 6 V14 A2 2 0 0 0 6 16 H8\"/>",
   "news": "<path d=\"M4 5 H17 V18 A2 2 0 0 0 19 20 H6 A2 2 0 0 1 4 18 Z\"/><path d=\"M17 9 H20 V18 A2 2 0 0 1 18 20\"/><path d=\"M7.5 9 H13.5 M7.5 12.5 H13.5 M7.5 16 H11\"/>",
   "user-plus": "<circle cx=\"10\" cy=\"8\" r=\"4\"/><path d=\"M3 20 A7 7 0 0 1 17 20 M19 8 V14 M16 11 H22\"/>",
-  "microsoft": "<rect x=\"4\" y=\"4\" width=\"7\" height=\"7\" rx=\"0.8\" fill=\"currentColor\" stroke=\"none\"/><rect x=\"13\" y=\"4\" width=\"7\" height=\"7\" rx=\"0.8\" fill=\"currentColor\" stroke=\"none\"/><rect x=\"4\" y=\"13\" width=\"7\" height=\"7\" rx=\"0.8\" fill=\"currentColor\" stroke=\"none\"/><rect x=\"13\" y=\"13\" width=\"7\" height=\"7\" rx=\"0.8\" fill=\"currentColor\" stroke=\"none\"/>"
+  "microsoft": "<rect x=\"4\" y=\"4\" width=\"7\" height=\"7\" rx=\"0.8\" fill=\"currentColor\" stroke=\"none\"/><rect x=\"13\" y=\"4\" width=\"7\" height=\"7\" rx=\"0.8\" fill=\"currentColor\" stroke=\"none\"/><rect x=\"4\" y=\"13\" width=\"7\" height=\"7\" rx=\"0.8\" fill=\"currentColor\" stroke=\"none\"/><rect x=\"13\" y=\"13\" width=\"7\" height=\"7\" rx=\"0.8\" fill=\"currentColor\" stroke=\"none\"/>",
+  "shield": "<path d=\"M12 3 L19.5 6 V11.5 C19.5 16 16.3 19.4 12 21 C7.7 19.4 4.5 16 4.5 11.5 V6 Z\"/><path d=\"M9 12 L11.2 14.2 L15.5 9.8\"/>",
+  "potion": "<path d=\"M9.5 3.5 H14.5 M10.5 3.5 V8.6 L5.6 16.4 A2.6 2.6 0 0 0 7.8 20.5 H16.2 A2.6 2.6 0 0 0 18.4 16.4 L13.5 8.6 V3.5\"/><path d=\"M7.6 14.5 H16.4\"/>",
+  "sprint": "<circle cx=\"14.5\" cy=\"4.8\" r=\"1.9\"/><path d=\"M6 11.5 L9.5 8.3 L13.5 9.5 L11.5 14 L15 17 L14 21 M11.5 14 L8 16 L4.5 15.5 M13.5 9.5 L16.5 12.5 L19.5 11.5\"/>",
+  "crosshair": "<circle cx=\"12\" cy=\"12\" r=\"7\"/><path d=\"M12 2.5 V7.5 M12 16.5 V21.5 M2.5 12 H7.5 M16.5 12 H21.5\"/><circle cx=\"12\" cy=\"12\" r=\"0.6\" fill=\"currentColor\" stroke=\"none\"/>",
+  "pin": "<path d=\"M12 21 C12 21 18.5 14.6 18.5 9.5 A6.5 6.5 0 0 0 5.5 9.5 C5.5 14.6 12 21 12 21 Z\"/><circle cx=\"12\" cy=\"9.5\" r=\"2.3\"/>",
+  "friends": "<circle cx=\"9\" cy=\"8\" r=\"3.5\"/><path d=\"M2.5 20 A6.5 6.5 0 0 1 15.5 20\"/><path d=\"M15.5 4.8 A3.5 3.5 0 0 1 15.5 11.2 M18 14.2 A6.5 6.5 0 0 1 21.5 20\"/>"
 };

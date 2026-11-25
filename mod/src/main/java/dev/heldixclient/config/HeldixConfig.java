@@ -63,6 +63,30 @@ public final class HeldixConfig {
 		/** HUD-Editor: Raster anzeigen und an Rändern/anderen Elementen einrasten */
 		public boolean hudGrid = true;
 		public boolean hudSnap = true;
+		/** Cape des eigenen Spielers: ID eines Heldix-Capes, "datei:<name>.png" für ein eigenes Bild, "" = keins */
+		public String cape = "heldix";
+		/** Elytra im Design des Capes */
+		public boolean capeElytra = true;
+		/** Capes bewegen sich (animierte Motive) */
+		public boolean capeAnimation = true;
+		/** leuchtende Teile der Capes (auch im Dunkeln hell) */
+		public boolean capeGlow = true;
+		/** Capes als wehender Stoff zeichnen statt als starre Platte (für alle Spieler) */
+		public boolean capeCloth = true;
+		/** Heldix-Dienst nutzen (aus = keine Verbindung, z. B. nach dem Löschen der Daten) */
+		public boolean socialEnabled = true;
+		/** Adresse des Heldix-Dienstes (leer = die vom Launcher, -Dheldixclient.service) */
+		public String serviceUrl;
+		/** Für andere als HeldixClient-Spieler erkennbar (Symbol in der Tab-Liste, Cape) */
+		public boolean socialVisible = true;
+		/** Freunde sehen den Online-Status */
+		public boolean socialPresence = true;
+		/** Freunde sehen den Server */
+		public boolean socialShowServer = true;
+		/** Einblendungen bei Anfragen und wenn Freunde online kommen */
+		public boolean socialNotifications = true;
+		/** Heldix-Capes anderer Spieler zeigen */
+		public boolean socialCapes = true;
 		/** zuletzt betretener Server (für "Weiterspielen" im Hauptmenü) */
 		public String lastServerIp;
 		public String lastServerName;

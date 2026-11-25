@@ -17,5 +17,7 @@ include 'heldix-api'
 include 'example-addon'
 // Spotify-Addon (Musik im HUD, Steuerung per Taste; wird mit dem Launcher ausgeliefert)
 include 'spotify-addon'
+// Brücke zum offiziellen Minecraft Launcher (Anmeldung von dort, gespielt wird mit HeldixClient)
+include 'launcher-bridge'
 // Automatischer Test im echten Spiel (wird nicht ausgeliefert)
 include 'autotest'

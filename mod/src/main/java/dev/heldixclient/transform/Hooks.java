@@ -87,6 +87,35 @@ public final class Hooks {
 	}
 
 	/** FramerateLimitTracker.getFramerateLimit: weniger FPS im Hintergrund. */
+	/** Skin eines Spielers: der eigene bekommt das gewählte Heldix-Cape */
+	public static net.minecraft.world.entity.player.PlayerSkin playerSkin(net.minecraft.world.entity.player.PlayerSkin skin,
+			net.minecraft.client.player.AbstractClientPlayer player) {
+		return dev.heldixclient.cosmetic.Capes.forPlayer(skin, player);
+	}
+
+	/**
+	 * Cape zeichnen (ersetzt den Aufruf in CapeLayer.submit): erst normal, dann – bei Heldix-Capes mit Leuchten –
+	 * die leuchtenden Teile noch einmal voll hell und additiv darüber (wie die Augen von Spinnen).
+	 */
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	public static void capeModel(net.minecraft.client.renderer.SubmitNodeCollector collector, net.minecraft.client.model.Model model, Object state,
+			com.mojang.blaze3d.vertex.PoseStack pose, net.minecraft.client.renderer.rendertype.RenderType type, int light, int overlay, int outline) {
+		if (state instanceof net.minecraft.client.renderer.entity.state.AvatarRenderState avatar && avatar.skin != null && avatar.skin.cape() != null
+				&& dev.heldixclient.config.HeldixConfig.get().capeCloth && dev.heldixclient.cosmetic.CapeCloth.supports(model)) {
+			// wehender Stoff statt starrer Platte (für alle Capes)
+			Identifier texture = avatar.skin.cape().texturePath();
+			dev.heldixclient.cosmetic.CapeCloth.submit(collector, model, avatar, pose, texture, dev.heldixclient.cosmetic.Capes.glowFor(texture), light, overlay);
+			return;
+		}
+		collector.submitModel(model, state, pose, type, light, overlay, outline);
+		if (state instanceof net.minecraft.client.renderer.entity.state.AvatarRenderState avatar && avatar.skin != null && avatar.skin.cape() != null) {
+			Identifier glow = dev.heldixclient.cosmetic.Capes.glowFor(avatar.skin.cape().texturePath());
+			if (glow != null) {
+				collector.submitModel(model, state, pose, net.minecraft.client.renderer.rendertype.RenderTypes.eyes(glow), 0xF000F0, overlay, 0);
+			}
+		}
+	}
+
 	public static int framerateLimit(int limit) {
 		return Performance.framerateLimit(limit);
 	}
@@ -164,6 +193,63 @@ public final class Hooks {
 	public static void titleAfterRender(TitleScreen screen, GuiGraphicsExtractor g) {
 		if (!titleActive(screen)) HeldixClient.drawBranding(g, Minecraft.getInstance().font);
 		else TITLES.get(screen).afterRender(g, screen.width, screen.height);
+	}
+
+	// --- Module: Fadenkreuz, Effekte, Dauersprint, Freelook, Chat, Tab-Liste -------------------
+
+	/** Hud.extractCrosshair: eigenes Fadenkreuz statt des Vanilla-Bildes (Bedingungen bleiben Vanilla). */
+	public static void crosshair(GuiGraphicsExtractor g, RenderPipeline pipeline, Identifier sprite, int x, int y, int width, int height) {
+		dev.heldixclient.module.impl.CrosshairModule module = ModuleManager.crosshair;
+		if (module != null && module.isEnabled()) module.draw(g, Minecraft.getInstance());
+		else g.blitSprite(pipeline, sprite, x, y, width, height);
+	}
+
+	/** Hud.extractEffects: true = Vanilla-Symbole oben rechts ausblenden (Modul Trank-Effekte). */
+	public static boolean hideVanillaEffects() {
+		return ModuleManager.effects != null && ModuleManager.effects.hidesVanilla();
+	}
+
+	public static boolean sprintKey(net.minecraft.client.KeyMapping key) {
+		return ModuleManager.toggleSprint != null ? ModuleManager.toggleSprint.sprintDown(key) : key.isDown();
+	}
+
+	public static boolean sneakKey(net.minecraft.client.KeyMapping key) {
+		return ModuleManager.toggleSprint != null ? ModuleManager.toggleSprint.sneakDown(key) : key.isDown();
+	}
+
+	/** Entity.turn: true = Mausbewegung dreht nur die Freelook-Kamera. */
+	public static boolean turn(net.minecraft.world.entity.Entity entity, double yaw, double pitch) {
+		return ModuleManager.freelook != null && ModuleManager.freelook.turn(entity, yaw, pitch);
+	}
+
+	public static float cameraYaw(net.minecraft.world.entity.Entity entity, float partialTick) {
+		return ModuleManager.freelook != null ? ModuleManager.freelook.cameraYaw(entity, partialTick) : entity.getViewYRot(partialTick);
+	}
+
+	public static float cameraPitch(net.minecraft.world.entity.Entity entity, float partialTick) {
+		return ModuleManager.freelook != null ? ModuleManager.freelook.cameraPitch(entity, partialTick) : entity.getViewXRot(partialTick);
+	}
+
+	/** ChatComponent.addMessage: Inhalt einer neuen Nachricht (Uhrzeit, Zähler). */
+	public static net.minecraft.network.chat.Component chatMessage(net.minecraft.client.gui.components.ChatComponent chat,
+			net.minecraft.network.chat.Component content) {
+		try {
+			return ModuleManager.chat != null ? ModuleManager.chat.process(chat, content) : content;
+		} catch (RuntimeException e) {
+			HeldixClient.LOGGER.warn("Chat-Verbesserungen fehlgeschlagen", e);
+			return content;
+		}
+	}
+
+	/** ChatScreen.mouseClicked: true = Klick verbraucht (Strg+Klick kopiert). */
+	public static boolean chatClick(net.minecraft.client.input.MouseButtonEvent event) {
+		return ModuleManager.chat != null && ModuleManager.chat.click(event);
+	}
+
+	/** PlayerTabOverlay.getNameForDisplay: Heldix-Symbol vor HeldixClient-Spielern. */
+	public static net.minecraft.network.chat.Component tabName(net.minecraft.network.chat.Component name, net.minecraft.client.multiplayer.PlayerInfo info) {
+		if (name == null || info == null || !dev.heldixclient.social.Social.isHeldix(info.getProfile().id())) return name;
+		return dev.heldixclient.social.Badge.prefix(name);
 	}
 
 	// --- Menüs -----------------------------------------------------------------------------

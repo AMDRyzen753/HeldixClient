@@ -17,6 +17,8 @@ export interface StoredAccount {
   accessToken?: string;
   refreshToken?: string;
   expiresAt?: number;
+  /** angemeldet über den offiziellen Minecraft Launcher (Brücke): kein Refresh-Token, neue Sitzungen kommen von dort */
+  source?: 'launcher';
 }
 
 interface AccountsFile {
@@ -88,6 +90,7 @@ export class Store {
       name: a.name,
       uuid: a.uuid,
       skinUrl: a.skinUrl,
+      via: a.source,
       active: a.id === data.activeId,
     }));
   }
@@ -97,10 +100,14 @@ export class Store {
     return data.accounts.find((a) => a.id === data.activeId) ?? data.accounts[0] ?? null;
   }
 
-  /** Fügt ein Microsoft-Konto hinzu oder aktualisiert es (gleiche UUID). */
+  /**
+   * Fügt ein Microsoft-Konto hinzu oder aktualisiert es (gleiche UUID).
+   * Sitzungen über den offiziellen Launcher haben kein Refresh-Token: Hat das Konto schon eins (eigene Anmeldung), bleibt es.
+   */
   async upsertMicrosoft(session: MinecraftSession): Promise<StoredAccount> {
     const data = await this.readAccounts();
     const existing = data.accounts.find((a) => a.type === 'microsoft' && a.uuid === session.uuid);
+    const keepRefresh = !session.refreshToken && existing?.refreshToken && decrypt(existing.refreshToken);
     const account: StoredAccount = {
       id: existing?.id ?? randomUUID(),
       type: 'microsoft',
@@ -109,8 +116,9 @@ export class Store {
       xuid: session.xuid,
       skinUrl: session.skinUrl,
       accessToken: encrypt(session.accessToken),
-      refreshToken: encrypt(session.refreshToken),
+      refreshToken: keepRefresh ? existing!.refreshToken : session.refreshToken ? encrypt(session.refreshToken) : undefined,
       expiresAt: session.expiresAt,
+      source: session.refreshToken || keepRefresh ? undefined : 'launcher',
     };
     data.accounts = existing ? data.accounts.map((a) => (a.id === existing.id ? account : a)) : [...data.accounts, account];
     data.activeId = account.id;

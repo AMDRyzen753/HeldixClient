@@ -1,0 +1,377 @@
+// Echtzeit: WebSocket, Online-Status für Freunde und Nachschlagen von Spielern.
+import assert from 'node:assert/strict';
+import { after, before, describe, test } from 'node:test';
+import { api, connect, devPlayer, startService, upgradeStatus, waitFor, type Player, type TestService, type WsClient } from './helpers';
+
+/** Macht zwei Spieler zu Freunden. */
+async function befriend(service: TestService, a: Player, b: Player): Promise<void> {
+  const sent = await api(service.url, 'POST', '/v1/friends/requests', { token: a.token, body: { name: b.name } });
+  assert.equal(sent.status, 200);
+  const accepted = await api(service.url, 'POST', `/v1/friends/requests/${a.uuid}/accept`, { token: b.token });
+  assert.equal(accepted.status, 200);
+}
+
+describe('WebSocket und Online-Status', () => {
+  let service: TestService;
+  let anna: Player;
+  let ben: Player;
+  const open: WsClient[] = [];
+
+  before(async () => {
+    service = await startService({ dev: true });
+    anna = await devPlayer(service.url, 'Anna');
+    ben = await devPlayer(service.url, 'Ben');
+    await befriend(service, anna, ben);
+  });
+  after(async () => {
+    for (const client of open) await client.close();
+    await service.close();
+  });
+
+  async function online(player: Player) {
+    const result = await connect(service.wsUrl, player.token);
+    open.push(result.client);
+    return result;
+  }
+
+  test('nach dem Verbinden kommt sofort die Freundesliste', async () => {
+    const { client, friends } = await online(ben);
+    assert.equal(friends.type, 'friends');
+    assert.equal(friends.friends.length, 1);
+    assert.equal(friends.friends[0].uuid, anna.uuid);
+    assert.equal(friends.friends[0].online, false);
+    assert.deepEqual(friends.incoming, []);
+    assert.deepEqual(friends.outgoing, []);
+    client.send({ type: 'ping' });
+    assert.deepEqual(await client.next('pong'), { type: 'pong' });
+  });
+
+  test('Freund kommt online, meldet Status, geht offline', async () => {
+    const benClient = open[0]!;
+    benClient.drain();
+
+    const { client: annaClient, friends } = await online(anna);
+    assert.equal(friends.friends[0].uuid, ben.uuid);
+    assert.equal(friends.friends[0].online, true);
+
+    let msg = await benClient.next('friend');
+    assert.deepEqual(msg.friend, { uuid: anna.uuid, name: 'Anna', online: true, state: null, server: null, since: msg.friend.since });
+
+    annaClient.send({ type: 'status', state: 'multiplayer', server: 'Mc.Hypixel.NET' });
+    msg = await benClient.next('friend');
+    assert.equal(msg.friend.state, 'multiplayer');
+    assert.equal(msg.friend.server, 'mc.hypixel.net');
+
+    // Ungültige Server-Adressen werden zu null.
+    for (const server of ['192.168.178.20', 'localhost', 'minecraft', 'fritz.box', 'server.local', '[::1]', 'a'.repeat(250) + '.net', 42]) {
+      annaClient.send({ type: 'status', state: 'multiplayer', server: 'play.example.org' });
+      assert.equal((await benClient.next('friend')).friend.server, 'play.example.org');
+      annaClient.send({ type: 'status', state: 'multiplayer', server });
+      const update = await benClient.next('friend');
+      assert.equal(update.friend.state, 'multiplayer');
+      assert.equal(update.friend.server, null, `server ${String(server)}`);
+    }
+
+    // Außerhalb von Mehrspieler gibt es keinen Server.
+    annaClient.send({ type: 'status', state: 'singleplayer', server: 'hypixel.net' });
+    msg = await benClient.next('friend');
+    assert.equal(msg.friend.state, 'singleplayer');
+    assert.equal(msg.friend.server, null);
+
+    // Gleicher Status noch einmal: keine neue Nachricht. Ungültiger Status: ignoriert.
+    annaClient.send({ type: 'status', state: 'singleplayer', server: null });
+    annaClient.send({ type: 'status', state: 'unterwegs', server: null });
+    annaClient.send({ type: 'gibtsnicht' });
+    await annaClient.sync();
+    await benClient.sync();
+    assert.deepEqual(benClient.drain(), []);
+
+    // Die REST-Liste zeigt dasselbe.
+    const list = await api(service.url, 'GET', '/v1/friends', { token: ben.token });
+    assert.equal(list.body.friends[0].online, true);
+    assert.equal(list.body.friends[0].state, 'singleplayer');
+
+    await annaClient.close();
+    open.splice(open.indexOf(annaClient), 1);
+    msg = await benClient.next('friend');
+    assert.deepEqual(msg.friend, { uuid: anna.uuid, name: 'Anna', online: false, state: null, server: null, since: msg.friend.since });
+  });
+
+  test('showServer aus: Status ja, Server nein', async () => {
+    const benClient = open[0]!;
+    const { client: annaClient } = await online(anna);
+    await benClient.next((m) => m.type === 'friend' && m.friend.online);
+
+    annaClient.send({ type: 'status', state: 'multiplayer', server: 'hypixel.net' });
+    assert.equal((await benClient.next('friend')).friend.server, 'hypixel.net');
+
+    const put = await api(service.url, 'PUT', '/v1/me', { token: anna.token, body: { showServer: false } });
+    assert.equal(put.status, 200);
+    let msg = await benClient.next('friend');
+    assert.equal(msg.friend.online, true);
+    assert.equal(msg.friend.state, 'multiplayer');
+    assert.equal(msg.friend.server, null);
+
+    annaClient.send({ type: 'status', state: 'multiplayer', server: 'gommehd.net' });
+    await annaClient.sync();
+    await benClient.sync();
+    // Anderer Server, aber für Ben sieht es gleich aus: keine Nachricht.
+    assert.deepEqual(benClient.drain(), []);
+    const list = await api(service.url, 'GET', '/v1/friends', { token: ben.token });
+    assert.equal(list.body.friends[0].server, null);
+
+    await api(service.url, 'PUT', '/v1/me', { token: anna.token, body: { showServer: true } });
+    msg = await benClient.next('friend');
+    assert.equal(msg.friend.server, 'gommehd.net');
+  });
+
+  test('presence aus: Freund erscheint immer offline', async () => {
+    const benClient = open[0]!;
+    const annaClient = open[1]!;
+    benClient.drain();
+
+    await api(service.url, 'PUT', '/v1/me', { token: anna.token, body: { presence: false } });
+    let msg = await benClient.next('friend');
+    assert.deepEqual(msg.friend, { uuid: anna.uuid, name: 'Anna', online: false, state: null, server: null, since: msg.friend.since });
+
+    // Statusänderungen bleiben unsichtbar.
+    annaClient.send({ type: 'status', state: 'realms', server: null });
+    await annaClient.sync();
+    await benClient.sync();
+    assert.deepEqual(benClient.drain(), []);
+    const list = await api(service.url, 'GET', '/v1/friends', { token: ben.token });
+    assert.deepEqual(
+      { online: list.body.friends[0].online, state: list.body.friends[0].state, server: list.body.friends[0].server },
+      { online: false, state: null, server: null },
+    );
+
+    // Eine zweite Verbindung ändert daran nichts.
+    const second = await online(anna);
+    await benClient.sync();
+    assert.deepEqual(benClient.drain(), []);
+    await second.client.close();
+    open.splice(open.indexOf(second.client), 1);
+
+    await api(service.url, 'PUT', '/v1/me', { token: anna.token, body: { presence: true } });
+    msg = await benClient.next('friend');
+    assert.equal(msg.friend.online, true);
+    assert.equal(msg.friend.state, 'realms');
+  });
+
+  test('mehrere Verbindungen: online bis zur letzten, zuletzt gemeldeter Status gilt', async () => {
+    const benClient = open[0]!;
+    const annaFirst = open[1]!;
+    benClient.drain();
+    const { client: annaSecond } = await online(anna);
+    await annaSecond.sync();
+    await benClient.sync();
+    assert.deepEqual(benClient.drain(), [], 'zweite Verbindung ändert nichts');
+
+    annaSecond.send({ type: 'status', state: 'lan', server: null });
+    assert.equal((await benClient.next('friend')).friend.state, 'lan');
+    annaFirst.send({ type: 'status', state: 'menu', server: null });
+    assert.equal((await benClient.next('friend')).friend.state, 'menu');
+
+    await annaFirst.close();
+    open.splice(open.indexOf(annaFirst), 1);
+    await annaSecond.sync();
+    await benClient.sync();
+    assert.deepEqual(benClient.drain(), [], 'noch eine Verbindung offen');
+
+    await annaSecond.close();
+    const msg = await benClient.next('friend');
+    assert.equal(msg.friend.online, false);
+  });
+});
+
+describe('Anfragen in Echtzeit', () => {
+  let service: TestService;
+  before(async () => {
+    service = await startService({ dev: true });
+  });
+  after(() => service.close());
+
+  test('request, accepted und friends gehen an beide Seiten', async () => {
+    const carla = await devPlayer(service.url, 'Carla');
+    const dirk = await devPlayer(service.url, 'Dirk');
+    const { client: carlaClient } = await connect(service.wsUrl, carla.token);
+    const { client: dirkClient } = await connect(service.wsUrl, dirk.token);
+    try {
+      carlaClient.send({ type: 'status', state: 'multiplayer', server: 'hypixel.net' });
+      await carlaClient.sync();
+
+      await api(service.url, 'POST', '/v1/friends/requests', { token: carla.token, body: { name: 'dirk' } });
+      await dirkClient.sync();
+      const dirkMessages = dirkClient.drain();
+      assert.deepEqual(
+        dirkMessages.map((m) => m.type),
+        ['request', 'friends'],
+      );
+      assert.deepEqual(dirkMessages[0], { type: 'request', from: { uuid: carla.uuid, name: 'Carla' } });
+      assert.deepEqual(dirkMessages[1].incoming.map((r: { uuid: string }) => r.uuid), [carla.uuid]);
+      await carlaClient.sync();
+      const carlaFriends = carlaClient.drain();
+      assert.deepEqual(
+        carlaFriends.map((m) => m.type),
+        ['friends'],
+      );
+      assert.deepEqual(carlaFriends[0].outgoing.map((r: { uuid: string }) => r.uuid), [dirk.uuid]);
+
+      // Dirk nimmt an: Carla bekommt accepted (mit Dirks Status) und danach friends.
+      await api(service.url, 'POST', `/v1/friends/requests/${carla.uuid}/accept`, { token: dirk.token });
+      await carlaClient.sync();
+      const carlaMessages = carlaClient.drain();
+      assert.deepEqual(
+        carlaMessages.map((m) => m.type),
+        ['accepted', 'friends'],
+      );
+      assert.equal(carlaMessages[0].friend.uuid, dirk.uuid);
+      assert.equal(carlaMessages[0].friend.online, true);
+      assert.equal(carlaMessages[1].friends[0].uuid, dirk.uuid);
+      await dirkClient.sync();
+      const dirkAfter = dirkClient.drain();
+      assert.deepEqual(
+        dirkAfter.map((m) => m.type),
+        ['friends'],
+      );
+      // Carla ist für Dirk online, mit Server.
+      assert.deepEqual(
+        { online: dirkAfter[0].friends[0].online, state: dirkAfter[0].friends[0].state, server: dirkAfter[0].friends[0].server },
+        { online: true, state: 'multiplayer', server: 'hypixel.net' },
+      );
+
+      // Entfernen: beide bekommen friends.
+      await api(service.url, 'DELETE', `/v1/friends/${carla.uuid}`, { token: dirk.token });
+      await carlaClient.sync();
+      await dirkClient.sync();
+      assert.deepEqual(carlaClient.drain().map((m) => [m.type, m.friends.length]), [['friends', 0]]);
+      assert.deepEqual(dirkClient.drain().map((m) => [m.type, m.friends.length]), [['friends', 0]]);
+
+      // Gegenseitige Anfrage: die erste Seite bekommt accepted.
+      await api(service.url, 'POST', '/v1/friends/requests', { token: dirk.token, body: { name: 'Carla' } });
+      await api(service.url, 'POST', '/v1/friends/requests', { token: carla.token, body: { name: 'Dirk' } });
+      await dirkClient.sync();
+      assert.deepEqual(
+        dirkClient.drain().map((m) => m.type),
+        ['friends', 'accepted', 'friends'],
+      );
+
+      // Ablehnen: beide bekommen friends.
+      await api(service.url, 'DELETE', `/v1/friends/${dirk.uuid}`, { token: carla.token });
+      await api(service.url, 'POST', '/v1/friends/requests', { token: dirk.token, body: { name: 'Carla' } });
+      await carlaClient.sync();
+      await dirkClient.sync();
+      carlaClient.drain();
+      dirkClient.drain();
+      await api(service.url, 'DELETE', `/v1/friends/requests/${dirk.uuid}`, { token: carla.token });
+      await carlaClient.sync();
+      await dirkClient.sync();
+      assert.deepEqual(carlaClient.drain().map((m) => [m.type, m.incoming.length]), [['friends', 0]]);
+      assert.deepEqual(dirkClient.drain().map((m) => [m.type, m.outgoing.length]), [['friends', 0]]);
+    } finally {
+      await carlaClient.close();
+      await dirkClient.close();
+    }
+  });
+});
+
+describe('Spieler nachschlagen', () => {
+  test('nur verbundene Spieler mit visible an', async () => {
+    const service = await startService({ dev: true });
+    const clients: WsClient[] = [];
+    try {
+      const sichtbar = await devPlayer(service.url, 'Sichtbar');
+      const versteckt = await devPlayer(service.url, 'Versteckt');
+      const offline = await devPlayer(service.url, 'Offline');
+      await api(service.url, 'PUT', '/v1/me', { token: sichtbar.token, body: { cape: 'galaxie' } });
+      await api(service.url, 'PUT', '/v1/me', { token: versteckt.token, body: { visible: false, cape: 'neon' } });
+      await api(service.url, 'PUT', '/v1/me', { token: offline.token, body: { cape: 'glut' } });
+      clients.push((await connect(service.wsUrl, sichtbar.token)).client);
+      clients.push((await connect(service.wsUrl, versteckt.token)).client);
+
+      const uuids = [sichtbar.uuid, versteckt.uuid, offline.uuid, 'f'.repeat(32), sichtbar.uuid];
+      let res = await api(service.url, 'POST', '/v1/players/lookup', { token: offline.token, body: { uuids } });
+      assert.equal(res.status, 200);
+      assert.deepEqual(res.body, { players: { [sichtbar.uuid]: { cape: 'galaxie' } } });
+
+      // Wer selbst verbunden und sichtbar ist, steht mit drin.
+      res = await api(service.url, 'POST', '/v1/players/lookup', { token: sichtbar.token, body: { uuids: [sichtbar.uuid] } });
+      assert.deepEqual(res.body, { players: { [sichtbar.uuid]: { cape: 'galaxie' } } });
+
+      // Nach dem Trennen nicht mehr (der Dienst bemerkt das Trennen kurz nach dem Client).
+      await clients[0]!.close();
+      await waitFor(async () => {
+        res = await api(service.url, 'POST', '/v1/players/lookup', { token: offline.token, body: { uuids } });
+        return Object.keys(res.body.players).length === 0;
+      });
+      assert.deepEqual(res.body, { players: {} });
+
+      // Kein Cape: "".
+      await api(service.url, 'PUT', '/v1/me', { token: versteckt.token, body: { visible: true, cape: '' } });
+      res = await api(service.url, 'POST', '/v1/players/lookup', { token: offline.token, body: { uuids } });
+      assert.deepEqual(res.body, { players: { [versteckt.uuid]: { cape: '' } } });
+    } finally {
+      for (const client of clients) await client.close();
+      await service.close();
+    }
+  });
+
+  test('ungültige Abfragen: 400', async () => {
+    const service = await startService({ dev: true });
+    try {
+      const player = await devPlayer(service.url);
+      const tooMany = Array.from({ length: 201 }, (_, i) => i.toString(16).padStart(32, '0'));
+      const exactly = tooMany.slice(0, 200);
+      for (const body of [{}, { uuids: 'abc' }, { uuids: ['ABC'] }, { uuids: [42] }, { uuids: tooMany }]) {
+        const res = await api(service.url, 'POST', '/v1/players/lookup', { token: player.token, body });
+        assert.equal(res.status, 400, JSON.stringify(body).slice(0, 80));
+      }
+      const ok = await api(service.url, 'POST', '/v1/players/lookup', { token: player.token, body: { uuids: exactly } });
+      assert.equal(ok.status, 200);
+    } finally {
+      await service.close();
+    }
+  });
+});
+
+describe('Verbindungsdauer', () => {
+  test('ohne Nachricht schließt der Dienst die Verbindung (im Test nach 150 ms), Ping hält sie offen', async () => {
+    const service = await startService({ dev: true, idleTimeoutMs: 150 });
+    try {
+      const anna = await devPlayer(service.url, 'Anna');
+      const ben = await devPlayer(service.url, 'Ben');
+      await befriend(service, anna, ben);
+      const { client: benClient } = await connect(service.wsUrl, ben.token);
+      const { client: annaClient } = await connect(service.wsUrl, anna.token);
+      await benClient.next((m) => m.type === 'friend' && m.friend.online);
+
+      // Ben pingt regelmäßig, Anna schweigt.
+      const pinger = setInterval(() => benClient.send({ type: 'ping' }), 40);
+      try {
+        const closed = await annaClient.closed;
+        assert.equal(closed.code, 4000);
+        const msg = await benClient.next((m) => m.type === 'friend' && !m.friend.online);
+        assert.equal(msg.friend.uuid, anna.uuid);
+        assert.equal(benClient.ws.readyState, benClient.ws.OPEN);
+      } finally {
+        clearInterval(pinger);
+      }
+      await benClient.close();
+    } finally {
+      await service.close();
+    }
+  });
+
+  test('WebSocket nur unter /v1/ws; normales GET bekommt 426', async () => {
+    const service = await startService({ dev: true });
+    try {
+      const player = await devPlayer(service.url);
+      const wrong = await upgradeStatus(service.wsUrl.replace('/v1/ws', '/v1/me'), { Authorization: `Bearer ${player.token}` });
+      assert.equal(wrong.status, 404);
+      const plain = await api(service.url, 'GET', '/v1/ws', { token: player.token });
+      assert.equal(plain.status, 426);
+    } finally {
+      await service.close();
+    }
+  });
+});

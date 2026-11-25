@@ -1,10 +1,12 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell } from 'electron';
 import type {
   AccountInfo,
   AppInfo,
+  BridgeState,
   ContentKind,
   DeveloperStatus,
   FolderKind,
@@ -23,12 +25,14 @@ import {
   CLIENT_NAME,
   DATA_DIR_NAME,
   DISCORD_CLIENT_ID,
+  HELDIX_SERVICE_URL,
   LAUNCHER_NAME,
   LAUNCHER_VERSION,
   MICROSOFT_CLIENT_ID,
   MICROSOFT_REDIRECT_URI,
 } from './config';
-import { loginMinecraft, offlineUuid, refreshMicrosoft } from './core/auth';
+import { loginMinecraft, offlineUuid, refreshMicrosoft, sessionFromAccessToken } from './core/auth';
+import { BridgeServer, type BridgeFile, type BridgeReply, type BridgeSession } from './core/bridge';
 import { addContentFiles, countEnabled, installBundledAddon, listBundledAddons, listContent, removeContent, setContentEnabled } from './core/content';
 import { DiscordRpc } from './core/discord';
 import { getFabricGameVersions } from './core/fabric';
@@ -47,6 +51,7 @@ import { DEV_PUBLIC_KEY } from './dev-public-key';
 import { buildActivity, parseStatusLine, type GameStatus } from './core/presence';
 import { listQuickPlay, validateQuickPlay } from './core/quickplay';
 import { loaderLogos } from './core/loaderlogos';
+import { installOfficialProfile, officialLauncherRunning, officialProfileInstalled, openOfficialLauncher } from './core/officiallauncher';
 import { listNews, newsBody } from './core/news';
 import { skinFor } from './core/skins';
 import { Store, type StoredAccount } from './store';
@@ -70,6 +75,7 @@ const clientModsDir = () => resourceDir('client-mods');
 const bundledAddonsDir = () => resourceDir(ADDON_DIR);
 const loaderDir = () => resourceDir('heldix-loader');
 const fabricLoaderDir = () => resourceDir('heldix-loader-fabric');
+const bridgeDir = () => resourceDir('launcher-bridge');
 
 const LOADER_LABELS = { heldix: 'Heldix Loader', fabric: 'Fabric', vanilla: 'Vanilla' } as const;
 
@@ -246,6 +252,12 @@ async function sessionFor(account: StoredAccount): Promise<GameAccount> {
   if (secrets.accessToken && (account.expiresAt ?? 0) > Date.now() + 10 * 60 * 1000) {
     return { name: account.name, uuid: account.uuid, accessToken: secrets.accessToken, xuid: account.xuid, userType: 'msa' };
   }
+  if (!secrets.refreshToken) {
+    // über den offiziellen Minecraft Launcher angemeldet: die neue Sitzung kommt wieder von dort
+    launcherLog('Sitzung abgelaufen – hole eine neue Anmeldung über den Minecraft Launcher …');
+    const fresh = await requestBridgeSession('launch');
+    return { name: fresh.name, uuid: fresh.uuid, accessToken: store.secrets(fresh).accessToken, xuid: fresh.xuid, userType: 'msa' };
+  }
   if (!MICROSOFT_CLIENT_ID) throw new Error('Microsoft-Client-ID fehlt (siehe README).');
   launcherLog('Erneuere Microsoft-Anmeldung …');
   const ms = await refreshMicrosoft(MICROSOFT_CLIENT_ID, secrets.refreshToken);
@@ -255,7 +267,134 @@ async function sessionFor(account: StoredAccount): Promise<GameAccount> {
 }
 
 function toAccountInfo(account: StoredAccount): AccountInfo {
-  return { id: account.id, type: account.type, name: account.name, uuid: account.uuid, skinUrl: account.skinUrl, active: true };
+  return { id: account.id, type: account.type, name: account.name, uuid: account.uuid, skinUrl: account.skinUrl, via: account.source, active: true };
+}
+
+// ---------- Brücke zum offiziellen Minecraft Launcher ----------
+// Der offizielle Launcher meldet an, HeldixClient startet das Spiel (siehe core/bridge.ts und mod/launcher-bridge).
+
+const bridgeFile = path.join(paths.root, 'bridge.json');
+let bridgeServer: BridgeServer | null = null;
+
+interface BridgeWaiter {
+  purpose: 'login' | 'launch';
+  resolve: (account: StoredAccount) => void;
+  reject: (error: Error) => void;
+}
+/** Anmeldung, auf die der Launcher gerade wartet */
+let bridgeWaiter: BridgeWaiter | null = null;
+/** Brücken, die offen bleiben, bis das Spiel endet (der Minecraft Launcher zeigt das Spiel so lange als laufend) */
+let bridgeHolds: (() => void)[] = [];
+
+function holdUntilGameEnds(): Promise<void> {
+  return new Promise((resolve) => bridgeHolds.push(resolve));
+}
+
+function releaseBridgeHolds(): void {
+  const holds = bridgeHolds;
+  bridgeHolds = [];
+  for (const release of holds) release();
+}
+
+async function bridgeJar(): Promise<string> {
+  const jar = (await readdir(bridgeDir()).catch(() => [] as string[])).filter((f) => /^heldix-bridge-.+\.jar$/.test(f)).sort().pop();
+  if (!jar) throw new Error('Die Brücke zum Minecraft Launcher fehlt in dieser Installation.');
+  return path.join(bridgeDir(), jar);
+}
+
+function bridgeIcon(): string | null {
+  const image = nativeImage.createFromPath(path.join(bridgeDir(), 'icon.png'));
+  return image.isEmpty() ? null : image.resize({ width: 128, height: 128, quality: 'best' }).toDataURL();
+}
+
+/** Installation „HeldixClient“ im offiziellen Launcher anlegen bzw. aktuell halten */
+async function setupOfficialLauncher(select: boolean): Promise<void> {
+  const fallbackParent = await getVersionManifest(paths).then((r) => r.manifest.latest.release).catch(() => null);
+  const result = await installOfficialProfile({ bridgeJar: await bridgeJar(), bridgeFile, icon: bridgeIcon(), select, fallbackParent });
+  if (result.changed) launcherLog(`Minecraft Launcher: Installation „HeldixClient“ eingerichtet (auf Basis von Minecraft ${result.parent})`);
+}
+
+function sendBridgeState(state: BridgeState): void {
+  send('bridge:state', state);
+}
+
+/**
+ * Anmeldung über den offiziellen Minecraft Launcher: Installation einrichten, den Launcher öffnen und warten,
+ * bis der Spieler dort auf „Spielen“ drückt. Die Sitzung kommt dann über die Brücke (onBridgeSession).
+ */
+async function requestBridgeSession(purpose: 'login' | 'launch'): Promise<StoredAccount> {
+  if (!bridgeServer) throw new Error('Die Brücke zum Minecraft Launcher konnte nicht gestartet werden.');
+  bridgeWaiter?.reject(new Error('Anmeldung über den Minecraft Launcher abgebrochen.'));
+  const wasRunning = await officialLauncherRunning();
+  await setupOfficialLauncher(true);
+  await openOfficialLauncher();
+  return new Promise<StoredAccount>((resolve, reject) => {
+    const finish = (error: Error | null, account?: StoredAccount) => {
+      clearTimeout(timer);
+      if (bridgeWaiter !== waiter) return;
+      bridgeWaiter = null;
+      sendBridgeState({ waiting: false });
+      if (error) reject(error);
+      else resolve(account!);
+    };
+    const waiter: BridgeWaiter = { purpose, resolve: (account) => finish(null, account), reject: (error) => finish(error) };
+    const timer = setTimeout(() => finish(new Error('Im Minecraft Launcher wurde nicht auf „Spielen“ gedrückt. Versuch es noch mal.')), 15 * 60 * 1000);
+    bridgeWaiter = waiter;
+    sendBridgeState({ waiting: true, purpose, launcherWasRunning: wasRunning });
+  });
+}
+
+function focusWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+/** Die Brücke hat eine Anmeldung vom offiziellen Launcher übergeben. */
+async function onBridgeSession(raw: BridgeSession): Promise<BridgeReply> {
+  if (!raw.accessToken) throw new Error('Der Minecraft Launcher hat keine Anmeldung übergeben.');
+  const session = await sessionFromAccessToken(raw.accessToken, raw.xuid);
+  const account = await store.upsertMicrosoft(session);
+  launcherLog(`Angemeldet als ${session.name} (über den Minecraft Launcher)`);
+  send('accounts:changed', null);
+
+  const waiter = bridgeWaiter;
+  if (waiter) {
+    waiter.resolve(account);
+    if (waiter.purpose === 'login') focusWindow();
+    // Ein Start wartete auf diese Anmeldung und läuft jetzt weiter
+    return { name: session.name, hold: waiter.purpose === 'launch' ? holdUntilGameEnds() : undefined };
+  }
+  focusWindow();
+  if (gameState.state === 'preparing' || gameState.state === 'running') return { name: session.name };
+  // Im Minecraft Launcher auf „Spielen“ gedrückt: die ausgewählte Instanz starten
+  const hold = holdUntilGameEnds();
+  launch().catch(() => releaseBridgeHolds());
+  return { name: session.name, hold };
+}
+
+/** So startet die Brücke HeldixClient, wenn es nicht läuft */
+function bridgeCommand(): string[] {
+  if (app.isPackaged) return [process.execPath];
+  // Entwicklung: einen schon eingetragenen Befehl (der installierten App) behalten
+  try {
+    const existing = JSON.parse(readFileSync(bridgeFile, 'utf8')) as BridgeFile;
+    if (Array.isArray(existing.command) && existing.command.length === 1) return existing.command;
+  } catch {
+    // keine Datei
+  }
+  return [process.execPath, app.getAppPath()];
+}
+
+async function startBridge(): Promise<void> {
+  bridgeServer = new BridgeServer(bridgeFile, bridgeCommand(), onBridgeSession, (message) => console.log(`[Launcher] ${message}`));
+  await bridgeServer.start();
+  // Installation im offiziellen Launcher aktuell halten (neue Brücke, neue Minecraft-Version) – nur mit dem echten Datenordner
+  if (!process.env.HELDIX_DATA_DIR && (await officialProfileInstalled())) await setupOfficialLauncher(false);
 }
 
 // ---------- Instanzen ----------
@@ -345,7 +484,8 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
       account: session,
       memoryMb: instance.memoryMb ?? settings.memoryMb,
       resolution: settings.resolution,
-      extraJvmArgs: [...prepared.loaderJvmArgs, ...tuning, ...userJvmArgs],
+      // Heldix-Dienst (Freunde, Capes für alle): Adresse für die Client-Mod
+      extraJvmArgs: [...prepared.loaderJvmArgs, ...(HELDIX_SERVICE_URL && usesHeldixClient(instance) ? [`-Dheldixclient.service=${HELDIX_SERVICE_URL}`] : []), ...tuning, ...userJvmArgs],
       extraGameArgs: graphics,
       quickPlay,
       launcherName: LAUNCHER_NAME.replace(/\s+/g, ''),
@@ -391,6 +531,7 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
         game = null;
         gameInstanceId = null;
         graphicsWatch = null;
+        releaseBridgeHolds();
         updatePresence({ phase: 'launcher', status: null });
         if (mainWindow && !mainWindow.isVisible()) mainWindow.show();
       });
@@ -399,6 +540,7 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
     launcherLog(message, 'ERROR');
     setGameState({ state: 'error', message });
     updatePresence({ phase: 'launcher', status: null });
+    releaseBridgeHolds();
     throw error;
   }
 }
@@ -616,6 +758,9 @@ function registerIpc(): void {
     if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) throw new Error('Name: 3–16 Zeichen, nur Buchstaben, Zahlen und _.');
     return toAccountInfo(await store.addOffline(name, offlineUuid(name)));
   });
+  ipcMain.handle('accounts:addViaLauncher', async () => toAccountInfo(await requestBridgeSession('login')));
+  ipcMain.handle('bridge:cancel', () => bridgeWaiter?.reject(new Error('Anmeldung über den Minecraft Launcher abgebrochen.')));
+  ipcMain.handle('bridge:reopen', () => openOfficialLauncher());
   ipcMain.handle('developer:status', () => developerStatus());
   ipcMain.handle('developer:import', () => importDeveloperKey());
   ipcMain.handle('accounts:remove', (_e, id: string) => store.remove(id));
@@ -673,6 +818,8 @@ function createWindow(): void {
     const size = /^(\d+)x(\d+)$/.exec(process.env.HELDIX_SCREENSHOT_SIZE ?? '');
     if (size) mainWindow.setSize(Number(size[1]), Number(size[2]));
     mainWindow.webContents.once('did-finish-load', async () => {
+      // HELDIX_SCREENSHOT_BRIDGE=1 zeigt den Dialog „Anmelden über den Minecraft Launcher“ (ohne den Launcher zu öffnen)
+      if (process.env.HELDIX_SCREENSHOT_BRIDGE) sendBridgeState({ waiting: true, purpose: 'launch', launcherWasRunning: true });
       const script = process.env.HELDIX_SCREENSHOT_SCRIPT;
       if (script) await mainWindow!.webContents.executeJavaScript(script).catch((e: Error) => console.error(e));
       setTimeout(async () => {
@@ -685,16 +832,33 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(async () => {
-  Menu.setApplicationMenu(null);
-  registerIpc();
-  await ensureInstances().catch((error) => console.error('[Launcher] Instanzen konnten nicht vorbereitet werden', error));
-  createWindow();
-  applyPresenceSettings(await store.getSettings());
-});
+// Nur ein Launcher gleichzeitig (in der Entwicklung egal): ein zweiter Start holt das offene Fenster nach vorn
+const singleInstance = !app.isPackaged || app.requestSingleInstanceLock();
+if (!singleInstance) app.quit();
+app.on('second-instance', () => focusWindow());
 
-// Discord-Status beim Beenden löschen
-app.on('before-quit', () => discord.stop());
+if (singleInstance) {
+  app.whenReady().then(async () => {
+    Menu.setApplicationMenu(null);
+    registerIpc();
+    await ensureInstances().catch((error) => console.error('[Launcher] Instanzen konnten nicht vorbereitet werden', error));
+    createWindow();
+    applyPresenceSettings(await store.getSettings());
+    await startBridge().catch((error) => console.error('[Launcher] Brücke zum Minecraft Launcher nicht verfügbar', error));
+  });
+}
+
+app.on('before-quit', () => {
+  // Discord-Status löschen, Port der Brücke austragen
+  discord.stop();
+  let current: BridgeFile | null = null;
+  try {
+    current = JSON.parse(readFileSync(bridgeFile, 'utf8')) as BridgeFile;
+  } catch {
+    // keine Datei
+  }
+  bridgeServer?.stopSync(current);
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

@@ -1,4 +1,4 @@
-import type { AccountInfo, DeveloperStatus, DiscordStatus, InstanceInfo, LogLine, QuickPlayList, QuickPlayTarget, Settings, SkinInfo } from '../shared/api';
+import type { AccountInfo, BridgeState, DeveloperStatus, DiscordStatus, InstanceInfo, LogLine, QuickPlayList, QuickPlayTarget, Settings, SkinInfo } from '../shared/api';
 import {
   $,
   api,
@@ -605,7 +605,7 @@ function renderAccounts(): void {
   renderAvatar($('#account-avatar'), active);
   $('#avatar-status').hidden = !active;
   $('#account-label').textContent = active?.name ?? 'Nicht angemeldet';
-  $('#account-sub').textContent = active ? (active.type === 'microsoft' ? 'Microsoft-Konto' : 'Offline-Konto') : 'Konto hinzufügen';
+  $('#account-sub').textContent = active ? (active.type === 'microsoft' ? (active.via === 'launcher' ? 'Über Minecraft Launcher' : 'Microsoft-Konto') : 'Offline-Konto') : 'Konto hinzufügen';
 
   const list = $('#account-list');
   list.textContent = '';
@@ -622,7 +622,7 @@ function renderAccounts(): void {
     avatar,
     h('div', { class: 'account-meta' },
       h('div', { class: 'account-name', text: account.name }),
-      h('div', { class: 'account-type', text: account.type === 'microsoft' ? 'Microsoft' : 'Offline' })),
+      h('div', { class: 'account-type', text: account.type === 'microsoft' ? (account.via === 'launcher' ? 'Microsoft · über Minecraft Launcher' : 'Microsoft') : 'Offline' })),
     h('button', {
       class: 'remove-account',
       title: 'Entfernen',
@@ -723,6 +723,69 @@ $('#add-microsoft').addEventListener('click', async () => {
   } finally {
     button.disabled = !state.info?.microsoftConfigured;
   }
+});
+
+// ---------- Anmeldung über den offiziellen Minecraft Launcher ----------
+$('#add-launcher').addEventListener('click', async () => {
+  const button = $<HTMLButtonElement>('#add-launcher');
+  button.disabled = true;
+  closeAccounts();
+  try {
+    const account = await api.addAccountViaLauncher();
+    toast(`Angemeldet als ${account.name}`, 'success');
+    await loadAccounts();
+  } catch (error) {
+    const message = errorMessage(error);
+    if (!/abgebrochen/i.test(message)) toast(message, 'error');
+  } finally {
+    button.disabled = false;
+  }
+});
+
+let bridgeDialog: HTMLElement | null = null;
+
+function closeBridgeDialog(): void {
+  bridgeDialog?.remove();
+  bridgeDialog = null;
+}
+
+/** Anleitung, solange der Launcher auf „Spielen“ im Minecraft Launcher wartet */
+function showBridgeDialog(bridge: Extract<BridgeState, { waiting: true }>): void {
+  closeBridgeDialog();
+  const cancel = () => void api.cancelBridge();
+  const steps = h('ol', { class: 'bridge-steps' },
+    h('li', { text: 'Der Minecraft Launcher öffnet sich. Melde dich dort mit deinem Microsoft-Konto an, falls nötig.' }),
+    h('li', { text: 'Unten links ist die Installation „HeldixClient“ ausgewählt. Drücke auf „Spielen“.' }),
+    h('li', { text: bridge.purpose === 'launch'
+      ? 'HeldixClient übernimmt die Anmeldung und startet das Spiel.'
+      : 'HeldixClient übernimmt die Anmeldung. Danach startest du hier mit „Spielen“ – die Anmeldung hält etwa einen Tag.' }));
+  const backdrop = h('div', { class: 'modal-backdrop', id: 'bridge-dialog' },
+    h('div', { class: 'modal' },
+      h('div', { class: 'modal-head' },
+        h('div', {},
+          h('h3', { class: 'modal-title', text: 'Anmelden über den Minecraft Launcher' }),
+          h('p', { class: 'modal-sub', text: 'Der offizielle Launcher meldet dich an, gespielt wird mit HeldixClient.' })),
+        h('button', { class: 'icon-button', title: 'Abbrechen', onclick: cancel }, uiIcon('close'))),
+      steps,
+      bridge.launcherWasRunning
+        ? h('p', { class: 'hint small', text: 'Der Minecraft Launcher war schon offen. Fehlt dort „HeldixClient“, schließe ihn und klicke auf „Launcher öffnen“.' })
+        : null,
+      h('div', { class: 'bridge-wait', text: 'Warte auf den Minecraft Launcher …' }),
+      h('div', { class: 'modal-actions' },
+        h('button', { class: 'ghost', type: 'button', text: 'Launcher öffnen', onclick: () => void api.reopenOfficialLauncher().catch((e: unknown) => toast(errorMessage(e), 'error')) }),
+        h('button', { class: 'ghost', type: 'button', text: 'Abbrechen', onclick: cancel }))));
+  document.body.append(backdrop);
+  bridgeDialog = backdrop;
+}
+
+api.onBridgeState((bridge) => {
+  if (bridge.waiting) showBridgeDialog(bridge);
+  else closeBridgeDialog();
+});
+api.onAccountsChanged(() => void loadAccounts());
+// Escape bricht das Warten ab (der allgemeine Escape-Handler blendet den Dialog nur aus)
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && bridgeDialog) void api.cancelBridge();
 });
 
 $('#offline-form').addEventListener('submit', async (event) => {

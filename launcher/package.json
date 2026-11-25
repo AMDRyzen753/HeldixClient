@@ -24,7 +24,8 @@
     "dist": "npm run mod && npm run build && electron-builder --win",
     "test:launch": "npm run build && node dist/scripts/test-launch.js",
     "test:discord": "npm run build && node dist/scripts/test-discord.js",
-    "dev-key": "npm run build && node dist/scripts/dev-key.js"
+    "dev-key": "npm run build && node dist/scripts/dev-key.js",
+    "capes": "electron scripts/render-capes.mjs"
   },
   "build": {
     "appId": "dev.heldixclient.launcher",
@@ -67,6 +68,14 @@
         "to": "heldix-loader-fabric",
         "filter": [
           "*.jar"
+        ]
+      },
+      {
+        "from": "resources/launcher-bridge",
+        "to": "launcher-bridge",
+        "filter": [
+          "*.jar",
+          "*.png"
         ]
       }
     ],

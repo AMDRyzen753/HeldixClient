@@ -472,6 +472,96 @@ public final class Ui {
 		}
 	}
 
+	/**
+	 * Ausschnitt einer Textur, weich skaliert in Bildschirmpixeln. u/v/uw/vh beziehen sich auf eine gedachte Größe
+	 * texW × texH – so funktioniert derselbe Aufruf für jede Auflösung mit gleichem Seitenverhältnis (z. B. Capes).
+	 */
+	public static void region(GuiGraphicsExtractor g, Identifier texture, float x, float y, float w, float h,
+			float u, float v, int uw, int vh, int texW, int texH, float alpha) {
+		int s = scale();
+		int x0 = Math.round(x * s);
+		int y0 = Math.round(y * s);
+		int x1 = Math.round((x + w) * s);
+		int y1 = Math.round((y + h) * s);
+		g.pose().pushMatrix();
+		g.pose().scale(1f / s, 1f / s);
+		g.blit(RenderPipelines.GUI_TEXTURED, texture, x0, y0, u, v, x1 - x0, y1 - y0, uw, vh, texW, texH, withAlpha(0xFFFFFFFF, alpha));
+		g.pose().popMatrix();
+	}
+
+	/** Grafik aus den Ressourcen mit weicher Filterung registrieren (einmalig, danach kostenlos) */
+	public static void linearTexture(Identifier id) {
+		linear(id);
+	}
+
+	/** Eigenes Bild unter einer ID mit weicher Filterung registrieren (ersetzt eine vorhandene Textur) */
+	public static void registerLinear(Identifier id, NativeImage image) {
+		Minecraft.getInstance().getTextureManager().register(id, new LinearTexture(id, image));
+	}
+
+	/**
+	 * Bild mit Mipmaps registrieren: weich beim Vergrößern und ohne Flimmern beim Verkleinern (z. B. ein Cape aus der
+	 * Entfernung). Das NativeImage gehört danach der Textur und wird mit ihr geschlossen.
+	 */
+	public static void registerMipmapped(Identifier id, NativeImage image) {
+		Minecraft.getInstance().getTextureManager().register(id, new MipTexture(id, image));
+	}
+
+	private static final class MipTexture extends net.minecraft.client.renderer.texture.AbstractTexture {
+		/** Bilder aller Stufen: das Hochladen kann verzögert passieren, deshalb erst mit der Textur freigeben */
+		private final List<NativeImage> levels = new java.util.ArrayList<>();
+
+		MipTexture(Identifier id, NativeImage image) {
+			int levels = 1;
+			while (levels < 7 && (image.getWidth() >> levels) >= 8 && (image.getHeight() >> levels) >= 4) levels++;
+			com.mojang.renderpearl.api.device.GpuDevice device = RenderSystem.getDevice();
+			this.texture = device.createTexture(id::toString, 5, com.mojang.renderpearl.api.GpuFormat.RGBA8_UNORM,
+					image.getWidth(), image.getHeight(), 1, levels);
+			this.textureView = device.createTextureView(this.texture);
+			this.sampler = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR, true);
+			com.mojang.renderpearl.api.commands.CommandEncoder encoder = device.createCommandEncoder();
+			NativeImage level = image;
+			for (int i = 0; i < levels; i++) {
+				if (i > 0) level = halve(level);
+				this.levels.add(level);
+				encoder.writeToTexture(this.texture, level, i, 0, 0, 0);
+			}
+		}
+
+		@Override
+		public void close() {
+			for (NativeImage level : levels) level.close();
+			levels.clear();
+			super.close();
+		}
+
+		/** halbe Größe, je 2 × 2 Pixel gemittelt */
+		private static NativeImage halve(NativeImage source) {
+			int w = Math.max(1, source.getWidth() / 2);
+			int h = Math.max(1, source.getHeight() / 2);
+			NativeImage out = new NativeImage(w, h, false);
+			for (int y = 0; y < h; y++) {
+				for (int x = 0; x < w; x++) {
+					int a = 0;
+					int r = 0;
+					int g = 0;
+					int b = 0;
+					for (int dy = 0; dy < 2; dy++) {
+						for (int dx = 0; dx < 2; dx++) {
+							int argb = source.getPixel(Math.min(source.getWidth() - 1, x * 2 + dx), Math.min(source.getHeight() - 1, y * 2 + dy));
+							a += argb >>> 24;
+							r += (argb >> 16) & 0xFF;
+							g += (argb >> 8) & 0xFF;
+							b += argb & 0xFF;
+						}
+					}
+					out.setPixel(x, y, (a / 4) << 24 | (r / 4) << 16 | (g / 4) << 8 | b / 4);
+				}
+			}
+			return out;
+		}
+	}
+
 	/** Lädt ein Bild mit linearer Filterung (weich beim Skalieren), statt der pixeligen Minecraft-Filterung. */
 	private static void linear(Identifier id) {
 		if (!LINEAR.add(id)) return;

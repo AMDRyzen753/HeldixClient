@@ -429,6 +429,15 @@ input::placeholder { color: var(--faint); }
 .remove-account { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--faint); font-size: 17px; line-height: 1; }
 .remove-account:hover { background: rgba(248, 113, 113, 0.14); color: var(--danger); }
 .offline-form { display: flex; gap: 8px; margin-top: 10px; }
+#add-launcher { margin-top: 8px; }
+.launcher-hint { margin: 6px 4px 0; }
+/* Warten auf den offiziellen Minecraft Launcher */
+.bridge-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; counter-reset: step; }
+.bridge-steps li { display: flex; gap: 12px; align-items: flex-start; color: var(--text); line-height: 1.45; counter-increment: step; }
+.bridge-steps li::before { content: counter(step); flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-text); font-weight: 700; font-size: 12px; }
+.bridge-wait { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; }
+.bridge-wait::before { content: ""; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--accent-text); animation: bridge-spin 0.9s linear infinite; }
+@keyframes bridge-spin { to { transform: rotate(360deg); } }
 .offline-form input { flex: 1; min-width: 0; height: 36px; }
 .offline-form.locked { opacity: 0.45; }
 .dev-panel { display: flex; flex-direction: column; gap: 10px; }

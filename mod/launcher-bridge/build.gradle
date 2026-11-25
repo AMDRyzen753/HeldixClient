@@ -1,0 +1,30 @@
+// Brücke zum offiziellen Minecraft Launcher: Der offizielle Launcher startet sie wie Minecraft (Installation „HeldixClient“)
+// und gibt ihr die Anmeldung mit. Sie reicht die Anmeldung an den HeldixClient-Launcher weiter, der dann selbst startet.
+// Reines Java ohne Abhängigkeiten, Java 8, damit sie mit jeder Laufzeit des offiziellen Launchers läuft.
+plugins {
+	id 'java'
+}
+
+group = rootProject.maven_group
+version = rootProject.launcher_bridge_version
+
+base {
+	archivesName = 'heldix-bridge'
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 8
+	it.options.encoding = 'UTF-8'
+	// "Quelle 8 ist veraltet" – gewollt, die Brücke soll auch mit alten Laufzeiten laufen
+	it.options.compilerArgs << '-Xlint:-options'
+}
+
+jar {
+	manifest {
+		attributes(
+				'Main-Class': 'dev.heldixclient.bridge.Bridge',
+				'Implementation-Title': 'HeldixClient Bridge',
+				'Implementation-Version': project.version,
+		)
+	}
+}

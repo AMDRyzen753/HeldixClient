@@ -44,6 +44,8 @@ public class HeldixClient implements HeldixModInitializer {
 
 	public static KeyMapping menuKey;
 	public static KeyMapping zoomKey;
+	public static KeyMapping freelookKey;
+	public static KeyMapping waypointKey;
 
 	@Override
 	public void onInitialize() {
@@ -56,10 +58,14 @@ public class HeldixClient implements HeldixModInitializer {
 		KeyMapping.Category category = KeyMapping.Category.register(id("main"));
 		menuKey = KeyMappings.register(new KeyMapping("key.heldixclient.menu", InputConstants.Type.KEYBOARD, InputConstants.KEY_RSHIFT, category));
 		zoomKey = KeyMappings.register(new KeyMapping("key.heldixclient.zoom", InputConstants.Type.KEYBOARD, InputConstants.KEY_C, category));
+		freelookKey = KeyMappings.register(new KeyMapping("key.heldixclient.freelook", InputConstants.Type.KEYBOARD, InputConstants.KEY_LALT, category));
+		waypointKey = KeyMappings.register(new KeyMapping("key.heldixclient.waypoint", InputConstants.Type.KEYBOARD, InputConstants.KEY_B, category));
 
 		HudEvents.RENDER.register(HudRenderer::extract);
 		ClientEvents.TICK_END.register(HeldixClient::onTick);
 		StatusReporter.init();
+		// Heldix-Dienst: Capes anderer Spieler, Heldix-Symbol, Freunde (nur mit eingetragener Adresse)
+		dev.heldixclient.social.Social.init();
 		// F3: eigener Eintrag – vor dem Laden der F3-Einstellungen, damit Minecraft ihn kennt
 		DebugOverlay.register();
 

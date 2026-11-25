@@ -59,12 +59,19 @@ Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Laun
 - eigenes **Pausemenü**; das von Minecraft (mit Knöpfen anderer Mods) bleibt über „Klassisches Pausemenü“ erreichbar
 - Heldix-Menü (**Rechte Umschalttaste**): Module als Kacheln mit Icons, Filter (HUD, Funktionen, Addons), Suche und ein Untermenü pro Modul (z. B. Größe, Farben, Anzeige)
 - übrige Minecraft-Menüs (Optionen usw.) mit passenden Knöpfen und Hintergrund; alles auf Wunsch abschaltbar
-- HUD-Module: FPS, CPS, Ping, Koordinaten, Richtung, Biom, Keystrokes
+- HUD-Module: FPS, CPS, Ping, Koordinaten, Richtung, Biom, Keystrokes, **Rüstung** (Rüstung und Items in der Hand mit Haltbarkeit, farbig je nach Zustand), **Trank-Effekte** (Symbol, Stufe und Restzeit; kurz vor dem Ende blinkt der Eintrag)
+- **Dauersprint und Dauerschleichen:** Sprinten ohne Taste (Sprinttaste schaltet um), Schleichen per Tastendruck umschalten; Minecraft entscheidet weiter, wann gesprintet werden darf
+- **Freelook** (**Linke Alt** halten): frei umschauen, während der Spieler weiter in seine Richtung läuft; auf Servern, deren Regeln es verbieten (z. B. hypixel.net), bleibt es aus
+- **Fadenkreuz-Editor:** sechs Formen, acht Farben, Größe, Dicke, Lücke, Deckkraft, Umrandung und Rot beim Zielen auf Lebewesen
+- **Chat:** Uhrzeit vor jeder Nachricht, gleiche Nachrichten hintereinander als „(3×)“ zusammengefasst, Strg+Klick kopiert eine Nachricht
+- **Wegpunkte** (**B** setzt einen): Markierung mit Name und Entfernung, auch durch Wände; automatischer Todespunkt; Verwalten unter Heldix-Menü → Wegpunkte (Farbe, Ausblenden, Löschen)
+- **Freunde, Capes für alle und Heldix-Symbol** über den [Heldix-Dienst](docs/dienst.md): Freundesliste mit Anfragen und Online-Status (auf Wunsch mit Server), andere HeldixClient-Spieler sehen dein Heldix-Cape, und in der Tab-Liste steht das Heldix-Logo vor ihrem Namen
 - HUD-Editor mit Werkzeugleiste: Einrasten an Rändern und anderen Elementen (Umschalt = frei), Raster, Größe über die Ecke oder das Mausrad, Elemente-Liste zum Ein- und Ausblenden, Pfeiltasten, Rückgängig (Strg+Z); Rechtsklick öffnet die Einstellungen eines Elements
 - Zoom (**C** halten, Mausrad ändert die Stärke)
 - **Heldix-Shader:** acht Farbstile und eine Shader-Engine mit Bloom, Tiefenunschärfe, Nebel und Umgebungsverdeckung (SSAO), mit Vulkan und OpenGL; HUD und Menüs bleiben unverändert
 - **Leistung:** FPS-Boost (schnelle Grafikoptionen, Ausschalten stellt alles wieder her) und weniger FPS, solange das Fenster im Hintergrund ist
 - **F3-Menü** im Heldix-Design, mit Grafik-API, Shader und Client-Version
+- **Capes:** neun animierte Heldix-Capes in hoher Auflösung (Heldix, Mitternacht, Aurora, Glut, Kristall, Neon, Sakura, Gewitter, Galaxie) mit Zierkante – Flammen flackern, Sterne funkeln, Blitze zucken, und leuchtende Teile strahlen auch nachts. Das Cape weht wie Stoff: Es biegt sich, wirft Wellen und flattert beim Laufen (für alle Capes, abschaltbar). Dazu eigene Bilder per Drag & Drop, eine drehende Vorschau der eigenen Spielfigur und auf Wunsch dasselbe Motiv auf der Elytra. Sichtbar für dich (z. B. mit F5)
 - **Spotify-Addon:** laufender Song mit Cover und Fortschritt im HUD, Abspielen/Pause und Songwechsel per Taste (Pos1, Bild ab/auf), Einblendung bei jedem neuen Song – ohne Anmeldung, über die Windows-Mediensteuerung
 
 **Für Entwickler**
@@ -88,6 +95,8 @@ Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Laun
 | HUD-Editor | Shader: Farbstile und Shader-Engine |
 | <img src="docs/images/spiel-pausemenue.png" alt="Pausemenü im Heldix-Design"> | <img src="docs/images/ui-icons.png" alt="Icon-Set von HeldixClient"> |
 | Pausemenü | Eigenes Icon-Set |
+| <img src="docs/images/spiel-cape.png" alt="Cape-Auswahl im Heldix-Menü"> | <img src="docs/images/capes.png" alt="Die neun Heldix-Capes"> |
+| Cape mit Vorschau der eigenen Figur | Die Heldix-Capes |
 
 ## Installation
 
@@ -96,7 +105,7 @@ Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Laun
 3. Im Launcher mit dem Microsoft-Konto anmelden, eine Instanz wählen und **Spielen** drücken.
 
 > [!NOTE]
-> Die Anmeldung mit Microsoft-Konten braucht eine App-ID, die Mojang freigeschaltet hat. Solange die Freigabe aussteht, lehnt Minecraft die Anmeldung ab. Hintergründe stehen in [docs/einrichtung.md](docs/einrichtung.md).
+> Die Anmeldung mit Microsoft-Konten braucht eine App-ID, die Mojang freigeschaltet hat. Solange die Freigabe aussteht, lehnt Minecraft die Anmeldung ab. Bis dahin gibt es **Über Minecraft Launcher anmelden**: Der offizielle Minecraft Launcher meldet an, gespielt wird mit HeldixClient. Hintergründe stehen in [docs/einrichtung.md](docs/einrichtung.md).
 
 ## Selbst bauen
 
@@ -130,6 +139,8 @@ mod/                     Java-Projekte (Gradle, Minecraft 26.3, Java 25)
 ├── heldix-api/          API für Heldix-Addons (ohne Minecraft-Abhängigkeit)
 ├── example-addon/       Beispiel-Addon „Uhrzeit & Spielzeit“
 ├── spotify-addon/       Spotify-Addon (Windows-Mediensteuerung)
+├── launcher-bridge/     Brücke: Anmeldung über den offiziellen Minecraft Launcher
+service/                 Heldix-Dienst: Freunde, Capes für alle, Heldix-Symbol (Node.js)
 └── autotest/            automatischer Test im echten Spiel
 docs/                    Dokumentation und Bilder
 ```

@@ -17,6 +17,8 @@ public final class HudRenderer {
 		if (mc.getDebugOverlay().showDebugScreen()) return;
 		if (mc.gui.screen() instanceof HudEditorScreen) return; // der Editor zeichnet selbst
 
+		// Wegpunkte unter den HUD-Elementen
+		if (ModuleManager.waypoints != null) ModuleManager.waypoints.render(g, mc);
 		for (HudModule module : ModuleManager.hud()) {
 			if (module.isEnabled()) module.extract(g, mc);
 		}

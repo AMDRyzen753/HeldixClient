@@ -42,6 +42,9 @@ public final class Shell {
 		SERVERS("Mehrspieler", "server", Section.PLAY),
 		REALMS("Realms", "realms", Section.PLAY),
 		MODULES("Module", "modules", Section.HELDIX),
+		CAPE("Cape", "cape", Section.HELDIX),
+		FRIENDS("Freunde", "friends", Section.HELDIX),
+		WAYPOINTS("Wegpunkte", "pin", Section.HELDIX),
 		SHADER("Shader", "shader", Section.HELDIX),
 		PERFORMANCE("Leistung", "performance", Section.HELDIX),
 		ADDONS("Addons", "addons", Section.HELDIX),
@@ -232,7 +235,8 @@ public final class Shell {
 		}
 	}
 
-	private static Supplier<PlayerSkin> skin(Minecraft minecraft) {
+	/** Skin des angemeldeten Kontos (auch im Hauptmenü ohne Welt) */
+	public static Supplier<PlayerSkin> skin(Minecraft minecraft) {
 		if (skin == null) skin = minecraft.getSkinManager().createLookup(minecraft.getGameProfile(), false);
 		return skin;
 	}
@@ -259,7 +263,7 @@ public final class Shell {
 			case WORLDS -> minecraft.gui.setScreen(new WorldsScreen());
 			case SERVERS -> minecraft.gui.setScreen(minecraft.options.skipMultiplayerWarning ? new ServersScreen() : new SafetyScreen(from));
 			case REALMS -> minecraft.gui.setScreen(new RealmsMainScreen(from));
-			case MODULES, SHADER, PERFORMANCE, ADDONS, SETTINGS -> minecraft.gui.setScreen(new HeldixMenuScreen(back, page));
+			case MODULES, CAPE, FRIENDS, WAYPOINTS, SHADER, PERFORMANCE, ADDONS, SETTINGS -> minecraft.gui.setScreen(new HeldixMenuScreen(back, page));
 			case HUD -> minecraft.gui.setScreen(new HudEditorScreen(from));
 			case OPTIONS -> minecraft.gui.setScreen(new OptionsScreen(from, minecraft.options));
 			case PAUSE -> minecraft.gui.setScreen(new PauseMenuScreen());

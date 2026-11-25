@@ -46,6 +46,13 @@ public abstract class Module {
 			case "coordinates" -> "compass";
 			case "keystrokes" -> "keyboard";
 			case "zoom" -> "zoom";
+			case "armor" -> "shield";
+			case "effects" -> "potion";
+			case "togglesprint" -> "sprint";
+			case "freelook" -> "eye";
+			case "crosshair" -> "crosshair";
+			case "chat" -> "chat";
+			case "waypoints" -> "pin";
 			default -> source() != null ? "addons" : "cube";
 		};
 	}

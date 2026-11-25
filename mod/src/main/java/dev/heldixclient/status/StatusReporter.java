@@ -45,6 +45,7 @@ public final class StatusReporter {
 	}
 
 	private static void emit(String mode, String server) {
+		dev.heldixclient.social.Social.statusChanged(mode, server);
 		JsonObject json = new JsonObject();
 		json.addProperty("mode", mode);
 		if (server != null) json.addProperty("server", server);

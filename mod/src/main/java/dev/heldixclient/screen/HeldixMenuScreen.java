@@ -1,5 +1,6 @@
 package dev.heldixclient.screen;
 
+import com.mojang.blaze3d.Blaze3D;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.device.GpuDevice;
@@ -8,6 +9,7 @@ import dev.heldixclient.addon.AddonManager;
 import dev.heldixclient.addon.LoadedAddon;
 import dev.heldixclient.api.HeldixApi;
 import dev.heldixclient.config.HeldixConfig;
+import dev.heldixclient.cosmetic.Capes;
 import dev.heldixclient.loader.HeldixLoader;
 import dev.heldixclient.loader.api.ModInfo;
 import dev.heldixclient.module.HudModule;
@@ -19,6 +21,8 @@ import dev.heldixclient.render.Performance;
 import dev.heldixclient.render.ShaderEngine;
 import dev.heldixclient.render.ShaderPreset;
 import dev.heldixclient.render.Shaders;
+import dev.heldixclient.social.Social;
+import dev.heldixclient.waypoint.Waypoints;
 import dev.heldixclient.ui.Shell;
 import dev.heldixclient.ui.Ui;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -94,6 +98,29 @@ public class HeldixMenuScreen extends ShellScreen {
 	private Setting.Slider dragging;
 	private float dragX;
 	private float dragW;
+
+	/** Seite Cape: Kachel unter der Maus (aus dem letzten Bild) für die Vorschau */
+	private static final Object NO_HOVER = new Object();
+	/** Kachel "Ohne" */
+	private static final Object NO_CAPE = new Object();
+	private Object capeHover = NO_HOVER;
+	private Object capeHoverShown = NO_HOVER;
+	private final long capeStart = System.nanoTime();
+	private String capeMessage;
+	private boolean capeMessageOk;
+	private long capeMessageAt;
+
+	/** Eingabefeld im Kopf der Seiten Freunde (Spielername) und Wegpunkte (Name) */
+	private SearchField pageInput;
+	private String pageInputText = "";
+	private String pageMessage;
+	private boolean pageMessageOk;
+	private long pageMessageAt;
+	/** Zeitpunkt des ersten Klicks auf „Daten beim Dienst löschen“ (0 = keiner) */
+	private long confirmDeleteAt;
+	/** Freund, dessen Entfernen gerade bestätigt werden muss (zweiter Klick) */
+	private java.util.UUID confirmRemove;
+	private long confirmAt;
 
 	private int bodyX;
 	private int bodyW;
@@ -191,6 +218,19 @@ public class HeldixMenuScreen extends ShellScreen {
 		return new int[] {cell[0] + cell[2] / 2, cell[1] + CHIP_H / 2};
 	}
 
+	/** Mitte der Cape-Kachel Nummer {@code index} in der ersten Cape-Reihe (0 = "Ohne", dann die Heldix-Capes). */
+	public int[] capeCenter(int index) {
+		layout();
+		CapeGrid grid = first(CapeGrid.class);
+		// Kachel in den sichtbaren Bereich scrollen (kleine Fenster)
+		int[] cell = grid.cell(index, bodyX, rowY(grid), bodyW);
+		if (cell[1] < bodyY || cell[1] + CapeGrid.TILE > bodyY + bodyH) {
+			scroll = Math.clamp(scroll + cell[1] - bodyY - (bodyH - CapeGrid.TILE) / 2.0, 0, maxScroll());
+			cell = grid.cell(index, bodyX, rowY(grid), bodyW);
+		}
+		return new int[] {cell[0] + cell[2] / 2, cell[1] + CapeGrid.TILE / 2};
+	}
+
 	/** ID des Moduls, dessen Untermenü offen ist (null = keins). */
 	public String openModuleId() {
 		return openModule == null ? null : openModule.id();
@@ -215,6 +255,8 @@ public class HeldixMenuScreen extends ShellScreen {
 	protected void initContent() {
 		layout();
 		search = null;
+		pageInput = null;
+		pageButton = null;
 		if (openModule != null) {
 			String back = "Zurück";
 			int w = ActionButton.widthFor(back, "back");
@@ -236,7 +278,83 @@ public class HeldixMenuScreen extends ShellScreen {
 				scroll = 0;
 			});
 			addRenderableWidget(search);
+		} else if (page == Shell.Page.FRIENDS && Social.state() != Social.State.DISABLED && Social.state() != Social.State.OFFLINE_ACCOUNT
+				&& Social.state() != Social.State.OFF) {
+			addPageInput("Anfrage senden", "user-plus", "Spielername", "user", this::sendFriendRequest);
+		} else if (page == Shell.Page.WAYPOINTS && minecraft.level != null) {
+			addPageInput("Hier setzen", "plus", "Name (optional)", "pin", this::addWaypointHere);
 		}
+	}
+
+	/** Eingabefeld und Knopf als erste Zeile des Inhalts (Position setzt drawContent über die InputRow) */
+	private void addPageInput(String button, String buttonIcon, String hint, String fieldIcon, Runnable action) {
+		int bw = ActionButton.widthFor(button, buttonIcon);
+		pageButton = new ActionButton(0, 0, bw, 20, button, true, action).withIcon(buttonIcon);
+		pageButton.visible = false;
+		addRenderableWidget(pageButton);
+		pageInput = new SearchField(0, 0, 120, 20, hint).withIcon(fieldIcon);
+		pageInput.visible = false;
+		pageInput.setValue(pageInputText);
+		pageInput.setResponder(text -> pageInputText = text);
+		pageInput.setOnEnter(action);
+		addRenderableWidget(pageInput);
+	}
+
+	/** Platzhalter-Zeile für Eingabefeld und Knopf; die Widgets folgen ihr beim Scrollen */
+	private final class InputRow implements Row {
+		@Override
+		public int height(int width) {
+			return 22;
+		}
+
+		@Override
+		public int gapAfter() {
+			return 8;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			// die Widgets zeichnen sich selbst
+		}
+	}
+
+	private final InputRow inputRow = new InputRow();
+	private ActionButton pageButton;
+
+	private void pageMessage(String message, boolean ok) {
+		pageMessage = message;
+		pageMessageOk = ok;
+		pageMessageAt = System.currentTimeMillis();
+	}
+
+	/** Ergebnis einer Anfrage an den Dienst als Hinweis auf der Seite zeigen */
+	private void report(java.util.concurrent.CompletableFuture<Void> call, String success) {
+		call.whenComplete((ok, error) -> minecraft.execute(() -> {
+			if (error == null) pageMessage(success, true);
+			else pageMessage(error instanceof java.util.concurrent.CompletionException && error.getCause() != null
+					? error.getCause().getMessage() : error.getMessage(), false);
+		}));
+	}
+
+	private void sendFriendRequest() {
+		String name = pageInputText.strip();
+		if (!name.matches("[A-Za-z0-9_]{1,16}")) {
+			pageMessage("Bitte einen Minecraft-Namen eingeben (1–16 Zeichen, Buchstaben, Zahlen und _).", false);
+			return;
+		}
+		click();
+		report(Social.sendRequest(name), "Anfrage an " + name + " gesendet");
+		pageInputText = "";
+		if (pageInput != null) pageInput.setValue("");
+	}
+
+	private void addWaypointHere() {
+		Waypoints.Waypoint waypoint = Waypoints.add(minecraft, pageInputText);
+		if (waypoint == null) return;
+		click();
+		pageMessage("„" + waypoint.name + "“ gesetzt bei " + waypoint.coordinates(), true);
+		pageInputText = "";
+		if (pageInput != null) pageInput.setValue("");
 	}
 
 	@Override
@@ -257,6 +375,19 @@ public class HeldixMenuScreen extends ShellScreen {
 				long on = ModuleManager.all().stream().filter(Module::isEnabled).count();
 				yield on + " von " + ModuleManager.all().size() + " Modulen aktiv";
 			}
+			case CAPE -> "Dein Cape in der Third-Person-Ansicht (F5)";
+			case FRIENDS -> switch (Social.state()) {
+				case ONLINE -> {
+					long online = Social.friends().stream().filter(Social.Friend::online).count();
+					yield Social.friends().isEmpty() ? "Mit dem Heldix-Dienst verbunden" : online + " von " + Social.friends().size() + " Freunden online";
+				}
+				case CONNECTING -> "Verbinde …";
+				case ERROR -> "Keine Verbindung zum Heldix-Dienst";
+				case OFFLINE_ACCOUNT -> "Nur mit Microsoft-Konto";
+				case OFF -> "Heldix-Dienst ausgeschaltet";
+				case DISABLED -> "Heldix-Dienst nicht eingerichtet";
+			};
+			case WAYPOINTS -> minecraft.level == null ? "In einer Welt oder auf einem Server" : Waypoints.worldName(minecraft);
 			case SHADER -> "Farbstile und Shader-Engine";
 			case PERFORMANCE -> "Mehr FPS, weniger Last";
 			case ADDONS -> AddonManager.addons().size() + (AddonManager.addons().size() == 1 ? " Addon installiert" : " Addons installiert");
@@ -293,6 +424,9 @@ public class HeldixMenuScreen extends ShellScreen {
 				if (modules.isEmpty()) list.add(new Text(query.isEmpty() ? "Keine Module in diesem Bereich." : "Kein Modul passt zu „" + searchText.trim() + "“.", Ui.MUTED));
 				else list.add(new ModuleGrid(modules));
 			}
+			case CAPE -> buildCapeRows(list);
+			case FRIENDS -> buildFriendRows(list);
+			case WAYPOINTS -> buildWaypointRows(list);
 			case SHADER -> buildShaderRows(list);
 			case PERFORMANCE -> buildPerformanceRows(list);
 			case ADDONS -> buildAddonRows(list);
@@ -304,6 +438,179 @@ public class HeldixMenuScreen extends ShellScreen {
 			}
 		}
 		return list;
+	}
+
+	/** Seite Cape: großer Vorschau-Bereich, Auswahl der Heldix-Capes und eigener Bilder */
+	private void buildCapeRows(List<Row> list) {
+		HeldixConfig.Data config = HeldixConfig.get();
+		list.add(new CapeShowcase());
+		list.add(new Section("Heldix-Capes", Capes.builtin().size() + " Motive"));
+		List<Object> builtin = new ArrayList<>();
+		builtin.add(NO_CAPE);
+		builtin.addAll(Capes.builtin());
+		list.add(new CapeGrid(builtin));
+
+		List<Capes.Cape> custom = Capes.custom();
+		list.add(new Section("Eigene Capes", custom.isEmpty() ? null : custom.size() + (custom.size() == 1 ? " Bild" : " Bilder")));
+		if (capeMessage != null && System.currentTimeMillis() - capeMessageAt < 8000) {
+			list.add(new Notice(capeMessageOk ? "check" : "warning", capeMessage, capeMessageOk ? Ui.SUCCESS : Ui.WARNING));
+		}
+		if (!custom.isEmpty()) list.add(new CapeGrid(new ArrayList<>(custom)));
+		list.add(new Text("Zieh ein PNG-Bild ins Fenster oder leg es in den Ordner " + Capes.DIRECTORY
+				+ ". Cape-Vorlagen (64 × 32 oder größer im selben Format) werden direkt übernommen, andere Bilder kommen auf die Rückseite.", Ui.MUTED));
+		list.add(new SettingRow(new Setting.Action("Ordner " + Capes.DIRECTORY, "Im Spielordner dieser Instanz", "Öffnen", () -> {
+			try {
+				java.nio.file.Files.createDirectories(Capes.directory());
+			} catch (Exception e) {
+				HeldixClient.LOGGER.warn("Cape-Ordner nicht anlegbar", e);
+			}
+			Blaze3D.openPath(Capes.directory());
+		})));
+		list.add(new SettingRow(new Setting.Action("Neu einlesen", "Nach dem Hinzufügen oder Löschen von Bildern", "Aktualisieren", () -> {
+			Capes.reloadCustom();
+			int count = Capes.custom().size();
+			capeMessage = count == 0 ? "Keine Bilder im Ordner gefunden" : count + (count == 1 ? " eigenes Cape gefunden" : " eigene Capes gefunden");
+			capeMessageOk = count > 0;
+			capeMessageAt = System.currentTimeMillis();
+		})));
+
+		list.add(new Section("Optionen", null));
+		list.add(new SettingRow(configToggle("Wehender Stoff", "Das Cape weht und wirft Wellen wie Stoff, statt als starre Platte zu schwingen (für alle Capes)",
+				() -> config.capeCloth, v -> config.capeCloth = v)));
+		list.add(new SettingRow(configToggle("Animation", "Die Heldix-Capes bewegen sich (Flammen, Sterne, Polarlicht …)",
+				() -> config.capeAnimation, v -> config.capeAnimation = v)));
+		list.add(new SettingRow(configToggle("Leuchtende Details", "Funken, Sterne und Neon leuchten auch im Dunkeln",
+				() -> config.capeGlow, v -> config.capeGlow = v)));
+		list.add(new SettingRow(configToggle("Elytra im Cape-Design", "Die Flügel zeigen dasselbe Motiv wie das Cape",
+				() -> config.capeElytra, v -> config.capeElytra = v)));
+		String who = Social.state() == Social.State.DISABLED || Social.state() == Social.State.OFFLINE_ACCOUNT || Social.state() == Social.State.OFF
+				? "Das Cape siehst nur du, z. B. in der Third-Person-Ansicht (F5) und im Inventar. "
+				: "Andere HeldixClient-Spieler sehen dein Heldix-Cape (einstellbar unter Freunde → Privatsphäre); eigene Bilder siehst nur du. ";
+		list.add(new Notice("info", who + "Unter Optionen → Skin-Anpassung muss „Umhang“ eingeschaltet sein.", Ui.ACCENT_TEXT));
+	}
+
+	/** Seite Freunde: Anfragen, Freunde (online zuerst), gesendete Anfragen und Privatsphäre */
+	private void buildFriendRows(List<Row> list) {
+		Social.State state = Social.state();
+		switch (state) {
+			case DISABLED -> {
+				list.add(new Notice("info", "Der Heldix-Dienst ist in dieser Installation nicht eingerichtet. Freunde, Capes für andere Spieler "
+						+ "und das Heldix-Symbol in der Tab-Liste brauchen ihn.", Ui.ACCENT_TEXT));
+				return;
+			}
+			case OFFLINE_ACCOUNT -> {
+				list.add(new Notice("warning", "Freunde gibt es nur mit einem Microsoft-Konto. Mit einem Offline-Konto bleibt der Heldix-Dienst aus.", Ui.WARNING));
+				return;
+			}
+			case OFF -> {
+				if (pageMessage != null && System.currentTimeMillis() - pageMessageAt < 8000) {
+					list.add(new Notice(pageMessageOk ? "check" : "warning", pageMessage, pageMessageOk ? Ui.SUCCESS : Ui.WARNING));
+				}
+				list.add(new Notice("info", "Der Heldix-Dienst ist ausgeschaltet: keine Freunde, keine Capes anderer Spieler und kein Heldix-Symbol. "
+						+ "Es werden keine Daten an den Dienst geschickt.", Ui.ACCENT_TEXT));
+				list.add(new SettingRow(new Setting.Toggle("Heldix-Dienst nutzen", "Freunde, Capes für alle und das Heldix-Symbol in der Tab-Liste",
+						() -> HeldixConfig.get().socialEnabled, Social::setEnabled)));
+				return;
+			}
+			case CONNECTING -> list.add(new Notice("refresh", "Verbinde mit dem Heldix-Dienst …", Ui.ACCENT_TEXT));
+			case ERROR -> {
+				list.add(new Notice("warning", (Social.error() != null ? Social.error() : "Keine Verbindung")
+						+ ". HeldixClient versucht es gleich noch einmal.", Ui.WARNING));
+				list.add(new SettingRow(new Setting.Action("Verbindung", "Nicht warten, sondern sofort neu verbinden", "Verbinden", Social::connect)));
+			}
+			case ONLINE -> {
+			}
+		}
+		if (pageInput != null) list.add(inputRow);
+		if (pageMessage != null && System.currentTimeMillis() - pageMessageAt < 8000) {
+			list.add(new Notice(pageMessageOk ? "check" : "warning", pageMessage, pageMessageOk ? Ui.SUCCESS : Ui.WARNING));
+		}
+		List<Social.Request> incoming = Social.incoming();
+		if (!incoming.isEmpty()) {
+			list.add(new Section("Anfragen", Integer.toString(incoming.size())));
+			for (Social.Request request : incoming) list.add(new RequestRow(request, true));
+		}
+		List<Social.Friend> friends = Social.friends();
+		List<Social.Friend> online = friends.stream().filter(Social.Friend::online).toList();
+		List<Social.Friend> offline = friends.stream().filter(f -> !f.online()).toList();
+		if (!online.isEmpty()) {
+			list.add(new Section("Online", Integer.toString(online.size())));
+			for (Social.Friend friend : online) list.add(new FriendRow(friend));
+		}
+		if (!offline.isEmpty()) {
+			list.add(new Section("Offline", Integer.toString(offline.size())));
+			for (Social.Friend friend : offline) list.add(new FriendRow(friend));
+		}
+		if (friends.isEmpty() && incoming.isEmpty() && state == Social.State.ONLINE) {
+			list.add(new Text("Noch keine Freunde. Gib oben den Namen eines Spielers ein und sende eine Anfrage – er muss HeldixClient "
+					+ "nutzen und schon einmal damit online gewesen sein.", Ui.MUTED));
+		}
+		List<Social.Request> outgoing = Social.outgoing();
+		if (!outgoing.isEmpty()) {
+			list.add(new Section("Gesendet", Integer.toString(outgoing.size())));
+			for (Social.Request request : outgoing) list.add(new RequestRow(request, false));
+		}
+
+		HeldixConfig.Data config = HeldixConfig.get();
+		list.add(new Section("Privatsphäre", null));
+		list.add(new SettingRow(socialToggle("Für andere erkennbar", "Heldix-Symbol in der Tab-Liste und dein Heldix-Cape für andere HeldixClient-Spieler",
+				() -> config.socialVisible, v -> config.socialVisible = v)));
+		list.add(new SettingRow(socialToggle("Online-Status für Freunde", "Freunde sehen, ob du online bist und ob du im Menü oder in einer Welt bist",
+				() -> config.socialPresence, v -> config.socialPresence = v)));
+		list.add(new SettingRow(socialToggle("Server für Freunde sichtbar", "Freunde sehen, auf welchem Server du spielst (nur öffentliche Adressen)",
+				() -> config.socialShowServer, v -> config.socialShowServer = v)));
+		list.add(new SettingRow(new Setting.Toggle("Heldix-Dienst nutzen", "Aus: keine Verbindung und keine Daten an den Dienst",
+				() -> HeldixConfig.get().socialEnabled, Social::setEnabled)));
+		boolean confirming = confirmDeleteAt > 0 && System.currentTimeMillis() - confirmDeleteAt < 5000;
+		list.add(new SettingRow(new Setting.Action("Daten beim Dienst löschen", confirming
+				? "Wirklich? Freunde, Anfragen und Einstellungen beim Dienst sind danach weg, der Dienst wird ausgeschaltet."
+				: "Löscht alles, was der Heldix-Dienst über dich gespeichert hat", confirming ? "Endgültig löschen" : "Löschen", () -> {
+			if (System.currentTimeMillis() - confirmDeleteAt < 5000) {
+				confirmDeleteAt = 0;
+				report(Social.deleteAccount(), "Deine Daten beim Heldix-Dienst sind gelöscht. Der Dienst ist jetzt ausgeschaltet.");
+			} else {
+				confirmDeleteAt = System.currentTimeMillis();
+			}
+		})));
+		list.add(new Section("Anzeige", null));
+		list.add(new SettingRow(configToggle("Einblendungen", "Bei Anfragen und wenn Freunde online kommen",
+				() -> config.socialNotifications, v -> config.socialNotifications = v)));
+		list.add(new SettingRow(configToggle("Capes anderer Spieler", "Heldix-Capes anderer HeldixClient-Spieler zeigen",
+				() -> config.socialCapes, v -> config.socialCapes = v)));
+	}
+
+	private Setting.Toggle socialToggle(String label, String description, BooleanSupplier get, Consumer<Boolean> set) {
+		return new Setting.Toggle(label, description, get, value -> {
+			set.accept(value);
+			HeldixConfig.save();
+			Social.profileChanged();
+		});
+	}
+
+	/** Seite Wegpunkte: Wegpunkte der aktuellen Welt, Optionen des Moduls */
+	private void buildWaypointRows(List<Row> list) {
+		Module module = ModuleManager.waypoints;
+		if (minecraft.level == null) {
+			list.add(new Notice("info", "Wegpunkte gehören zu einer Welt bzw. einem Server. Betritt eine Welt, um sie zu sehen und zu setzen.", Ui.ACCENT_TEXT));
+		} else {
+			if (pageInput != null) list.add(inputRow);
+			if (pageMessage != null && System.currentTimeMillis() - pageMessageAt < 8000) {
+				list.add(new Notice(pageMessageOk ? "check" : "warning", pageMessage, pageMessageOk ? Ui.SUCCESS : Ui.WARNING));
+			}
+			List<Waypoints.Waypoint> waypoints = Waypoints.current(minecraft);
+			list.add(new Section("In dieser Welt", waypoints.isEmpty() ? null : waypoints.size() + (waypoints.size() == 1 ? " Wegpunkt" : " Wegpunkte")));
+			if (waypoints.isEmpty()) {
+				list.add(new Text("Noch keine Wegpunkte. Oben „Hier setzen“ oder im Spiel die Taste "
+						+ HeldixClient.waypointKey.getTranslatedKeyMessage().getString() + " drücken.", Ui.MUTED));
+			}
+			for (Waypoints.Waypoint waypoint : waypoints) list.add(new WaypointRow(waypoint));
+			list.add(new Text("Klick auf den Farbpunkt wechselt die Farbe, das Auge blendet einen Wegpunkt aus.", Ui.FAINT));
+		}
+		if (module != null) {
+			list.add(new Section("Optionen", null));
+			list.add(new SettingRow(new Setting.Toggle("Wegpunkte im Spiel", "Markierungen mit Name und Entfernung, auch durch Wände", module::isEnabled, module::setEnabled)));
+			for (Setting setting : module.settings()) list.add(new SettingRow(setting));
+		}
 	}
 
 	private void buildShaderRows(List<Row> list) {
@@ -924,6 +1231,165 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 	}
 
+	/** Vorschau des Capes: Spielerfigur von hinten, Name und Beschreibung */
+	private final class CapeShowcase implements Row {
+		private static final int H = 124;
+
+		@Override
+		public int height(int width) {
+			return H;
+		}
+
+		@Override
+		public int gapAfter() {
+			return 10;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			Capes.Cape selected = Capes.selected();
+			Object shown = capeHoverShown != NO_HOVER ? capeHoverShown : selected == null ? NO_CAPE : selected;
+			Capes.Cape cape = shown instanceof Capes.Cape c ? c : null;
+			boolean preview = capeHoverShown != NO_HOVER && cape != selected;
+
+			int pw = Math.clamp(w / 3, 84, 128);
+			Ui.rect(g, x, y, pw, H, 12, 0x12FFFFFF);
+			Ui.outline(g, x, y, pw, H, 12, Ui.LINE);
+			Ui.rect(g, x + pw / 2f - 24, y + H - 17, 48, 7, 3.5f, 0x30000000);
+			Capes.drawPlayer(g, Shell.skin(minecraft).get(), cape, x + 4, y + 6, x + pw - 4, y + H - 8, (System.nanoTime() - capeStart) / 1e9f);
+
+			int tx = x + pw + 14;
+			int tw = w - pw - 14;
+			Ui.text(g, preview ? "VORSCHAU" : "DEIN CAPE", tx, y + 6, preview ? Ui.ACCENT_TEXT : Ui.FAINT, Ui.Font.SMALL);
+			String name = cape != null ? cape.name() : "Kein Cape";
+			Ui.text(g, Ui.ellipsize(name, tw, Ui.Font.TITLE), tx, y + 25, Ui.TEXT, Ui.Font.TITLE);
+			String description = cape != null ? cape.description()
+					: "Ohne Heldix-Cape. Ein Cape deines Minecraft-Kontos bleibt sichtbar.";
+			int ly = y + 45;
+			List<FormattedCharSequence> lines = Ui.wrap(description, tw, Ui.Font.BODY);
+			for (int i = 0; i < Math.min(3, lines.size()); i++) {
+				g.text(minecraft.font, lines.get(i), tx, ly, Ui.MUTED, false);
+				ly += 11;
+			}
+			if (preview) Ui.text(g, "Klicken zum Auswählen", tx, ly + 3, Ui.FAINT, Ui.Font.SMALL);
+
+			// Hinweise als Pillen unten
+			int px = tx;
+			int py = y + H - 20;
+			HeldixConfig.Data config = HeldixConfig.get();
+			List<String[]> pills = new ArrayList<>();
+			boolean shared = cape != null && !cape.custom() && Social.online() && config.socialVisible;
+			pills.add(new String[] {"eye", shared ? "Andere Heldix-Spieler sehen es" : "Nur für dich sichtbar"});
+			if (cape != null && cape.glows() && config.capeGlow) pills.add(new String[] {"sparkles", "Leuchtet im Dunkeln"});
+			if (cape != null && cape.animated() && config.capeAnimation) pills.add(new String[] {"play", "Animiert"});
+			if (cape != null && config.capeElytra) pills.add(new String[] {"check", "Auch auf der Elytra"});
+			for (String[] p : pills) {
+				int pillW = Ui.width(p[1], Ui.Font.SMALL) + 24;
+				if (px + pillW > x + w) break;
+				px += pill(g, px, py, p[0], p[1]) + 6;
+			}
+		}
+
+		private int pill(GuiGraphicsExtractor g, int x, int y, String icon, String text) {
+			int pw = Ui.width(text, Ui.Font.SMALL) + 24;
+			Ui.rect(g, x, y, pw, 16, 8, Ui.SURFACE);
+			Ui.outline(g, x, y, pw, 16, 8, Ui.LINE);
+			Ui.icon(g, icon, x + 6, y + 4, 8, Ui.MUTED);
+			Ui.text(g, text, x + 17, y + 5, Ui.MUTED, Ui.Font.SMALL);
+			return pw;
+		}
+	}
+
+	/** Capes als Kacheln mit der Außenseite des Capes; Klick legt es an. */
+	private final class CapeGrid implements Row {
+		private static final int MIN_W = 58;
+		private static final int TILE = 84;
+		private final List<Object> capes;
+
+		CapeGrid(List<Object> capes) {
+			this.capes = capes;
+		}
+
+		private int columns(int w) {
+			return Math.clamp((w + GAP) / (MIN_W + GAP), 3, 8);
+		}
+
+		int[] cell(int index, int x, int y, int w) {
+			int c = columns(w);
+			int cw = (w - GAP * (c - 1)) / c;
+			return new int[] {x + (index % c) * (cw + GAP), y + (index / c) * (TILE + GAP), cw};
+		}
+
+		@Override
+		public int height(int width) {
+			int c = columns(width);
+			return (capes.size() + c - 1) / c * (TILE + GAP) - GAP;
+		}
+
+		private boolean isSelected(Object entry, Capes.Cape selected) {
+			return entry == NO_CAPE ? selected == null : entry == selected;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			Capes.Cape selected = Capes.selected();
+			for (int i = 0; i < capes.size(); i++) {
+				Object entry = capes.get(i);
+				int[] cell = cell(i, x, y, w);
+				int cx = cell[0];
+				int cy = cell[1];
+				int cw = cell[2];
+				boolean on = isSelected(entry, selected);
+				boolean hover = Ui.inside(mouseX, mouseY, cx, cy, cw, TILE);
+				float t = animate(entry, on ? 1f : 0f);
+				float hv = animate("cape-hover#" + System.identityHashCode(entry), hover ? 1f : 0f);
+				if (hover) capeHover = entry;
+
+				Ui.rect(g, cx, cy, cw, TILE, 10, Ui.lerp(Ui.lerp(Ui.SURFACE, Ui.SURFACE_HOVER, hv), Ui.ACCENT_SOFT, t));
+				Ui.outline(g, cx, cy, cw, TILE, 10, Ui.lerp(Ui.LINE, Ui.ACCENT_LINE, t));
+
+				float ih = 46;
+				float iw = ih * 10 / 16;
+				float ix = cx + (cw - iw) / 2f;
+				float iy = cy + 9 - hv * 1.5f;
+				String name;
+				if (entry instanceof Capes.Cape cape) {
+					Ui.shadow(g, ix, iy, iw, ih, 0.35f);
+					Capes.drawFront(g, cape, ix, iy, iw, ih, 1f);
+					Ui.outline(g, ix, iy, iw, ih, 0, 0x33000000);
+					name = cape.name();
+					if (hover && cape.custom()) Ui.requestTooltip(cape.description(), mouseX, mouseY);
+					if (cape.glows() && HeldixConfig.get().capeGlow) {
+						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
+						Ui.icon(g, "sparkles", cx + 5, cy + 5, 10, 0xFFFDE68A);
+					}
+				} else {
+					Ui.outline(g, ix, iy, iw, ih, 4, Ui.LINE_STRONG);
+					Ui.icon(g, "close", ix + iw / 2f - 6, iy + ih / 2f - 6, 12, Ui.FAINT);
+					name = "Ohne";
+				}
+				Ui.textCentered(g, Ui.ellipsize(name, cw - 8, Ui.Font.SMALL), cx + cw / 2, cy + TILE - 18, on ? Ui.TEXT : Ui.MUTED, Ui.Font.SMALL);
+				if (t > 0.01f) {
+					Ui.circle(g, cx + cw - 10, cy + 10, 6, Ui.withAlpha(Ui.ACCENT, t));
+					Ui.icon(g, "check", cx + cw - 14, cy + 6, 8, Ui.withAlpha(0xFFFFFFFF, t));
+				}
+			}
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			for (int i = 0; i < capes.size(); i++) {
+				int[] cell = cell(i, x, y, w);
+				if (!Ui.inside(mouseX, mouseY, cell[0], cell[1], cell[2], TILE)) continue;
+				HeldixMenuScreen.this.click();
+				Object entry = capes.get(i);
+				Capes.select(entry instanceof Capes.Cape cape ? cape : null);
+				return true;
+			}
+			return false;
+		}
+	}
+
 	/** Ein Heldix-Addon mit Status. */
 	private final class AddonCard implements Row {
 		private final LoadedAddon addon;
@@ -962,6 +1428,195 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 	}
 
+	/** Ein Freund: Anfangsbuchstabe, Name, was er gerade macht; rechts Entfernen (mit Bestätigung) */
+	private final class FriendRow implements Row {
+		private final Social.Friend friend;
+
+		FriendRow(Social.Friend friend) {
+			this.friend = friend;
+		}
+
+		@Override
+		public int height(int width) {
+			return 36;
+		}
+
+		@Override
+		public int gapAfter() {
+			return 4;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			boolean hover = Ui.inside(mouseX, mouseY, x, y, w, 36);
+			Ui.rect(g, x, y, w, 36, 9, hover ? Ui.SURFACE_HOVER : Ui.SURFACE);
+			avatar(g, friend.name(), x + 8, y + 7, friend.online());
+			int textW = w - 40 - 120;
+			Ui.text(g, Ui.ellipsize(friend.name(), textW, Ui.Font.LABEL), x + 38, y + 8, Ui.TEXT, Ui.Font.LABEL);
+			Ui.text(g, Ui.ellipsize(friend.activity(), textW, Ui.Font.SMALL), x + 38, y + 21, friend.online() ? Ui.SUCCESS : Ui.FAINT, Ui.Font.SMALL);
+			boolean confirming = friend.uuid().equals(confirmRemove) && System.currentTimeMillis() - confirmAt < 4000;
+			boolean overRemove = Ui.inside(mouseX, mouseY, x + w - 30, y, 30, 36);
+			if (confirming) {
+				Ui.textRight(g, "Nochmal klicken zum Entfernen", x + w - 30, y + 14, Ui.DANGER, Ui.Font.SMALL);
+			}
+			Ui.icon(g, "trash", x + w - 22, y + 12, 12, confirming || overRemove ? Ui.DANGER : Ui.FAINT);
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			if (mouseX < x + w - 30) return false;
+			if (friend.uuid().equals(confirmRemove) && System.currentTimeMillis() - confirmAt < 4000) {
+				confirmRemove = null;
+				HeldixMenuScreen.this.click();
+				report(Social.removeFriend(friend.uuid()), friend.name() + " ist nicht mehr dein Freund");
+			} else {
+				confirmRemove = friend.uuid();
+				confirmAt = System.currentTimeMillis();
+			}
+			return true;
+		}
+	}
+
+	/** Eingehende (Annehmen/Ablehnen) oder gesendete Anfrage (Zurückziehen) */
+	private final class RequestRow implements Row {
+		private final Social.Request request;
+		private final boolean incoming;
+
+		RequestRow(Social.Request request, boolean incoming) {
+			this.request = request;
+			this.incoming = incoming;
+		}
+
+		@Override
+		public int height(int width) {
+			return 36;
+		}
+
+		@Override
+		public int gapAfter() {
+			return 4;
+		}
+
+		private int[] buttons(int x, int w) {
+			int accept = Ui.width("Annehmen", Ui.Font.SMALL) + 16;
+			int decline = Ui.width(incoming ? "Ablehnen" : "Zurückziehen", Ui.Font.SMALL) + 16;
+			int declineX = x + w - 8 - decline;
+			int acceptX = declineX - 6 - accept;
+			return new int[] {acceptX, accept, declineX, decline};
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			Ui.rect(g, x, y, w, 36, 9, incoming ? (Ui.ACCENT & 0xFFFFFF) | 0x14000000 : Ui.SURFACE);
+			avatar(g, request.name(), x + 8, y + 7, false);
+			int[] b = buttons(x, w);
+			int textW = (incoming ? b[0] : b[2]) - x - 46;
+			Ui.text(g, Ui.ellipsize(request.name(), textW, Ui.Font.LABEL), x + 38, y + 8, Ui.TEXT, Ui.Font.LABEL);
+			Ui.text(g, Ui.ellipsize(incoming ? "möchte mit dir befreundet sein" : "Anfrage gesendet, wartet auf Antwort", textW, Ui.Font.SMALL),
+					x + 38, y + 21, Ui.MUTED, Ui.Font.SMALL);
+			if (incoming) pill(g, "Annehmen", b[0], y + 10, b[1], true, Ui.inside(mouseX, mouseY, b[0], y + 10, b[1], 16));
+			pill(g, incoming ? "Ablehnen" : "Zurückziehen", b[2], y + 10, b[3], false, Ui.inside(mouseX, mouseY, b[2], y + 10, b[3], 16));
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			int[] b = buttons(x, w);
+			if (incoming && Ui.inside(mouseX, mouseY, b[0], y + 10, b[1], 16)) {
+				HeldixMenuScreen.this.click();
+				report(Social.accept(request.uuid()), request.name() + " ist jetzt dein Freund");
+				return true;
+			}
+			if (Ui.inside(mouseX, mouseY, b[2], y + 10, b[3], 16)) {
+				HeldixMenuScreen.this.click();
+				report(Social.cancelRequest(request.uuid()), incoming ? "Anfrage abgelehnt" : "Anfrage zurückgezogen");
+				return true;
+			}
+			return false;
+		}
+	}
+
+	/** Ein Wegpunkt: Farbpunkt (Klick wechselt die Farbe), Name, Koordinaten, Entfernung; rechts Auge und Löschen */
+	private final class WaypointRow implements Row {
+		private final Waypoints.Waypoint waypoint;
+
+		WaypointRow(Waypoints.Waypoint waypoint) {
+			this.waypoint = waypoint;
+		}
+
+		@Override
+		public int height(int width) {
+			return 36;
+		}
+
+		@Override
+		public int gapAfter() {
+			return 4;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			boolean hover = Ui.inside(mouseX, mouseY, x, y, w, 36);
+			Ui.rect(g, x, y, w, 36, 9, hover ? Ui.SURFACE_HOVER : Ui.SURFACE);
+			int dot = waypoint.visible ? waypoint.color : Ui.withAlpha(waypoint.color, 0.35f);
+			Ui.circle(g, x + 18, y + 18, 7, dot);
+			if (Ui.inside(mouseX, mouseY, x + 8, y + 8, 20, 20)) Ui.circle(g, x + 18, y + 18, 3, 0x66FFFFFF);
+			int textW = w - 40 - 60;
+			Ui.text(g, Ui.ellipsize(waypoint.name, textW, Ui.Font.LABEL), x + 36, y + 8, waypoint.visible ? Ui.TEXT : Ui.FAINT, Ui.Font.LABEL);
+			StringBuilder line = new StringBuilder(waypoint.coordinates()).append("  ·  ").append(Waypoints.dimensionName(waypoint.dimension));
+			if (minecraft.player != null && waypoint.dimension.equals(Waypoints.dimension(minecraft))) {
+				double dx = waypoint.x + 0.5 - minecraft.player.getX();
+				double dy = waypoint.y - minecraft.player.getY();
+				double dz = waypoint.z + 0.5 - minecraft.player.getZ();
+				line.append("  ·  ").append(dev.heldixclient.module.impl.WaypointsModule.formatDistance(Math.sqrt(dx * dx + dy * dy + dz * dz)));
+			}
+			Ui.text(g, Ui.ellipsize(line.toString(), textW, Ui.Font.SMALL), x + 36, y + 21, Ui.MUTED, Ui.Font.SMALL);
+			boolean overEye = Ui.inside(mouseX, mouseY, x + w - 56, y, 26, 36);
+			boolean overTrash = Ui.inside(mouseX, mouseY, x + w - 30, y, 30, 36);
+			Ui.icon(g, waypoint.visible ? "eye" : "eye-off", x + w - 49, y + 12, 12, overEye ? Ui.TEXT : Ui.FAINT);
+			Ui.icon(g, "trash", x + w - 22, y + 12, 12, overTrash ? Ui.DANGER : Ui.FAINT);
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			if (Ui.inside(mouseX, mouseY, x + 8, y + 8, 20, 20)) {
+				HeldixMenuScreen.this.click();
+				Waypoints.nextColor(waypoint);
+				return true;
+			}
+			if (Ui.inside(mouseX, mouseY, x + w - 56, y, 26, 36)) {
+				HeldixMenuScreen.this.click();
+				Waypoints.toggleVisible(waypoint);
+				return true;
+			}
+			if (Ui.inside(mouseX, mouseY, x + w - 30, y, 30, 36)) {
+				HeldixMenuScreen.this.click();
+				Waypoints.remove(minecraft, waypoint);
+				return true;
+			}
+			return false;
+		}
+	}
+
+	/** Kreis mit Anfangsbuchstabe (Farbe aus dem Namen), grüner Punkt = online */
+	private void avatar(GuiGraphicsExtractor g, String name, int x, int y, boolean online) {
+		String shown = name == null || name.isEmpty() ? "?" : name.substring(0, 1).toUpperCase(Locale.ROOT);
+		float hue = Math.floorMod(name == null ? 0 : name.hashCode(), 360) / 360f;
+		int color = 0xFF000000 | java.awt.Color.HSBtoRGB(hue, 0.45f, 0.62f) & 0xFFFFFF;
+		Ui.circle(g, x + 11, y + 11, 11, color);
+		Ui.text(g, shown, x + 11 - Ui.width(shown, Ui.Font.LABEL) / 2, y + 7, 0xFFFFFFFF, Ui.Font.LABEL);
+		if (online) {
+			Ui.circle(g, x + 19, y + 19, 4, Ui.WINDOW | 0xFF000000);
+			Ui.circle(g, x + 19, y + 19, 3, Ui.SUCCESS);
+		}
+	}
+
+	/** kleiner Knopf in einer Zeile */
+	private void pill(GuiGraphicsExtractor g, String label, int x, int y, int w, boolean primary, boolean hover) {
+		int fill = primary ? (hover ? Ui.ACCENT_HOVER : Ui.ACCENT) : (hover ? Ui.SURFACE_STRONG : Ui.SURFACE_HOVER);
+		Ui.rect(g, x, y, w, 16, 8, fill);
+		Ui.text(g, label, x + (w - Ui.width(label, Ui.Font.SMALL)) / 2, y + 4, primary ? 0xFFFFFFFF : Ui.TEXT, Ui.Font.SMALL);
+	}
+
 	// ======================================================================================
 	// Zeichnen
 	// ======================================================================================
@@ -971,13 +1626,30 @@ public class HeldixMenuScreen extends ShellScreen {
 		long now = System.nanoTime();
 		frameDt = Math.min((now - lastFrame) / 1_000_000_000f, 0.1f);
 		lastFrame = now;
+		capeHoverShown = capeHover;
+		capeHover = NO_HOVER;
 		layout();
 
 		g.enableScissor(bodyX - 2, bodyY, bodyX + bodyW + 2, bodyY + bodyH);
 		boolean inBody = Ui.inside(mouseX, mouseY, bodyX, bodyY, bodyW, bodyH);
 		int y = bodyY - (int) scroll;
+		if (pageInput != null) {
+			pageInput.visible = false;
+			pageButton.visible = false;
+		}
 		for (Row row : rows) {
 			int h = row.height(bodyW);
+			if (row == inputRow && pageInput != null) {
+				int bw = pageButton.getWidth();
+				boolean inside = y >= bodyY && y + 21 <= bodyY + bodyH;
+				pageButton.setX(bodyX + bodyW - bw);
+				pageButton.setY(y + 1);
+				pageInput.setX(bodyX);
+				pageInput.setY(y + 1);
+				pageInput.setWidth(bodyW - bw - 6);
+				pageInput.visible = inside;
+				pageButton.visible = inside;
+			}
 			if (y + h >= bodyY && y <= bodyY + bodyH) row.draw(g, bodyX, y, bodyW, mouseX, inBody ? mouseY : -1000);
 			y += h + row.gapAfter();
 		}
@@ -1041,6 +1713,10 @@ public class HeldixMenuScreen extends ShellScreen {
 			search.setFocused(false);
 			if (getFocused() == search) setFocused(null);
 		}
+		if (pageInput != null && !pageInput.isMouseOver(event.x(), event.y())) {
+			pageInput.setFocused(false);
+			if (getFocused() == pageInput) setFocused(null);
+		}
 		if (event.button() != InputConstants.MOUSE_BUTTON_LEFT) return false;
 		layout();
 		double mx = event.x();
@@ -1077,7 +1753,7 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
-		boolean typing = search != null && search.isFocused();
+		boolean typing = (search != null && search.isFocused()) || (pageInput != null && pageInput.isFocused());
 		if (!typing && HeldixClient.menuKey.matches(event)) {
 			onClose();
 			return true;
@@ -1087,6 +1763,32 @@ public class HeldixMenuScreen extends ShellScreen {
 			return true;
 		}
 		return super.keyPressed(event);
+	}
+
+	/** Bilder ins Fenster gezogen: auf der Seite Cape als eigenes Cape übernehmen */
+	@Override
+	public void onFilesDrop(List<java.nio.file.Path> files) {
+		if (page != Shell.Page.CAPE || openModule != null) {
+			super.onFilesDrop(files);
+			return;
+		}
+		Capes.Cape cape = Capes.importFiles(files);
+		if (cape != null) {
+			Capes.select(cape);
+			capeMessage = "„" + cape.name() + "“ hinzugefügt und angelegt";
+			capeMessageOk = true;
+		} else {
+			capeMessage = "Nur PNG-Bilder lassen sich als Cape übernehmen";
+			capeMessageOk = false;
+		}
+		capeMessageAt = System.currentTimeMillis();
+	}
+
+	/** Beim Verlassen der Cape-Seite nur das gewählte Cape im Grafikspeicher behalten */
+	@Override
+	public void removed() {
+		super.removed();
+		if (page == Shell.Page.CAPE) Capes.trim();
 	}
 
 	@Override

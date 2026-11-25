@@ -1,0 +1,27 @@
+{
+  "name": "heldix-dienst",
+  "version": "1.0.0",
+  "description": "Heldix-Dienst: Capes für alle, Heldix-Symbol und Freunde für HeldixClient",
+  "license": "MIT",
+  "author": "HeldixClient contributors",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/server.js",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "npm run build && node -e \"process.env.HELDIX_DIENST_DEV='1';require('./dist/server.js')\"",
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test \"dist/test-build/test/*.test.js\""
+  },
+  "dependencies": {
+    "ws": "^8.22.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2"
+  }
+}

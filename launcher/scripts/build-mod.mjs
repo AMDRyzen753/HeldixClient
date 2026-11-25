@@ -2,6 +2,7 @@
 //   resources/heldix-loader/heldix-loader-<version>.jar   (der eigene Loader, Java-Agent)
 //   resources/client-mods/heldixclient-<version>+<mc>.jar (die HeldixClient-Mod)
 //   resources/heldix-addons/*.jar                          (mitgelieferte Addons)
+//   resources/launcher-bridge/heldix-bridge-<version>.jar  (Brücke zum offiziellen Minecraft Launcher, plus icon.png)
 // Nutzt das portable JDK aus ../.tools/jdk-25, falls vorhanden, sonst JAVA_HOME.
 import { spawnSync } from 'node:child_process';
 import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
@@ -63,6 +64,15 @@ for (const jar of await jarsIn(libs, (f) => /^heldixclient-.+\+.+\.jar$/.test(f)
   if (!newest.has(minecraft) || newest.get(minecraft).mtimeMs < mtimeMs) newest.set(minecraft, { jar, mtimeMs });
 }
 await replaceAll(path.join(resources, 'client-mods'), libs, [...newest.values()].map((v) => v.jar), 'Client-Mod');
+
+// Brücke zum offiziellen Minecraft Launcher (und das Bild der Installation dort)
+const bridgeLibs = path.join(modDir, 'launcher-bridge', 'build', 'libs');
+const bridgeJars = await jarsIn(bridgeLibs, (f) => /^heldix-bridge-.+\.jar$/.test(f));
+if (bridgeJars.length === 0) throw new Error('Brücke zum Minecraft Launcher wurde nicht gebaut');
+const newestBridge = (await Promise.all(bridgeJars.map(async (jar) => ({ jar, mtimeMs: (await stat(path.join(bridgeLibs, jar))).mtimeMs }))))
+  .sort((a, b) => b.mtimeMs - a.mtimeMs)[0].jar;
+await replaceAll(path.join(resources, 'launcher-bridge'), bridgeLibs, [newestBridge], 'Brücke');
+await copyFile(path.join(launcherDir, 'build', 'icon.png'), path.join(resources, 'launcher-bridge', 'icon.png'));
 
 // Mitgelieferte Heldix-Addons (neue Heldix-Instanzen bekommen sie automatisch, bestehende über den Reiter „Heldix-Addons“)
 const addonTarget = path.join(resources, 'heldix-addons');

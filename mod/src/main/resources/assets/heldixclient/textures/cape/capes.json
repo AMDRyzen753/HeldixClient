@@ -1,0 +1,76 @@
+{
+  "capes": [
+    {
+      "id": "heldix",
+      "name": "Heldix",
+      "description": "Tiefes Blau mit leuchtendem Heldix-Zeichen und Lichtschimmer",
+      "frames": 24,
+      "fps": 12,
+      "glow": true
+    },
+    {
+      "id": "mitternacht",
+      "name": "Mitternacht",
+      "description": "Funkelnder Sternenhimmel, Mondsichel und Sternschnuppe",
+      "frames": 24,
+      "fps": 10,
+      "glow": true
+    },
+    {
+      "id": "aurora",
+      "name": "Aurora",
+      "description": "Wogende Polarlichter über einem dunklen Wald",
+      "frames": 24,
+      "fps": 10,
+      "glow": true
+    },
+    {
+      "id": "glut",
+      "name": "Glut",
+      "description": "Flackernde Flammen und aufsteigende Funken – leuchtet im Dunkeln",
+      "frames": 24,
+      "fps": 14,
+      "glow": true
+    },
+    {
+      "id": "kristall",
+      "name": "Kristall",
+      "description": "Eisblaue Facetten mit wanderndem Glanz und Funkeln",
+      "frames": 24,
+      "fps": 12,
+      "glow": true
+    },
+    {
+      "id": "neon",
+      "name": "Neon",
+      "description": "Pulsierende Leuchtstreifen auf dunklem Raster",
+      "frames": 24,
+      "fps": 12,
+      "glow": true
+    },
+    {
+      "id": "sakura",
+      "name": "Sakura",
+      "description": "Kirschblüten und tanzende Blütenblätter",
+      "frames": 24,
+      "fps": 10,
+      "glow": false
+    },
+    {
+      "id": "gewitter",
+      "name": "Gewitter",
+      "description": "Dunkle Wolken, Regen und zuckende Blitze",
+      "frames": 24,
+      "fps": 14,
+      "glow": true
+    },
+    {
+      "id": "galaxie",
+      "name": "Galaxie",
+      "description": "Eine langsam drehende Spiralgalaxie im Nebel",
+      "frames": 24,
+      "fps": 10,
+      "glow": true
+    }
+  ]
+}

@@ -26,6 +26,13 @@ public final class Targets {
 	public static final String FRAMERATE_LIMIT_TRACKER = "com.mojang.blaze3d.platform.FramerateLimitTracker";
 	public static final String LOADING_OVERLAY = "net.minecraft.client.gui.screens.LoadingOverlay";
 	public static final String GUI = "net.minecraft.client.gui.Gui";
+	public static final String ABSTRACT_CLIENT_PLAYER = "net.minecraft.client.player.AbstractClientPlayer";
+	public static final String CAPE_LAYER = "net.minecraft.client.renderer.entity.layers.CapeLayer";
+	public static final String ENTITY = "net.minecraft.world.entity.Entity";
+	public static final String KEYBOARD_INPUT = "net.minecraft.client.player.KeyboardInput";
+	public static final String CHAT_COMPONENT = "net.minecraft.client.gui.components.ChatComponent";
+	public static final String CHAT_SCREEN = "net.minecraft.client.gui.screens.ChatScreen";
+	public static final String PLAYER_TAB_OVERLAY = "net.minecraft.client.gui.components.PlayerTabOverlay";
 
 	public static final List<String> ALL = List.of(
 			MINECRAFT,
@@ -44,7 +51,14 @@ public final class Targets {
 			DEBUG_SCREEN_OVERLAY,
 			FRAMERATE_LIMIT_TRACKER,
 			LOADING_OVERLAY,
-			GUI);
+			GUI,
+			ABSTRACT_CLIENT_PLAYER,
+			CAPE_LAYER,
+			ENTITY,
+			KEYBOARD_INPUT,
+			CHAT_COMPONENT,
+			CHAT_SCREEN,
+			PLAYER_TAB_OVERLAY);
 
 	private Targets() {
 	}

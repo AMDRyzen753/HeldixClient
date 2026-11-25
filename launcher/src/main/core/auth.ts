@@ -145,23 +145,37 @@ export async function loginMinecraft(ms: MicrosoftTokens): Promise<MinecraftSess
   if (!loginRes.ok) throw new HttpError(loginRes.url, loginRes.status, await loginRes.text().catch(() => ''));
   const mc = (await loginRes.json()) as { access_token: string; expires_in: number };
 
-  const auth = { headers: { Authorization: `Bearer ${mc.access_token}` } };
+  const session = await sessionFromAccessToken(mc.access_token);
+  return { ...session, expiresAt: Date.now() + mc.expires_in * 1000, refreshToken: ms.refreshToken };
+}
+
+/**
+ * Sitzung zu einem fertigen Minecraft-Zugangs-Token (z. B. vom offiziellen Launcher über die Brücke):
+ * fragt das Profil bei Mojang ab – das prüft zugleich, dass das Token gilt und Minecraft gekauft ist.
+ * Ohne Refresh-Token: Läuft die Sitzung ab, muss sie neu übergeben werden.
+ */
+export async function sessionFromAccessToken(accessToken: string, xuidHint?: string): Promise<MinecraftSession> {
+  const auth = { headers: { Authorization: `Bearer ${accessToken}` } };
   const profileRes = await request('https://api.minecraftservices.com/minecraft/profile', auth);
+  if (profileRes.status === 401) throw new AuthError('Die Anmeldung ist abgelaufen oder ungültig. Bitte noch mal anmelden.');
   if (profileRes.status === 404) {
     throw new AuthError('Mit diesem Konto wurde Minecraft: Java Edition nicht gekauft (oder es gibt noch kein Profil).');
   }
   if (!profileRes.ok) throw new HttpError(profileRes.url, profileRes.status, '');
   const profile = (await profileRes.json()) as { id: string; name: string; skins?: { state: string; url: string }[] };
 
-  const claims = decodeJwt(mc.access_token);
+  const claims = decodeJwt(accessToken);
+  // Minecraft-Tokens gelten 24 Stunden; die genaue Zeit steht im Token
+  const expiresAt = typeof claims.exp === 'number' ? claims.exp * 1000 : Date.now() + 23 * 60 * 60 * 1000;
+  const xuid = typeof claims.xuid === 'string' ? claims.xuid : xuidHint && /^\d+$/.test(xuidHint) ? xuidHint : undefined;
   return {
     name: profile.name,
     uuid: profile.id.replace(/-/g, ''),
-    accessToken: mc.access_token,
-    expiresAt: Date.now() + mc.expires_in * 1000,
-    xuid: typeof claims.xuid === 'string' ? claims.xuid : undefined,
+    accessToken,
+    expiresAt,
+    xuid,
     skinUrl: profile.skins?.find((s) => s.state === 'ACTIVE')?.url,
-    refreshToken: ms.refreshToken,
+    refreshToken: '',
   };
 }
 

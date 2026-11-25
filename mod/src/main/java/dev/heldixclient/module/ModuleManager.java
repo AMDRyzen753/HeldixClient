@@ -1,6 +1,13 @@
 package dev.heldixclient.module;
 
+import dev.heldixclient.module.impl.ArmorStatusModule;
+import dev.heldixclient.module.impl.ChatModule;
 import dev.heldixclient.module.impl.CoordinatesModule;
+import dev.heldixclient.module.impl.CrosshairModule;
+import dev.heldixclient.module.impl.EffectsModule;
+import dev.heldixclient.module.impl.FreelookModule;
+import dev.heldixclient.module.impl.ToggleSprintModule;
+import dev.heldixclient.module.impl.WaypointsModule;
 import dev.heldixclient.module.impl.CpsModule;
 import dev.heldixclient.module.impl.FpsModule;
 import dev.heldixclient.module.impl.KeystrokesModule;
@@ -17,6 +24,12 @@ public final class ModuleManager {
 	private static final List<HudModule> HUD_MODULES = new ArrayList<>();
 
 	public static ZoomModule zoom;
+	public static EffectsModule effects;
+	public static ToggleSprintModule toggleSprint;
+	public static FreelookModule freelook;
+	public static CrosshairModule crosshair;
+	public static ChatModule chat;
+	public static WaypointsModule waypoints;
 
 	private ModuleManager() {
 	}
@@ -28,6 +41,13 @@ public final class ModuleManager {
 		register(new CoordinatesModule());
 		register(new KeystrokesModule());
 		zoom = register(new ZoomModule());
+		register(new ArmorStatusModule());
+		effects = register(new EffectsModule());
+		toggleSprint = register(new ToggleSprintModule());
+		freelook = register(new FreelookModule());
+		crosshair = register(new CrosshairModule());
+		chat = register(new ChatModule());
+		waypoints = register(new WaypointsModule());
 	}
 
 	/** Für den Heldix Loader: Module aus Addons hinzufügen bzw. wieder entfernen. */

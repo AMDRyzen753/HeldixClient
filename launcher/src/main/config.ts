@@ -25,3 +25,9 @@ export const MICROSOFT_REDIRECT_URI = 'https://login.microsoftonline.com/common/
  * Der Name der Discord-App erscheint in Discord als "Spielt <Name>".
  */
 export const DISCORD_CLIENT_ID: string = process.env.HELDIX_DISCORD_CLIENT_ID ?? '1574791711266177084';
+
+/**
+ * Adresse des Heldix-Dienstes (Capes für alle, Heldix-Symbol in der Tab-Liste, Freunde), z. B. https://dienst.example.de.
+ * Leer = diese Funktionen sind aus. Siehe docs/dienst.md. Alternativ per Umgebungsvariable HELDIX_SERVICE_URL setzen.
+ */
+export const HELDIX_SERVICE_URL: string = process.env.HELDIX_SERVICE_URL ?? '';

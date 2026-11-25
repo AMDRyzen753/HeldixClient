@@ -24,6 +24,8 @@ public class SearchField extends AbstractWidget {
 	private Consumer<String> responder = value -> {
 	};
 	private float hover;
+	private String icon = "search";
+	private Runnable onEnter;
 
 	public SearchField(int x, int y, int width, int height, String hint) {
 		super(x, y, width, height, Component.literal(hint));
@@ -40,6 +42,17 @@ public class SearchField extends AbstractWidget {
 
 	public void setResponder(Consumer<String> responder) {
 		this.responder = responder;
+	}
+
+	/** anderes Icon links (Standard: Lupe) */
+	public SearchField withIcon(String icon) {
+		this.icon = icon;
+		return this;
+	}
+
+	/** Enter im Feld löst das aus (z. B. „Anfrage senden“) */
+	public void setOnEnter(Runnable onEnter) {
+		this.onEnter = onEnter;
 	}
 
 	private void changed(String newValue) {
@@ -59,10 +72,10 @@ public class SearchField extends AbstractWidget {
 		float r = h / 2f;
 		Ui.rect(g, x, y, w, h, r, Ui.withAlpha(Ui.lerp(0x12FFFFFF, 0x1CFFFFFF, hover), alpha));
 		Ui.outline(g, x, y, w, h, r, Ui.withAlpha(isFocused() ? Ui.ACCENT_LINE : Ui.LINE, alpha));
-		int icon = 10;
-		Ui.icon(g, "search", x + 7, y + (h - icon) / 2f, icon, Ui.withAlpha(isFocused() ? Ui.ACCENT_TEXT : Ui.FAINT, alpha));
+		int iconSize = 10;
+		Ui.icon(g, icon, x + 7, y + (h - iconSize) / 2f, iconSize, Ui.withAlpha(isFocused() ? Ui.ACCENT_TEXT : Ui.FAINT, alpha));
 
-		int textX = x + 7 + icon + 5;
+		int textX = x + 7 + iconSize + 5;
 		int textW = w - (textX - x) - (value.isEmpty() ? 8 : 18);
 		int textY = y + (h - 8) / 2;
 		if (value.isEmpty()) {
@@ -116,6 +129,10 @@ public class SearchField extends AbstractWidget {
 		if (event.isPaste()) {
 			String clip = Minecraft.getInstance().keyboardHandler.getClipboard().replaceAll("[\\r\\n\\t]", " ");
 			changed(value + clip);
+			return true;
+		}
+		if ((key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER) && onEnter != null) {
+			onEnter.run();
 			return true;
 		}
 		if (key == InputConstants.KEY_ESCAPE && !value.isEmpty()) {

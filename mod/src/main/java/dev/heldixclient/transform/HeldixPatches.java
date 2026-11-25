@@ -32,6 +32,21 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 	private static final String FRAMERATE = "com/mojang/blaze3d/platform/FramerateLimitTracker";
 	private static final String LOADING = "net/minecraft/client/gui/screens/LoadingOverlay";
 	private static final String GUI = "net/minecraft/client/gui/Gui";
+	private static final String CLIENT_PLAYER = "net/minecraft/client/player/AbstractClientPlayer";
+	private static final String PLAYER_SKIN = "Lnet/minecraft/world/entity/player/PlayerSkin;";
+	private static final String CAPE_LAYER = "net/minecraft/client/renderer/entity/layers/CapeLayer";
+	private static final String COLLECTOR = "net/minecraft/client/renderer/SubmitNodeCollector";
+	private static final String SUBMIT_MODEL = "(Lnet/minecraft/client/model/Model;Ljava/lang/Object;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/rendertype/RenderType;III)V";
+
+	private static final String HUD = "net/minecraft/client/gui/Hud";
+	private static final String ENTITY = "net/minecraft/world/entity/Entity";
+	private static final String KEYBOARD_INPUT = "net/minecraft/client/player/KeyboardInput";
+	private static final String KEY_MAPPING = "net/minecraft/client/KeyMapping";
+	private static final String CHAT = "net/minecraft/client/gui/components/ChatComponent";
+	private static final String CHAT_SCREEN = "net/minecraft/client/gui/screens/ChatScreen";
+	private static final String TAB_LIST = "net/minecraft/client/gui/components/PlayerTabOverlay";
+	private static final String COMPONENT = "Lnet/minecraft/network/chat/Component;";
+	private static final String DELTA = "Lnet/minecraft/client/DeltaTracker;";
 
 	private static final String G = "L" + GRAPHICS + ";";
 	private static final String L_TITLE = "L" + TITLE + ";";
@@ -40,14 +55,14 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 
 	@Override
 	public Set<String> targets() {
-		return Set.of(CAMERA, MINECRAFT, MOUSE, GRAPHICS, SELECTION_LIST, TITLE, GAME_RENDERER, DEBUG_OVERLAY, FRAMERATE, LOADING, GUI);
+		return Set.of(CAMERA, MINECRAFT, MOUSE, GRAPHICS, SELECTION_LIST, TITLE, GAME_RENDERER, DEBUG_OVERLAY, FRAMERATE, LOADING, GUI, CLIENT_PLAYER, CAPE_LAYER,
+				HUD, ENTITY, KEYBOARD_INPUT, CHAT, CHAT_SCREEN, TAB_LIST);
 	}
 
 	@Override
 	public void transform(String className, ClassNode node) {
 		switch (className) {
-			// Zoom: berechnetes Sichtfeld durch den Zoomfaktor teilen
-			case CAMERA -> Patches.modifyReturnValue(Patches.method(node, "calculateFov", "(F)F"), HOOKS, "fov", "(F)F");
+			case CAMERA -> camera(node);
 			// Fenstertitel "HeldixClient 0.6.0 | Minecraft 26.3"
 			case MINECRAFT -> Patches.modifyReturnValue(Patches.method(node, "createTitle", "()Ljava/lang/String;"),
 					HOOKS, "windowTitle", "(Ljava/lang/String;)Ljava/lang/String;");
@@ -73,9 +88,75 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 						.invokeStatic(HOOKS, "replaceScreen", "(L" + SCREEN + ";)L" + SCREEN + ";")
 						.add(new VarInsnNode(ASTORE, 1)));
 			}
+			// Cape: der Skin des eigenen Spielers bekommt das gewählte Heldix-Cape
+			case CLIENT_PLAYER -> {
+				MethodNode getSkin = Patches.method(node, "getSkin", "()" + PLAYER_SKIN);
+				Patches.beforeReturns(getSkin, () -> Code.begin().loadThis()
+						.invokeStatic(HOOKS, "playerSkin", "(" + PLAYER_SKIN + "L" + CLIENT_PLAYER + ";)" + PLAYER_SKIN));
+			}
+			// Cape: leuchtende Teile der Heldix-Capes als zweiter Durchgang
+			case CAPE_LAYER -> {
+				MethodNode submit = Patches.method(node, "submit", "(Lcom/mojang/blaze3d/vertex/PoseStack;L" + COLLECTOR
+						+ ";ILnet/minecraft/client/renderer/entity/state/AvatarRenderState;FF)V");
+				Patches.replaceCalls(submit, COLLECTOR, "submitModel", SUBMIT_MODEL,
+						i -> Code.begin().invokeStatic(HOOKS, "capeModel", "(L" + COLLECTOR + ";" + SUBMIT_MODEL.substring(1)));
+			}
+			case HUD -> hud(node);
+			// Freelook: Mausbewegung dreht nur die Kamera
+			case ENTITY -> {
+				MethodNode turn = Patches.method(node, "turn", "(DD)V");
+				Patches.cancelAtHead(turn, Code.begin().loadThis().loadArgs(turn, 0, 1).invokeStatic(HOOKS, "turn", "(L" + ENTITY + ";DD)Z"));
+			}
+			// Dauersprint / Dauerschleichen: Sprint- (7. Taste) und Schleichtaste (6.) gelten als gedrückt
+			case KEYBOARD_INPUT -> Patches.replaceCalls(Patches.method(node, "tick", "()V"), KEY_MAPPING, "isDown", "()Z", call -> switch (call) {
+				case 5 -> Code.begin().invokeStatic(HOOKS, "sneakKey", "(L" + KEY_MAPPING + ";)Z");
+				case 6 -> Code.begin().invokeStatic(HOOKS, "sprintKey", "(L" + KEY_MAPPING + ";)Z");
+				default -> null;
+			});
+			// Chat: Uhrzeit und gestapelte Nachrichten (neuer Inhalt für addMessage)
+			case CHAT -> {
+				MethodNode add = Patches.method(node, "addMessage", "(" + COMPONENT + "Lnet/minecraft/network/chat/MessageSignature;"
+						+ "Lnet/minecraft/client/multiplayer/chat/GuiMessageSource;Lnet/minecraft/client/multiplayer/chat/GuiMessageTag;)V");
+				Patches.head(add, Code.begin().loadThis().loadArg(add, 0)
+						.invokeStatic(HOOKS, "chatMessage", "(L" + CHAT + ";" + COMPONENT + ")" + COMPONENT)
+						.add(new VarInsnNode(ASTORE, 1)));
+			}
+			// Chat: Strg+Klick kopiert eine Nachricht
+			case CHAT_SCREEN -> {
+				MethodNode click = Patches.method(node, "mouseClicked", "(Lnet/minecraft/client/input/MouseButtonEvent;Z)Z");
+				Patches.head(click, Code.begin().loadArg(click, 0)
+						.invokeStatic(HOOKS, "chatClick", "(Lnet/minecraft/client/input/MouseButtonEvent;)Z")
+						.ifTrue(Code.begin().insn(ICONST_1).insn(IRETURN)));
+			}
+			// Tab-Liste: Heldix-Symbol vor dem Namen von HeldixClient-Spielern
+			case TAB_LIST -> {
+				MethodNode name = Patches.method(node, "getNameForDisplay", "(Lnet/minecraft/client/multiplayer/PlayerInfo;)" + COMPONENT);
+				Patches.beforeReturns(name, () -> Code.begin().loadArg(name, 0)
+						.invokeStatic(HOOKS, "tabName", "(" + COMPONENT + "Lnet/minecraft/client/multiplayer/PlayerInfo;)" + COMPONENT));
+			}
 			default -> {
 			}
 		}
+	}
+
+	/** Zoom (Sichtfeld) und Freelook (Blickwinkel der Kamera). */
+	private static void camera(ClassNode node) {
+		// Zoom: berechnetes Sichtfeld durch den Zoomfaktor teilen
+		Patches.modifyReturnValue(Patches.method(node, "calculateFov", "(F)F"), HOOKS, "fov", "(F)F");
+		// Freelook: Kamera übernimmt eigene Winkel statt der des Spielers
+		MethodNode align = Patches.method(node, "alignWithEntity", "(F)V");
+		Patches.replaceCalls(align, ENTITY, "getViewYRot", "(F)F", call -> Code.begin().invokeStatic(HOOKS, "cameraYaw", "(L" + ENTITY + ";F)F"));
+		Patches.replaceCalls(align, ENTITY, "getViewXRot", "(F)F", call -> Code.begin().invokeStatic(HOOKS, "cameraPitch", "(L" + ENTITY + ";F)F"));
+	}
+
+	/** Fadenkreuz (nur das Bild, Bedingungen bleiben Vanilla) und Trank-Symbole oben rechts. */
+	private static void hud(ClassNode node) {
+		MethodNode crosshair = Patches.method(node, "extractCrosshair", "(" + G + DELTA + ")V");
+		String blit = "(" + PIPELINE + IDENTIFIER + "IIII)V";
+		Patches.replaceCalls(crosshair, GRAPHICS, "blitSprite", blit,
+				call -> call == 0 ? Code.begin().invokeStatic(HOOKS, "crosshair", "(" + G + blit.substring(1)) : null);
+		MethodNode effects = Patches.method(node, "extractEffects", "(" + G + DELTA + ")V");
+		Patches.cancelAtHead(effects, Code.begin().invokeStatic(HOOKS, "hideVanillaEffects", "()Z"));
 	}
 
 	/** Klicks zählen (CPS) und Mausrad beim Zoomen abfangen. */

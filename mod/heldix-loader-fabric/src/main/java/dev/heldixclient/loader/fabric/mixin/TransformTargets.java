@@ -28,6 +28,13 @@ import org.spongepowered.asm.mixin.Mixin;
 		Targets.FRAMERATE_LIMIT_TRACKER,
 		Targets.LOADING_OVERLAY,
 		Targets.GUI,
+		Targets.ABSTRACT_CLIENT_PLAYER,
+		Targets.CAPE_LAYER,
+		Targets.ENTITY,
+		Targets.KEYBOARD_INPUT,
+		Targets.CHAT_COMPONENT,
+		Targets.CHAT_SCREEN,
+		Targets.PLAYER_TAB_OVERLAY,
 }, priority = 100000)
 public abstract class TransformTargets {
 }
