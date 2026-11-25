@@ -61,8 +61,8 @@ jobs:
 
   build-mac:
     name: macOS-App bauen
-    # Apple-Silicon-Runner; electron-builder baut dort auch die Intel-Version
-    runs-on: macos-14
+    # aktueller Apple-Silicon-Runner von GitHub (macos-14 gibt es nicht mehr); electron-builder baut dort auch die Intel-Version
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
