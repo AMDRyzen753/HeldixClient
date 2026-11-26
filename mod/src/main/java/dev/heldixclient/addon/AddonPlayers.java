@@ -15,8 +15,8 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Addon-API 6 rund um andere Spieler: Sprachkanal ({@link VoiceChannel}), Symbole am Namensschild ({@link PlayerMarkers})
- * und Einträge im Spielermenü. Alles läuft unter der Id des Addons und wird beim Abschalten mit {@link #release} entfernt.
+ * Addon-API 6/7 rund um andere Spieler: Sprachkanal ({@link VoiceChannel}, ab 7 mit Status und Gruppen), Symbole am
+ * Namensschild und über dem Kopf ({@link PlayerMarkers}) und Einträge im Spielermenü. Alles läuft unter der Id des Addons und wird beim Abschalten mit {@link #release} entfernt.
  */
 final class AddonPlayers {
 	private AddonPlayers() {
@@ -67,6 +67,13 @@ final class AddonPlayers {
 			@Override
 			public void hide(UUID player) {
 				if (player != null) PlayerMarkerStore.hide(addon.id(), player);
+			}
+
+			@Override
+			public void showAbove(UUID player, String icon, int color, Duration duration) {
+				Objects.requireNonNull(player, "player");
+				if (!addon.isActive()) return;
+				PlayerMarkerStore.showAbove(addon.id(), player, icon, color, duration == null ? 1000 : duration.toMillis());
 			}
 		};
 	}
@@ -133,6 +140,46 @@ final class AddonPlayers {
 			@Override
 			public Set<UUID> peers() {
 				return VoiceLink.isActive(owner) ? VoiceLink.peers() : Set.of();
+			}
+
+			@Override
+			public void setState(boolean muted, boolean deafened) {
+				if (addon.isActive()) VoiceLink.setState(muted, deafened);
+			}
+
+			@Override
+			public boolean peerMuted(UUID player) {
+				return VoiceLink.isActive(owner) && VoiceLink.peerMuted(player);
+			}
+
+			@Override
+			public boolean peerDeafened(UUID player) {
+				return VoiceLink.isActive(owner) && VoiceLink.peerDeafened(player);
+			}
+
+			@Override
+			public void setGroup(String name, String password) {
+				if (addon.isActive()) VoiceLink.setGroup(owner, name, password);
+			}
+
+			@Override
+			public String group() {
+				return VoiceLink.isActive(owner) ? VoiceLink.groupName() : null;
+			}
+
+			@Override
+			public Set<UUID> groupMembers() {
+				return VoiceLink.isActive(owner) ? VoiceLink.groupMembers() : Set.of();
+			}
+
+			@Override
+			public boolean groupsAvailable() {
+				return VoiceLink.isActive(owner) && VoiceLink.groupsAvailable();
+			}
+
+			@Override
+			public String groupProblem() {
+				return VoiceLink.isActive(owner) ? VoiceLink.groupProblem() : null;
 			}
 		};
 	}

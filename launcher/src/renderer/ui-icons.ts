@@ -90,5 +90,11 @@ export const UI_ICONS: Record<string, string> = {
   "mic-off": "<path d=\"M15 9 V5.5 A3 3 0 0 0 9.3 4.2\"/><path d=\"M9 9 V11 A3 3 0 0 0 13.9 13.3\"/><path d=\"M5.5 11 A6.5 6.5 0 0 0 16.6 15.6 M18.5 11 A6.4 6.4 0 0 1 18.1 13.3\"/><path d=\"M12 17.5 V21\"/><path d=\"M3.5 3.5 L20.5 20.5\"/>",
   "volume": "<path d=\"M3.5 9.5 H7 L11.5 5.5 V18.5 L7 14.5 H3.5 Z\"/><path d=\"M15 9 A4 4 0 0 1 15 15\"/><path d=\"M17.8 6.2 A8 8 0 0 1 17.8 17.8\"/>",
   "volume-off": "<path d=\"M3.5 9.5 H7 L11.5 5.5 V18.5 L7 14.5 H3.5 Z\"/><path d=\"M15.5 9.5 L20.5 14.5 M20.5 9.5 L15.5 14.5\"/>",
-  "headphones": "<path d=\"M4 15.5 V12 A8 8 0 0 1 20 12 V15.5\"/><rect x=\"3.5\" y=\"14\" width=\"4.5\" height=\"7\" rx=\"1.8\"/><rect x=\"16\" y=\"14\" width=\"4.5\" height=\"7\" rx=\"1.8\"/>"
+  "headphones": "<path d=\"M4 15.5 V12 A8 8 0 0 1 20 12 V15.5\"/><rect x=\"3.5\" y=\"14\" width=\"4.5\" height=\"7\" rx=\"1.8\"/><rect x=\"16\" y=\"14\" width=\"4.5\" height=\"7\" rx=\"1.8\"/>",
+  "volume-1": "<path d=\"M3.5 9.5 H7 L11.5 5.5 V18.5 L7 14.5 H3.5 Z\" fill=\"currentColor\"/><path d=\"M14.8 9.8 A3.4 3.4 0 0 1 14.8 14.2\"/>",
+  "volume-2": "<path d=\"M3.5 9.5 H7 L11.5 5.5 V18.5 L7 14.5 H3.5 Z\" fill=\"currentColor\"/><path d=\"M14.8 9.8 A3.4 3.4 0 0 1 14.8 14.2\"/><path d=\"M16.7 7.2 A6.6 6.6 0 0 1 16.7 16.8\"/>",
+  "volume-3": "<path d=\"M3.5 9.5 H7 L11.5 5.5 V18.5 L7 14.5 H3.5 Z\" fill=\"currentColor\"/><path d=\"M14.8 9.8 A3.4 3.4 0 0 1 14.8 14.2\"/><path d=\"M16.7 7.2 A6.6 6.6 0 0 1 16.7 16.8\"/><path d=\"M18.9 4.8 A9.8 9.8 0 0 1 18.9 19.2\"/>",
+  "headphones-off": "<path d=\"M4 15.5 V12 A8 8 0 0 1 20 12 V15.5\"/><rect x=\"3.5\" y=\"14\" width=\"4.5\" height=\"7\" rx=\"1.8\"/><rect x=\"16\" y=\"14\" width=\"4.5\" height=\"7\" rx=\"1.8\"/><path d=\"M3.5 3.5 L20.5 20.5\"/>",
+  "disc": "<circle cx=\"12\" cy=\"12\" r=\"11.5\" fill=\"currentColor\" stroke=\"none\"/>",
+  "ring": "<circle cx=\"12\" cy=\"12\" r=\"10.9\" stroke-width=\"1.6\"/>"
 };

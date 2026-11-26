@@ -1,5 +1,6 @@
-// Voice Chat über /v1/voice: Anmeldung, Räume, Weiterleiten nur in der Nähe, Grenzen, Trennen.
+// Voice Chat über /v1/voice: Anmeldung, Räume, Gruppen, Status, Weiterleiten nur in der Nähe oder in der Gruppe, Grenzen, Trennen.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -15,6 +16,26 @@ import { Clock, teamLogin, webApi, WEBSITE } from './web-helpers';
 const SERVER = 'mc.example.net';
 const OVERWORLD = 'minecraft:overworld';
 const NETHER = 'minecraft:the_nether';
+const THE_END = 'minecraft:the_end';
+
+/** Prüfwert einer Gruppe wie vom Client: SHA-256 aus Gruppenname und Passwort. */
+function groupHash(name: string, password = 'geheim'): string {
+  return createHash('sha256').update(`${name}\n${password}`).digest('hex');
+}
+const GROUP = groupHash('Bande');
+const OTHER_GROUP = groupHash('Andere');
+
+interface Peers {
+  uuids: string[];
+  group: string[];
+  muted: string[];
+  deafened: string[];
+}
+
+/** Erwartete `peers`-Felder (sortiert). */
+function peers(uuids: string[] = [], group: string[] = [], muted: string[] = [], deafened: string[] = []): Peers {
+  return { uuids: [...uuids].sort(), group: [...group].sort(), muted: [...muted].sort(), deafened: [...deafened].sort() };
+}
 
 /** Uhr des Voice Chats: läuft mit der echten Zeit, lässt sich vorstellen und anhalten. */
 class VoiceClock {
@@ -31,6 +52,13 @@ class VoiceClock {
 }
 
 type Text = any;
+
+/** Eine `peers`-Nachricht: immer alle vier Felder, verglichen ohne Reihenfolge. */
+function peersOf(message: Text): Peers {
+  assert.equal(message.type, 'peers');
+  assert.deepEqual(Object.keys(message).sort(), ['deafened', 'group', 'muted', 'type', 'uuids']);
+  return peers(message.uuids, message.group, message.muted, message.deafened);
+}
 
 interface Frame {
   version: number;
@@ -114,6 +142,20 @@ class VoiceClient {
   async join(server: string, dimension: string, mode?: string): Promise<string[]> {
     this.send(mode === undefined ? { type: 'join', server, dimension } : { type: 'join', server, dimension, mode });
     return [...(await this.next('peers')).uuids].sort();
+  }
+
+  /** Raum und Gruppe (`null`: keine) betreten und die eigene `peers`-Nachricht abwarten. */
+  async enter(server: string, dimension: string, group: string | null, mode?: string): Promise<Peers> {
+    this.send(mode === undefined ? { type: 'join', server, dimension, group } : { type: 'join', server, dimension, group, mode });
+    return this.nextPeers();
+  }
+
+  async nextPeers(): Promise<Peers> {
+    return peersOf(await this.next('peers'));
+  }
+
+  state(muted: boolean, deafened: boolean): void {
+    this.send({ type: 'state', muted, deafened });
   }
 
   pos(x: number, y: number, z: number): void {
@@ -221,7 +263,7 @@ describe('Voice Chat: Verbindung', () => {
       assert.equal(await voiceCount(service), 0);
 
       const { client, ready } = await connect(anna);
-      assert.deepEqual(ready, { type: 'ready', range: 48, maxFrame: 1024, protocol: 1 });
+      assert.deepEqual(ready, { type: 'ready', range: 48, maxFrame: 1024, protocol: 1, features: ['state', 'groups'], maxGroup: 16 });
       client.send({ type: 'ping' });
       assert.deepEqual(await client.next('pong'), { type: 'pong' });
       assert.equal(await voiceCount(service), 1);
@@ -706,6 +748,420 @@ describe('Voice Chat: Grenzen', () => {
   });
 });
 
+describe('Voice Chat: Status', () => {
+  test('state geht an alle im selben Raum oder in derselben Gruppe (jeden einmal); unverändert oder ungültig: nichts', async () => {
+    await withVoice({}, async ({ clock, connect, player }) => {
+      const [annaP, benP, carlaP, dirkP, emilP] = await Promise.all(['Anna', 'Ben', 'Carla', 'Dirk', 'Emil'].map((name) => player(name)));
+      const all: VoiceClient[] = [];
+      for (const p of [annaP, benP, carlaP, dirkP, emilP]) all.push((await connect(p!)).client);
+      const [anna, ben, carla, dirk, emil] = all as [VoiceClient, VoiceClient, VoiceClient, VoiceClient, VoiceClient];
+      await anna.enter(SERVER, OVERWORLD, GROUP);
+      await ben.enter(SERVER, OVERWORLD, GROUP); // Raum und Gruppe
+      await carla.enter(SERVER, NETHER, GROUP); // nur die Gruppe
+      await dirk.enter(SERVER, OVERWORLD, null); // nur der Raum
+      await emil.join(SERVER, NETHER); // weder noch
+      const settle = async (): Promise<Text[][]> => {
+        for (const client of all) await client.sync();
+        return all.map((client) => client.drain());
+      };
+      await settle();
+
+      anna.state(true, false);
+      const muted = { type: 'state', uuid: annaP!.uuid, muted: true, deafened: false };
+      assert.deepEqual(await settle(), [[], [muted], [muted], [muted], []]);
+
+      // unverändert: nichts
+      anna.state(true, false);
+      assert.deepEqual(await settle(), [[], [], [], [], []]);
+
+      // ungültig: nichts, der Status bleibt
+      clock.advance(1000);
+      for (const message of [
+        { type: 'state', muted: 'true', deafened: false },
+        { type: 'state', muted: true },
+        { type: 'state', deafened: true },
+        { type: 'state', muted: 1, deafened: 0 },
+        { type: 'state', muted: false, deafened: null },
+        { type: 'state' },
+      ]) {
+        anna.send(message);
+      }
+      assert.deepEqual(await settle(), [[], [], [], [], []]);
+      assert.deepEqual(
+        await ben.enter(SERVER, OVERWORLD, GROUP),
+        peers([annaP!.uuid, dirkP!.uuid], [annaP!.uuid, carlaP!.uuid], [annaP!.uuid]),
+      );
+    });
+  });
+
+  test('höchstens 4 angenommene Änderungen pro Sekunde, weitere werden ignoriert', async () => {
+    await withVoice({}, async ({ clock, connect, player }) => {
+      const annaP = await player('Anna');
+      const { client: anna } = await connect(annaP);
+      const { client: ben } = await connect(await player('Ben'));
+      await anna.enter(SERVER, OVERWORLD, null);
+      await ben.enter(SERVER, OVERWORLD, null);
+      await anna.nextPeers();
+      clock.advance(1000);
+      clock.freeze();
+      const changes: [boolean, boolean][] = [
+        [true, false],
+        [false, false],
+        [true, false],
+        [false, false],
+        [true, true],
+        [false, true],
+      ];
+      for (const [muted, deafened] of changes) anna.state(muted, deafened);
+      await anna.sync();
+      await ben.sync();
+      assert.deepEqual(
+        ben.drain().map((m) => [m.type, m.uuid, m.muted, m.deafened]),
+        changes.slice(0, 4).map(([muted, deafened]) => ['state', annaP.uuid, muted, deafened]),
+      );
+      // Es gilt die zuletzt angenommene Änderung (beides aus).
+      assert.deepEqual(await ben.enter(SERVER, OVERWORLD, null), peers([annaP.uuid]));
+
+      // Nächste Sekunde: Unveränderte zählen nicht mit.
+      clock.advance(1000);
+      for (let i = 0; i < 3; i++) anna.state(false, false);
+      for (const [muted, deafened] of changes.slice(0, 4)) anna.state(muted, deafened);
+      await anna.sync();
+      await ben.sync();
+      assert.equal(ben.drain().length, 4);
+
+      clock.advance(1000);
+      anna.state(true, true);
+      assert.deepEqual(await ben.next('state'), { type: 'state', uuid: annaP.uuid, muted: true, deafened: true });
+    });
+  });
+
+  test('peers zeigt muted und deafened; der Status bleibt über Raumwechsel und leave, eine neue Verbindung beginnt ohne', async () => {
+    await withVoice({}, async ({ connect, player }) => {
+      const annaP = await player('Anna');
+      const benP = await player('Ben');
+      const { client: anna } = await connect(annaP);
+      const { client: ben } = await connect(benP);
+      // ohne Raum sieht es niemand
+      anna.state(true, true);
+      await anna.sync();
+      await ben.sync();
+      assert.deepEqual(ben.drain(), []);
+
+      assert.deepEqual(await anna.enter(SERVER, OVERWORLD, null), peers());
+      assert.deepEqual(await ben.enter(SERVER, OVERWORLD, null), peers([annaP.uuid], [], [annaP.uuid], [annaP.uuid]));
+      assert.deepEqual(await anna.nextPeers(), peers([benP.uuid]));
+
+      // leave: alles leer
+      anna.send({ type: 'leave' });
+      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [], group: [], muted: [], deafened: [] });
+      assert.deepEqual(await ben.nextPeers(), peers());
+
+      // über den Nether zurück: der Status ist noch da
+      await anna.enter(SERVER, NETHER, null);
+      await anna.enter(SERVER, OVERWORLD, null);
+      assert.deepEqual(await ben.nextPeers(), peers([annaP.uuid], [], [annaP.uuid], [annaP.uuid]));
+      anna.state(false, true);
+      assert.deepEqual(await ben.next('state'), { type: 'state', uuid: annaP.uuid, muted: false, deafened: true });
+
+      // neue Verbindung: beides wieder aus
+      const { client: again } = await connect(annaP);
+      await anna.closed;
+      assert.deepEqual(await ben.nextPeers(), peers());
+      assert.deepEqual(await again.enter(SERVER, OVERWORLD, null), peers([benP.uuid]));
+      assert.deepEqual(await ben.nextPeers(), peers([annaP.uuid]));
+    });
+  });
+
+  test('„Ton aus“: keine Sprache, weder aus der Nähe noch aus der Gruppe; „Mikrofon stumm“ hört weiter', async () => {
+    await withVoice({}, async ({ connect, player }) => {
+      const { client: anna } = await connect(await player('Anna'));
+      const { client: ben } = await connect(await player('Ben'));
+      const { client: carla } = await connect(await player('Carla'));
+      await anna.enter(SERVER, OVERWORLD, GROUP);
+      await ben.enter(SERVER, OVERWORLD, null);
+      await carla.enter(SERVER, NETHER, GROUP);
+      anna.pos(0, 64, 0);
+      ben.pos(1, 64, 0);
+      for (const client of [anna, ben, carla]) await client.sync();
+      assert.deepEqual(await heardBy(anna, [ben, carla]), [true, true]);
+
+      ben.state(false, true);
+      carla.state(false, true);
+      await ben.sync();
+      await carla.sync();
+      assert.deepEqual(await heardBy(anna, [ben, carla]), [false, false]);
+      // Wer den Ton aus hat, spricht selbst weiter.
+      assert.deepEqual(await heardBy(ben, [anna]), [true]);
+      assert.deepEqual(await heardBy(carla, [anna]), [true]);
+
+      ben.state(true, false);
+      carla.state(true, false);
+      await ben.sync();
+      await carla.sync();
+      assert.deepEqual(await heardBy(anna, [ben, carla]), [true, true]);
+    });
+  });
+});
+
+describe('Voice Chat: Gruppen', () => {
+  test('die Gruppe hört sich über Dimension und Entfernung hinweg, ohne Position und ohne „Nur Freunde“; andere wie bisher', async () => {
+    await withVoice({}, async ({ clock, connect, player }) => {
+      const players = await Promise.all(['Anna', 'Ben', 'Carla', 'Dirk', 'Emil', 'Frida'].map((name) => player(name)));
+      const clients: VoiceClient[] = [];
+      for (const p of players) clients.push((await connect(p)).client);
+      const [anna, ben, carla, dirk, emil, frida] = clients as [VoiceClient, VoiceClient, VoiceClient, VoiceClient, VoiceClient, VoiceClient];
+      await anna.enter(SERVER, OVERWORLD, GROUP);
+      await ben.enter(SERVER, NETHER, GROUP); // andere Dimension, ohne Position
+      await carla.enter(SERVER, OVERWORLD, null); // nicht in der Gruppe, in Reichweite
+      await dirk.enter(SERVER, OVERWORLD, GROUP); // in der Gruppe, weit weg
+      await emil.enter('anderer.example.net', OVERWORLD, GROUP); // gleicher Prüfwert, anderer Server: andere Gruppe
+      await frida.enter(SERVER, OVERWORLD, OTHER_GROUP); // andere Gruppe, in Reichweite
+      anna.pos(0, 64, 0);
+      carla.pos(1, 64, 0);
+      dirk.pos(10_000, 64, 0);
+      emil.pos(0, 64, 0);
+      frida.pos(2, 64, 0);
+      for (const client of clients) await client.sync();
+      clock.advance(1000);
+
+      assert.deepEqual(await heardBy(anna, [ben, carla, dirk, emil, frida]), [true, true, true, false, true]);
+      // Ben hat keine Position: nur die Gruppe hört ihn.
+      assert.deepEqual(await heardBy(ben, [anna, carla, dirk, emil, frida]), [true, false, true, false, false]);
+      // Nicht-Mitglieder hören sich wie bisher nur in der Nähe.
+      assert.deepEqual(await heardBy(carla, [anna, ben, dirk, emil, frida]), [true, false, false, false, true]);
+      assert.deepEqual(await heardBy(emil, [anna, ben, carla, dirk, frida]), [false, false, false, false, false]);
+      clock.advance(1000);
+
+      // Rahmen-Kopf wie bisher; in Gruppe und Reichweite zugleich nur eine Kopie.
+      dirk.pos(1, 64, 1);
+      await dirk.sync();
+      anna.speak(777, [5, 6], 0xff);
+      await anna.sync();
+      for (const listener of [ben, dirk]) {
+        await listener.sync();
+        assert.deepEqual(listener.takeFrames(), [{ version: 1, flags: 1, seq: 777, speaker: players[0]!.uuid, payload: Buffer.from([5, 6]) }]);
+      }
+      for (const listener of [carla, frida]) {
+        await listener.sync();
+        assert.equal(listener.takeFrames().length, 1);
+      }
+      clock.advance(1000);
+
+      // „Nur Freunde“ zählt in der Gruppe nicht (befreundet ist hier niemand).
+      ben.send({ type: 'mode', mode: 'friends' });
+      dirk.send({ type: 'mode', mode: 'friends' });
+      await ben.sync();
+      await dirk.sync();
+      assert.deepEqual(await heardBy(anna, [ben, dirk, carla, frida]), [true, true, true, true]);
+      assert.deepEqual(await heardBy(ben, [anna, dirk]), [true, true]);
+      // … in der Nähe aber weiter: Carla und Dirk hören sich nicht.
+      assert.deepEqual(await heardBy(carla, [anna, dirk, frida]), [true, false, true]);
+      clock.advance(1000);
+
+      // Alte Positionen (über 15 s): in der Nähe hört niemand mehr, die Gruppe weiter.
+      clock.advance(16_000);
+      assert.deepEqual(await heardBy(anna, [ben, dirk, carla, frida]), [true, true, false, false]);
+    });
+  });
+
+  test('Gruppenwechsel im selben Raum; Dimensionswechsel behält die Gruppe; ohne group raus aus der Gruppe', async () => {
+    await withVoice({}, async ({ clock, connect, player }) => {
+      const [annaP, benP, carlaP, dirkP] = await Promise.all(['Anna', 'Ben', 'Carla', 'Dirk'].map((name) => player(name)));
+      const all: VoiceClient[] = [];
+      for (const p of [annaP, benP, carlaP, dirkP]) all.push((await connect(p!)).client);
+      const [anna, ben, carla, dirk] = all as [VoiceClient, VoiceClient, VoiceClient, VoiceClient];
+      const [a, b, c, d] = [annaP!.uuid, benP!.uuid, carlaP!.uuid, dirkP!.uuid];
+      await anna.enter(SERVER, OVERWORLD, GROUP);
+      await ben.enter(SERVER, OVERWORLD, GROUP);
+      await carla.enter(SERVER, NETHER, OTHER_GROUP);
+      await dirk.enter(SERVER, OVERWORLD, null);
+      const settle = async (): Promise<Text[][]> => {
+        for (const client of all) await client.sync();
+        return all.map((client) => client.drain());
+      };
+      await settle();
+
+      // Anna wechselt im selben Raum in Carlas Gruppe.
+      assert.deepEqual(await anna.enter(SERVER, OVERWORLD, OTHER_GROUP), peers([b, d], [c]));
+      assert.deepEqual(await ben.nextPeers(), peers([a, d]));
+      assert.deepEqual(await carla.nextPeers(), peers([], [a]));
+      assert.deepEqual(await settle(), [[], [], [], []], 'jeder höchstens einmal, Dirk (nur im Raum) gar nicht');
+      clock.advance(1000);
+      assert.deepEqual(await heardBy(anna, [ben, carla, dirk]), [false, true, false]);
+
+      // Anna wechselt in den Nether, die Gruppe bleibt; Carla (Raum und Gruppe) bekommt eine Liste.
+      assert.deepEqual(await anna.enter(SERVER, NETHER, OTHER_GROUP), peers([c], [c]));
+      assert.deepEqual(await carla.nextPeers(), peers([a], [a]));
+      assert.deepEqual(await ben.nextPeers(), peers([d]));
+      assert.deepEqual(await dirk.nextPeers(), peers([b]));
+      assert.deepEqual(await settle(), [[], [], [], []]);
+      clock.advance(1000);
+      assert.deepEqual(await heardBy(anna, [carla, ben, dirk]), [true, false, false]);
+
+      // Wieder ins Overworld mit der Gruppe: Carla merkt nur den Raumwechsel.
+      assert.deepEqual(await anna.enter(SERVER, OVERWORLD, OTHER_GROUP), peers([b, d], [c]));
+      assert.deepEqual(await carla.nextPeers(), peers([], [a]));
+      assert.deepEqual(await ben.nextPeers(), peers([a, d]));
+      assert.deepEqual(await dirk.nextPeers(), peers([a, b]));
+      clock.advance(1000);
+
+      // join ohne group im selben Raum: raus aus der Gruppe, der Raum bleibt.
+      anna.send({ type: 'join', server: SERVER, dimension: OVERWORLD });
+      assert.deepEqual(await anna.nextPeers(), peers([b, d]));
+      assert.deepEqual(await carla.nextPeers(), peers());
+      assert.deepEqual(await settle(), [[], [], [], []]);
+      assert.deepEqual(await heardBy(anna, [carla]), [false]);
+    });
+  });
+
+  test('ungültige group: die ganze join-Nachricht wird ignoriert; group: null heißt keine Gruppe', async () => {
+    await withVoice({}, async ({ clock, connect, player }) => {
+      const benP = await player('Ben');
+      const { client: anna } = await connect(await player('Anna'));
+      const { client: ben } = await connect(benP);
+      await anna.enter(SERVER, OVERWORLD, null, 'friends');
+      await ben.enter(SERVER, OVERWORLD, null);
+      anna.pos(0, 64, 0);
+      ben.pos(1, 64, 0);
+      await anna.sync();
+      await ben.sync();
+      ben.drain();
+      anna.drain();
+      assert.deepEqual(await heardBy(anna, [ben]), [false], '„Nur Freunde“');
+      clock.advance(1000);
+
+      for (const group of [GROUP.toUpperCase(), GROUP.slice(1), `${GROUP}0`, 'g'.repeat(64), '', 42, true, [GROUP], { hash: GROUP }]) {
+        anna.send({ type: 'join', server: SERVER, dimension: NETHER, mode: 'all', group });
+      }
+      await anna.sync();
+      await ben.sync();
+      assert.deepEqual([anna.drain(), ben.drain()], [[], []]);
+      clock.advance(1000);
+
+      // Raum, Position und Modus sind unverändert.
+      assert.deepEqual(await heardBy(anna, [ben]), [false]);
+      anna.send({ type: 'mode', mode: 'all' });
+      await anna.sync();
+      assert.deepEqual(await heardBy(anna, [ben]), [true]);
+      assert.deepEqual(await anna.enter(SERVER, OVERWORLD, null), peers([benP.uuid]));
+    });
+  });
+
+  test('Blockieren gilt auch in der Gruppe', async () => {
+    await withVoice({}, async ({ service, clock, connect, player }) => {
+      const annaP = await player('Anna');
+      const benP = await player('Ben');
+      const { client: anna } = await connect(annaP);
+      const { client: ben } = await connect(benP);
+      await anna.enter(SERVER, OVERWORLD, GROUP);
+      await ben.enter(SERVER, NETHER, GROUP);
+      assert.deepEqual(await heardBy(anna, [ben]), [true]);
+
+      const block = async (who: Player, target: Player) =>
+        assert.equal((await api(service.url, 'POST', '/v1/blocks', { token: who.token, body: { uuid: target.uuid } })).status, 200);
+      const unblock = async (who: Player, target: Player) =>
+        assert.equal((await api(service.url, 'DELETE', `/v1/blocks/${target.uuid}`, { token: who.token })).status, 200);
+
+      await block(annaP, benP);
+      assert.deepEqual(await heardBy(anna, [ben]), [false]);
+      assert.deepEqual(await heardBy(ben, [anna]), [false]);
+      await unblock(annaP, benP);
+      clock.advance(1000);
+      assert.deepEqual(await heardBy(anna, [ben]), [true]);
+
+      await block(benP, annaP);
+      assert.deepEqual(await heardBy(anna, [ben]), [false]);
+      assert.deepEqual(await heardBy(ben, [anna]), [false]);
+      await unblock(benP, annaP);
+      assert.deepEqual(await heardBy(ben, [anna]), [true]);
+    });
+  });
+
+  test('leave, Trennen, Verdrängen (4002) und gelöschtes Konto nehmen aus der Gruppe', async () => {
+    await withVoice({}, async ({ service, connect, player }) => {
+      const [annaP, benP, carlaP, dirkP] = await Promise.all(['Anna', 'Ben', 'Carla', 'Dirk'].map((name) => player(name)));
+      const [a, b, c, d] = [annaP!.uuid, benP!.uuid, carlaP!.uuid, dirkP!.uuid];
+      const { client: anna } = await connect(annaP!);
+      const { client: ben } = await connect(benP!);
+      const { client: carla } = await connect(carlaP!);
+      const { client: dirk } = await connect(dirkP!);
+      await anna.enter(SERVER, OVERWORLD, GROUP);
+      await ben.enter(SERVER, NETHER, GROUP);
+      await carla.enter(SERVER, NETHER, GROUP);
+      await dirk.enter(SERVER, THE_END, GROUP);
+      for (const client of [anna, ben, carla, dirk]) {
+        await client.sync();
+        client.drain();
+      }
+
+      anna.send({ type: 'leave' });
+      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [], group: [], muted: [], deafened: [] });
+      assert.deepEqual(await ben.nextPeers(), peers([c], [c, d]));
+      assert.deepEqual(await carla.nextPeers(), peers([b], [b, d]));
+      assert.deepEqual(await dirk.nextPeers(), peers([], [b, c]));
+      assert.deepEqual(await heardBy(anna, [ben, carla, dirk]), [false, false, false]);
+
+      assert.deepEqual(await anna.enter(SERVER, OVERWORLD, GROUP), peers([], [b, c, d]));
+      for (const client of [ben, carla, dirk]) assert.deepEqual((await client.nextPeers()).group.includes(a), true);
+
+      // Verdrängt durch eine neue Verbindung
+      const { client: again } = await connect(annaP!);
+      assert.deepEqual(await anna.closed, { code: 4002, reason: 'Neue Verbindung' });
+      assert.deepEqual(await ben.nextPeers(), peers([c], [c, d]));
+      assert.deepEqual(await carla.nextPeers(), peers([b], [b, d]));
+      assert.deepEqual(await dirk.nextPeers(), peers([], [b, c]));
+      assert.deepEqual(await heardBy(again, [ben]), [false]);
+
+      // Trennen
+      await carla.close();
+      assert.deepEqual(await ben.nextPeers(), peers([], [d]));
+      assert.deepEqual(await dirk.nextPeers(), peers([], [b]));
+
+      // Konto gelöscht
+      assert.equal((await api(service.url, 'DELETE', '/v1/me', { token: dirkP!.token })).status, 200);
+      assert.deepEqual(await dirk.closed, { code: 4001, reason: 'Konto gelöscht' });
+      assert.deepEqual(await ben.nextPeers(), peers());
+    });
+  });
+
+  test('alter Client ohne group und state: wie in 1.8.0', async () => {
+    await withVoice({}, async ({ clock, connect, player }) => {
+      const [annaP, benP, carlaP] = await Promise.all(['Anna', 'Ben', 'Carla'].map((name) => player(name)));
+      const { client: anna } = await connect(annaP!); // alter Client
+      const { client: ben } = await connect(benP!);
+      const { client: carla } = await connect(carlaP!);
+      assert.deepEqual(await anna.join(SERVER, OVERWORLD), []);
+      assert.deepEqual(await ben.enter(SERVER, OVERWORLD, GROUP), peers([annaP!.uuid]));
+      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [benP!.uuid], group: [], muted: [], deafened: [] });
+      assert.deepEqual(await carla.enter(SERVER, NETHER, GROUP), peers([], [benP!.uuid]));
+      assert.deepEqual(await ben.nextPeers(), peers([annaP!.uuid], [carlaP!.uuid]));
+      await anna.sync();
+      assert.deepEqual(anna.drain(), [], 'die Gruppe in einer anderen Dimension merkt der alte Client nicht');
+
+      anna.pos(0, 64, 0);
+      ben.pos(1000, 64, 0);
+      await anna.sync();
+      await ben.sync();
+      clock.advance(1000);
+      assert.deepEqual(await heardBy(anna, [ben, carla]), [false, false]);
+      assert.deepEqual(await heardBy(ben, [anna, carla]), [false, true]);
+
+      ben.pos(3, 64, 0);
+      await ben.sync();
+      assert.deepEqual(await heardBy(anna, [ben, carla]), [true, false]);
+      assert.deepEqual(await heardBy(ben, [anna, carla]), [true, true]);
+      clock.advance(1000);
+
+      // Ein Rahmen pro Hörer, Kopf wie bisher
+      anna.speak(42, [1, 2], 1);
+      await anna.sync();
+      await ben.sync();
+      assert.deepEqual(ben.takeFrames(), [{ version: 1, flags: 1, seq: 42, speaker: annaP!.uuid, payload: Buffer.from([1, 2]) }]);
+    });
+  });
+});
+
 describe('Voice Chat: Trennen bei gelöschtem oder gesperrtem Konto', () => {
   test('DELETE /v1/me schließt auch die Voice-Verbindung (4001)', async () => {
     await withVoice({}, async ({ service, connect, player }) => {
@@ -779,9 +1235,21 @@ class FakeSocket extends EventEmitter {
   frames(): Buffer[] {
     return this.sent.filter((d): d is Buffer => Buffer.isBuffer(d));
   }
+  texts(): Text[] {
+    return this.sent.filter((d): d is string => typeof d === 'string').map((t) => JSON.parse(t));
+  }
+  /** Textnachrichten seit dem letzten Aufruf; danach ist `sent` leer. */
+  takeTexts(): Text[] {
+    const texts = this.texts();
+    this.sent.length = 0;
+    return texts;
+  }
+  lastPeersMessage(): Text {
+    const all = this.texts().filter((m) => m.type === 'peers');
+    return all[all.length - 1];
+  }
   lastPeers(): string[] {
-    const peers = this.sent.filter((d): d is string => typeof d === 'string').map((t) => JSON.parse(t)).filter((m) => m.type === 'peers');
-    return peers[peers.length - 1].uuids;
+    return this.lastPeersMessage().uuids;
   }
 }
 
@@ -844,19 +1312,81 @@ describe('Voice Chat: Verteilung (ohne Netz)', () => {
       assert.equal(voice.connectedCount(), 101);
     });
   });
+
+  test('Gruppe: höchstens 16 Mitglieder, sonst status full und keine Gruppe; leere Gruppen verschwinden', () => {
+    withFakeVoice((voice, connect) => {
+      const groups = (voice as unknown as { groups: Map<string, unknown> }).groups;
+      const rooms = (voice as unknown as { rooms: Map<string, unknown> }).rooms;
+      const uuids = Array.from({ length: 18 }, () => randomUuid());
+      const sockets = uuids.map((uuid) => connect(uuid));
+      const join = (ws: FakeSocket, group: string, dimension = OVERWORLD) => ws.text({ type: 'join', server: SERVER, dimension, group });
+      for (const ws of sockets.slice(0, 16)) join(ws, GROUP);
+      for (const ws of sockets.slice(0, 16)) assert.equal(ws.lastPeersMessage().group.length, 15);
+
+      // Die 17. war in einer anderen Gruppe: Sie verlässt diese, kommt nicht hinein und ist danach in keiner Gruppe.
+      const [late, other] = [sockets[16]!, sockets[17]!];
+      join(late, OTHER_GROUP, NETHER);
+      join(other, OTHER_GROUP, NETHER);
+      assert.equal(groups.size, 2);
+      late.takeTexts();
+      other.takeTexts();
+      sockets[0]!.takeTexts();
+      join(late, GROUP);
+      assert.deepEqual(late.takeTexts(), [
+        { type: 'group', status: 'full' },
+        { type: 'peers', uuids: uuids.slice(0, 16), group: [], muted: [], deafened: [] },
+      ]);
+      // Die andere war mit ihr in Raum und Gruppe: eine Liste.
+      assert.deepEqual(other.takeTexts(), [{ type: 'peers', uuids: [], group: [], muted: [], deafened: [] }]);
+      // Die Gruppe hat sie nicht aufgenommen; sie ist nur im Raum.
+      assert.equal(sockets[0]!.lastPeersMessage().group.length, 15);
+      assert.equal(sockets[0]!.lastPeersMessage().uuids.length, 16);
+      // Noch einmal: wieder voll
+      join(late, GROUP);
+      assert.deepEqual(late.takeTexts().map((m) => m.type), ['group', 'peers']);
+      assert.equal(groups.size, 2);
+      other.text({ type: 'leave' });
+      assert.equal(groups.size, 1, 'leere Gruppe gelöscht');
+
+      // Wer schon drin ist, bleibt drin (gleicher Raum oder andere Dimension).
+      sockets[0]!.takeTexts();
+      join(sockets[0]!, GROUP);
+      join(sockets[0]!, GROUP, NETHER);
+      assert.deepEqual(sockets[0]!.takeTexts().map((m) => [m.type, m.group?.length]), [
+        ['peers', 15],
+        ['peers', 15],
+      ]);
+
+      // Platz frei: jetzt klappt es.
+      sockets[1]!.text({ type: 'leave' });
+      late.takeTexts();
+      join(late, GROUP);
+      assert.deepEqual(late.takeTexts().map((m) => [m.type, m.group?.length]), [['peers', 15]]);
+
+      // Trennen nimmt aus der Gruppe; leer verschwindet sie.
+      for (const ws of sockets) ws.emit('close');
+      assert.equal(groups.size, 0);
+      assert.equal(rooms.size, 0);
+      assert.equal(voice.connectedCount(), 0);
+    });
+  });
 });
 
 describe('Voice Chat: Datenschutz', () => {
-  test('weder Sprache noch Positionen, Räume oder Server landen in Log oder Datenbank', async () => {
+  test('weder Sprache noch Positionen, Räume, Gruppen oder Server landen in Log, Datenbank oder Status', async () => {
     await withVoice({}, async ({ service, connect, player }) => {
       const { client: anna } = await connect(await player('Anna'));
       const { client: ben } = await connect(await player('Ben'));
       const server = 'geheimer-voice-server.net';
       for (const [client, x] of [[anna, 123.456], [ben, 124.567]] as const) {
-        await client.join(server, 'meinmod:geheime_welt');
+        await client.enter(server, 'meinmod:geheime_welt', GROUP);
         client.pos(x, 77.125, -9876.5);
+        client.state(true, false);
         await client.sync();
       }
+      const status = (await api(service.url, 'GET', '/v1/status')).body;
+      assert.equal(status.voice, 2);
+      assert.equal(JSON.stringify(status).includes('group'), false);
       const secret = Buffer.from('GEHEIME-SPRACHE');
       anna.speak(1, secret);
       await anna.sync();
@@ -866,14 +1396,14 @@ describe('Voice Chat: Datenschutz', () => {
       await ben.close();
 
       const logged = service.logs.join('\n');
-      for (const needle of ['geheimer-voice-server', 'geheime_welt', '123.456', '9876', 'GEHEIME-SPRACHE']) {
+      for (const needle of ['geheimer-voice-server', 'geheime_welt', '123.456', '9876', 'GEHEIME-SPRACHE', GROUP]) {
         assert.equal(logged.includes(needle), false, `im Log: ${needle}`);
       }
       for (const file of fs.readdirSync(service.dataDir)) {
         const full = path.join(service.dataDir, file);
         if (!fs.statSync(full).isFile()) continue;
         const content = fs.readFileSync(full);
-        for (const needle of ['geheimer-voice-server', 'geheime_welt', 'GEHEIME-SPRACHE']) {
+        for (const needle of ['geheimer-voice-server', 'geheime_welt', 'GEHEIME-SPRACHE', GROUP]) {
           assert.equal(content.includes(needle), false, `in ${file}: ${needle}`);
         }
       }

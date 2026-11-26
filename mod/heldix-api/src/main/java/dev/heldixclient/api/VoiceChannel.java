@@ -6,7 +6,8 @@ import java.util.UUID;
 /**
  * Sprachkanal über den Heldix-Dienst für Voice-Chat-Addons: HeldixClient hält die Verbindung, meldet Server, Welt und
  * Position und verteilt die Rahmen deines Addons an HeldixClient-Spieler in der Nähe (gleicher Server, gleiche Welt,
- * innerhalb von {@link #range()} Blöcken; Blockierungen und „Nur Freunde“ gelten). Aufnehmen, Kodieren (z. B. Opus),
+ * innerhalb von {@link #range()} Blöcken; Blockierungen und „Nur Freunde“ gelten) – ab API 7 außerdem an die Mitglieder deiner
+ * Gruppe ({@link #setGroup}) auf demselben Server, egal wo sie sind. Aufnehmen, Kodieren (z. B. Opus),
  * Mischen und Abspielen macht das Addon selbst. Der Dienst speichert nichts.
  * Wird von HeldixClient bereitgestellt, nicht selbst implementieren.
  *
@@ -59,6 +60,69 @@ public interface VoiceChannel {
 
 	/** andere Spieler mit eingeschaltetem Voice Chat im selben Raum (Server und Welt), unabhängig vom Abstand */
 	Set<UUID> peers();
+
+	// --- ab API 7: Status und Gruppen ------------------------------------------------------------
+
+	/**
+	 * Eigenen Status an die anderen melden (z. B. für Symbole über deinem Kopf bei ihnen). HeldixClient schickt ihn nach
+	 * jedem Verbinden und Raumwechsel erneut. Mit {@code deafened} bekommst du außerdem keine Rahmen mehr.
+	 *
+	 * @since 7
+	 */
+	void setState(boolean muted, boolean deafened);
+
+	/**
+	 * Hat dieser Spieler (im Raum oder in deiner Gruppe) sein Mikrofon stumm geschaltet?
+	 *
+	 * @since 7
+	 */
+	boolean peerMuted(UUID player);
+
+	/**
+	 * Hat dieser Spieler den Ton aus (hört niemanden)?
+	 *
+	 * @since 7
+	 */
+	boolean peerDeafened(UUID player);
+
+	/**
+	 * Gruppe betreten oder verlassen: Alle mit demselben Namen und Passwort auf diesem Server hören sich überall (auch in
+	 * anderen Dimensionen, ohne Abstand); Spieler in der Nähe hören dich weiter wie gewohnt. An den Heldix-Dienst geht nur
+	 * ein Prüfwert aus Name und Passwort. Groß- und Kleinschreibung zählt beim Namen nicht, beim Passwort schon.
+	 *
+	 * @param name     leer oder null = keine Gruppe
+	 * @param password darf leer sein
+	 * @since 7
+	 */
+	void setGroup(String name, String password);
+
+	/**
+	 * Name der eingestellten Gruppe, sonst null.
+	 *
+	 * @since 7
+	 */
+	String group();
+
+	/**
+	 * Die anderen Mitglieder deiner Gruppe (laut Heldix-Dienst), auch wenn sie weit weg sind.
+	 *
+	 * @since 7
+	 */
+	Set<UUID> groupMembers();
+
+	/**
+	 * Unterstützt der verbundene Heldix-Dienst Gruppen? (false, solange nicht verbunden)
+	 *
+	 * @since 7
+	 */
+	boolean groupsAvailable();
+
+	/**
+	 * Warum die Gruppe gerade nicht klappt (z. B. „Gruppe ist voll“), sonst null.
+	 *
+	 * @since 7
+	 */
+	String groupProblem();
 
 	@FunctionalInterface
 	interface FrameListener {

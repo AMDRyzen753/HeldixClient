@@ -19,8 +19,10 @@ public interface HeldixApi {
 	 * Version 6: Tasten im Untermenü eines Moduls ({@link ModuleHandle#addKey}, {@link ModuleHandle#showKey}), andere
 	 * Spieler ({@link #nearbyPlayers()}), Spielermenü ({@link #addPlayerMenuEntry}), Symbole am Namensschild
 	 * ({@link #playerMarkers()}) und Sprachkanal über den Heldix-Dienst ({@link #voice()}).
+	 * Version 7: Symbole über dem Kopf ({@link PlayerMarkers#showAbove}), Status und Gruppen im Sprachkanal
+	 * ({@link VoiceChannel#setState}, {@link VoiceChannel#setGroup}) und Spielernamen ({@link #playerName}).
 	 */
-	int API_VERSION = 6;
+	int API_VERSION = 7;
 
 	/** Informationen über das eigene Addon (aus heldix.addon.json). */
 	AddonInfo addon();
@@ -198,4 +200,14 @@ public interface HeldixApi {
 	 * @since 6
 	 */
 	Registration addPlayerMenuEntry(PlayerMenuEntry entry);
+
+	// --- ab API 7 ---------------------------------------------------------------------------
+
+	/**
+	 * Name eines Spielers auf dem aktuellen Server (aus der Tab-Liste) oder aus deiner Freundesliste, z. B. für Mitglieder
+	 * einer Voice-Gruppe, die gerade nicht in deiner Nähe sind. Ohne Treffer leer. Nur im Haupt-Thread aufrufen.
+	 *
+	 * @since 7
+	 */
+	Optional<String> playerName(java.util.UUID player);
 }

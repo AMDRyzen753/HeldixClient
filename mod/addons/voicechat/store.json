@@ -3,10 +3,11 @@
 	"icon": "mic",
 	"kategorie": "chat",
 	"plattformen": [],
-	"beschreibung": "Sprich mit anderen HeldixClient-Spielern in deiner Nähe – auf jedem Server, ganz ohne Plugin.\n\n- Push-to-Talk (Taste V halten) oder Sprachaktivierung mit einstellbarer Schwelle\n- Je weiter weg, desto leiser – und in Stereo hörst du, aus welcher Richtung jemand spricht\n- Ein Symbol über dem Kopf zeigt, wer gerade spricht; die Anzeige im HUD zeigt dein Mikrofon und die Sprecher\n- Mausrad-Klick auf einen Spieler: stummschalten, lauter oder leiser\n- „Nur Freunden“: dann sprichst und hörst du nur mit deinen HeldixClient-Freunden\n- Mikrofon testen: zehn Sekunden lang hörst du dich selbst, ohne etwas zu senden\n\nDie Sprache läuft über den Heldix-Dienst an Spieler auf demselben Server und in derselben Welt (bis 48 Blöcke). Gespeichert wird nichts. Voice Chat ist aus, bis du das Modul einschaltest. Am besten mit Kopfhörern – sonst hören die anderen sich selbst.\n\nAuf dem Mac fragt das System beim ersten Mal, ob Minecraft das Mikrofon benutzen darf.",
+	"beschreibung": "Sprich mit anderen HeldixClient-Spielern in deiner Nähe – auf jedem Server, ganz ohne Plugin.\n\n- Push-to-Talk (Taste V halten) oder Sprachaktivierung mit einstellbarer Schwelle\n- Je weiter weg, desto leiser – und in Stereo hörst du, aus welcher Richtung jemand spricht\n- Gruppen: Alle mit demselben Gruppennamen (und Passwort) hören sich auf dem ganzen Server, auch in anderen Dimensionen\n- Symbole über dem Kopf zeigen, wer gerade spricht – und wer sein Mikrofon stumm oder den Ton aus hat\n- Die Anzeige im HUD zeigt dein Mikrofon, deine Gruppe und die Köpfe der Sprecher; mit offenem Chat schaltest du dort stumm\n- Rauschfilter gegen Brummen und Lüfter, Signaltöne bei Push-to-Talk\n- Mausrad-Klick auf einen Spieler: stummschalten, lauter oder leiser\n- „Nur Freunden“: dann sprichst und hörst du in der Nähe nur mit deinen HeldixClient-Freunden\n- Mikrofon testen: zehn Sekunden lang hörst du dich selbst, ohne etwas zu senden\n\nDie Sprache läuft über den Heldix-Dienst an Spieler auf demselben Server – in derselben Welt bis 48 Blöcke, in deiner Gruppe überall. Gespeichert wird nichts. Voice Chat ist aus, bis du das Modul einschaltest. Am besten mit Kopfhörern – sonst hören die anderen sich selbst.\n\nAuf dem Mac fragt das System beim ersten Mal, ob Minecraft das Mikrofon benutzen darf.",
 	"hinweise": [
-		"Voice Chat in der Nähe – auf jedem Server, ohne Plugin",
-		"Push-to-Talk oder Sprachaktivierung, Lautstärke nach Abstand, Richtung in Stereo",
-		"Stummschalten und Lautstärke je Spieler im Spielermenü (Mausrad-Klick)"
+		"Gruppen: mit Freunden über den ganzen Server sprechen, auch in anderen Dimensionen",
+		"Neue Symbole über dem Kopf: Schallwellen beim Sprechen, Mikrofon stumm, Ton aus",
+		"Neue HUD-Anzeige mit Köpfen der Sprecher, Pegel und Knöpfen zum Stummschalten",
+		"Rauschfilter und Signaltöne"
 	]
 }

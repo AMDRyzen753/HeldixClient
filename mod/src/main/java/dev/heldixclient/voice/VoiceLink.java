@@ -1,6 +1,5 @@
 package dev.heldixclient.voice;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -12,6 +11,11 @@ import net.minecraft.client.player.LocalPlayer;
 
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.Objects;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
@@ -31,7 +35,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Sprachkanal zum Heldix-Dienst ({@code /v1/voice}, Protokoll in docs/dienst.md „Voice Chat“): verbindet sich nur, solange
  * ein Addon ihn eingeschaltet hat, der Dienst erreichbar ist und du auf einem Server spielst. Meldet Server, Welt und
  * Position (im Haupt-Thread), schickt Sprach-Rahmen der Addons und verteilt empfangene an ihre Listener (Netzwerk-Thread).
- * Die Sprache selbst (Aufnahme, Opus, Abspielen) macht das Addon.
+ * Die Sprache selbst (Aufnahme, Opus, Abspielen) macht das Addon. Ab Dienst 1.9.0 (features "state", "groups") kommen
+ * der eigene Status (stumm, Ton aus) und Gruppen dazu: Für eine Gruppe geht nur ein SHA-256 aus Name und Passwort an den
+ * Dienst.
  */
 public final class VoiceLink {
 	public enum Status {
@@ -69,6 +75,21 @@ public final class VoiceLink {
 	private static volatile int range = 48;
 	private static volatile int maxFrame = 1024;
 	private static volatile Set<UUID> peers = Set.of();
+	/** Fähigkeiten des Dienstes aus "ready" (leer = Dienst 1.8.0) */
+	private static volatile Set<String> features = Set.of();
+	private static volatile boolean ready;
+	private static volatile long connectedAt;
+	private static volatile int maxGroup = 16;
+	private static volatile Set<UUID> groupMembers = Set.of();
+	private static final Set<UUID> PEER_MUTED = ConcurrentHashMap.newKeySet();
+	private static final Set<UUID> PEER_DEAFENED = ConcurrentHashMap.newKeySet();
+	/** eigener Status und Gruppe (von einem Addon gesetzt) */
+	private static volatile boolean selfMuted;
+	private static volatile boolean selfDeafened;
+	private static volatile String groupOwner;
+	private static volatile String groupName;
+	private static volatile String groupKey;
+	private static volatile boolean groupFull;
 	private static volatile int generation;
 	private static volatile long retryAt;
 	private static int failures;
@@ -76,6 +97,10 @@ public final class VoiceLink {
 	/** zuletzt gemeldeter Raum und Position (Haupt-Thread) */
 	private static String joinedRoom;
 	private static boolean joinedFriendsOnly;
+	private static String joinedGroup;
+	private static boolean sentMuted;
+	private static boolean sentDeafened;
+	private static boolean stateSent;
 	private static double lastX = Double.NaN;
 	private static double lastY;
 	private static double lastZ;
@@ -94,7 +119,73 @@ public final class VoiceLink {
 		else {
 			ACTIVE.remove(owner);
 			FRIENDS_ONLY.remove(owner);
+			if (owner.equals(groupOwner)) setGroup(owner, null, null);
 		}
+	}
+
+	/** eigenen Status melden (stumm, Ton aus); geht beim nächsten Tick raus */
+	public static void setState(boolean muted, boolean deafened) {
+		selfMuted = muted;
+		selfDeafened = deafened;
+	}
+
+	public static boolean peerMuted(UUID player) {
+		return player != null && PEER_MUTED.contains(player);
+	}
+
+	public static boolean peerDeafened(UUID player) {
+		return player != null && PEER_DEAFENED.contains(player);
+	}
+
+	/** Gruppe setzen (leerer Name = keine); geht beim nächsten Tick als neues "join" raus */
+	public static void setGroup(String owner, String name, String password) {
+		String trimmed = name == null ? "" : name.strip();
+		if (trimmed.isEmpty()) {
+			if (groupOwner == null || owner.equals(groupOwner)) {
+				groupOwner = null;
+				groupName = null;
+				groupKey = null;
+				groupFull = false;
+			}
+			return;
+		}
+		String key = groupKey(trimmed, password == null ? "" : password);
+		if (key.equals(groupKey) && owner.equals(groupOwner)) return;
+		groupOwner = owner;
+		groupName = trimmed;
+		groupKey = key;
+		groupFull = false;
+	}
+
+	/** Prüfwert der Gruppe: SHA-256 aus festem Präfix, Name (klein) und Passwort, als 64 Hex-Zeichen */
+	public static String groupKey(String name, String password) {
+		try {
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			String text = "heldix-voice-group\n" + name.strip().toLowerCase(Locale.ROOT) + "\n" + password;
+			return HexFormat.of().formatHex(digest.digest(text.getBytes(StandardCharsets.UTF_8)));
+		} catch (NoSuchAlgorithmException e) {
+			throw new IllegalStateException(e);
+		}
+	}
+
+	public static String groupName() {
+		return groupName;
+	}
+
+	public static Set<UUID> groupMembers() {
+		return groupKey == null ? Set.of() : groupMembers;
+	}
+
+	public static boolean groupsAvailable() {
+		return status == Status.CONNECTED && features.contains("groups");
+	}
+
+	/** Warum die Gruppe nicht klappt, sonst null */
+	public static String groupProblem() {
+		if (groupKey == null || status != Status.CONNECTED || !ready) return null;
+		if (!features.contains("groups")) return "Der Heldix-Dienst kann noch keine Gruppen";
+		if (groupFull) return "Gruppe ist voll (höchstens " + maxGroup + ")";
+		return null;
 	}
 
 	public static boolean isActive(String owner) {
@@ -118,6 +209,7 @@ public final class VoiceLink {
 	public static void forget(String owner) {
 		setActive(owner, false);
 		SINKS.removeIf(sink -> sink.owner().equals(owner));
+		if (ACTIVE.isEmpty()) setState(false, false);
 	}
 
 	public static Status status() {
@@ -173,19 +265,38 @@ public final class VoiceLink {
 		}
 		if (status != Status.CONNECTED) return;
 		long now = System.currentTimeMillis();
+		// erst nach "ready" (Fähigkeiten des Dienstes); kommt es nicht, nach 5 s trotzdem
+		if (!ready && now - connectedAt < 5000) return;
 		LocalPlayer player = mc.player;
 		String room = room(mc);
 		boolean friendsOnly = !FRIENDS_ONLY.isEmpty();
-		if (!room.equals(joinedRoom) || friendsOnly != joinedFriendsOnly) {
+		String group = features.contains("groups") ? groupKey : null;
+		if (!room.equals(joinedRoom) || friendsOnly != joinedFriendsOnly || !Objects.equals(group, joinedGroup)) {
 			JsonObject join = new JsonObject();
 			join.addProperty("type", "join");
 			join.addProperty("server", serverAddress(mc));
 			join.addProperty("dimension", mc.level.dimension().identifier().toString());
 			join.addProperty("mode", friendsOnly ? "friends" : "all");
+			if (group != null) join.addProperty("group", group);
+			if (!Objects.equals(group, joinedGroup)) {
+				groupFull = false;
+				if (group == null) groupMembers = Set.of();
+			}
 			sendText(join);
 			joinedRoom = room;
 			joinedFriendsOnly = friendsOnly;
+			joinedGroup = group;
 			lastX = Double.NaN;
+		}
+		if (features.contains("state") && (!stateSent || selfMuted != sentMuted || selfDeafened != sentDeafened)) {
+			JsonObject state = new JsonObject();
+			state.addProperty("type", "state");
+			state.addProperty("muted", selfMuted);
+			state.addProperty("deafened", selfDeafened);
+			sendText(state);
+			sentMuted = selfMuted;
+			sentDeafened = selfDeafened;
+			stateSent = true;
 		}
 		double dx = player.getX() - lastX;
 		double dy = player.getY() - lastY;
@@ -245,6 +356,10 @@ public final class VoiceLink {
 		status = Status.CONNECTING;
 		statusText = "Verbinde …";
 		joinedRoom = null;
+		joinedGroup = null;
+		stateSent = false;
+		ready = false;
+		features = Set.of();
 		String url = Social.baseUrl().replaceFirst("^http", "ws") + "/v1/voice";
 		HTTP.newWebSocketBuilder()
 				.header("Authorization", "Bearer " + token)
@@ -260,6 +375,7 @@ public final class VoiceLink {
 						return;
 					}
 					socket = ws;
+					connectedAt = System.currentTimeMillis();
 					status = Status.CONNECTED;
 					statusText = "Verbunden";
 					failures = 0;
@@ -288,10 +404,21 @@ public final class VoiceLink {
 		QUEUE.clear();
 		QUEUED_AUDIO.set(0);
 		SENDING.set(false);
-		peers = Set.of();
+		clearRoom();
 		joinedRoom = null;
+		joinedGroup = null;
+		stateSent = false;
+		ready = false;
 		status = newStatus;
 		statusText = text;
+	}
+
+	/** Raum, Gruppe und Status der anderen vergessen (getrennt) */
+	private static void clearRoom() {
+		peers = Set.of();
+		groupMembers = Set.of();
+		PEER_MUTED.clear();
+		PEER_DEAFENED.clear();
 	}
 
 	// ======================================================================================
@@ -378,7 +505,8 @@ public final class VoiceLink {
 		public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
 			if (gen == generation) {
 				socket = null;
-				peers = Set.of();
+				clearRoom();
+				ready = false;
 				status = Status.UNAVAILABLE;
 				statusText = statusCode == 4002 ? "In einem anderen Spiel verbunden" : "Verbindung getrennt – neuer Versuch gleich";
 				retryAt = System.currentTimeMillis() + (statusCode == 4002 ? 60_000 : 5_000);
@@ -407,22 +535,59 @@ public final class VoiceLink {
 			case "ready" -> {
 				if (json.has("range")) range = Math.clamp(json.get("range").getAsInt(), 1, 256);
 				if (json.has("maxFrame")) maxFrame = Math.clamp(json.get("maxFrame").getAsInt(), 16, 4096);
+				if (json.has("maxGroup")) maxGroup = Math.clamp(json.get("maxGroup").getAsInt(), 2, 256);
+				features = Set.copyOf(strings(json, "features"));
+				ready = true;
 			}
 			case "peers" -> {
-				Set<UUID> set = new HashSet<>();
-				if (json.has("uuids") && json.get("uuids").isJsonArray()) {
-					JsonArray array = json.getAsJsonArray("uuids");
-					for (JsonElement element : array) {
-						UUID uuid = Social.uuid(element.getAsString());
-						if (uuid != null) set.add(uuid);
-					}
-				}
+				Set<UUID> set = uuids(json, "uuids");
 				peers = Set.copyOf(set);
+				groupMembers = Set.copyOf(uuids(json, "group"));
+				Set<UUID> muted = uuids(json, "muted");
+				Set<UUID> deafened = uuids(json, "deafened");
+				PEER_MUTED.retainAll(muted);
+				PEER_MUTED.addAll(muted);
+				PEER_DEAFENED.retainAll(deafened);
+				PEER_DEAFENED.addAll(deafened);
 				statusText = set.isEmpty() ? "Verbunden – noch niemand hier" : set.size() == 1 ? "Verbunden – 1 Spieler hier" : "Verbunden – " + set.size() + " Spieler hier";
+			}
+			case "state" -> {
+				UUID uuid = json.has("uuid") ? Social.uuid(json.get("uuid").getAsString()) : null;
+				if (uuid == null) return;
+				boolean muted = json.has("muted") && json.get("muted").getAsBoolean();
+				boolean deafened = json.has("deafened") && json.get("deafened").getAsBoolean();
+				if (muted) PEER_MUTED.add(uuid);
+				else PEER_MUTED.remove(uuid);
+				if (deafened) PEER_DEAFENED.add(uuid);
+				else PEER_DEAFENED.remove(uuid);
+			}
+			case "group" -> {
+				if (json.has("status") && "full".equals(json.get("status").getAsString())) {
+					groupFull = true;
+					groupMembers = Set.of();
+				}
 			}
 			default -> {
 			}
 		}
+	}
+
+	private static Set<UUID> uuids(JsonObject json, String field) {
+		Set<UUID> set = new HashSet<>();
+		for (String value : strings(json, field)) {
+			UUID uuid = Social.uuid(value);
+			if (uuid != null) set.add(uuid);
+		}
+		return set;
+	}
+
+	private static Set<String> strings(JsonObject json, String field) {
+		Set<String> set = new HashSet<>();
+		if (!json.has(field) || !json.get(field).isJsonArray()) return set;
+		for (JsonElement element : json.getAsJsonArray(field)) {
+			if (element.isJsonPrimitive()) set.add(element.getAsString());
+		}
+		return set;
 	}
 
 	private static void handleBinary(byte[] data) {

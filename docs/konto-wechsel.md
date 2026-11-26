@@ -86,7 +86,7 @@ Ereignisse kommen erst nach `hello` und werden gebündelt (150 ms).
 
 | Operation | Parameter | Ergebnis |
 | --- | --- | --- |
-| `hello` | – | `{"protocol":1,"launcher":"0.13.4","offline":false,"allowed":true}` |
+| `hello` | – | `{"protocol":1,"launcher":"0.13.5","offline":false,"allowed":true}` |
 | `accounts.list` | – | `{"accounts":[Konto, …],"allowed":true}` |
 | `accounts.session` | `account` | `{"name","uuid","accessToken","userType","xuid"?}` |
 | `accounts.add` | – | `{"account":Konto,"accounts":[Konto, …]}` |

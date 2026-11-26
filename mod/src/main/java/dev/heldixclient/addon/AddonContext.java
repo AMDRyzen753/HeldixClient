@@ -373,4 +373,13 @@ final class AddonContext implements HeldixApi {
 	public Registration addPlayerMenuEntry(dev.heldixclient.api.PlayerMenuEntry entry) {
 		return AddonPlayers.addMenuEntry(addon, entry);
 	}
+
+	// --- API 7: Spielernamen --------------------------------------------------------------------
+
+	@Override
+	public Optional<String> playerName(java.util.UUID player) {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (!minecraft.isSameThread()) throw new IllegalStateException("playerName() nur im Haupt-Thread aufrufen");
+		return Optional.ofNullable(dev.heldixclient.player.NearbyPlayers.nameOf(minecraft, player));
+	}
 }

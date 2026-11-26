@@ -314,11 +314,20 @@ Das Spotify-Addon ([SpotifyHud](../mod/addons/spotify/src/main/java/dev/heldixcl
 
 Jedes Modul – eingebaut oder aus einem Addon – bekommt außerdem von HeldixClient eine Taste „Ein/Aus“ (ab Werk frei, Gruppe „Heldix-Module“ in der Steuerung). Sie entsteht beim Start, solange Minecraft die Optionen noch nicht geladen hat; Module, die ein Addon erst später anlegt, haben keine.
 
+**API 7** (ab HeldixClient 0.13.5, `"api": 7`): Symbole über dem Kopf, Status und Gruppen im Sprachkanal, Spielernamen
+
+| Neu | Wofür |
+| --- | --- |
+| `api.playerMarkers().showAbove(uuid, icon, farbe, dauer)` | größeres Symbol über dem Namensschild (runde dunkle Fläche mit farbigem Rand, ploppt kurz auf); gezeichnet in `PlayerMarkerStore.submitAbove` am Anfang von `EntityRenderer.submit`, nur wenn Minecraft das Namensschild zeigt |
+| `api.voice().setState(stumm, tonAus)`, `peerMuted(uuid)`, `peerDeafened(uuid)` | eigener Status an Raum und Gruppe, Status der anderen (Dienst ≥ 1.9.0) |
+| `api.voice().setGroup(name, passwort)`, `group()`, `groupMembers()`, `groupsAvailable()`, `groupProblem()` | Gruppe über den ganzen Server (alle Dimensionen, ohne Abstand, höchstens 16); an den Dienst geht nur SHA-256 aus Name und Passwort |
+| `api.playerName(uuid)` | Name aus Welt, Tab-Liste oder Freundesliste (Haupt-Thread) |
+
 **Warum so:** Neue Methoden gibt es nur an Schnittstellen, die HeldixClient selbst bereitstellt (`HeldixApi`, `HeldixEvents`, `HudCanvas`, `ModuleHandle`); Schnittstellen, die Addons selbst schreiben (`HeldixAddon`, `DroppedItemRenderer`, Listener), bleiben unverändert. Einzige Ausnahme ist `HudRenderer`: Es bekommt in API 5 nur **Default-Methoden** (`onClick`, `onHover`), bleibt ein funktionales Interface, und fertige Addons (auch Lambdas) laufen unverändert. `HudClick`, `HudHover` und `HudStyle` stellt HeldixClient bereit, deshalb sind es Schnittstellen. `GameInfo`, `PlayerState`, `DroppedItem`, `CosmeticInfo` und `CosmeticChange` sind Schnittstellen statt Records, damit spätere Versionen Werte ergänzen können, ohne Addons zu brechen. `DroppedItemPose` baut das Addon selbst, deshalb ist es ein Record (wie `ItemInfo`). Die bisherigen Events (`onTick` …) geben weiter `void` zurück – eine andere Rückgabe würde fertige Addons brechen.
 
 Tastencodes aus `HeldixKeys` sind feste GLFW-Werte. HeldixClient übersetzt sie in die Tasten der jeweiligen Minecraft-Version (seit 26.x nimmt Minecraft SDL-Scancodes). Bis 0.13.0 landeten sie unübersetzt im Spiel: Standardtasten wie Pos1 lagen dadurch auf falschen Tasten, und `HeldixKeys.NONE` brachte das Spiel zum Absturz. Falsch gespeicherte Standardtasten setzt HeldixClient einmal auf die richtigen zurück.
 
-Addons für API 1 bis 5 laufen unverändert weiter. Ein Addon, das eine neuere API braucht, als der installierte HeldixClient kann, wird mit dem Hinweis „bitte HeldixClient aktualisieren“ übersprungen (z. B. ein Addon mit `"api": 6` in HeldixClient 0.13.3). Launcher und Addon-Store im Spiel zeigen es dort mit „Braucht einen neueren HeldixClient“ statt mit „Installieren“.
+Addons für API 1 bis 6 laufen unverändert weiter. Ein Addon, das eine neuere API braucht, als der installierte HeldixClient kann, wird mit dem Hinweis „bitte HeldixClient aktualisieren“ übersprungen (z. B. ein Addon mit `"api": 7` in HeldixClient 0.13.4). Launcher und Addon-Store im Spiel zeigen es dort mit „Braucht einen neueren HeldixClient“ statt mit „Installieren“.
 
 Details stehen in den Javadoc-Kommentaren der [API-Klassen](../mod/heldix-api/src/main/java/dev/heldixclient/api).
 
@@ -490,13 +499,16 @@ Bewertungen (1–5 Sterne) und Meldungen zu Addons gehen auf der Webseite und im
 
 ### Voice-Chat-Addon
 
-Proximity-Voice-Chat über den Heldix-Dienst ([mod/addons/voicechat](../mod/addons/voicechat), Version 1.0.0, API 6), auf jedem Server ohne Plugin.
+Proximity-Voice-Chat über den Heldix-Dienst ([mod/addons/voicechat](../mod/addons/voicechat), Version 1.1.0, API 7), auf jedem Server ohne Plugin.
 
-- **Ton:** Aufnahme mit `javax.sound` (48 kHz mono, 20-ms-Rahmen), Opus mit [Concentus](https://github.com/jaredmdobson/concentus) (reines Java, BSD-Lizenz, liegt in der JAR mit `META-INF/LICENSE-concentus.txt`), 24 kbit/s mit FEC. Wiedergabe: je Sprecher ein Decoder mit 60 ms Puffer, Lücken überbrückt Opus; Mischen in Stereo nach Abstand (bis 4 Blöcke voll, am Rand der Reichweite still) und Richtung (`NearbyPlayer.direction()`).
+- **Ton:** Aufnahme mit `javax.sound` (48 kHz mono, 20-ms-Rahmen), Rauschfilter (Hochpass 90 Hz gegen Brummen, dazu ein Rauschtor, das den Grundpegel verfolgt und leises Rauschen zwischen den Worten auf 20 % dämpft), Opus mit [Concentus](https://github.com/jaredmdobson/concentus) (reines Java, BSD-Lizenz, liegt in der JAR mit `META-INF/LICENSE-concentus.txt`), 24 kbit/s mit FEC. Wiedergabe: je Sprecher ein Decoder mit 60 ms Puffer, Lücken überbrückt Opus; Mischen in Stereo nach Abstand (bis 4 Blöcke voll, am Rand der Reichweite still) und Richtung (`NearbyPlayer.direction()`); die eigene Gruppe ohne Abstand. Signaltöne (kurze Gleittöne) bei Push-to-Talk und beim Stummschalten werden nur lokal dazugemischt.
 - **Sprechen:** Push-to-Talk (`addKey`, ab Werk V) oder Sprachaktivierung mit Schwelle und 300 ms Nachlauf; Tasten „Mikrofon stumm“ und „Ton aus“; „Mikrofon testen“ spielt zehn Sekunden lang die eigenen Rahmen ab, ohne zu senden.
-- **Anzeige:** HUD-Element mit Mikrofon-Zustand, Pegel und Sprechern; Symbol `volume` über dem Kopf von Sprechern (`playerMarkers`); Spielermenü mit Stummschalten, Lauter und Leiser je Spieler (gespeichert in der Addon-Konfiguration).
+- **Gruppen** (ab 1.1.0): Einstellungen „Gruppe“ und „Gruppen-Passwort“ (Textfelder, 1,5 s nach dem letzten Tippen übernommen) → `voice().setGroup`. Mitglieder hören sich auf dem ganzen Server, auch in anderen Dimensionen; Kommen und Gehen meldet eine Einblendung. Spieler in der Nähe hören weiter wie gewohnt.
+- **Status** (ab 1.1.0): Mikrofon stumm / Ton aus gehen per `voice().setState` an Raum und Gruppe.
+- **Symbole über dem Kopf** (ab 1.1.0, `showAbove`): `volume-1` bis `volume-3` je nach Lautstärke des Sprechers (grün, Gruppe violett), `mic-off` bzw. `headphones-off` (rot) für den Status der anderen, `volume-off` (grau) für von dir stumm Geschaltete. Einstellung „Symbole über dem Kopf“: Aus, Nur beim Sprechen, Sprechen und Status.
+- **Anzeige:** HUD-Element „Voice Chat-Anzeige“: Kopfzeile mit Mikrofon im runden Feld, Zustand und Pegel (fünf Balken), darunter Reichweite und Gruppe, dann die Sprecher mit Kopf, farbigem Ring und hüpfenden Balken. Mit offenem Chat Knöpfe für Mikrofon stumm und Ton aus. Stil-Optionen im HUD-Editor: Darstellung (Liste/Kompakt), Köpfe zeigen, Nur zeigen, wenn etwas los ist. Spielermenü mit Stummschalten, Lauter und Leiser je Spieler (gespeichert in der Addon-Konfiguration).
 - **Start:** Das Modul ist ab Werk aus. Mikrofon und Lautsprecher sind nur offen, solange es an und der Kanal verbunden ist (oder der Test läuft). Beim ersten Einschalten erklärt eine Einblendung, wohin die Stimme geht.
-- **Autotest:** `-Dheldixclient.voicechat.testAudio=true` ersetzt Mikrofon und Lautsprecher durch einen Testton bzw. nichts, `-Dheldixclient.voice.testServer=…` gibt dem Einzelspieler einen Raum. Beides setzt `test:launch` mit `--autotest`.
+- **Autotest:** `-Dheldixclient.voicechat.testAudio=true` ersetzt Mikrofon und Lautsprecher durch einen Testton bzw. nichts, `-Dheldixclient.voice.testServer=…` gibt dem Einzelspieler einen Raum. Beides setzt `test:launch` mit `--autotest`. `VoiceTests` prüft dazu die Symbole über dem Kopf, den Status in beide Richtungen, Signaltöne und eine Gruppe über Dimensionen hinweg.
 
 ### Item-Physics-Addon
 

@@ -91,6 +91,12 @@
     "mic-off",
     "volume",
     "volume-off",
-    "headphones"
+    "headphones",
+    "volume-1",
+    "volume-2",
+    "volume-3",
+    "headphones-off",
+    "disc",
+    "ring"
   ]
 }

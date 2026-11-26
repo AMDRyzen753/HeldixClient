@@ -141,7 +141,18 @@ public final class Hooks {
 			cosmeticError(e);
 		}
 		dev.heldixclient.cosmetic.CosmeticRenderer.submitNanos += System.nanoTime() - start;
+		// Symbole über dem Kopf (Addon-API 7, z. B. „spricht“ im Voice Chat)
+		try {
+			dev.heldixclient.player.PlayerMarkerStore.submitAbove(state, pose, collector, camera);
+		} catch (RuntimeException e) {
+			if (!markerErrorLogged) {
+				markerErrorLogged = true;
+				HeldixClient.LOGGER.error("Symbole über dem Kopf konnten nicht gezeichnet werden", e);
+			}
+		}
 	}
+
+	private static boolean markerErrorLogged;
 
 	private static void cosmeticError(RuntimeException e) {
 		if (cosmeticErrorLogged) return;

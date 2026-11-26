@@ -13,6 +13,7 @@ import dev.heldixclient.player.PlayerMarkerStore;
 import dev.heldixclient.player.PlayerMenu;
 import dev.heldixclient.screen.PlayerMenuScreen;
 import dev.heldixclient.social.Social;
+import dev.heldixclient.ui.Ui;
 import dev.heldixclient.voice.VoiceLink;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.player.RemotePlayer;
@@ -35,7 +36,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Autotest des Spielermenüs (Mausrad-Klick auf einen Spieler) und des Voice-Chat-Addons über den Heldix-Dienst: eine
  * zweite Spielerin („Stimme“) steht vor uns, meldet sich über die Schnittstelle beim Sprachkanal an, empfängt unseren
- * Testton und schickt ihn zurück. Echte Mikrofone und Lautsprecher bleiben aus (-Dheldixclient.voicechat.testAudio).
+ * Testton und schickt ihn zurück. Danach: Symbole über dem Kopf (spricht, Mikrofon stumm, Ton aus), der eigene Status bei
+ * ihr, Signaltöne und eine Gruppe über Dimensionen hinweg (sie wechselt in den Nether, ohne Position). Echte Mikrofone und
+ * Lautsprecher bleiben aus (-Dheldixclient.voicechat.testAudio).
  */
 final class VoiceTests {
 	private static final HttpClient HTTP = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build();
@@ -137,7 +140,7 @@ final class VoiceTests {
 		// --- Voice Chat ---------------------------------------------------------------------------
 		LoadedAddon addon = t.compute(mc -> AddonManager.addons().stream().filter(a -> a.id().equals("voicechat")).findFirst().orElse(null));
 		Module voice = module(t, "voicechat:voicechat");
-		t.check("Voice Chat: Addon aktiv (API 6)", addon != null && addon.isActive() && voice != null);
+		t.check("Voice Chat: Addon aktiv (API 7)", addon != null && addon.isActive() && voice != null);
 		if (addon == null || voice == null) return;
 		Object instance = t.compute(mc -> addon.instance());
 		// Sprachaktivierung (der Testton ist laut genug), dann einschalten
@@ -154,13 +157,20 @@ final class VoiceTests {
 
 		// „Stimme“ meldet sich beim Sprachkanal an: gleicher Raum, gleiche Stelle
 		ConcurrentLinkedQueue<byte[]> received = new ConcurrentLinkedQueue<>();
+		ConcurrentLinkedQueue<String> texts = new ConcurrentLinkedQueue<>();
 		AtomicInteger fromUs = new AtomicInteger();
 		WebSocket socket = HTTP.newWebSocketBuilder().header("Authorization", "Bearer " + token)
 				.buildAsync(URI.create(base.replaceFirst("^http", "ws") + "/v1/voice"), new WebSocket.Listener() {
 					private final java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+					private final StringBuilder text = new StringBuilder();
 
 					@Override
 					public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+						text.append(data);
+						if (last) {
+							texts.add(text.toString());
+							text.setLength(0);
+						}
 						webSocket.request(1);
 						return null;
 					}
@@ -210,7 +220,10 @@ final class VoiceTests {
 					@SuppressWarnings("unchecked")
 					List<UUID> speaking = (List<UUID>) invoke(instance, "speakingNow");
 					t.check("Voice Chat: „Stimme“ spricht gerade", speaking.contains(voiceId));
-					t.check("Voice Chat: Symbol über ihrem Kopf", t.compute(mc -> PlayerMarkerStore.count(voiceId)) > 0);
+					int icon = t.compute(mc -> PlayerMarkerStore.aboveIcon("voicechat", voiceId));
+					t.check("Voice Chat: Schallwellen über ihrem Kopf (Icon " + icon + ")", t.compute(mc -> PlayerMarkerStore.countAbove(voiceId)) > 0
+							&& (icon == Ui.iconIndex("volume-1") || icon == Ui.iconIndex("volume-2") || icon == Ui.iconIndex("volume-3")));
+					t.check("Voice Chat: Lautstärke der Sprecherin gemessen", ((Number) invoke(instance, "levelOf", voiceId)).floatValue() > 0);
 					t.screenshot("voicechat-01-spricht");
 				}
 			}
@@ -246,6 +259,73 @@ final class VoiceTests {
 			middleClick(t);
 			int unmute = t.compute(mc -> ((PlayerMenuScreen) mc.gui.screen()).actionLabels().indexOf("Stumm aufheben"));
 			t.pressKey(InputConstants.KEY_1 + unmute);
+
+			// --- Status: ihr Mikrofon stumm, Ton aus → Symbole über ihrem Kopf ------------------------
+			t.check("Voice Chat: Dienst kann Status und Gruppen", t.compute(mc -> VoiceLink.groupsAvailable()));
+			TestContext.sleep(400);
+			socket.sendText("{\"type\":\"state\",\"muted\":true,\"deafened\":false}", true).get(5, TimeUnit.SECONDS);
+			t.waitSoft(mc -> VoiceLink.peerMuted(voiceId), 5);
+			t.waitSoft(mc -> PlayerMarkerStore.aboveIcon("voicechat", voiceId) == Ui.iconIndex("mic-off"), 3);
+			t.check("Voice Chat: ihr Mikrofon ist stumm – Symbol über dem Kopf", t.compute(mc -> VoiceLink.peerMuted(voiceId)
+					&& PlayerMarkerStore.aboveIcon("voicechat", voiceId) == Ui.iconIndex("mic-off")));
+			t.screenshot("voicechat-02-stumm");
+			socket.sendText("{\"type\":\"state\",\"muted\":true,\"deafened\":true}", true).get(5, TimeUnit.SECONDS);
+			t.waitSoft(mc -> PlayerMarkerStore.aboveIcon("voicechat", voiceId) == Ui.iconIndex("headphones-off"), 5);
+			t.check("Voice Chat: ihr Ton ist aus – Symbol über dem Kopf", t.compute(mc -> VoiceLink.peerDeafened(voiceId)
+					&& PlayerMarkerStore.aboveIcon("voicechat", voiceId) == Ui.iconIndex("headphones-off")));
+			socket.sendText("{\"type\":\"state\",\"muted\":false,\"deafened\":false}", true).get(5, TimeUnit.SECONDS);
+			t.waitSoft(mc -> !VoiceLink.peerMuted(voiceId) && !VoiceLink.peerDeafened(voiceId), 5);
+			t.waitSoft(mc -> PlayerMarkerStore.countAbove(voiceId) == 0, 3);
+			t.check("Voice Chat: wieder normal – kein Symbol", t.compute(mc -> PlayerMarkerStore.countAbove(voiceId)) == 0);
+
+			// --- eigener Status kommt bei ihr an, mit Signalton -----------------------------------
+			String own = Social.compact(ownId);
+			int cuesBefore = ((Number) invoke(instance, "cuesPlayed")).intValue();
+			texts.clear();
+			t.run(mc -> invoke(instance, "toggleMute"));
+			long stateUntil = System.currentTimeMillis() + 5000;
+			while (texts.stream().noneMatch(m -> m.contains("\"state\"") && m.contains(own) && m.contains("\"muted\":true"))
+					&& System.currentTimeMillis() < stateUntil) TestContext.sleep(50);
+			t.check("Voice Chat: „Stimme“ sieht unser Mikrofon stumm", texts.stream().anyMatch(m -> m.contains("\"state\"") && m.contains(own)
+					&& m.contains("\"muted\":true")));
+			TestContext.sleep(300);
+			t.check("Voice Chat: Signalton beim Stummschalten", ((Number) invoke(instance, "cuesPlayed")).intValue() > cuesBefore);
+			t.screenshot("voicechat-03-selbst-stumm");
+			t.run(mc -> invoke(instance, "toggleMute"));
+
+			// --- Gruppe: sie geht in den Nether (ohne Position) und hört uns trotzdem ------------
+			Setting.Text group = t.compute(mc -> voice.settings().stream().filter(s -> s.label().equals("Gruppe")).map(s -> (Setting.Text) s)
+					.findFirst().orElseThrow());
+			t.run(mc -> group.set().accept("Bau-Test"));
+			String key = VoiceLink.groupKey("Bau-Test", "");
+			socket.sendText("{\"type\":\"join\",\"server\":\"autotest.heldixclient.com\",\"dimension\":\"minecraft:the_nether\",\"mode\":\"all\",\"group\":\""
+					+ key + "\"}", true).get(5, TimeUnit.SECONDS);
+			t.waitSoft(mc -> VoiceLink.groupMembers().contains(voiceId), 10);
+			t.check("Voice Chat: Gruppe „Bau-Test“ mit „Stimme“ (" + t.compute(mc -> VoiceLink.groupName()) + ")",
+					t.compute(mc -> VoiceLink.groupMembers().contains(voiceId) && "Bau-Test".equals(VoiceLink.groupName())));
+			t.check("Voice Chat: „Stimme“ ist nicht mehr im selben Raum", t.compute(mc -> !VoiceLink.peers().contains(voiceId)));
+			int heardBefore = fromUs.get();
+			long groupUntil = System.currentTimeMillis() + 8000;
+			while (fromUs.get() < heardBefore + 20 && System.currentTimeMillis() < groupUntil) TestContext.sleep(100);
+			t.check("Voice Chat: in der Gruppe hört sie uns im Nether (" + (fromUs.get() - heardBefore) + " Rahmen)", fromUs.get() >= heardBefore + 20);
+			received.clear();
+			while (received.size() < 30 && System.currentTimeMillis() < groupUntil + 4000) TestContext.sleep(50);
+			for (int i = 0; i < 30 && !received.isEmpty(); i++) {
+				byte[] payload = received.poll();
+				ByteBuffer frame = ByteBuffer.allocate(4 + payload.length);
+				frame.put((byte) 1).put((byte) 0).putShort((short) sequence++).put(payload).flip();
+				socket.sendBinary(frame, true).get(5, TimeUnit.SECONDS);
+				TestContext.sleep(20);
+				if (i == 15) {
+					@SuppressWarnings("unchecked")
+					List<UUID> speaking = (List<UUID>) invoke(instance, "speakingNow");
+					t.check("Voice Chat: wir hören sie aus dem Nether (Gruppe)", speaking.contains(voiceId));
+					t.screenshot("voicechat-04-gruppe");
+				}
+			}
+			t.run(mc -> group.set().accept(""));
+			t.waitSoft(mc -> VoiceLink.groupName() == null, 5);
+			t.check("Voice Chat: Gruppe verlassen", t.compute(mc -> VoiceLink.groupName() == null && VoiceLink.groupMembers().isEmpty()));
 		} finally {
 			socket.abort();
 			t.run(mc -> voice.setEnabled(false));

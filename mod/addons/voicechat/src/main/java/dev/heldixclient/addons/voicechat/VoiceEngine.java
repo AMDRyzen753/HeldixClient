@@ -25,10 +25,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
- * Ton des Voice Chats: ein Thread nimmt das Mikrofon auf (20-ms-Rahmen, 48 kHz mono), entscheidet über Push-to-Talk bzw.
- * Sprachaktivierung, kodiert mit Opus und schickt die Rahmen über den Sprachkanal; ein zweiter Thread dekodiert die
- * Rahmen der anderen (kleiner Puffer gegen Schwankungen, Lücken überbrückt Opus), mischt sie nach Abstand und Richtung in
- * Stereo und spielt sie ab. Beide laufen nur, solange das Modul an und der Kanal verbunden ist (oder der Test läuft).
+ * Ton des Voice Chats: ein Thread nimmt das Mikrofon auf (20-ms-Rahmen, 48 kHz mono), filtert tiefes Brummen und leises
+ * Rauschen weg, entscheidet über Push-to-Talk bzw. Sprachaktivierung, kodiert mit Opus und schickt die Rahmen über den
+ * Sprachkanal; ein zweiter Thread dekodiert die Rahmen der anderen (kleiner Puffer gegen Schwankungen, Lücken überbrückt
+ * Opus), mischt sie nach Abstand und Richtung in Stereo (die eigene Gruppe ohne Abstand), mischt Signaltöne dazu und
+ * spielt alles ab. Beide laufen nur, solange das Modul an und der Kanal verbunden ist (oder der Test läuft).
  */
 final class VoiceEngine {
 	static final int RATE = 48_000;
@@ -39,14 +40,34 @@ final class VoiceEngine {
 	private static final int MAX_QUEUE = 25;
 	/** Ab hier leiser werdend; am Rand der Reichweite still */
 	private static final double FULL_VOLUME_DISTANCE = 4;
+	/** Tiefpass-Grenze des Brummfilters (Hochpass) in Hz */
+	private static final double HIGH_PASS_HZ = 90;
 
 	/** Einstellungen (vom Haupt-Thread gesetzt, von den Ton-Threads gelesen) */
 	record Settings(boolean pushToTalk, double thresholdDb, int device, double micGain, double volume, boolean stereo, boolean muted,
-			boolean deafened, boolean test) {
+			boolean deafened, boolean test, boolean noiseFilter, boolean tones) {
 	}
 
 	/** Lage eines anderen Spielers von dir aus */
 	record Position(double distance, float direction, String name) {
+	}
+
+	/** Signaltöne (nur bei dir zu hören) */
+	enum Cue {
+		TALK_START(620, 880, 70),
+		TALK_STOP(880, 620, 70),
+		MUTE(520, 330, 110),
+		UNMUTE(330, 520, 110);
+
+		final double from;
+		final double to;
+		final int millis;
+
+		Cue(double from, double to, int millis) {
+			this.from = from;
+			this.to = to;
+			this.millis = millis;
+		}
 	}
 
 	/** Woher der Ton kommt (Mikrofon oder Testton) */
@@ -71,9 +92,11 @@ final class VoiceEngine {
 	private final HeldixLogger log;
 	private final Map<UUID, Stream> streams = new ConcurrentHashMap<>();
 	private final ConcurrentLinkedQueue<byte[]> loopback = new ConcurrentLinkedQueue<>();
+	private final ConcurrentLinkedQueue<short[]> cues = new ConcurrentLinkedQueue<>();
 
-	private volatile Settings settings = new Settings(true, -40, 0, 1, 1, true, false, false, false);
+	private volatile Settings settings = new Settings(true, -40, 0, 1, 1, true, false, false, false, true, true);
 	private volatile Map<UUID, Position> positions = Map.of();
+	private volatile Set<UUID> group = Set.of();
 	private volatile int range = 48;
 	private volatile boolean running;
 	private volatile float level;
@@ -82,6 +105,7 @@ final class VoiceEngine {
 	private volatile String speakerProblem;
 	private volatile int framesSent;
 	private volatile int framesPlayed;
+	private volatile int cuesPlayed;
 	private Thread capture;
 	private Thread playback;
 
@@ -95,9 +119,10 @@ final class VoiceEngine {
 	// Steuerung (Haupt-Thread)
 	// ======================================================================================
 
-	void update(Settings settings, Map<UUID, Position> positions, boolean run, int range) {
+	void update(Settings settings, Map<UUID, Position> positions, Set<UUID> group, boolean run, int range) {
 		this.settings = settings;
 		this.positions = positions;
+		this.group = group;
 		this.range = Math.max(8, range);
 		if (run && !running) start();
 		else if (!run && running) stop();
@@ -121,6 +146,7 @@ final class VoiceEngine {
 		playback = null;
 		streams.clear();
 		loopback.clear();
+		cues.clear();
 		transmitting = false;
 		level = 0;
 	}
@@ -151,12 +177,28 @@ final class VoiceEngine {
 		return framesPlayed;
 	}
 
+	int cuesPlayed() {
+		return cuesPlayed;
+	}
+
+	/** Signalton abspielen (wenn die Signaltöne an sind und der Ton läuft) */
+	void cue(Cue cue) {
+		if (!running || !settings.tones() || cues.size() > 4) return;
+		cues.add(tone(cue));
+	}
+
 	/** Wer gerade spricht (zuletzt vor höchstens 250 ms ein Rahmen) */
 	List<UUID> speaking() {
 		long now = System.currentTimeMillis();
 		List<UUID> list = new ArrayList<>();
 		for (Stream stream : streams.values()) if (stream.speakingUntil > now) list.add(stream.uuid);
 		return list;
+	}
+
+	/** Lautstärke eines Sprechers gerade (0–1), 0 = still */
+	float levelOf(UUID player) {
+		Stream stream = streams.get(player);
+		return stream == null || stream.speakingUntil <= System.currentTimeMillis() ? 0 : stream.level;
 	}
 
 	/** Empfangener Rahmen (Netzwerk-Thread) */
@@ -186,7 +228,10 @@ final class VoiceEngine {
 			return;
 		}
 		short[] pcm = new short[FRAME];
+		double[] samples = new double[FRAME];
 		byte[] out = new byte[1024];
+		HighPass highPass = new HighPass(HIGH_PASS_HZ);
+		NoiseGate gate = new NoiseGate();
 		int sequence = 0;
 		long hangUntil = 0;
 		boolean wasSending = false;
@@ -207,17 +252,20 @@ final class VoiceEngine {
 				sleep(20);
 				continue;
 			}
-			// Verstärkung und Pegel
-			double sum = 0;
+			// Verstärkung, Brummfilter, Pegel
 			double gain = current.micGain();
+			double sum = 0;
 			for (int i = 0; i < FRAME; i++) {
-				int sample = (int) Math.round(pcm[i] * gain);
-				sample = Math.clamp(sample, Short.MIN_VALUE, Short.MAX_VALUE);
-				pcm[i] = (short) sample;
-				sum += (double) sample * sample;
+				double sample = pcm[i] * gain;
+				if (current.noiseFilter()) sample = highPass.process(sample);
+				samples[i] = sample;
+				sum += sample * sample;
 			}
 			double rms = Math.sqrt(sum / FRAME) / Short.MAX_VALUE;
 			double db = rms > 0 ? 20 * Math.log10(rms) : -100;
+			// leises Rauschen zwischen den Worten dämpfen (nach dem Pegel, damit die Sprachaktivierung unbeeinflusst bleibt)
+			if (current.noiseFilter()) gate.process(samples, db);
+			for (int i = 0; i < FRAME; i++) pcm[i] = (short) Math.clamp(Math.round(samples[i]), Short.MIN_VALUE, Short.MAX_VALUE);
 			level = (float) Math.clamp((db + 60) / 60, 0, 1);
 			long now = System.currentTimeMillis();
 			boolean voice;
@@ -228,6 +276,7 @@ final class VoiceEngine {
 				voice = now < hangUntil;
 			}
 			boolean send = voice && !current.muted() && !current.deafened();
+			if (current.pushToTalk() && send != wasSending && !current.test()) cue(send ? Cue.TALK_START : Cue.TALK_STOP);
 			if (send || wasSending) {
 				try {
 					int length = encoder.encode(pcm, 0, FRAME, out, 0, out.length);
@@ -247,6 +296,67 @@ final class VoiceEngine {
 		}
 		if (source != null) source.close();
 		transmitting = false;
+	}
+
+	/** Hochpass 2. Ordnung (Butterworth): nimmt Brummen, Trittschall und Wind unter etwa 90 Hz weg */
+	private static final class HighPass {
+		private final double b0;
+		private final double b1;
+		private final double b2;
+		private final double a1;
+		private final double a2;
+		private double x1;
+		private double x2;
+		private double y1;
+		private double y2;
+
+		HighPass(double cutoff) {
+			double w0 = 2 * Math.PI * cutoff / RATE;
+			double alpha = Math.sin(w0) / (2 * Math.sqrt(0.5));
+			double cos = Math.cos(w0);
+			double a0 = 1 + alpha;
+			b0 = (1 + cos) / 2 / a0;
+			b1 = -(1 + cos) / a0;
+			b2 = (1 + cos) / 2 / a0;
+			a1 = -2 * cos / a0;
+			a2 = (1 - alpha) / a0;
+		}
+
+		double process(double x) {
+			double y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+			x2 = x1;
+			x1 = x;
+			y2 = y1;
+			y1 = y;
+			return y;
+		}
+	}
+
+	/**
+	 * Dämpft gleichmäßiges Rauschen (Lüfter, Tastatur aus der Ferne): merkt sich den Grundpegel (sinkt sofort, steigt
+	 * langsam) und lässt nur durch, was deutlich lauter ist. Schnell auf, langsam zu, damit Wortenden nicht abreißen.
+	 */
+	private static final class NoiseGate {
+		private static final double OPEN_ABOVE_FLOOR_DB = 9;
+		private static final double CLOSED_GAIN = 0.2;
+		private double floorDb = -60;
+		private double gain = 1;
+		private int hold;
+
+		void process(double[] samples, double db) {
+			if (db < floorDb) floorDb = db;
+			else floorDb = Math.min(floorDb + 0.04, -25);
+			boolean open = db > floorDb + OPEN_ABOVE_FLOOR_DB;
+			if (open) hold = 10;
+			else if (hold > 0) hold--;
+			double target = open || hold > 0 ? 1 : CLOSED_GAIN;
+			double step = target > gain ? (target - gain) / 48.0 : (target - gain) / 960.0;
+			for (int i = 0; i < samples.length; i++) {
+				if (Math.abs(target - gain) > Math.abs(step)) gain += step;
+				else gain = target;
+				samples[i] *= gain;
+			}
+		}
 	}
 
 	private Source openSource(int device) {
@@ -337,6 +447,8 @@ final class VoiceEngine {
 		short[] pcm = new short[FRAME];
 		byte[] bytes = new byte[FRAME * 4];
 		Stream self = new Stream(new UUID(0, 0));
+		short[] cue = null;
+		int cueAt = 0;
 		while (running) {
 			if (sink == null) {
 				sink = openSink();
@@ -348,22 +460,28 @@ final class VoiceEngine {
 			Arrays.fill(mix, 0);
 			Settings current = settings;
 			Map<UUID, Position> where = positions;
+			Set<UUID> members = group;
 			long now = System.currentTimeMillis();
 			boolean any = false;
 			for (Stream stream : streams.values()) {
 				if (!stream.next(pcm)) {
+					// kurze Lücke im Netz: Anzeige nur langsam sinken lassen (ob jemand spricht, entscheidet speakingUntil)
+					stream.level *= 0.9f;
 					if (now - stream.lastPacketAt > 10_000) streams.remove(stream.uuid, stream);
 					continue;
 				}
 				any = true;
+				stream.level = Math.max(peak(pcm), stream.level * 0.82f);
 				float gain = (float) (current.volume() * addon.volumeOf(stream.uuid));
 				float pan = 0;
 				Position position = where.get(stream.uuid);
+				boolean inGroup = members.contains(stream.uuid);
 				if (position != null) {
-					gain *= (float) falloff(position.distance());
-					if (current.stereo()) pan = (float) Math.sin(Math.toRadians(position.direction()));
-					if (Math.abs(position.direction()) > 90) gain *= 0.85f;
-				} else {
+					// die eigene Gruppe überall gleich laut, nur die Richtung zählt
+					if (!inGroup) gain *= (float) falloff(position.distance());
+					if (current.stereo()) pan = (float) Math.sin(Math.toRadians(position.direction())) * (inGroup ? 0.6f : 1f);
+					if (!inGroup && Math.abs(position.direction()) > 90) gain *= 0.85f;
+				} else if (!inGroup) {
 					// nicht in der geladenen Welt (z. B. unsichtbar oder gerade erst angekommen): leiser, in der Mitte
 					gain *= 0.6f;
 				}
@@ -376,6 +494,19 @@ final class VoiceEngine {
 				any = true;
 				add(mix, pcm, 1f, 0f);
 			}
+			// Signaltöne
+			if (cue == null) {
+				cue = cues.poll();
+				cueAt = 0;
+				if (cue != null) cuesPlayed++;
+			}
+			if (cue != null) {
+				for (int i = 0; i < FRAME && cueAt < cue.length; i++, cueAt++) {
+					mix[2 * i] += cue[cueAt];
+					mix[2 * i + 1] += cue[cueAt];
+				}
+				if (cueAt >= cue.length) cue = null;
+			}
 			for (int i = 0; i < mix.length; i++) {
 				int value = Math.clamp(mix[i], Short.MIN_VALUE, Short.MAX_VALUE);
 				bytes[2 * i] = (byte) value;
@@ -385,6 +516,31 @@ final class VoiceEngine {
 			sink.write(bytes);
 		}
 		if (sink != null) sink.close();
+	}
+
+	/** Lautheit eines Rahmens (0–1) für die Anzeige: Effektivwert in dB, -50 dB = 0, -10 dB = 1 */
+	private static float peak(short[] pcm) {
+		double sum = 0;
+		for (short sample : pcm) sum += (double) sample * sample;
+		double rms = Math.sqrt(sum / pcm.length) / Short.MAX_VALUE;
+		double db = rms > 0 ? 20 * Math.log10(rms) : -100;
+		return (float) Math.clamp((db + 50) / 40, 0, 1);
+	}
+
+	/** kurzer Gleitton mit weichem Ein- und Ausblenden */
+	private static short[] tone(Cue cue) {
+		int length = RATE * cue.millis / 1000;
+		short[] out = new short[length];
+		double phase = 0;
+		int fade = Math.min(length / 3, RATE / 200);
+		for (int i = 0; i < length; i++) {
+			double t = (double) i / length;
+			double frequency = cue.from + (cue.to - cue.from) * t;
+			phase += 2 * Math.PI * frequency / RATE;
+			double envelope = Math.min(1, Math.min(i, length - 1 - i) / (double) Math.max(1, fade));
+			out[i] = (short) Math.round(Math.sin(phase) * 2600 * envelope);
+		}
+		return out;
 	}
 
 	private static void add(int[] mix, short[] pcm, float gain, float pan) {
@@ -473,6 +629,8 @@ final class VoiceEngine {
 		private int concealLeft;
 		private volatile long lastPacketAt = System.currentTimeMillis();
 		private volatile long speakingUntil;
+		/** Lautheit für Anzeige und Symbol (nur der Wiedergabe-Thread schreibt) */
+		private volatile float level;
 
 		Stream(UUID uuid) {
 			this.uuid = uuid;

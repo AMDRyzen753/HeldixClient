@@ -2,9 +2,9 @@
 titel: Addon-API im Detail
 beschreibung: Module, HUD-Elemente, Einstellungen, Tasten, Einblendungen, Ereignisse und gedroppte Items – mit echten Beispielen aus den Addons Spotify, Uhrzeit & Spielzeit und Item Physics.
 reihenfolge: 2
-stichworte: api, heldixapi, addkey, showkey, voice, voicechat, sprachkanal, nearbyplayers, spielermenü, playermenuentry, playermarkers, tasten, keybind, tastenbelegung, hudclick, hudhover, hudstyle, hotspot, iconbutton, anklickbar, hud bedienen, stil-optionen, cosmetics, cosmeticinfo, preview, animate, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate, api 4, api 5, api 6, droppeditems, droppeditemrenderer, droppeditem, droppeditempose, item physics, gedroppte items
+stichworte: api, heldixapi, addkey, showkey, voice, voicechat, sprachkanal, nearbyplayers, spielermenü, playermenuentry, playermarkers, tasten, keybind, tastenbelegung, hudclick, hudhover, hudstyle, hotspot, iconbutton, anklickbar, hud bedienen, stil-optionen, cosmetics, cosmeticinfo, preview, animate, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate, api 4, api 5, api 6, api 7, showabove, gruppe, voice-gruppe, setstate, playername, droppeditems, droppeditemrenderer, droppeditem, droppeditempose, item physics, gedroppte items
 ---
-Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **6** (Stand HeldixClient 0.13.4). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3`, alles unter [Ab API 4](#ab-api-4) den Eintrag `"api": 4`, alles unter [Ab API 5](#ab-api-5) den Eintrag `"api": 5` und alles unter [Ab API 6](#ab-api-6) den Eintrag `"api": 6`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Addons entwickeln](/entwickler/addons).
+Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **7** (Stand HeldixClient 0.13.5). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3`, alles unter [Ab API 4](#ab-api-4) den Eintrag `"api": 4`, alles unter [Ab API 5](#ab-api-5) den Eintrag `"api": 5`, alles unter [Ab API 6](#ab-api-6) den Eintrag `"api": 6` und alles unter [Ab API 7](#ab-api-7) den Eintrag `"api": 7`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Addons entwickeln](/entwickler/addons).
 
 > **Hinweis:** Die Heldix-API reicht für die meisten Addons und läuft über Minecraft-Updates hinweg. Was sie nicht kann, darf ein Addon auch direkt in Minecraft ändern – mit Transformern des Heldix Loaders, siehe [Weg 2: Eingriff in Minecraft](/entwickler/addons#weg-2-eingriff-in-minecraft). Mit der API-Stufe hat das nichts zu tun.
 
@@ -25,6 +25,7 @@ In `onEnable(HeldixApi api)` bekommst du ein Objekt, über das alles läuft:
 - ab API 4: `droppedItems()` – Lage und Drehung der gedroppten Items in der Welt – und `cosmetics()` – der Cosmetics-Katalog, siehe [Ab API 4](#ab-api-4).
 - ab API 5: anklickbare HUD-Elemente im HUD-Stil (an `HudRenderer`, `HudCanvas` und `ModuleHandle`), siehe [Ab API 5](#ab-api-5).
 - ab API 6: Tasten im Untermenü eines Moduls (`addKey`, `showKey`), `nearbyPlayers()`, `playerMarkers()`, `addPlayerMenuEntry(...)` und `voice()` – siehe [Ab API 6](#ab-api-6).
+- ab API 7: `playerName(uuid)`, Symbole über dem Kopf (`playerMarkers().showAbove(...)`), Status und Gruppen im Sprachkanal – siehe [Ab API 7](#ab-api-7).
 
 ## Ereignisse
 
@@ -545,9 +546,41 @@ module.showKey(api.registerKey("play-pause", "Abspielen/Pause", HeldixKeys.HOME,
 - `onFrame((sender, folgenummer, letzter, rahmen) -> …)` empfängt die Rahmen der anderen – **im Netzwerk-Thread**: schnell zurückkehren und keine Minecraft-Objekte anfassen.
 - `peers()` – andere Spieler mit eingeschaltetem Kanal im selben Raum.
 
-Das offizielle Addon **Voice Chat** ist ein vollständiges Beispiel: Aufnahme mit `javax.sound`, Opus aus Concentus, Puffer gegen Schwankungen, Lautstärke nach Abstand und Richtung, Push-to-Talk mit `addKey`, Einträge im Spielermenü und das Symbol „spricht“.
+Das offizielle Addon **Voice Chat** ist ein vollständiges Beispiel: Aufnahme mit `javax.sound`, Opus aus Concentus, Puffer gegen Schwankungen, Lautstärke nach Abstand und Richtung, Push-to-Talk mit `addKey` und Einträge im Spielermenü (ab Version 1.1.0 mit den Funktionen der Stufe 7).
 
 `NearbyPlayer` und `VoiceChannel` stellt HeldixClient bereit, deshalb sind es Schnittstellen; `PlayerMenuEntry` schreibst du selbst (mit Default-Methoden für `icon` und `keepOpen`). Funktionen der Stufe 6 sind in den API-Klassen mit `@since 6` gekennzeichnet.
+
+## Ab API 7
+
+Mit `"api": 7` (ab HeldixClient 0.13.5) zeigen Addons größere Symbole frei über dem Kopf anderer Spieler, der Sprachkanal kennt den Status der anderen (Mikrofon stumm, Ton aus) und Gruppen über den ganzen Server, und Namen lassen sich auch für Spieler nachschlagen, die nicht in der Nähe sind. Fertige Addons für API 1 bis 6 laufen unverändert weiter.
+
+### Symbole über dem Kopf
+
+- `api.playerMarkers().showAbove(uuid, icon, farbe, dauer)` – ein Symbol aus dem Heldix-Icon-Set über dem Namensschild: größer als hinter dem Namen, auf einer runden, dunklen Fläche mit Rand in der Farbe des Symbols, gut lesbar vor Himmel und Landschaft. Beim Erscheinen ploppt es kurz auf. Es gilt, was für das Namensschild gilt: nicht mit F1, nicht bei Unsichtbarkeit oder wenn der Server Namensschilder ausblendet, beim Schleichen blasser und nicht durch Wände. Symbole mehrerer Addons stehen nebeneinander.
+- Ein neues Symbol deines Addons ersetzt das alte – zum Animieren einfach jeden Tick neu zeigen, z. B. `"volume-1"` bis `"volume-3"` je nach Lautstärke. `hide(uuid)` nimmt beide Symbole deines Addons weg (hinter dem Namen und über dem Kopf).
+- Neu im Icon-Set: `volume-1`, `volume-2`, `volume-3` (Lautsprecher mit einer bis drei Wellen) und `headphones-off`.
+
+```java
+// jeden Tick: wer spricht, bekommt Schallwellen über den Kopf
+for (UUID speaker : speaking) {
+    float level = levelOf(speaker);
+    String icon = level < 0.34f ? "volume-1" : level < 0.67f ? "volume-2" : "volume-3";
+    api.playerMarkers().showAbove(speaker, icon, 0x34D399, Duration.ofMillis(300));
+}
+```
+
+### Status und Gruppen im Sprachkanal
+
+- `voice().setState(stumm, tonAus)` meldet deinen Status an die anderen im selben Raum und in deiner Gruppe; HeldixClient schickt ihn nach jedem Verbinden erneut. Mit `tonAus` bekommst du außerdem keine Rahmen mehr. `peerMuted(uuid)` und `peerDeafened(uuid)` liefern den Status der anderen.
+- `voice().setGroup(name, passwort)` betritt eine Gruppe (leerer Name = keine): Alle mit demselben Namen und Passwort auf diesem Server hören sich überall – auch in anderen Dimensionen und ohne Abstand. Spieler in der Nähe hören dich weiter wie gewohnt. Groß- und Kleinschreibung zählt beim Namen nicht, beim Passwort schon. An den Heldix-Dienst geht nur ein Prüfwert (SHA-256) aus Name und Passwort.
+- `group()` – eingestellte Gruppe, `groupMembers()` – die anderen Mitglieder (höchstens 16 je Gruppe), `groupsAvailable()` – kann der verbundene Heldix-Dienst Gruppen (ab Dienst 1.9.0), `groupProblem()` – warum es gerade nicht klappt (z. B. „Gruppe ist voll“).
+- Rahmen aus der Gruppe kommen wie alle anderen über `onFrame` an; ob der Sprecher zur Gruppe gehört, sagt `groupMembers()`.
+
+### Spielernamen
+
+`api.playerName(uuid)` liefert den Namen eines Spielers aus der Welt, der Tab-Liste des Servers oder deiner Freundesliste – z. B. für Gruppenmitglieder, die gerade woanders sind. Ohne Treffer ein leeres `Optional`. Nur im Haupt-Thread.
+
+Funktionen der Stufe 7 sind in den API-Klassen mit `@since 7` gekennzeichnet.
 
 ## Threads und Fehler
 

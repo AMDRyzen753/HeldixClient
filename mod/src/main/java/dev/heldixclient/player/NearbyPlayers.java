@@ -46,6 +46,23 @@ public final class NearbyPlayers {
 				Social.isHeldix(other.getUUID()));
 	}
 
+	/** Name zu einer UUID: Spieler in der Welt, Tab-Liste des Servers, Freundesliste; sonst null. Haupt-Thread. */
+	public static String nameOf(Minecraft mc, UUID uuid) {
+		if (uuid == null) return null;
+		if (mc.level != null) {
+			Player player = mc.level.getPlayerByUUID(uuid);
+			if (player != null) return player.getGameProfile().name();
+		}
+		if (mc.getConnection() != null) {
+			net.minecraft.client.multiplayer.PlayerInfo info = mc.getConnection().getPlayerInfo(uuid);
+			if (info != null) return info.getProfile().name();
+		}
+		for (Social.Friend friend : Social.friends()) {
+			if (friend.uuid().equals(uuid)) return friend.name();
+		}
+		return null;
+	}
+
 	private static float wrap(float degrees) {
 		float value = degrees % 360f;
 		if (value >= 180f) value -= 360f;

@@ -21,6 +21,19 @@ public interface PlayerMarkers {
 	 */
 	void show(UUID player, String icon, int color, Duration duration);
 
-	/** Symbol deines Addons für diesen Spieler sofort entfernen */
+	/** Symbol deines Addons für diesen Spieler sofort entfernen (hinter dem Namen und über dem Kopf) */
 	void hide(UUID player);
+
+	/**
+	 * Größeres Symbol über dem Namensschild (über dem Kopf): auf einer runden, dunklen Fläche mit Rand in der Farbe des
+	 * Symbols – gut lesbar vor Himmel und Landschaft. Erscheint nur, wenn Minecraft das Namensschild zeigt (F1, Unsichtbarkeit, Teams), beim Schleichen
+	 * blasser und nicht durch Wände. Symbole mehrerer Addons stehen nebeneinander. Ein neues Symbol deines Addons für
+	 * denselben Spieler ersetzt das alte – zum Animieren (z. B. Schallwellen beim Sprechen) einfach jeden Tick neu zeigen.
+	 *
+	 * @param icon     Name aus dem Heldix-Icon-Set, z. B. "volume-1" bis "volume-3", "mic-off", "headphones-off"
+	 * @param color    Farbe (RGB)
+	 * @param duration so lange sichtbar (höchstens 1 Minute)
+	 * @since 7
+	 */
+	void showAbove(UUID player, String icon, int color, Duration duration);
 }
