@@ -4,5 +4,6 @@
 	"key.heldixclient.menu": "Heldix-Menü öffnen",
 	"key.heldixclient.zoom": "Zoom",
 	"key.heldixclient.freelook": "Freelook (frei umschauen)",
-	"key.heldixclient.waypoint": "Wegpunkt setzen"
+	"key.heldixclient.waypoint": "Wegpunkt setzen",
+	"key.heldixclient.hudInteract": "HUD bedienen (Maus frei)"
 }

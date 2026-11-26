@@ -22,8 +22,16 @@ public final class HeldixConfig {
 
 	public static final class ModuleState {
 		public boolean enabled;
+		/** zuletzt gezeichnete Position (GUI-Pixel, linke obere Ecke); bis 0.13.1 die einzige Angabe */
 		public int x;
 		public int y;
+		/**
+		 * HUD-Elemente: Bezugspunkt am Bildschirm ("top-left", "top-center", … "bottom-right", siehe HudAnchor) und
+		 * Abstand dazu in GUI-Pixeln. null = noch alte Angabe (x/y), wird beim ersten Zeichnen umgerechnet.
+		 */
+		public String anchor;
+		public int anchorX;
+		public int anchorY;
 		/** Einstellungen des Moduls (Untermenü), als Text gespeichert */
 		public Map<String, String> options = new LinkedHashMap<>();
 
@@ -35,6 +43,38 @@ public final class HeldixConfig {
 			this.x = x;
 			this.y = y;
 		}
+
+		/** Tiefe Kopie (Rückgängig im HUD-Editor) */
+		public ModuleState copy() {
+			ModuleState copy = new ModuleState(enabled, x, y);
+			copy.anchor = anchor;
+			copy.anchorX = anchorX;
+			copy.anchorY = anchorY;
+			copy.options = new LinkedHashMap<>(options);
+			return copy;
+		}
+
+		/** Zustand aus einer Kopie übernehmen (ohne die Kopie selbst zu teilen) */
+		public void restore(ModuleState from) {
+			enabled = from.enabled;
+			x = from.x;
+			y = from.y;
+			anchor = from.anchor;
+			anchorX = from.anchorX;
+			anchorY = from.anchorY;
+			options = new LinkedHashMap<>(from.options);
+		}
+
+		@Override
+		public boolean equals(Object other) {
+			return other instanceof ModuleState s && s.enabled == enabled && s.x == x && s.y == y && java.util.Objects.equals(s.anchor, anchor)
+					&& s.anchorX == anchorX && s.anchorY == anchorY && s.options.equals(options);
+		}
+
+		@Override
+		public int hashCode() {
+			return java.util.Objects.hash(enabled, x, y, anchor, anchorX, anchorY, options);
+		}
 	}
 
 	public static final class Data {
@@ -42,7 +82,24 @@ public final class HeldixConfig {
 		public float zoomFactor = 4.0f;
 		public boolean zoomSmooth = true;
 		public boolean zoomCinematicCamera = true;
+		/** HUD: Hintergrund hinter den Elementen (einzelne Elemente können das im HUD-Editor ändern) */
 		public boolean hudBackground = true;
+		/** HUD-Stil: 0 = Heldix, 1 = Minimal, 2 = Klassisch (siehe HudStyles) */
+		public int hudStyle;
+		/** Deckkraft des HUD-Hintergrunds (0 bis 1) */
+		public float hudOpacity = 0.72f;
+		/** Größe aller HUD-Elemente (mit der Größe des einzelnen Elements multipliziert) */
+		public float hudScale = 1f;
+		/** Akzentfarbe des HUD (ARGB), 0 = die des Stils */
+		public int hudAccent;
+		/** Größen so runden, dass Schrift und Kanten auf ganzen Bildschirmpixeln liegen */
+		public boolean hudCrisp = true;
+		/** HUD-Elemente ausblenden, solange das F3-Menü offen ist */
+		public boolean hudHideDebug = true;
+		/** HUD-Elemente ausblenden, solange der Chat offen ist (dann nur mit der Taste „HUD bedienen“ klickbar) */
+		public boolean hudHideChat;
+		/** HUD-Elemente bei offenem Chat anklickbar (Aktionen, Tooltips) */
+		public boolean hudClickable = true;
 		/** Heldix-Design für Hauptmenü, Buttons, Listen und Hintergründe (false = Vanilla) */
 		public boolean customMenus = true;
 		/** Aktiver Shader-Stil (siehe ShaderPreset), "aus" = keiner */
@@ -63,6 +120,8 @@ public final class HeldixConfig {
 		/** HUD-Editor: Raster anzeigen und an Rändern/anderen Elementen einrasten */
 		public boolean hudGrid = true;
 		public boolean hudSnap = true;
+		/** HUD-Editor: Hilfslinien beim Ziehen (Mitte, Ränder, Kanten anderer Elemente) */
+		public boolean hudGuides = true;
 		/** Cape des eigenen Spielers: ID eines Heldix-Capes, "datei:<name>.png" für ein eigenes Bild, "" = keins */
 		public String cape = "heldix";
 		/** Elytra im Design des Capes */

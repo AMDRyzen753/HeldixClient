@@ -25,7 +25,20 @@ import { Support } from './support';
 import { playerLabel, Team, writeAudit, type Actor } from './team';
 import { DOWNLOAD_TARGETS, MAX_SETUP_SIZE, NOTHING_PUBLISHED, Updates, type DownloadTarget } from './updates';
 import { DEFAULT_CAPES, isName, isUuid } from './validate';
-import { checkCsrf, checkOrigin, clearSessionCookie, NOT_SIGNED_IN, readSessionCookie, Web, type WebAuth } from './web';
+import { CALLBACK_PATH, LoginError, MICROSOFT_ENDPOINTS, MicrosoftLogin, type MicrosoftEndpoints } from './microsoft';
+import {
+  bindingCookie,
+  checkCsrf,
+  checkOrigin,
+  clearSessionCookie,
+  loginTarget,
+  newSecret,
+  NOT_SIGNED_IN,
+  readBindingCookie,
+  readSessionCookie,
+  Web,
+  type WebAuth,
+} from './web';
 
 export const DEFAULT_SESSION_SERVER = 'https://sessionserver.mojang.com';
 /** Höchstgröße für Anfragekörper und WebSocket-Nachrichten. */
@@ -58,6 +71,19 @@ export interface ServiceOptions {
   website?: string | null;
   /** Öffentlicher Update-Schlüssel (Ed25519, PEM); ohne: kein Veröffentlichen im Team-Bereich (503). */
   updateKey?: string | null;
+  /**
+   * Öffentliche Adresse der API (Origin, z. B. `https://api.heldixclient.com`). Daraus (und nur daraus) entsteht die
+   * Umleitungs-URI der Anmeldung mit dem Minecraft-Konto: `<apiUrl>/v1/web/auth/microsoft/callback`.
+   */
+  apiUrl?: string | null;
+  /**
+   * Anmeldung mit dem Minecraft-Konto auf der Webseite: App-ID der Azure-App (dieselbe wie im Launcher, von Mojang
+   * freigegeben) und optional das Client-Geheimnis. Ohne (oder ohne `website`/`apiUrl`): aus, die Webseite zeigt
+   * keinen Knopf, der Start antwortet mit 503.
+   */
+  microsoft?: { clientId: string; clientSecret?: string | null } | null;
+  /** Nur im Entwicklungsmodus (Tests): andere Adressen für Microsoft, Xbox Live und die Minecraft-Dienste. */
+  microsoftEndpoints?: Partial<MicrosoftEndpoints>;
   /** Uhr für die 2FA-Codes (nur Tests stellen sie). */
   totpNow?: () => number;
 
@@ -113,6 +139,10 @@ export interface ServiceOptions {
   teamVerifyTtlMs?: number;
   /** Einmal-Links pro Spieler und Zeitraum (rateWindowMs). */
   webLinkRateLimit?: number;
+  /** Anmeldung mit dem Minecraft-Konto: Start und Rückkehr zusammen pro IP und Zeitraum (rateWindowMs). */
+  webMicrosoftRateLimit?: number;
+  /** So lange gilt ein begonnener Anmeldeversuch mit dem Minecraft-Konto (state und PKCE-Verifier). */
+  microsoftStateTtlMs?: number;
   /** 2FA-Versuche pro Spieler und Zeitraum (totpWindowMs). */
   totpRateLimit?: number;
   totpWindowMs?: number;
@@ -247,6 +277,24 @@ export function createService(options: ServiceOptions): Service {
   const updatesDir = options.updatesDir ?? join(options.dataDir, 'updates');
   const addonsDir = options.addonsDir ?? join(options.dataDir, 'addons');
   const website = options.website ? new URL(options.website).origin : null;
+  const apiUrl = options.apiUrl ? new URL(options.apiUrl).origin : null;
+  if (options.microsoftEndpoints && !dev) {
+    throw new Error('Andere Adressen für Microsoft, Xbox Live und Minecraft gibt es nur im Entwicklungsmodus (HELDIX_DIENST_DEV=1).');
+  }
+  const microsoftStateTtlMs = options.microsoftStateTtlMs ?? 10 * 60_000;
+  // Nur mit Webseite (dorthin geht es nach der Anmeldung) und öffentlicher API-Adresse (Umleitungs-URI).
+  const microsoft =
+    options.microsoft && options.microsoft.clientId && website !== null && apiUrl !== null
+      ? new MicrosoftLogin({
+          clientId: options.microsoft.clientId,
+          clientSecret: options.microsoft.clientSecret || null,
+          redirectUri: `${apiUrl}${CALLBACK_PATH}`,
+          endpoints: { ...MICROSOFT_ENDPOINTS, ...options.microsoftEndpoints },
+          stateTtlMs: microsoftStateTtlMs,
+          timeoutMs: options.mojangTimeoutMs ?? 10_000,
+          log,
+        })
+      : null;
   const auditTtlMs = options.auditTtlMs ?? 365 * 24 * 60 * 60 * 1000;
   let updateKey: KeyObject | null = null;
   if (options.updateKey) {
@@ -281,6 +329,7 @@ export function createService(options: ServiceOptions): Service {
   const ratingLimiter = new RateLimiter(options.addonRatingRateLimit ?? 30, rateWindowMs);
   const skinLimiter = new RateLimiter(options.skinRateLimit ?? 300, rateWindowMs);
   const linkLimiter = new RateLimiter(options.webLinkRateLimit ?? 10, rateWindowMs);
+  const microsoftLimiter = new RateLimiter(options.webMicrosoftRateLimit ?? 20, rateWindowMs);
   const totpLimiter = new RateLimiter(options.totpRateLimit ?? 5, options.totpWindowMs ?? 10 * 60_000);
   const exportLimiter = new RateLimiter(options.exportRateLimit ?? 5, options.exportWindowMs ?? 60 * 60_000);
   const realtime = new Realtime(store, {
@@ -616,6 +665,92 @@ export function createService(options: ServiceOptions): Service {
     const { code } = await body(ctx);
     web.verify(ctx.user, ctx.session!, code);
     return webMe(webAuth(ctx));
+  }
+
+  // ---------- Anmeldung mit dem Minecraft-Konto (über Microsoft) ----------
+
+  /** `GET /v1/web/config`: was die Webseite anbieten kann (ohne Anmeldung). */
+  function webConfig(ctx: Context) {
+    sendJson(ctx.res, 200, { microsoftLogin: microsoft !== null }, { 'Cache-Control': 'no-store' });
+    return RESPONDED;
+  }
+
+  /** Weiterleitung (303) ohne Körper; nicht zwischenspeichern, keinen Referer weitergeben. */
+  function redirect(ctx: Context, location: string, headers: Record<string, string> = {}) {
+    ctx.res.writeHead(303, { Location: location, 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Length': '0', ...headers });
+    ctx.res.end();
+    return RESPONDED;
+  }
+
+  /** Zurück zur Webseite mit einem Fehlercode (`/konto#fehler=…`); den Text dazu zeigt die Webseite. */
+  function loginFailed(ctx: Context, code: string, target: string | null, headers: Record<string, string> = {}) {
+    return redirect(ctx, `${website}/konto#fehler=${code}${target !== null ? `&ziel=${target}` : ''}`, headers);
+  }
+
+  /** Kurze Seite für den Browser (503), wenn die Anmeldung mit dem Minecraft-Konto hier nicht eingerichtet ist. */
+  function microsoftNotConfigured(ctx: Context) {
+    const back = website !== null ? `<p><a href="${website}/konto">Zurück zum Konto-Bereich</a></p>\n` : '';
+    const html =
+      '<!doctype html>\n<html lang="de">\n<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+      '<title>Anmeldung nicht verfügbar – HeldixClient</title></head>\n<body>\n<h1>Anmeldung mit dem Minecraft-Konto nicht verfügbar</h1>\n' +
+      '<p>Auf diesem Server ist die Anmeldung mit dem Minecraft-Konto nicht eingerichtet. Melde dich über den Launcher oder im Spiel an – ohne Passwort.</p>\n' +
+      `${back}</body>\n</html>\n`;
+    ctx.res.writeHead(503, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Length': String(Buffer.byteLength(html)),
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    });
+    ctx.res.end(html);
+    return RESPONDED;
+  }
+
+  /**
+   * `GET /v1/web/auth/microsoft[?ziel=…]`: Anmeldung beginnen. Die Webseite ruft das über `/api` auf ihrer eigenen
+   * Adresse auf: Dort setzt der Dienst das Bindungs-Cookie, das beim Einlösen des Codes wieder dabei sein muss.
+   */
+  function microsoftStart(ctx: Context) {
+    if (microsoft === null || website === null) return microsoftNotConfigured(ctx);
+    const target = loginTarget(textQuery(ctx, 'ziel'));
+    const rate = microsoftLimiter.take(clientIp(ctx.req));
+    if (!rate.ok) return loginFailed(ctx, 'zu-viele', target, { 'Retry-After': String(rate.retryAfter) });
+    // Ein vorhandenes Bindungs-Cookie bleibt (zwei Tabs gleichzeitig), sonst ein neues.
+    const binding = readBindingCookie(ctx.req) ?? newSecret();
+    const location = microsoft.begin(target, hashToken(binding));
+    return redirect(ctx, location, { 'Set-Cookie': bindingCookie(ctx.req, binding, Math.ceil(microsoftStateTtlMs / 1000)) });
+  }
+
+  /**
+   * `GET /v1/web/auth/microsoft/callback?code=…&state=…` (Umleitungs-URI auf der API-Adresse): Code tauschen, Profil
+   * holen, Spieler anlegen wie bei der Anmeldung im Launcher, dann mit einem gebundenen Einmal-Code zur Webseite.
+   * Jeder Fehler: zurück zur Webseite mit `#fehler=<code>`.
+   */
+  async function microsoftCallback(ctx: Context) {
+    if (microsoft === null || website === null) return microsoftNotConfigured(ctx);
+    const query = new URL(ctx.req.url ?? '/', 'http://heldix.invalid').searchParams;
+    let target: string | null = null;
+    try {
+      if (!microsoftLimiter.take(clientIp(ctx.req)).ok) throw new LoginError('zu-viele');
+      // state genau einmal einlösen, auch wenn Microsoft mit einem Fehler zurückkommt
+      const pending = microsoft.take(query.get('state'));
+      target = pending?.target ?? null;
+      const error = query.get('error');
+      if (error !== null) throw microsoft.authorizeError(error);
+      if (pending === null) throw new LoginError('abgelaufen');
+      const code = query.get('code');
+      if (code === null || code === '' || code.length > 4096) throw new LoginError('microsoft');
+      const profile = await microsoft.profile(code, pending.verifier);
+      // Wie bei der Anmeldung im Launcher: Gesperrte bekommen keine Sitzung und auch kein neues Konto.
+      if (store.getBan(profile.uuid)) throw new LoginError('gesperrt');
+      const user = store.upsertUser(profile.uuid, profile.name, Date.now());
+      return redirect(ctx, web.boundLink(user.uuid, pending.binding, target));
+    } catch (err) {
+      if (err instanceof LoginError) return loginFailed(ctx, err.code, target);
+      // Unerwartet (z. B. Datenbank): nur die Art ins Log, keine Texte, die Teile einer Antwort enthalten könnten.
+      log(`Anmeldung mit dem Minecraft-Konto: interner Fehler (${err instanceof Error ? err.name : typeof err}).`);
+      return loginFailed(ctx, 'fehler', target);
+    }
   }
 
   /** `GET /v1/news`: veröffentlichte Neuigkeiten für Webseite und Launcher, mit `before` als Archiv. */
@@ -1209,6 +1344,10 @@ export function createService(options: ServiceOptions): Service {
     // Anmeldung auf der Webseite
     { method: 'POST', pattern: /^\/v1\/web\/link$/, kind: 'bearer', handler: link },
     { method: 'POST', pattern: /^\/v1\/web\/session$/, kind: 'auth', handler: createWebSession },
+    { method: 'GET', pattern: /^\/v1\/web\/config$/, kind: 'public', handler: webConfig },
+    // Anmeldung mit dem Minecraft-Konto: eigene Grenze pro IP im Endpunkt
+    { method: 'GET', pattern: /^\/v1\/web\/auth\/microsoft$/, kind: 'public', handler: microsoftStart },
+    { method: 'GET', pattern: /^\/v1\/web\/auth\/microsoft\/callback$/, kind: 'public', handler: microsoftCallback },
     { method: 'GET', pattern: /^\/v1\/web\/me$/, kind: 'web', handler: (ctx) => webMe(webAuth(ctx)) },
     { method: 'POST', pattern: /^\/v1\/web\/logout$/, kind: 'web', handler: logout },
     { method: 'GET', pattern: /^\/v1\/web\/sessions$/, kind: 'web', handler: (ctx) => web.sessions(ctx.user, ctx.session!) },
@@ -1473,6 +1612,9 @@ export function createService(options: ServiceOptions): Service {
     addonUploadLimiter.sweep(now);
     ratingLimiter.sweep(now);
     linkLimiter.sweep(now);
+    microsoftLimiter.sweep(now);
+    microsoft?.sweep(now);
+    web.sweepBound(now);
     totpLimiter.sweep(now);
     exportLimiter.sweep(now);
     try {

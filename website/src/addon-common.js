@@ -11,9 +11,9 @@ import { publicGet } from './public-cards.js';
 
 export const ADDON_ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 /** Höchste Heldix-API-Stufe, die der aktuelle HeldixClient lädt (HeldixApi.API_VERSION). */
-export const API_STUFE = 4;
+export const API_STUFE = 5;
 /** Ab welcher HeldixClient-Version es eine API-Stufe gibt (Stufen 1 und 2 laden alle Versionen mit Addons). */
-export const API_STUFE_AB = { 3: '0.13.1', 4: '0.13.2' };
+export const API_STUFE_AB = { 3: '0.13.1', 4: '0.13.2', 5: '0.13.3' };
 export const UUID_RE = /^[0-9a-f]{32}$/;
 /** So zeigt der Dienst den Einreicher, wenn er seine Daten gelöscht hat. */
 export const DELETED_PLAYER = 'Gelöschter Spieler';

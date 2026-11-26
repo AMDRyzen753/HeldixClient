@@ -90,6 +90,7 @@ export async function startService(options: Partial<ServiceOptions> = {}): Promi
     messageRateLimit: 1000,
     downloadRateLimit: 1000,
     webLinkRateLimit: 1000,
+    webMicrosoftRateLimit: 1000,
     totpRateLimit: 1000,
     exportRateLimit: 1000,
     skinRateLimit: 1000,

@@ -21,6 +21,7 @@ import type {
   VersionListResult,
 } from '../shared/api';
 import { interactiveMicrosoftLogin } from './auth-window';
+import { confirmOnTop } from './confirm-window';
 import {
   CLIENT_MOD_PREFIX,
   CLIENT_NAME,
@@ -33,7 +34,9 @@ import {
   MICROSOFT_CLIENT_ID,
   MICROSOFT_REDIRECT_URI,
 } from './config';
-import { loginMinecraft, offlineUuid, refreshMicrosoft, sessionFromAccessToken } from './core/auth';
+import { loginMinecraft, offlineUuid, refreshMicrosoft, sessionFromAccessToken, type MicrosoftTokens } from './core/auth';
+import { AccountBridge, IPC_JVM_FLAG } from './core/accountipc';
+import { OFFLINE_LOCKED, SessionManager } from './core/sessions';
 import { addContentFiles, countEnabled, importContentFiles, listAllContent, listContent, removeContent, setContentEnabled, type ContentContext } from './core/content';
 import { applyPendingRemovals, installStoreAddon, storeForInstance, uninstallStoreAddon, type OverviewInstance } from './core/addonstore';
 import { AddonStoreService, noticeList, type StoreNotice } from './core/storeservice';
@@ -97,6 +100,8 @@ let gameInstanceId: string | null = null;
 let gameState: GameState = { state: 'idle' };
 /** welche Grafik-API das laufende Spiel wirklich benutzt */
 let graphicsWatch: GraphicsWatch | null = null;
+/** Konto-Wechsel im laufenden Spiel (nur HeldixClient-Instanzen, siehe core/accountipc.ts) */
+let gameBridge: AccountBridge | null = null;
 
 function resourceDir(name: string): string {
   return app.isPackaged ? path.join(process.resourcesPath, name) : path.join(app.getAppPath(), 'resources', name);
@@ -296,8 +301,6 @@ const launcherLog = (text: string, level: LogLine['level'] = 'INFO') => sendLog(
 
 // ---------- Konten ----------
 
-const OFFLINE_LOCKED = 'Offline-Konten gibt es nur in der Entwicklungsversion von HeldixClient.';
-
 /**
  * Offline-Konten nur beim Entwickeln (npm start). Die fertige App kennt sie nicht: gespielt wird mit dem
  * Microsoft-Konto, mit dem Minecraft gekauft wurde (die Store-Klasse blendet alte Offline-Konten dort aus).
@@ -306,40 +309,76 @@ function offlineAllowed(): boolean {
   return isDev;
 }
 
-/** Laufende Erneuerungen je Konto (Spielstart, Freunde und Skins teilen sich eine) */
-const sessionRefreshes = new Map<string, Promise<GameAccount>>();
+/** Sitzungen je Konto; laufende Erneuerungen teilen sich Spielstart, Freunde, Skins und der Konto-Wechsel im Spiel */
+const sessions = new SessionManager<StoredAccount>({
+  secrets: (account) => store.secrets(account),
+  save: (session) => store.upsertMicrosoft(session, false),
+  clientId: MICROSOFT_CLIENT_ID,
+  refreshMicrosoft,
+  loginMinecraft,
+  offlineAllowed,
+  log: (text) => launcherLog(text),
+});
 
 /**
  * Gültige Sitzung für ein Konto, bei Bedarf erneuert. interactive = false (Freunde, Skins & Capes im Hintergrund):
  * nie den Minecraft Launcher öffnen – über ihn angemeldete Konten melden dann nur, dass die Anmeldung abgelaufen ist.
  */
-async function sessionFor(account: StoredAccount, interactive = true): Promise<GameAccount> {
-  if (account.type === 'offline') {
-    if (!offlineAllowed()) throw new Error(OFFLINE_LOCKED);
-    return { name: account.name, uuid: account.uuid, accessToken: '0', userType: 'legacy' };
+async function sessionFor(account: StoredAccount, _interactive = true): Promise<GameAccount> {
+  return sessions.sessionFor(account);
+}
+
+/** Eine Microsoft-Anmeldung zur Zeit (Launcher und Spiel teilen sich das Fenster) */
+let signInFlight: Promise<MicrosoftTokens> | null = null;
+
+/** fromGame: aus dem laufenden Spiel – eigenes Fenster über allem statt eines Dialogs am (oft versteckten) Launcher */
+function microsoftSignIn(fromGame: boolean): Promise<MicrosoftTokens> {
+  if (!MICROSOFT_CLIENT_ID) {
+    return Promise.reject(new Error('Microsoft-Login ist noch nicht eingerichtet: Client-ID in src/main/config.ts eintragen (siehe README).'));
   }
-  const secrets = store.secrets(account);
-  if (secrets.accessToken && (account.expiresAt ?? 0) > Date.now() + 10 * 60 * 1000) {
-    return { name: account.name, uuid: account.uuid, accessToken: secrets.accessToken, xuid: account.xuid, userType: 'msa' };
-  }
-  if (!secrets.refreshToken) {
-    // früher über den offiziellen Minecraft Launcher angemeldet (ohne Refresh-Token) – diesen Weg gibt es nicht mehr
-    throw new Error(`Die Anmeldung von ${account.name} ist abgelaufen. Bitte unten links mit Microsoft neu anmelden.`);
-  }
-  if (!MICROSOFT_CLIENT_ID) throw new Error('Microsoft-Client-ID fehlt (siehe README).');
-  let refresh = sessionRefreshes.get(account.id);
-  if (!refresh) {
-    refresh = (async (): Promise<GameAccount> => {
-      launcherLog('Erneuere Microsoft-Anmeldung …');
-      const ms = await refreshMicrosoft(MICROSOFT_CLIENT_ID, secrets.refreshToken);
-      const session = await loginMinecraft(ms);
-      // das Konto bleibt dabei, wie es ist (nicht aktiv machen: im Hintergrund könnte inzwischen ein anderes gewählt sein)
-      await store.upsertMicrosoft(session, false);
-      return { name: session.name, uuid: session.uuid, accessToken: session.accessToken, xuid: session.xuid, userType: 'msa' };
-    })().finally(() => sessionRefreshes.delete(account.id));
-    sessionRefreshes.set(account.id, refresh);
-  }
-  return refresh;
+  signInFlight ??= interactiveMicrosoftLogin(fromGame ? null : mainWindow, MICROSOFT_CLIENT_ID, MICROSOFT_REDIRECT_URI, { onTop: fromGame })
+    .finally(() => (signInFlight = null));
+  return signInFlight;
+}
+
+/**
+ * Konto-Wechsel aus dem Spiel (Protokoll: docs/konto-wechsel.md). write schreibt eine Zeile auf stdin des Spiels.
+ * game: Startkonto (braucht keine Bestätigung) und Name der Instanz (steht im Bestätigungsfenster).
+ */
+function createGameBridge(write: (line: string) => boolean, game: { accountId: string; instanceName: string }): AccountBridge {
+  return new AccountBridge({
+    allowed: async () => (await store.getSettings()).gameAccountSwitch,
+    launchedAccountId: game.accountId,
+    confirmSwitch: (account) => confirmOnTop({
+      title: `Im Spiel zu ${account.name} wechseln?`,
+      message: 'Das laufende Spiel möchte zu diesem Konto wechseln. Wenn du das nicht selbst im Spiel ausgelöst hast, wähle „Abbrechen“.',
+      detail: `Instanz: ${game.instanceName}`,
+      confirm: 'Wechseln',
+      cancel: 'Abbrechen',
+    }),
+    listAccounts: () => store.listAccounts(),
+    session: async (id) => {
+      const account = await store.getAccount(id);
+      if (!account) throw new Error('Dieses Konto gibt es im Launcher nicht (mehr).');
+      return sessionFor(account);
+    },
+    signIn: async () => {
+      const tokens = await microsoftSignIn(true);
+      // nicht aktiv machen: ob gewechselt wird, entscheidet das Spiel (accounts.setActive)
+      const account = await store.upsertMicrosoft(await loginMinecraft(tokens), false);
+      accountsChanged();
+      broadcast('accounts:changed', null);
+      return (await store.listAccounts()).find((a) => a.id === account.id) ?? { ...toAccountInfo(account), active: false };
+    },
+    setActive: async (id) => {
+      await store.select(id);
+      accountsChanged();
+      broadcast('accounts:changed', null);
+    },
+    offlineAllowed,
+    launcherVersion: LAUNCHER_VERSION,
+    log: (text, level) => launcherLog(`Spiel: ${text}`, level),
+  }, write);
 }
 
 function toAccountInfo(account: StoredAccount): AccountInfo {
@@ -388,9 +427,10 @@ const social = new SocialClient<StoredAccount>({
   log: (line) => console.log(`[Launcher] ${line}`),
 });
 
-/** Konto gewechselt, hinzugefügt oder entfernt: Freunde sofort neu laden */
+/** Konto gewechselt, hinzugefügt oder entfernt: Freunde sofort neu laden, dem laufenden Spiel Bescheid sagen */
 function accountsChanged(): void {
   social.refresh().catch(() => undefined);
+  gameBridge?.notifyChanged();
 }
 
 /** Benachrichtigungen bis zum Klick festhalten (sonst räumt der Garbage Collector sie samt Klick-Handler weg) */
@@ -516,6 +556,7 @@ const profiles = new ProfileService<StoredAccount>({
     // Figur auf der Startseite: getSkin() lädt den neuen Skin über die neue Adresse
     await store.setSkinUrl(account.id, url);
     broadcast('accounts:changed', null);
+    gameBridge?.notifyChanged();
   },
 });
 
@@ -638,8 +679,14 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
       account: session,
       memoryMb: instance.memoryMb ?? settings.memoryMb,
       resolution: settings.resolution,
-      // Heldix-Dienst (Freunde, Capes für alle): Adresse für die Client-Mod
-      extraJvmArgs: [...prepared.loaderJvmArgs, ...(HELDIX_SERVICE_URL && usesHeldixClient(instance) ? [`-Dheldixclient.service=${HELDIX_SERVICE_URL}`] : []), ...tuning, ...userJvmArgs],
+      // Heldix-Dienst (Freunde, Capes für alle): Adresse für die Client-Mod; Konto-Wechsel im Spiel über stdin/stdout
+      extraJvmArgs: [
+        ...prepared.loaderJvmArgs,
+        ...(HELDIX_SERVICE_URL && usesHeldixClient(instance) ? [`-Dheldixclient.service=${HELDIX_SERVICE_URL}`] : []),
+        ...(usesHeldixClient(instance) ? [IPC_JVM_FLAG] : []),
+        ...tuning,
+        ...userJvmArgs,
+      ],
       extraGameArgs: graphics,
       quickPlay,
       launcherName: LAUNCHER_NAME.replace(/\s+/g, ''),
@@ -656,11 +703,25 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
     gameLines = [];
     killedByUser = false;
     const launchedAt = Date.now();
-    const running = startGame(prepared.javaPath, args, prepared.gameDir, handleGameLog);
-    await new Promise<void>((resolve, reject) => {
-      running.process.once('spawn', () => resolve());
-      running.process.once('error', reject);
-    });
+    // Antworten gehen über stdin genau an diesen Spielprozess; Marker-Zeilen schneidet startGame immer aus der Ausgabe
+    let writeToGame: (line: string) => boolean = () => false;
+    const bridge = usesHeldixClient(instance)
+      ? createGameBridge((line) => writeToGame(line), { accountId: account.id, instanceName: instance.name })
+      : null;
+    const running = startGame(prepared.javaPath, args, prepared.gameDir, handleGameLog, bridge
+      ? { message: (json) => bridge.handle(json), rejected: (reason) => bridge.rejected(reason) }
+      : undefined);
+    writeToGame = (line) => running.send(line);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        running.process.once('spawn', () => resolve());
+        running.process.once('error', reject);
+      });
+    } catch (error) {
+      bridge?.dispose();
+      throw error;
+    }
+    gameBridge = bridge;
     game = running;
     gameInstanceId = instance.id;
     const startedAt = Date.now();
@@ -715,6 +776,8 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
       })
       .catch((error: Error) => setGameState({ state: 'error', message: error.message }))
       .finally(() => {
+        bridge?.dispose();
+        if (gameBridge === bridge) gameBridge = null;
         game = null;
         gameInstanceId = null;
         graphicsWatch = null;
@@ -805,6 +868,8 @@ function registerIpc(): void {
     applyPresenceSettings(next);
     autoUpdate = next.autoUpdate;
     if (next.social !== before.social) social.refresh().catch(() => undefined);
+    // das laufende Spiel lädt die Liste neu und sieht dabei „allowed“
+    if (next.gameAccountSwitch !== before.gameAccountSwitch) gameBridge?.notifyChanged();
     return next;
   });
   ipcMain.handle('update:state', () => updater.state);
@@ -1080,8 +1145,7 @@ function registerIpc(): void {
   ipcMain.handle('loader:logos', () => loaderLogos(paths));
   ipcMain.handle('news:body', (_e, id: string) => newsBody(String(id)));
   ipcMain.handle('accounts:addMicrosoft', async () => {
-    if (!MICROSOFT_CLIENT_ID) throw new Error('Microsoft-Login ist noch nicht eingerichtet: Client-ID in src/main/config.ts eintragen (siehe README).');
-    const tokens = await interactiveMicrosoftLogin(mainWindow, MICROSOFT_CLIENT_ID, MICROSOFT_REDIRECT_URI);
+    const tokens = await microsoftSignIn(false);
     const account = await store.upsertMicrosoft(await loginMinecraft(tokens));
     accountsChanged();
     return toAccountInfo(account);

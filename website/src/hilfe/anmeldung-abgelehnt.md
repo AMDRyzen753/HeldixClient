@@ -23,5 +23,7 @@ Die Anmeldung läuft über Microsoft, Xbox und Minecraft. Klappt ein Schritt nic
 ## Webseite und Heldix-Dienst
 - **„Für die Webseite brauchst du ein Microsoft-Konto.“** – Mit einem Offline-Konto gibt es kein Konto auf heldixclient.com. Wechsle im Konto-Menü auf dein Microsoft-Konto.
 - **„Der Anmelde-Link ist abgelaufen oder wurde schon benutzt.“** – Der Link gilt nur zwei Minuten und einmal. Wähle im Launcher erneut **Auf heldixclient.com anmelden**.
+- **„Mit diesem Microsoft-Konto ist kein Minecraft: Java Edition verknüpft.“** (Anmeldung mit dem Minecraft-Konto auf der Webseite) – Bei Microsoft war ein anderes Konto gewählt. Klicke noch einmal auf **Mit Minecraft-Konto anmelden** und wähle das Konto, mit dem du Minecraft spielst. Mehr unter [Konto auf heldixclient.com](/hilfe/web-konto).
+- **„Die Anmeldung hat zu lange gedauert oder wurde schon benutzt.“** oder **„… in einem anderen Browser begonnen.“** – Die Anmeldung mit dem Minecraft-Konto muss innerhalb von 10 Minuten und im selben Browser enden, in dem du sie begonnen hast. Klicke noch einmal auf den Knopf.
 - **„Mojang hat die Anmeldung abgelehnt. Bitte das Konto im Launcher neu anmelden.“** – Entferne das Konto und melde dich neu an.
 - **„Dieses Konto ist für den Heldix-Dienst gesperrt.“** – Freunde, Nachrichten und Capes für andere sind für dein Konto gesperrt. Minecraft und der Rest von HeldixClient laufen weiter.

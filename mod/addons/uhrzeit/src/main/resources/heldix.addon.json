@@ -5,5 +5,5 @@
 	"description": "Zeigt Uhrzeit und Spielzeit im HUD und begrüßt dich beim Betreten einer Welt.",
 	"authors": ["HeldixClient"],
 	"entrypoint": "dev.heldixclient.examples.uhrzeit.UhrzeitAddon",
-	"api": 3
+	"api": 5
 }

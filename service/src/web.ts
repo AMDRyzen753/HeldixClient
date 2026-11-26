@@ -1,6 +1,8 @@
 // Anmeldung auf der Webseite ohne Passwort: Der Launcher (oder das Spiel) holt mit seinem Token einen Einmal-Link,
-// die Webseite tauscht den Code gegen eine Cookie-Sitzung. Dazu die Zwei-Faktor-Anmeldung und der Zugang zum Team-Bereich.
-import { randomBytes } from 'node:crypto';
+// die Webseite tauscht den Code gegen eine Cookie-Sitzung. Bei der Anmeldung mit dem Minecraft-Konto (microsoft.ts)
+// entsteht derselbe Einmal-Code, zusätzlich an den Browser gebunden, der die Anmeldung begonnen hat.
+// Dazu die Zwei-Faktor-Anmeldung und der Zugang zum Team-Bereich.
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { TLSSocket } from 'node:tls';
 import { hashToken, isLoopback } from './auth';
@@ -11,6 +13,11 @@ import { newTotpSecret, totpUri, verifyTotp } from './totp';
 
 /** Name des Cookies (`__Host-`: nur über HTTPS, nur für genau diese Adresse, Pfad `/`). */
 export const SESSION_COOKIE = '__Host-heldix_web';
+/**
+ * Bindung der Anmeldung mit dem Minecraft-Konto an diesen Browser: gesetzt beim Start (über die Webseite), geprüft beim
+ * Einlösen des Codes, danach gelöscht. Enthält nur einen Zufallswert.
+ */
+export const BINDING_COOKIE = '__Host-heldix_ms';
 /** 32 Zufallsbytes als base64url (Cookie-Wert und Einmal-Code). */
 const SECRET_RE = /^[A-Za-z0-9_-]{43}$/;
 /** Höchstens so viele Web-Sitzungen pro Spieler; die ältesten fallen weg. */
@@ -18,10 +25,19 @@ const SESSIONS_PER_USER = 10;
 
 /** Erlaubte Ziele im Einmal-Link: Reiter der Konto-Seite bzw. `team` für die Seite /team. */
 export const LINK_TARGETS = ['profil', 'freunde', 'nachrichten', 'privatsphaere', 'daten', 'support', 'team'] as const;
+/** Erlaubte Ziele bei der Anmeldung mit dem Minecraft-Konto (`?ziel=`): alle Bereiche der Konto-Seite und `team`. */
+export const LOGIN_TARGETS = [...LINK_TARGETS, 'uebersicht', 'sicherheit', 'addons'] as const;
+
+/** Ziel aus der Anfrage, nur aus der Liste; alles andere (auch Adressen) fällt still weg. */
+export function loginTarget(value: string | null): string | null {
+  return value !== null && (LOGIN_TARGETS as readonly string[]).includes(value) ? value : null;
+}
 
 export const LINK_EXPIRED =
   'Der Anmelde-Link ist abgelaufen oder wurde schon benutzt. Bitte im Launcher erneut „Auf heldixclient.com anmelden“ wählen.';
 export const NOT_SIGNED_IN = 'Nicht angemeldet oder Anmeldung abgelaufen. Bitte neu anmelden.';
+export const MICROSOFT_EXPIRED =
+  'Die Anmeldung ist abgelaufen oder wurde in einem anderen Browser begonnen. Bitte klicke noch einmal auf „Mit Minecraft-Konto anmelden“.';
 const CSRF_REJECTED = 'Diese Anfrage wurde aus Sicherheitsgründen abgelehnt. Bitte die Seite neu laden.';
 const WRONG_CODE = 'Der Code stimmt nicht.';
 
@@ -48,15 +64,26 @@ export interface WebAuth {
 
 // ---------- Cookie, CSRF, Gerät ----------
 
-/** Wert des Sitzungs-Cookies aus der Anfrage oder null. */
-export function readSessionCookie(req: IncomingMessage): string | null {
+/** Wert des Cookies `name` aus der Anfrage oder null. */
+export function readCookie(req: IncomingMessage, name: string): string | null {
   const header = req.headers.cookie;
   if (typeof header !== 'string') return null;
   for (const part of header.split(';')) {
     const index = part.indexOf('=');
-    if (index > 0 && part.slice(0, index).trim() === SESSION_COOKIE) return part.slice(index + 1).trim();
+    if (index > 0 && part.slice(0, index).trim() === name) return part.slice(index + 1).trim();
   }
   return null;
+}
+
+/** Wert des Sitzungs-Cookies aus der Anfrage oder null. */
+export function readSessionCookie(req: IncomingMessage): string | null {
+  return readCookie(req, SESSION_COOKIE);
+}
+
+/** Bindungs-Cookie dieses Browsers, wenn es gültig aussieht, sonst null. */
+export function readBindingCookie(req: IncomingMessage): string | null {
+  const value = readCookie(req, BINDING_COOKIE);
+  return value !== null && SECRET_RE.test(value) ? value : null;
 }
 
 /** Direkte Anfrage über HTTP von diesem Rechner (nur Tests): Dann darf `Secure` fehlen. Hinter einem Proxy nie. */
@@ -65,9 +92,14 @@ function plainLoopback(req: IncomingMessage): boolean {
   return !proxied && !(req.socket instanceof TLSSocket) && isLoopback(req.socket.remoteAddress);
 }
 
-function cookie(req: IncomingMessage, value: string, maxAgeSeconds: number): string {
+function cookie(req: IncomingMessage, value: string, maxAgeSeconds: number, name = SESSION_COOKIE): string {
   const secure = plainLoopback(req) ? '' : '; Secure';
-  return `${SESSION_COOKIE}=${value}; Path=/; Max-Age=${maxAgeSeconds}; HttpOnly; SameSite=Strict${secure}`;
+  return `${name}=${value}; Path=/; Max-Age=${maxAgeSeconds}; HttpOnly; SameSite=Strict${secure}`;
+}
+
+/** Set-Cookie für das Bindungs-Cookie (gleiche Regeln wie das Sitzungs-Cookie); `maxAgeSeconds` 0 löscht es. */
+export function bindingCookie(req: IncomingMessage, value: string, maxAgeSeconds: number): string {
+  return cookie(req, value, maxAgeSeconds, BINDING_COOKIE);
 }
 
 /** Set-Cookie, das das Sitzungs-Cookie im Browser löscht. */
@@ -122,8 +154,25 @@ export function deviceName(userAgent: string | undefined): string {
   return browser ?? os ?? 'Unbekanntes Gerät';
 }
 
-function newSecret(): string {
+export function newSecret(): string {
   return randomBytes(32).toString('base64url');
+}
+
+/** Höchstens so viele an einen Browser gebundene Codes im Speicher; darüber fallen die ältesten weg. */
+const MAX_BOUND_CODES = 10_000;
+
+/** Einmal-Code aus der Anmeldung mit dem Minecraft-Konto: nur im Arbeitsspeicher, gebunden an den Browser. */
+interface BoundCode {
+  uuid: string;
+  /** Hash des Bindungs-Cookies */
+  binding: string;
+  expiresAt: number;
+}
+
+function sameHash(a: string, b: string): boolean {
+  const x = Buffer.from(a, 'utf8');
+  const y = Buffer.from(b, 'utf8');
+  return x.length === y.length && timingSafeEqual(x, y);
 }
 
 /** Code aus der Eingabe (Leerzeichen erlaubt, z. B. „123 456“). */
@@ -136,10 +185,38 @@ function readCode(value: unknown): string {
 // ---------- Anmeldung ----------
 
 export class Web {
+  private readonly bound = new Map<string, BoundCode>();
+
   constructor(
     private readonly store: Store,
     readonly options: WebOptions,
   ) {}
+
+  /**
+   * Einmal-Code nach der Anmeldung mit dem Minecraft-Konto (gleiche Form und Laufzeit wie beim Einmal-Link), gebunden an
+   * den Browser mit dem Bindungs-Cookie `bindingHash`. Liefert die Adresse auf der Webseite.
+   */
+  boundLink(uuid: string, bindingHash: string, target: string | null): string {
+    const { website } = this.options;
+    if (website === null) throw new HttpError(503, 'Die Anmeldung auf der Webseite ist auf diesem Server nicht eingerichtet.');
+    const now = Date.now();
+    if (this.bound.size >= MAX_BOUND_CODES) this.sweepBound(now);
+    while (this.bound.size >= MAX_BOUND_CODES) {
+      const oldest = this.bound.keys().next().value;
+      if (oldest === undefined) break;
+      this.bound.delete(oldest);
+    }
+    const code = newSecret();
+    this.bound.set(hashToken(code), { uuid, binding: bindingHash, expiresAt: now + this.options.codeTtlMs });
+    return `${website}/konto#code=${code}${target !== null ? `&ziel=${target}` : ''}`;
+  }
+
+  /** Abgelaufene gebundene Codes entfernen. */
+  sweepBound(now = Date.now()): void {
+    for (const [key, entry] of this.bound) {
+      if (entry.expiresAt <= now) this.bound.delete(key);
+    }
+  }
 
   /** `POST /v1/web/link` (mit Bearer-Token), auf Wunsch mit `{ target }`: Einmal-Link zur Webseite. */
   link(user: UserRow, target?: unknown): { url: string; expiresAt: number } {
@@ -160,13 +237,32 @@ export class Web {
     return { url: `${website}/konto#code=${code}${ziel}`, expiresAt };
   }
 
-  /** `POST /v1/web/session` mit `{ code }`: neue Sitzung. Liefert Sitzung, Spieler und Set-Cookie. */
-  createSession(req: IncomingMessage, code: unknown): WebAuth & { setCookie: string } {
+  /**
+   * `POST /v1/web/session` mit `{ code }`: neue Sitzung. Liefert Sitzung, Spieler und Set-Cookie. Der Code kommt aus
+   * dem Einmal-Link des Launchers oder aus der Anmeldung mit dem Minecraft-Konto (dann nur mit dem Bindungs-Cookie des
+   * Browsers, der sie begonnen hat; das Cookie wird dabei gelöscht). Danach ist alles gleich.
+   */
+  createSession(req: IncomingMessage, code: unknown): WebAuth & { setCookie: string[] } {
     if (typeof code !== 'string' || !SECRET_RE.test(code)) throw new HttpError(401, LINK_EXPIRED);
     const now = Date.now();
-    const uuid = this.store.takeWebCode(hashToken(code), now);
+    const hash = hashToken(code);
+    const extraCookies: string[] = [];
+    let uuid: string | undefined;
+    let expired = LINK_EXPIRED;
+    const bound = this.bound.get(hash);
+    if (bound) {
+      // Einmal: auch ein Fehlversuch verbraucht den Code.
+      this.bound.delete(hash);
+      expired = MICROSOFT_EXPIRED;
+      const binding = readBindingCookie(req);
+      if (bound.expiresAt <= now || binding === null || !sameHash(hashToken(binding), bound.binding)) throw new HttpError(401, expired);
+      uuid = bound.uuid;
+      extraCookies.push(bindingCookie(req, '', 0));
+    } else {
+      uuid = this.store.takeWebCode(hash, now);
+    }
     const user = uuid === undefined ? undefined : this.store.getUser(uuid);
-    if (!user || this.store.getBan(user.uuid)) throw new HttpError(401, LINK_EXPIRED);
+    if (!user || this.store.getBan(user.uuid)) throw new HttpError(401, expired);
     const value = newSecret();
     const session: WebSessionRow = {
       id: randomBytes(12).toString('base64url'),
@@ -178,7 +274,7 @@ export class Web {
       verifiedAt: 0,
     };
     this.store.insertWebSession(session, hashToken(value), SESSIONS_PER_USER);
-    return { user, session, setCookie: cookie(req, value, Math.floor(this.options.sessionTtlMs / 1000)) };
+    return { user, session, setCookie: [cookie(req, value, Math.floor(this.options.sessionTtlMs / 1000)), ...extraCookies] };
   }
 
   /** Sitzung zum Cookie-Wert (gültig, nicht zu lange unbenutzt) oder undefined. Merkt die Nutzung. */

@@ -46,13 +46,14 @@ function defaultSettings(): Settings {
     socialNotifications: true,
     addonUpdateNotifications: true,
     addonAutoUpdate: false,
+    gameAccountSwitch: true,
   };
 }
 
 /** Ältere Einstellungsdateien: fehlende oder ungültige Schalter bekommen den Standard. */
 function migrateSettings(stored: Partial<Settings>): Partial<Settings> {
   const next = { ...stored };
-  for (const key of ['social', 'socialNotifications', 'addonUpdateNotifications', 'addonAutoUpdate'] as const) {
+  for (const key of ['social', 'socialNotifications', 'addonUpdateNotifications', 'addonAutoUpdate', 'gameAccountSwitch'] as const) {
     if (key in next && typeof next[key] !== 'boolean') delete next[key];
   }
   return next;
@@ -128,12 +129,19 @@ export class Store {
     return this.activeOf(await this.readAccounts());
   }
 
+  /** Ein nutzbares Konto (fertige App: kein Offline-Konto) */
+  async getAccount(id: string): Promise<StoredAccount | null> {
+    return this.usable((await this.readAccounts()).accounts).find((a) => a.id === id) ?? null;
+  }
+
   /**
    * Fügt ein Microsoft-Konto hinzu oder aktualisiert es (gleiche UUID).
    * Sitzungen über den offiziellen Launcher haben kein Refresh-Token: Hat das Konto schon eins (eigene Anmeldung), bleibt es.
+   * activate = false: Ein neues Konto wird nur aktiv, wenn es noch kein nutzbares gibt (Anmeldung aus dem Spiel).
    */
   async upsertMicrosoft(session: MinecraftSession, activate = true): Promise<StoredAccount> {
     const data = await this.readAccounts();
+    const hadActive = this.activeOf(data) !== null;
     const existing = data.accounts.find((a) => a.type === 'microsoft' && a.uuid === session.uuid);
     const keepRefresh = !session.refreshToken && existing?.refreshToken && decrypt(existing.refreshToken);
     const account: StoredAccount = {
@@ -149,7 +157,7 @@ export class Store {
       source: session.refreshToken || keepRefresh ? undefined : 'launcher',
     };
     data.accounts = existing ? data.accounts.map((a) => (a.id === existing.id ? account : a)) : [...data.accounts, account];
-    if (activate || !existing) data.activeId = account.id;
+    if (activate || (!existing && !hadActive)) data.activeId = account.id;
     await this.writeAccounts(data);
     return account;
   }

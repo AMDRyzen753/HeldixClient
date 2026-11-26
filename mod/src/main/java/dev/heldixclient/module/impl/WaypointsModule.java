@@ -28,6 +28,15 @@ public class WaypointsModule extends Module {
 	/** Bildschirmpositionen der zuletzt gezeichneten Markierungen {x, y} (für den Autotest) */
 	public static volatile List<float[]> lastMarkers = List.of();
 
+	/** Gezeichnete Markierung mit Fläche (Box und Raute) zum Anklicken bei offenem Chat */
+	public record Marker(Waypoints.Waypoint waypoint, float x, float y, double distance, int x0, int y0, int x1, int y1) {
+		boolean contains(double px, double py) {
+			return px >= x0 && px < x1 && py >= y0 && py < y1;
+		}
+	}
+
+	private List<Marker> drawn = List.of();
+
 	public WaypointsModule() {
 		super("waypoints", "Wegpunkte", "Orte merken und im Spiel anzeigen, Taste B", true, 0, 0);
 	}
@@ -49,7 +58,7 @@ public class WaypointsModule extends Module {
 
 	/** Markierungen ins HUD zeichnen (HudRenderer, vor den HUD-Elementen). */
 	public void render(GuiGraphicsExtractor g, Minecraft mc) {
-		lastMarkers = List.of();
+		clearMarkers();
 		if (!isEnabled() || mc.player == null || mc.level == null) return;
 		List<Waypoints.Waypoint> waypoints = Waypoints.visibleHere(mc);
 		if (waypoints.isEmpty()) return;
@@ -67,9 +76,9 @@ public class WaypointsModule extends Module {
 		double maxDistance = option("maxDistance", 0.0);
 		boolean showDistance = option("distance", true);
 
-		record Marker(Waypoints.Waypoint waypoint, float x, float y, double distance) {
+		record Point(Waypoints.Waypoint waypoint, float x, float y, double distance) {
 		}
-		List<Marker> markers = new ArrayList<>();
+		List<Point> markers = new ArrayList<>();
 		for (Waypoints.Waypoint waypoint : waypoints) {
 			double dx = waypoint.x + 0.5 - cam.x;
 			double dy = waypoint.y + 1.0 - cam.y;
@@ -81,12 +90,13 @@ public class WaypointsModule extends Module {
 			float sx = (clip.x / clip.w * 0.5f + 0.5f) * width;
 			float sy = (0.5f - yFlip * clip.y / clip.w * 0.5f) * height;
 			if (sx < -40 || sx > width + 40 || sy < -40 || sy > height + 40) continue;
-			markers.add(new Marker(waypoint, sx, sy, distance));
+			markers.add(new Point(waypoint, sx, sy, distance));
 		}
 		// ferne zuerst, damit nahe Markierungen oben liegen
-		markers.sort(Comparator.comparingDouble(Marker::distance).reversed());
+		markers.sort(Comparator.comparingDouble(Point::distance).reversed());
 		lastMarkers = markers.stream().map(m -> new float[] {m.x(), m.y()}).toList();
-		for (Marker marker : markers) {
+		List<Marker> hits = new ArrayList<>();
+		for (Point marker : markers) {
 			String label = marker.waypoint().name + (showDistance ? "  " + formatDistance(marker.distance()) : "");
 			int textW = mc.font.width(label);
 			int x = Math.round(marker.x());
@@ -99,7 +109,23 @@ public class WaypointsModule extends Module {
 			g.fill(boxX, boxY, boxX + textW + 8, boxY + 12, Theme.HUD_BG);
 			g.fill(boxX, boxY + 11, boxX + textW + 8, boxY + 12, color);
 			g.text(mc.font, label, boxX + 4, boxY + 2, Theme.TEXT, true);
+			hits.add(new Marker(marker.waypoint(), marker.x(), marker.y(), marker.distance(), boxX, boxY, boxX + textW + 8, y));
 		}
+		drawn = hits;
+	}
+
+	public void clearMarkers() {
+		lastMarkers = List.of();
+		drawn = List.of();
+	}
+
+	/** Oberste (nächste) Markierung an dieser Stelle oder null */
+	public Marker markerAt(double x, double y) {
+		List<Marker> markers = drawn;
+		for (int i = markers.size() - 1; i >= 0; i--) {
+			if (markers.get(i).contains(x, y)) return markers.get(i);
+		}
+		return null;
 	}
 
 	public static String formatDistance(double distance) {

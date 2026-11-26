@@ -46,6 +46,8 @@ public class HeldixClient implements HeldixModInitializer {
 	public static KeyMapping zoomKey;
 	public static KeyMapping freelookKey;
 	public static KeyMapping waypointKey;
+	/** HUD bedienen: Maus frei, HUD-Elemente anklickbar (ohne Standardtaste) */
+	public static KeyMapping hudKey;
 
 	@Override
 	public void onInitialize() {
@@ -60,6 +62,7 @@ public class HeldixClient implements HeldixModInitializer {
 		zoomKey = KeyMappings.register(new KeyMapping("key.heldixclient.zoom", InputConstants.Type.KEYBOARD, InputConstants.KEY_C, category));
 		freelookKey = KeyMappings.register(new KeyMapping("key.heldixclient.freelook", InputConstants.Type.KEYBOARD, InputConstants.KEY_LALT, category));
 		waypointKey = KeyMappings.register(new KeyMapping("key.heldixclient.waypoint", InputConstants.Type.KEYBOARD, InputConstants.KEY_B, category));
+		hudKey = KeyMappings.register(new KeyMapping("key.heldixclient.hudInteract", InputConstants.Type.KEYBOARD, InputConstants.UNKNOWN.getValue(), category));
 
 		HudEvents.RENDER.register(HudRenderer::extract);
 		ClientEvents.TICK_END.register(HeldixClient::onTick);
@@ -70,6 +73,8 @@ public class HeldixClient implements HeldixModInitializer {
 		dev.heldixclient.cosmetic.Cosmetics.init();
 		// Addon-Store: kurz nach dem Start nach Updates sehen (Hinweis einmal pro Sitzung)
 		dev.heldixclient.addon.AddonStore.init();
+		// Kontowechsel im Spiel: nur vom HeldixClient-Launcher gestartet (stdin/stdout, docs/konto-wechsel.md)
+		dev.heldixclient.account.AccountSwitcher.init();
 		// F3: eigener Eintrag – vor dem Laden der F3-Einstellungen, damit Minecraft ihn kennt
 		DebugOverlay.register();
 
@@ -123,6 +128,11 @@ public class HeldixClient implements HeldixModInitializer {
 		while (menuKey.consumeClick()) {
 			if (mc.gui.screen() == null) {
 				mc.gui.setScreen(new HeldixMenuScreen(null));
+			}
+		}
+		while (hudKey.consumeClick()) {
+			if (mc.gui.screen() == null && mc.player != null && !mc.gui.hud.isHidden()) {
+				mc.gui.setScreen(new dev.heldixclient.screen.HudInteractScreen());
 			}
 		}
 		ModuleManager.tick(mc);

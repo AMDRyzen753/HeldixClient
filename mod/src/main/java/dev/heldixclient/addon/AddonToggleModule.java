@@ -111,6 +111,23 @@ final class AddonToggleModule extends Module implements ModuleHandle {
 		return text.get();
 	}
 
+	// --- Stil-Optionen (API 5): ohne HUD-Element nur im Untermenü ------------------------------
+
+	@Override
+	public BooleanSupplier addStyleToggle(String key, String label, boolean defaultValue) {
+		return addToggle(key, label, "", defaultValue);
+	}
+
+	@Override
+	public IntSupplier addStyleChoice(String key, String label, List<String> options, int defaultIndex) {
+		return addChoice(key, label, "", options, defaultIndex);
+	}
+
+	@Override
+	public IntSupplier addStyleColor(String key, String label, int defaultColor) {
+		return addColor(key, label, "", defaultColor);
+	}
+
 	@Override
 	public List<Setting> settings() {
 		List<Setting> settings = super.settings();

@@ -9,5 +9,5 @@
   "entrypoints": {
     "client": ["dev.heldixclient.HeldixClient"]
   },
-  "transformers": ["dev.heldixclient.transform.HeldixPatches", "dev.heldixclient.transform.DroppedItemPatches"]
+  "transformers": ["dev.heldixclient.transform.HeldixPatches", "dev.heldixclient.transform.DroppedItemPatches", "dev.heldixclient.account.AccountPatches"]
 }

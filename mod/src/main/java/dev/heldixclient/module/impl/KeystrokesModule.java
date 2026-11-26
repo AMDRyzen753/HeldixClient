@@ -2,7 +2,8 @@ package dev.heldixclient.module.impl;
 
 import dev.heldixclient.module.Setting;
 
-import dev.heldixclient.config.HeldixConfig;
+import dev.heldixclient.hud.HudStyles;
+import dev.heldixclient.ui.Ui;
 import dev.heldixclient.module.HudModule;
 import dev.heldixclient.ui.Draw;
 import dev.heldixclient.ui.Theme;
@@ -45,7 +46,7 @@ public class KeystrokesModule extends HudModule {
 			boolean jump = o.keyJump.isDown();
 			box(g, x, row4, full, 10, jump);
 			int barWidth = full / 3;
-			g.fill(x + (full - barWidth) / 2, row4 + 4, x + (full + barWidth) / 2, row4 + 6, jump ? Theme.TEXT : Theme.ACCENT_LIGHT);
+			g.fill(x + (full - barWidth) / 2, row4 + 4, x + (full + barWidth) / 2, row4 + 6, jump ? 0xFFFFFFFF : HudStyles.current().labelColor());
 			bottom = row4 + 10;
 		}
 		return size(full, bottom - y);
@@ -56,7 +57,12 @@ public class KeystrokesModule extends HudModule {
 		if (label.length() > 3) label = label.substring(0, 3);
 		boolean pressed = mapping.isDown();
 		box(g, x, y, w, h, pressed);
-		g.text(font, label, x + (w - font.width(label)) / 2, y + (h - 8) / 2, Theme.TEXT, !pressed);
+		HudStyles.text(g, label, x + (w - HudStyles.width(label, true)) / 2, y + (h - 8) / 2, pressed ? 0xFFFFFFFF : HudStyles.current().textColor(), true);
+	}
+
+	@Override
+	public void onHover(Minecraft mc, dev.heldixclient.hud.HudPointer pointer) {
+		pointer.tooltip("Keystrokes", "Links " + CpsModule.left() + " CPS · Rechts " + CpsModule.right() + " CPS");
 	}
 
 	@Override
@@ -70,12 +76,13 @@ public class KeystrokesModule extends HudModule {
 
 	private static void mouse(GuiGraphicsExtractor g, Font font, String label, int cps, boolean pressed, int x, int y, int w, int h, boolean showCps) {
 		box(g, x, y, w, h, pressed);
+		int color = pressed ? 0xFFFFFFFF : HudStyles.current().textColor();
 		if (!showCps) {
-			g.text(font, label, x + (w - font.width(label)) / 2, y + (h - 8) / 2, Theme.TEXT, !pressed);
+			HudStyles.text(g, label, x + (w - HudStyles.width(label, true)) / 2, y + (h - 8) / 2, color, true);
 			return;
 		}
 		String cpsText = cps + " CPS";
-		g.text(font, label, x + (w - font.width(label)) / 2, y + 3, Theme.TEXT, !pressed);
+		HudStyles.text(g, label, x + (w - HudStyles.width(label, true)) / 2, y + 3, color, true);
 		// halbe Schriftgröße für die CPS-Zeile
 		g.pose().pushMatrix();
 		g.pose().translate(x + w / 2f, y + 14);
@@ -85,11 +92,22 @@ public class KeystrokesModule extends HudModule {
 	}
 
 	private static void box(GuiGraphicsExtractor g, int x, int y, int w, int h, boolean pressed) {
+		HudStyles.Resolved s = HudStyles.current();
+		if (s.kind() == dev.heldixclient.api.HudStyle.Kind.CLASSIC) {
+			if (pressed) {
+				Draw.rounded(g, x, y, w, h, s.accent());
+				g.fill(x + 1, y, x + w - 1, y + 1, 0x50FFFFFF);
+			} else if (s.background() != 0) {
+				Draw.rounded(g, x, y, w, h, s.background());
+			}
+			return;
+		}
+		float r = Math.min(s.radius(), 4);
 		if (pressed) {
-			Draw.rounded(g, x, y, w, h, Theme.ACCENT);
-			g.fill(x + 1, y, x + w - 1, y + 1, 0x50FFFFFF);
-		} else if (HeldixConfig.get().hudBackground) {
-			Draw.rounded(g, x, y, w, h, Theme.HUD_BG);
+			Ui.rect(g, x, y, w, h, r, s.accent());
+		} else {
+			if (s.background() != 0) Ui.rect(g, x, y, w, h, r, s.background());
+			if (s.border()) Ui.outline(g, x, y, w, h, r, s.borderColor());
 		}
 	}
 }

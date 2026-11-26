@@ -74,6 +74,13 @@ public final class ModuleManager {
 		return Collections.unmodifiableList(HUD_MODULES);
 	}
 
+	/** HUD-Module in Zeichenreihenfolge: niedrige Ebene zuerst, bei gleicher Ebene die Reihenfolge der Module */
+	public static List<HudModule> hudByLayer() {
+		List<HudModule> sorted = new ArrayList<>(HUD_MODULES);
+		sorted.sort(java.util.Comparator.comparingInt(HudModule::layer));
+		return sorted;
+	}
+
 	public static void tick(Minecraft mc) {
 		for (Module module : MODULES) module.tick(mc);
 	}

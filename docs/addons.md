@@ -105,7 +105,7 @@ public class MeinAddon implements HeldixAddon {
 }
 ```
 
-**Vorlagen:** [mod/addons/uhrzeit](../mod/addons/uhrzeit) (Uhrzeit, Spielzeit, Begrüßung; API 3: Farbe, Textfeld, Regler, Scheduler, Befehl), [mod/addons/spotify](../mod/addons/spotify) (Tasten, Einstellungen, Bilder, Einblendungen, Hintergrund-Prozess, Befehle, Laufschrift, Fortschrittsbalken) und [mod/addons/itemphysics](../mod/addons/itemphysics) (API 4: Renderer für gedroppte Items, Speicher je Item, Regler mit eigenem Text, Taste ohne Standardbelegung).
+**Vorlagen:** [mod/addons/uhrzeit](../mod/addons/uhrzeit) (Uhrzeit, Spielzeit, Begrüßung; API 3: Farbe, Textfeld, Regler, Scheduler, Befehl; API 5: HUD-Stil, Tooltip, Klick), [mod/addons/spotify](../mod/addons/spotify) (Tasten, Einstellungen, Bilder, Einblendungen, Hintergrund-Prozess, Befehle, Laufschrift, Fortschrittsbalken; API 5: Knöpfe im HUD, Stil-Optionen im HUD-Editor) und [mod/addons/itemphysics](../mod/addons/itemphysics) (API 4: Renderer für gedroppte Items, Speicher je Item, Regler mit eigenem Text, Taste ohne Standardbelegung).
 
 ```powershell
 cd mod
@@ -245,15 +245,67 @@ Optional<String> hut = cosmetics.worn(andererSpieler, Cosmetics.Slot.HEAD);     
 
 Cosmetics sind reine Daten (Modell, Textur, Partikel), vom Team mit dem Update-Schlüssel signiert. HeldixClient prüft jeden Umschlag selbst (Signatur über `"heldix-cosmetic\n" + manifest`, alle Regeln aus [service/src/cosmetics-format.ts](../service/src/cosmetics-format.ts), nachgebaut in [CosmeticFormat](../mod/src/main/java/dev/heldixclient/cosmetic/CosmeticFormat.java)) und zeichnet sie in Heldix- und Fabric-Instanzen ([CosmeticRenderer](../mod/src/main/java/dev/heldixclient/cosmetic/CosmeticRenderer.java), Eingriffe am Anfang von `CapeLayer.submit` und `EntityRenderer.submit`). Ein Addon kann keine eigenen Cosmetics zeichnen lassen, nichts an andere Spieler senden und die Auswahl beim Dienst nicht ändern.
 
-So funktioniert es: HeldixClient verändert dafür `ItemEntityRenderer` und `ItemEntityRenderState` ([DroppedItemPatches](../mod/src/main/java/dev/heldixclient/transform/DroppedItemPatches.java)). Am Ende von `extractRenderState` fragt der Hook den Renderer des Addons und legt die Lage am Renderzustand ab; in `submit` gehen das eine `translate` (Schweben) und das eine `rotate` (Drehen) durch die Hooks. Ohne Lage rufen sie genau Minecrafts Methoden mit Minecrafts Werten auf – ohne Addon bleibt alles wie bisher. Hat Minecraft den Code umgebaut, bleibt die Klasse ganz unverändert, `isSupported()` ist false und das Problem steht unter `HeldixLoader.problems()`. Das gilt in Heldix- und Fabric-Instanzen (in Fabric stehen beide Klassen in `Targets`/`TransformTargets`). `gradlew checkTransforms` (läuft mit jedem `build`) prüft die veränderten Klassen mit dem ASM-Verifier gegen die echte Minecraft-JAR.
+So funktioniert es (gedroppte Items): HeldixClient verändert dafür `ItemEntityRenderer` und `ItemEntityRenderState` ([DroppedItemPatches](../mod/src/main/java/dev/heldixclient/transform/DroppedItemPatches.java)). Am Ende von `extractRenderState` fragt der Hook den Renderer des Addons und legt die Lage am Renderzustand ab; in `submit` gehen das eine `translate` (Schweben) und das eine `rotate` (Drehen) durch die Hooks. Ohne Lage rufen sie genau Minecrafts Methoden mit Minecrafts Werten auf – ohne Addon bleibt alles wie bisher. Hat Minecraft den Code umgebaut, bleibt die Klasse ganz unverändert, `isSupported()` ist false und das Problem steht unter `HeldixLoader.problems()`. Das gilt in Heldix- und Fabric-Instanzen (in Fabric stehen beide Klassen in `Targets`/`TransformTargets`). `gradlew checkTransforms` (läuft mit jedem `build`) prüft die veränderten Klassen mit dem ASM-Verifier gegen die echte Minecraft-JAR.
 
 Werte, die keinen Sinn ergeben, fängt HeldixClient ab: `lift` wird auf ±2 Blöcke begrenzt, Winkel über 3600° auf 0 bis 360° gebracht; ist `lift` keine endliche Zahl (`NaN`, unendlich), schwebt das Item wie gewohnt, ist ein Winkel keine endliche Zahl, dreht es sich wie gewohnt. Wirft der Renderer, wird dieses Item in diesem Bild normal gezeichnet und der Fehler zählt wie jeder Addon-Fehler.
 
-**Warum so:** Neue Methoden gibt es nur an Schnittstellen, die HeldixClient selbst bereitstellt (`HeldixApi`, `HeldixEvents`, `HudCanvas`, `ModuleHandle`); Schnittstellen, die Addons selbst schreiben (`HeldixAddon`, `HudRenderer`, `DroppedItemRenderer`, Listener), bleiben unverändert. `GameInfo`, `PlayerState`, `DroppedItem`, `CosmeticInfo` und `CosmeticChange` sind Schnittstellen statt Records, damit spätere Versionen Werte ergänzen können, ohne Addons zu brechen. `DroppedItemPose` baut das Addon selbst, deshalb ist es ein Record (wie `ItemInfo`). Die bisherigen Events (`onTick` …) geben weiter `void` zurück – eine andere Rückgabe würde fertige Addons brechen.
+**API 5** (ab HeldixClient 0.13.3, `"api": 5`): HUD-Elemente anklickbar, im HUD-Stil, mehr Zeichenhilfen
+
+Seit der HUD-Überarbeitung (HeldixClient 0.13.3) haben alle HUD-Elemente ein gemeinsames Aussehen (Stil Heldix, Minimal oder Klassisch, Akzentfarbe, Deckkraft, Größe; dazu Einstellungen je Element im Rechtsklick-Menü des HUD-Editors), hängen an einem Bezugspunkt am Bildschirmrand und lassen sich im Spiel bedienen: **bei offenem Chat** oder mit der Taste **„HUD bedienen“** (Optionen → Steuerung → HeldixClient, ab Werk nicht belegt) zeigen sie beim Überfahren einen Rahmen und einen Tooltip und reagieren auf Klicks – beim normalen Spielen nie, und ein Klick erreicht das Spiel nicht. Addon-Elemente machen dabei mit:
+
+| Neu | Wofür |
+| --- | --- |
+| `HudRenderer.onClick(HudClick)` → `boolean` | Klick auf das Element (Default-Methode, ein Lambda zeichnet weiter nur). `HudClick`: `x()`/`y()` lokal in den Koordinaten der Zeichenfläche, `button()` (`LEFT`, `RIGHT`, `MIDDLE`), `shift()`, `control()`, `alt()`, `hotspot()` (Bereich unter der Maus), `chatOpen()`, `insertIntoChat(text)`, `copyToClipboard(text)`. Ein Klick ist eine Aktion des Spielers (`sendChatMessage` einmal erlaubt). Ein Rechtsklick, den das Addon nicht verbraucht (`false`), öffnet die Einstellungen des Moduls |
+| `HudRenderer.onHover(HudHover)` | Maus über dem Element: `tooltip(zeilen…)` (höchstens 12 Zeilen) und `cursor(…)` mit `HAND`, `TEXT`, `CROSSHAIR`, `MOVE`, `NOT_ALLOWED` oder `DEFAULT`; vorbelegt mit Tooltip und Hand des Bereichs unter der Maus |
+| `canvas.hotspot(id, x, y, b, h, tooltip)` | klickbarer Bereich: Hand, Tooltip (`\n` trennt Zeilen), beim Klick `click.hotspot()` = id. Jedes Bild beim Zeichnen neu anmelden; später angemeldete liegen oben |
+| `canvas.iconButton(id, icon, x, y, größe, farbe, tooltip)` → `boolean` | runder Knopf mit Icon im HUD-Stil, hell bei Hover; zugleich ein Bereich. Rückgabe: Maus darüber |
+| `canvas.interactive()`, `canvas.hovered(x, y, b, h)` | Bedient der Spieler gerade das HUD (im HUD-Editor immer `false`)? Maus über einem Bereich? – z. B. Knöpfe nur dann zeigen |
+| `canvas.style()` → `HudStyle` | eingestelltes Aussehen für dieses Element: `kind()` (`HELDIX`, `MINIMAL`, `CLASSIC`), `accent()`, `labelColor()`, `textColor()`, `background()` (mit Deckkraft, 0 = aus), `opacity()`, `border()`, `borderColor()`, `shadow()`, `radius()`, `padding()`, `align()` (`LEFT`/`CENTER`/`RIGHT`), `scale()`, `textStyle()` |
+| `canvas.panel(x, y, b, h)` | Fläche im HUD-Stil (Deckkraft, Ecken, Rahmen bzw. klassischer Streifen) – wie bei den eingebauten Elementen |
+| `canvas.text(text, x, y, farbe, schrift, schatten)` | Text an Kommazahl-Positionen, wahlweise mit Schatten (z. B. `style.shadow()`) |
+| `canvas.lineHeight(schrift)`, `canvas.wrap(text, breite, schrift)` | Zeilenhöhe; Umbruch nach Wörtern |
+| `canvas.clippedText(text, x, y, breite, farbe, schrift)`, `canvas.pushClip(x, y, b, h)` / `popClip()` | hart abgeschnittener Text; Ausschnitt für alles dazwischen (verschachtelbar, vergessene `popClip` schließt HeldixClient) |
+| `canvas.hasIcon(name)` | Gibt es das Icon im Heldix-Icon-Set? |
+| `modul.addStyleToggle(key, label, standard)`, `addStyleChoice(…)`, `addStyleColor(…)` | Stil-Optionen: erscheinen im HUD-Editor im Rechtsklick-Menü des Elements unter „Optionen: <Name>“ und im Untermenü des Moduls |
+
+Abgerundete Flächen, Icons, Fortschrittsbalken, Items, Spielerköpfe, gekürzter Text und Textbreiten gibt es schon seit API 2 bzw. 3 (`roundedRect`, `icon`, `progressBar`, `item`, `playerHead`, `ellipsize`, `textWidth`). Die Größe des Elements (HUD-Größe × Größe im Editor, mit „Scharfe Schrift“ auf ganze Bildschirmpixel gerundet) ist beim Zeichnen schon eingerechnet; die Zeichenfläche arbeitet immer in den eigenen, ungeskalierten Koordinaten.
+
+```java
+// Element mit Knopf: zeichnet im HUD-Stil, bei offenem Chat mit Knopf und Tooltip
+ModuleHandle zaehler = api.registerHudModule(ModuleSpec.of("zaehler", "Zähler", "Klicks zählen").withIcon("star"), new HudRenderer() {
+    int klicks;
+
+    @Override
+    public void render(HudCanvas c) {
+        HudStyle stil = c.style();
+        c.panel(0, 0, 90, 18);
+        c.text("Klicks " + klicks, stil.padding(), 5, stil.textColor(), stil.textStyle(), stil.shadow());
+        if (c.interactive()) c.iconButton("plus", "plus", 74, 3, 12, stil.accent(), "Eins dazu\nUmschalt+Klick: in den Chat");
+    }
+
+    @Override
+    public boolean onClick(HudClick klick) {
+        if (!klick.hotspot().equals("plus")) return false;                 // Rechtsklick → Einstellungen
+        if (klick.shift()) return klick.insertIntoChat(klicks + " Klicks"); // nur einfügen, nicht senden
+        klicks++;
+        return true;
+    }
+
+    @Override
+    public void onHover(HudHover maus) {
+        if (maus.hotspot().isEmpty()) maus.tooltip("Zähler", klicks + " Klicks bisher");
+    }
+});
+BooleanSupplier kompakt = zaehler.addStyleToggle("kompakt", "Kompakt", false);  // im Rechtsklick-Menü des HUD-Editors
+```
+
+Das Spotify-Addon ([SpotifyHud](../mod/addons/spotify/src/main/java/dev/heldixclient/addons/spotify/SpotifyHud.java)) zeigt so bei offenem Chat Knöpfe für Zurück, Abspielen/Pause und Weiter, springt per Klick auf die Zeitleiste und zeigt bei Klick auf den Titel den Song im Chat; die Uhrzeit hat einen Tooltip mit Datum und zeigt per Klick Uhr- und Spielzeit.
+
+**Warum so:** Neue Methoden gibt es nur an Schnittstellen, die HeldixClient selbst bereitstellt (`HeldixApi`, `HeldixEvents`, `HudCanvas`, `ModuleHandle`); Schnittstellen, die Addons selbst schreiben (`HeldixAddon`, `DroppedItemRenderer`, Listener), bleiben unverändert. Einzige Ausnahme ist `HudRenderer`: Es bekommt in API 5 nur **Default-Methoden** (`onClick`, `onHover`), bleibt ein funktionales Interface, und fertige Addons (auch Lambdas) laufen unverändert. `HudClick`, `HudHover` und `HudStyle` stellt HeldixClient bereit, deshalb sind es Schnittstellen. `GameInfo`, `PlayerState`, `DroppedItem`, `CosmeticInfo` und `CosmeticChange` sind Schnittstellen statt Records, damit spätere Versionen Werte ergänzen können, ohne Addons zu brechen. `DroppedItemPose` baut das Addon selbst, deshalb ist es ein Record (wie `ItemInfo`). Die bisherigen Events (`onTick` …) geben weiter `void` zurück – eine andere Rückgabe würde fertige Addons brechen.
 
 Tastencodes aus `HeldixKeys` sind feste GLFW-Werte. HeldixClient übersetzt sie in die Tasten der jeweiligen Minecraft-Version (seit 26.x nimmt Minecraft SDL-Scancodes). Bis 0.13.0 landeten sie unübersetzt im Spiel: Standardtasten wie Pos1 lagen dadurch auf falschen Tasten, und `HeldixKeys.NONE` brachte das Spiel zum Absturz. Falsch gespeicherte Standardtasten setzt HeldixClient einmal auf die richtigen zurück.
 
-Addons für API 1 bis 3 laufen unverändert weiter. Ein Addon, das eine neuere API braucht, als der installierte HeldixClient kann, wird mit dem Hinweis „bitte HeldixClient aktualisieren“ übersprungen (z. B. ein Addon mit `"api": 4` in HeldixClient 0.13.1). Launcher und Addon-Store im Spiel zeigen es dort mit „Braucht einen neueren HeldixClient“ statt mit „Installieren“.
+Addons für API 1 bis 4 laufen unverändert weiter. Ein Addon, das eine neuere API braucht, als der installierte HeldixClient kann, wird mit dem Hinweis „bitte HeldixClient aktualisieren“ übersprungen (z. B. ein Addon mit `"api": 5` in HeldixClient 0.13.2). Launcher und Addon-Store im Spiel zeigen es dort mit „Braucht einen neueren HeldixClient“ statt mit „Installieren“.
 
 Details stehen in den Javadoc-Kommentaren der [API-Klassen](../mod/heldix-api/src/main/java/dev/heldixclient/api).
 
@@ -360,7 +412,7 @@ Heldix-Mods (`heldix.mod.json` im Ordner `mods/`, Format in [heldix-loader.md](h
 - Jedes reine API-Addon bekommt einen eigenen Classloader; Addons mit Zugriff auf Minecraft liegen im Classloader des Spiels (der Heldix Loader hat sie beim Start geladen), ihr `entrypoint` kommt über denselben.
 - Addons mit unpassender API-Version, falscher Minecraft- oder Loader-Version, unpassendem `loaders`, fehlerhafter oder fehlender `heldix.addon.json` oder Fehlern beim Laden werden übersprungen. Das Heldix-Menü zeigt sie unter **Mods & Addons → Installiert** rot mit Grund an; Addons mit Zugriff auf Minecraft stehen zusätzlich in `HeldixLoader.problems()`.
 - Abgeschaltete Addons (`.jar.disabled`, im Launcher oder im Heldix-Menü ausgeschaltet) lädt weder der Heldix Loader noch HeldixClient; im Menü stehen sie als „Ausgeschaltet“ mit Schalter.
-- Wirft ein Addon zur Laufzeit drei Fehler, wird es abgeschaltet. Das gilt für alle Rückrufe: Events, Tasten, Befehle, Knöpfe, Regler-Texte, HUD, Renderer für gedroppte Items und Aufgaben im Scheduler (Fehler aus Hintergrund-Threads werden im Haupt-Thread gezählt). Ist ein Item-Renderer abgeschaltet, zeichnet wieder der vorige bzw. Minecraft. Eingriffe eines Addons mit Zugriff auf Minecraft bleiben bis zum Neustart.
+- Wirft ein Addon zur Laufzeit drei Fehler, wird es abgeschaltet. Das gilt für alle Rückrufe: Events, Tasten, Befehle, Knöpfe, Regler-Texte, HUD (Zeichnen, Klicks und Tooltips), Renderer für gedroppte Items und Aufgaben im Scheduler (Fehler aus Hintergrund-Threads werden im Haupt-Thread gezählt). Ist ein Item-Renderer abgeschaltet, zeichnet wieder der vorige bzw. Minecraft. Eingriffe eines Addons mit Zugriff auf Minecraft bleiben bis zum Neustart.
 - Beim Abschalten eines Addons und beim Beenden des Spiels werden seine geplanten Aufgaben abgebrochen und laufende Hintergrund-Aufgaben unterbrochen.
 - Chat an den Server geht nur als direkte Folge einer Aktion des Spielers (Taste, Befehl, Knopf) und nur einmal pro Aktion. Ein Addon kann so nicht von sich aus spammen.
 - Befehle eines abgeschalteten Addons werden trotzdem abgefangen („Das Addon … ist abgeschaltet“), damit „.np“ nicht im öffentlichen Chat landet.
@@ -379,8 +431,8 @@ Addons kommen nicht mehr mit dem Launcher, sondern einzeln aus dem **Addon-Store
 
 | Addon | Was es macht |
 | --- | --- |
-| **Spotify** ([mod/addons/spotify](../mod/addons/spotify)) | HUD-Element mit Cover, Titel, Künstler und Fortschritt des laufenden Songs in drei Darstellungen (Kompakt, Groß mit Cover, Nur Titel). Tasten für Abspielen/Pause (**Pos1**), nächsten Song (**Bild ab**) und vorherigen Song (**Bild auf**), dazu frei belegbare Tasten für Spulen, Zufall, Wiederholen und Teilen. Chat-Befehle `.np`, `.np teilen` und `.spotify …`. Einblendung beim Songwechsel. Windows, macOS und Linux (mit playerctl). |
-| **Uhrzeit & Spielzeit** ([mod/addons/uhrzeit](../mod/addons/uhrzeit)) | Uhrzeit (Farbe und Beschriftung einstellbar) und Spielzeit mit Pausen-Erinnerung im HUD, eine Begrüßung im Chat und der Befehl `.uhr`. Gleichzeitig die Vorlage für eigene Addons. |
+| **Spotify** ([mod/addons/spotify](../mod/addons/spotify)) | HUD-Element mit Cover, Titel, Künstler und Fortschritt des laufenden Songs in drei Darstellungen (Kompakt, Groß mit Cover, Nur Titel), bei offenem Chat mit Knöpfen für Zurück, Abspielen/Pause und Weiter. Tasten für Abspielen/Pause (**Pos1**), nächsten Song (**Bild ab**) und vorherigen Song (**Bild auf**), dazu frei belegbare Tasten für Spulen, Zufall, Wiederholen und Teilen. Chat-Befehle `.np`, `.np teilen` und `.spotify …`. Einblendung beim Songwechsel. Windows, macOS und Linux (mit playerctl). |
+| **Uhrzeit & Spielzeit** ([mod/addons/uhrzeit](../mod/addons/uhrzeit)) | Uhrzeit (Farbe, Beschriftung, Sekunden und Datum einstellbar; Tooltip mit Datum, Klick zeigt Uhr- und Spielzeit im Chat) und Spielzeit mit Pausen-Erinnerung im HUD, eine Begrüßung im Chat und der Befehl `.uhr`. Gleichzeitig die Vorlage für eigene Addons. |
 | **Item Physics** ([mod/addons/itemphysics](../mod/addons/itemphysics)) | Gedroppte Items fallen, überschlagen sich und liegen dann flach und still auf dem Boden (Blöcke auf einer Seite), statt zu schweben und sich zu drehen. Von Kxyuzu, braucht API 4 (HeldixClient 0.13.2). |
 
 **Sicherheit:** Addons sind Code, der im Spiel läuft. Deshalb veröffentlicht nur das Team, und jede Version ist mit dem **Update-Schlüssel** signiert (derselbe Ed25519-Schlüssel wie bei Launcher-Updates). Signiert werden die Bytes von `"heldix-addon\n"` + Manifest, damit ein Addon-Manifest nie als Launcher-Update gilt. Der Heldix-Dienst prüft die Signatur beim Veröffentlichen, Launcher und Spiel prüfen Signatur, Größe, SHA-256 und die `heldix.addon.json` der JAR noch einmal vor dem Installieren. Ein übernommenes Team-Konto kann so kein fremdes Addon ausliefern. Der öffentliche Schlüssel liegt im Launcher (`launcher/src/main/update-public-key.ts`) und in der Mod (`mod/src/main/resources/heldix-store-key.pem`); `npm run update-key` schreibt beide, `npm run mod` bricht ab, wenn sie nicht zusammenpassen.
@@ -406,7 +458,7 @@ Bewertungen (1–5 Sterne) und Meldungen zu Addons gehen auf der Webseite und im
 ### Spotify-Addon
 
 - **Keine Anmeldung nötig.** Das Addon liest den laufenden Song über die Mediensteuerung des Systems. Ein Spotify-Konto, Premium oder ein API-Schlüssel ist nicht nötig. Es werden keine Daten über den Spieler ins Internet geschickt.
-- **Systeme** (Version 2.0.0, API 3):
+- **Systeme** (Version 2.1.0, API 5):
 
   | System | Quelle | Was geht |
   | --- | --- | --- |
@@ -416,7 +468,8 @@ Bewertungen (1–5 Sterne) und Meldungen zu Addons gehen auf der Webseite und im
 
   Unter anderen Systemen zeigt das HUD-Element „Nur unter Windows, macOS und Linux (mit playerctl)“. Fehlt Spotify oder läuft es nicht, steht dort z. B. „Spotify nicht geöffnet“.
 - **Darstellungen:** Kompakt (wie bisher), Groß mit Cover (Player, Zufall/Wiederholen, Album, Zeitleiste) und Nur Titel (eine Zeile mit feiner Fortschrittslinie). Akzentfarbe für Fortschritt und Equalizer: Spotify-Grün, aus dem Cover (`canvas.imageColor`) oder eine eigene Farbe. Lange Titel laufen als Laufschrift durch oder werden mit „…“ gekürzt.
-- **Einstellungen** im Heldix-Menü unter **Module → Spotify → Zahnrad**: Darstellung, HUD-Element, Cover, Fortschritt, Akzentfarbe, Lange Titel, Ausblenden ohne Musik, Ausblenden nach 10 Sekunden Pause, Einblendung beim Songwechsel (auf Wunsch nur, wenn das HUD-Element aus oder per F1 ausgeblendet ist) und „Nur Spotify“.
+- **Im Spiel bedienen** (ab 2.1.0): Bei offenem Chat oder mit der Taste „HUD bedienen“ zeigt das Element Knöpfe für Zurück, Abspielen/Pause und Weiter; ein Klick auf die Zeitleiste springt an die Stelle (wenn der Player spulen kann), ein Klick auf den Titel zeigt den Song nur dir im Chat, mit Umschalt kommt „🎵 Titel – Künstler“ in die Chat-Eingabe. Fläche, Deckkraft und Rahmen folgen dem HUD-Stil; als Akzentfarbe gibt es zusätzlich „Wie das HUD“.
+- **Einstellungen** im Heldix-Menü unter **Module → Spotify → Zahnrad** (Darstellung, Cover, Fortschritt und Akzentfarbe auch im Rechtsklick-Menü des HUD-Editors): Darstellung, HUD-Element, Cover, Fortschritt, Akzentfarbe, Lange Titel, Ausblenden ohne Musik, Ausblenden nach 10 Sekunden Pause, Einblendung beim Songwechsel (auf Wunsch nur, wenn das HUD-Element aus oder per F1 ausgeblendet ist) und „Nur Spotify“.
 - **Tasten** ändert man unter **Optionen → Steuerung → Heldix-Addons**. Belegt sind Abspielen/Pause (**Pos1**), nächster Song (**Bild ab**) und vorheriger Song (**Bild auf**); „10 Sekunden vor/zurück“, „Zufallswiedergabe“, „Wiederholen“ und „Song im Chat teilen“ belegt man selbst. Sie wirken nur im Spiel, nicht in Menüs.
 - **Chat-Befehle:** `.np` zeigt den laufenden Song nur dir, `.np teilen` schickt „🎵 Titel – Künstler“ an alle. `.spotify play | pause | next | prev | +10 | -10 | shuffle | repeat | player` steuert die Musik.
 - **Technik:** Die Verbindung zum Player läuft nur, solange das Modul an ist, und endet mit dem Spiel. Bricht sie ab, baut das Addon sie mit wachsender Pause (2 s bis 30 s) neu auf. Cover landen als PNG unter `config/heldix-addons/spotify/covers/` (je höchstens 30). Unter macOS und Linux melden die Player nur eine Adresse: Das Addon lädt das Bild dann einmal selbst (nur https oder lokale Datei, höchstens 2 MB). Die Lautstärke lässt sich nicht steuern, das kann die Mediensteuerung nicht.

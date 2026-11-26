@@ -4,7 +4,8 @@
 //
 // Ablauf: Dienst bauen (dist/), Laufzeitpakete ohne Entwicklungspakete holen (nur ws), Webseite bauen (website/),
 // öffentlichen Update-Schlüssel aus launcher/src/main/update-public-key.ts als update-public-key.pem dazulegen,
-// alles als tar.gz packen und Base64-kodiert in installer/install.sh einsetzen. Die fertige Datei braucht auf dem Server nur bash und curl;
+// alles als tar.gz packen und Base64-kodiert in installer/install.sh einsetzen; dazu die App-ID des Launchers
+// (launcher/src/main/config.ts) als Standard für --minecraft-login. Die fertige Datei braucht auf dem Server nur bash und curl;
 // Node.js und Caddy lädt sie selbst (mit Prüfsumme).
 import { execSync } from 'node:child_process';
 import { createHash, createPublicKey } from 'node:crypto';
@@ -20,6 +21,24 @@ const releaseDir = path.join(serviceDir, 'release');
 const output = path.join(releaseDir, 'heldix-dienst-install.sh');
 const pkg = JSON.parse(readFileSync(path.join(serviceDir, 'package.json'), 'utf8'));
 const keySource = path.join(serviceDir, '..', 'launcher', 'src', 'main', 'update-public-key.ts');
+const configSource = path.join(serviceDir, '..', 'launcher', 'src', 'main', 'config.ts');
+
+/**
+ * Liest die App-ID (MICROSOFT_CLIENT_ID) aus der config.ts des Launchers (nur lesen, nie ändern). Der Installer nimmt
+ * sie mit --minecraft-login für die Anmeldung mit dem Minecraft-Konto auf der Webseite: dieselbe App-Registrierung, die
+ * Mojang freigegeben hat. Leer: keine gefunden (dann braucht der Installer --ms-client-id).
+ */
+function readMicrosoftClientId() {
+  let source;
+  try {
+    source = readFileSync(configSource, 'utf8');
+  } catch {
+    return '';
+  }
+  const match = /MICROSOFT_CLIENT_ID\b[^=]*=\s*process\.env\.HELDIX_MS_CLIENT_ID\s*\?\?\s*'([^']*)'/.exec(source);
+  const id = match ? match[1].trim().toLowerCase() : '';
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) ? id : '';
+}
 
 /**
  * Liest UPDATE_PUBLIC_KEY aus der Datei des Launchers (nur lesen, nie ändern). Mit diesem Schlüssel prüft der Dienst
@@ -86,7 +105,12 @@ try {
 
   const template = readFileSync(path.join(serviceDir, 'installer', 'install.sh'), 'utf8').replace(/\r\n/g, '\n');
   if (!template.includes('__HELDIX_PAYLOAD__')) throw new Error('Platzhalter __HELDIX_PAYLOAD__ fehlt in install.sh');
-  const script = template.replaceAll('__HELDIX_VERSION__', pkg.version).replace('__HELDIX_PAYLOAD__', base64);
+  const msClientId = readMicrosoftClientId();
+  if (!msClientId) console.warn('Hinweis: keine MICROSOFT_CLIENT_ID im Launcher – --minecraft-login braucht dann --ms-client-id.');
+  const script = template
+    .replaceAll('__HELDIX_VERSION__', pkg.version)
+    .replaceAll('__HELDIX_MS_CLIENT_ID__', msClientId)
+    .replace('__HELDIX_PAYLOAD__', base64);
 
   mkdirSync(releaseDir, { recursive: true });
   writeFileSync(output, script, { mode: 0o755 });
@@ -94,6 +118,7 @@ try {
   writeFileSync(`${output}.sha256`, `${sha256}  heldix-dienst-install.sh\n`);
   const files = entries.filter((e) => !e.dir).length;
   if (updateKey) console.log('Update-Schlüssel: aus launcher/src/main/update-public-key.ts übernommen');
+  if (msClientId) console.log(`App-ID für --minecraft-login: ${msClientId} (aus launcher/src/main/config.ts)`);
   console.log(`Installer fertig: ${path.relative(process.cwd(), output)} (${Math.round(script.length / 1024)} KB, ${files} Dateien im Paket)`);
   console.log(`SHA-256: ${sha256}`);
 } finally {

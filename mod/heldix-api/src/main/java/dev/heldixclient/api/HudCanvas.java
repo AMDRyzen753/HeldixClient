@@ -175,4 +175,105 @@ public interface HudCanvas {
 	 * @since 3
 	 */
 	int imageColor(Path png);
+
+	// --- ab API 5 ---------------------------------------------------------------------------
+
+	/**
+	 * Eingestelltes Aussehen des HUD für dieses Element (Stil, Akzentfarbe, Deckkraft, Größe …), damit das Element
+	 * zu den eingebauten passt.
+	 *
+	 * @since 5
+	 */
+	HudStyle style();
+
+	/**
+	 * Hintergrundfläche im eingestellten HUD-Stil: Fläche mit Deckkraft, Eckenradius und Rahmen bzw. beim klassischen
+	 * Stil der farbige Streifen links. Hat der Spieler den Hintergrund ausgeschaltet, wird nichts gezeichnet (die
+	 * Fläche zählt trotzdem zur Größe des Elements).
+	 *
+	 * @since 5
+	 */
+	void panel(float x, float y, float width, float height);
+
+	/**
+	 * Text wie {@link #text(String, int, int, int, TextStyle)}, wahlweise mit Schatten (z. B. {@link HudStyle#shadow()}).
+	 *
+	 * @since 5
+	 */
+	void text(String text, float x, float y, int color, TextStyle style, boolean shadow);
+
+	/**
+	 * Zeilenhöhe eines Schriftschnitts in GUI-Pixeln.
+	 *
+	 * @since 5
+	 */
+	int lineHeight(TextStyle style);
+
+	/**
+	 * Bricht Text nach Wörtern in Zeilen von höchstens maxWidth Pixeln um (zu lange Wörter werden geteilt).
+	 *
+	 * @since 5
+	 */
+	java.util.List<String> wrap(String text, int maxWidth, TextStyle style);
+
+	/**
+	 * Text, der hart an der Breite abgeschnitten wird (ohne „…“), z. B. in einer Spalte fester Breite.
+	 *
+	 * @since 5
+	 */
+	void clippedText(String text, float x, float y, int maxWidth, int color, TextStyle style);
+
+	/**
+	 * Alles, was bis {@link #popClip()} gezeichnet wird, erscheint nur innerhalb dieses Rechtecks. Verschachteln geht
+	 * (es gilt die Schnittmenge). Zu jedem pushClip gehört ein popClip.
+	 *
+	 * @since 5
+	 */
+	void pushClip(float x, float y, float width, float height);
+
+	/** @since 5 */
+	void popClip();
+
+	/**
+	 * Gibt es ein Icon dieses Namens im Heldix-Icon-Set?
+	 *
+	 * @since 5
+	 */
+	boolean hasIcon(String name);
+
+	/**
+	 * true, solange der Spieler das HUD mit der Maus bedient (Chat offen oder Taste „HUD bedienen“). Dann kann das
+	 * Element z. B. Knöpfe zeigen, die sonst nicht nötig sind. Im HUD-Editor immer false.
+	 *
+	 * @since 5
+	 */
+	boolean interactive();
+
+	/**
+	 * Steht die Maus über diesem Bereich des Elements (nur, solange {@link #interactive()})? Für Hover-Effekte.
+	 *
+	 * @since 5
+	 */
+	boolean hovered(float x, float y, float width, float height);
+
+	/**
+	 * Klickbarer Bereich: Über ihm zeigt der Mauszeiger eine Hand und der Tooltip erscheint; ein Klick kommt mit
+	 * dieser ID in {@link HudClick#hotspot()} an {@link HudRenderer#onClick(HudClick)}. Gilt nur für dieses Bild –
+	 * jedes Bild neu anmelden (einfach beim Zeichnen). Später angemeldete Bereiche liegen oben.
+	 *
+	 * @param id      frei wählbar, z. B. "play-pause"
+	 * @param tooltip Text für den Tooltip, "\n" trennt Zeilen; null oder "" = ohne Tooltip
+	 * @since 5
+	 */
+	void hotspot(String id, float x, float y, float width, float height, String tooltip);
+
+	/**
+	 * Runder Knopf mit Icon im HUD-Stil (hell hinterlegt, wenn die Maus darüber ist), zugleich ein
+	 * {@link #hotspot} mit dieser ID.
+	 *
+	 * @param size Durchmesser in GUI-Pixeln (das Icon ist etwas kleiner)
+	 * @return true, wenn die Maus gerade darüber ist
+	 * @since 5
+	 */
+	boolean iconButton(String id, String icon, float x, float y, float size, int color, String tooltip);
 }

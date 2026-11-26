@@ -37,12 +37,17 @@
       <p class="lead">Hier verwaltest du dein Profil beim Heldix-Dienst: Cape und Cosmetics, Freunde, Nachrichten, eigene Addons, Privatsphäre, Sicherheit und deine Daten.</p>
     </div>
     <p class="notice" id="konto-gast-hinweis" role="alert" hidden></p>
-    <h2 class="gate-sub">So meldest du dich an</h2>
+    <!-- Nur, wenn der Dienst die Anmeldung mit dem Minecraft-Konto anbietet (anmelden.js) -->
+    <div class="mc-login" id="konto-minecraft" data-mit-minecraft hidden>
+      <a class="button big mc-login-button" id="konto-minecraft-knopf" data-minecraft-knopf href="/api/v1/web/auth/microsoft">{{icon:loader-vanilla}}<span>Mit Minecraft-Konto anmelden</span></a>
+      <p class="mc-login-hint">{{icon:microsoft}}<span>Du meldest dich bei Microsoft an – dort liegt dein Minecraft-Konto. Wir übernehmen nur deinen Minecraft-Namen und deine UUID.</span></p>
+    </div>
+    <h2 class="gate-sub"><span data-ohne-minecraft>So meldest du dich an</span><span data-mit-minecraft hidden>Oder über Launcher und Spiel</span></h2>
     <div class="ways">
       <div class="app-card way">
         <div class="way-head"><span class="way-icon">{{icon:loader-heldix}}</span><h3>Im Launcher</h3></div>
         <ol class="steps">
-          <li><span>HeldixClient-Launcher öffnen und mit deinem Microsoft-Konto anmelden.</span></li>
+          <li><span>HeldixClient-Launcher öffnen und mit deinem Minecraft-Konto anmelden.</span></li>
           <li><span>Oben auf dein <strong>Konto</strong> klicken und <strong>„Auf heldixclient.com anmelden“</strong> wählen.</span></li>
           <li><span>Dein Browser öffnet diese Seite – fertig.</span></li>
         </ol>
@@ -58,7 +63,7 @@
     </div>
     <div class="info-box">
       {{icon:lock}}
-      <p><strong>Es gibt kein Passwort.</strong> Der Launcher ist schon über dein Microsoft-Konto beim Heldix-Dienst angemeldet und erstellt dir einen Anmelde-Link. Er gilt zwei Minuten und nur ein einziges Mal. Mehr dazu in der <a href="/datenschutz">Datenschutzerklärung</a>.</p>
+      <p><strong>Es gibt kein Passwort.</strong> Der Launcher ist schon mit deinem Minecraft-Konto beim Heldix-Dienst angemeldet und erstellt dir einen Anmelde-Link. Er gilt zwei Minuten und nur ein einziges Mal. Mehr dazu in der <a href="/datenschutz">Datenschutzerklärung</a>.</p>
     </div>
     <p class="gate-foot">Noch kein HeldixClient? <a href="/#download">Hier herunterladen</a>.</p>
   </div>

@@ -276,9 +276,18 @@ public final class Hooks {
 		}
 	}
 
-	/** ChatScreen.mouseClicked: true = Klick verbraucht (Strg+Klick kopiert). */
-	public static boolean chatClick(net.minecraft.client.input.MouseButtonEvent event) {
-		return ModuleManager.chat != null && ModuleManager.chat.click(event);
+	/**
+	 * ChatScreen.mouseClicked: true = Klick verbraucht. Strg+Klick kopiert eine Nachricht; sonst ein Klick auf ein
+	 * HUD-Element (Befehlsvorschläge, Eingabefeld und Chatnachrichten haben Vorrang).
+	 */
+	public static boolean chatClick(net.minecraft.client.gui.components.CommandSuggestions suggestions, net.minecraft.client.input.MouseButtonEvent event) {
+		if (ModuleManager.chat != null && ModuleManager.chat.click(event)) return true;
+		try {
+			return dev.heldixclient.hud.HudInteraction.chatClick(suggestions, event);
+		} catch (RuntimeException e) {
+			HeldixClient.LOGGER.warn("Klick auf das HUD fehlgeschlagen", e);
+			return false;
+		}
 	}
 
 	/** ChatScreen.handleChatInput: true = Addon-Befehl („.np“) ausgeführt, nichts an den Server senden. */
@@ -306,13 +315,19 @@ public final class Hooks {
 		}
 	}
 
-	/** ChatScreen.extractRenderState: passende Addon-Befehle über dem Eingabefeld. */
+	/** ChatScreen.extractRenderState: passende Addon-Befehle über dem Eingabefeld, Tooltips der HUD-Elemente. */
 	public static void chatHints(net.minecraft.client.gui.components.EditBox input, GuiGraphicsExtractor g) {
-		if (input == null) return;
+		if (input != null) {
+			try {
+				dev.heldixclient.addon.AddonCommands.hints(g, input.getValue(), input.getX() - 2, input.getY() - 2);
+			} catch (RuntimeException e) {
+				HeldixClient.LOGGER.debug("Befehls-Vorschläge im Chat fehlgeschlagen", e);
+			}
+		}
 		try {
-			dev.heldixclient.addon.AddonCommands.hints(g, input.getValue(), input.getX() - 2, input.getY() - 2);
+			dev.heldixclient.hud.HudInteraction.render(g);
 		} catch (RuntimeException e) {
-			HeldixClient.LOGGER.debug("Befehls-Vorschläge im Chat fehlgeschlagen", e);
+			HeldixClient.LOGGER.debug("HUD im Chat fehlgeschlagen", e);
 		}
 	}
 

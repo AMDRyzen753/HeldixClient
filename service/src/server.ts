@@ -3,6 +3,7 @@ import { createPublicKey } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createService, DEFAULT_SESSION_SERVER } from './app';
+import { CALLBACK_PATH, type MicrosoftEndpoints } from './microsoft';
 import { parseCapeList } from './validate';
 
 function log(line: string): void {
@@ -32,8 +33,11 @@ function readUrl(raw: string | undefined): string {
   return value.replace(/\/+$/, '');
 }
 
-/** HELDIX_DIENST_WEBSITE: Adresse der Webseite (nur Schema, Name, Port), z. B. https://heldixclient.com */
-function readWebsite(raw: string | undefined): string | null {
+/**
+ * Adresse ohne Pfad (nur Schema, Name, Port), z. B. HELDIX_DIENST_WEBSITE=https://heldixclient.com oder
+ * HELDIX_DIENST_API_URL=https://api.heldixclient.com
+ */
+function readOrigin(name: string, raw: string | undefined, example: string): string | null {
   const value = raw?.trim();
   if (!value) return null;
   try {
@@ -43,8 +47,63 @@ function readWebsite(raw: string | undefined): string | null {
     }
     return url.origin;
   } catch {
-    fail(`Ungültige HELDIX_DIENST_WEBSITE: "${value}" (erwartet z. B. https://heldixclient.com)`);
+    fail(`Ungültige ${name}: "${value}" (erwartet z. B. ${example})`);
   }
+}
+
+/** HELDIX_DIENST_MS_CLIENT_ID: Anwendungs-ID der Azure-App (GUID); leer: keine Anmeldung mit dem Minecraft-Konto. */
+function readClientId(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+    fail(`Ungültige HELDIX_DIENST_MS_CLIENT_ID: "${value}" (erwartet die Anwendungs-ID der Azure-App, z. B. 00000000-0000-0000-0000-000000000000)`);
+  }
+  return value.toLowerCase();
+}
+
+/**
+ * HELDIX_DIENST_MS_CLIENT_SECRET_FILE: Datei mit dem Client-Geheimnis (eine Zeile). Der Inhalt erscheint nie im Log.
+ * Nicht lesbar oder leer: undefined (dann bleibt die Anmeldung mit dem Minecraft-Konto aus).
+ */
+function readClientSecret(raw: string | undefined): string | null | undefined {
+  const file = raw?.trim();
+  if (!file) return null;
+  try {
+    const secret = fs.readFileSync(file, 'utf8').trim();
+    if (secret === '' || secret.length > 1024 || /[\r\n]/.test(secret)) throw new Error('leer oder mehr als eine Zeile');
+    return secret;
+  } catch (err) {
+    const reason = (err as NodeJS.ErrnoException).code ?? (err as Error).message;
+    log(`WARNUNG: Client-Geheimnis ${file} nicht nutzbar (${reason}). Die Anmeldung mit dem Minecraft-Konto ist aus.`);
+    return undefined;
+  }
+}
+
+/** Nur mit HELDIX_DIENST_DEV=1 (Tests): andere Adressen für Microsoft, Xbox Live und die Minecraft-Dienste. */
+function readMicrosoftEndpoints(dev: boolean): Partial<MicrosoftEndpoints> | undefined {
+  const names = {
+    login: 'HELDIX_DIENST_MS_LOGIN_URL',
+    xboxUser: 'HELDIX_DIENST_XBOX_USER_URL',
+    xsts: 'HELDIX_DIENST_XSTS_URL',
+    minecraft: 'HELDIX_DIENST_MINECRAFT_URL',
+  } as const;
+  const out: Partial<MicrosoftEndpoints> = {};
+  for (const [key, name] of Object.entries(names) as [keyof MicrosoftEndpoints, string][]) {
+    const value = process.env[name]?.trim();
+    if (!value) continue;
+    if (!dev) {
+      log(`WARNUNG: ${name} gilt nur im Entwicklungsmodus (HELDIX_DIENST_DEV=1) und wird ignoriert.`);
+      continue;
+    }
+    try {
+      const url = new URL(value);
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error();
+    } catch {
+      fail(`Ungültige ${name}: "${value}"`);
+    }
+    out[key] = value.replace(/\/+$/, '');
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**
@@ -71,8 +130,25 @@ const dataDir = path.resolve(env.HELDIX_DIENST_DATA?.trim() || './data');
 const updatesDir = path.resolve(env.HELDIX_DIENST_UPDATES?.trim() || path.join(dataDir, 'updates'));
 const addonsDir = path.resolve(env.HELDIX_DIENST_ADDONS?.trim() || path.join(dataDir, 'addons'));
 const sessionServer = readUrl(env.HELDIX_DIENST_SESSION_SERVER);
-const website = readWebsite(env.HELDIX_DIENST_WEBSITE);
+const website = readOrigin('HELDIX_DIENST_WEBSITE', env.HELDIX_DIENST_WEBSITE, 'https://heldixclient.com');
+const apiUrl = readOrigin('HELDIX_DIENST_API_URL', env.HELDIX_DIENST_API_URL, 'https://api.heldixclient.com');
 const updateKey = readUpdateKey(env.HELDIX_DIENST_UPDATE_KEY);
+const dev = env.HELDIX_DIENST_DEV === '1';
+const clientId = readClientId(env.HELDIX_DIENST_MS_CLIENT_ID);
+const clientSecret = readClientSecret(env.HELDIX_DIENST_MS_CLIENT_SECRET_FILE);
+const microsoftEndpoints = readMicrosoftEndpoints(dev);
+// Anmeldung mit dem Minecraft-Konto: nur mit App-ID, Webseite und API-Adresse (und lesbarem Geheimnis, falls angegeben)
+const microsoft = clientId !== null && clientSecret !== undefined && website !== null && apiUrl !== null ? { clientId, clientSecret } : null;
+function microsoftStatus(): string {
+  if (microsoft) {
+    const kind = microsoft.clientSecret === null ? 'öffentlicher Client mit PKCE' : 'mit Client-Geheimnis';
+    return `an (${kind}, Umleitungs-URI ${apiUrl}${CALLBACK_PATH})`;
+  }
+  if (clientId === null) return 'aus (keine HELDIX_DIENST_MS_CLIENT_ID)';
+  if (clientSecret === undefined) return 'aus (Client-Geheimnis nicht lesbar)';
+  if (website === null) return 'aus (keine HELDIX_DIENST_WEBSITE)';
+  return 'aus (keine HELDIX_DIENST_API_URL)';
+}
 let capes: string[];
 try {
   capes = parseCapeList(env.HELDIX_DIENST_CAPES);
@@ -85,10 +161,13 @@ const service = createService({
   updatesDir,
   addonsDir,
   sessionServer,
-  dev: env.HELDIX_DIENST_DEV === '1',
+  dev,
   capes,
   trustProxy: env.HELDIX_DIENST_TRUST_PROXY === '1',
   website,
+  apiUrl,
+  microsoft,
+  microsoftEndpoints,
   updateKey,
   log,
 });
@@ -99,6 +178,7 @@ service.server.listen(port, host, () => {
   const shown = typeof address === 'object' && address ? `${address.address}:${address.port}` : String(address);
   log(`Heldix-Dienst läuft auf ${shown} (Daten: ${dataDir}, Updates: ${updatesDir}, Addons: ${addonsDir}, Session-Server: ${sessionServer})`);
   log(`Webseite: ${website ?? 'nicht eingerichtet (keine Anmeldung auf der Webseite)'} · Update-Schlüssel: ${updateKey ? 'eingerichtet' : 'keiner (kein Veröffentlichen von Updates, Addons und Cosmetics im Team-Bereich)'}`);
+  log(`Anmeldung mit dem Minecraft-Konto auf der Webseite: ${microsoftStatus()}`);
 });
 
 let stopping = false;

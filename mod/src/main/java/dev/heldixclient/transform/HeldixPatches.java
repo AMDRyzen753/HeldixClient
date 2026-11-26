@@ -55,6 +55,7 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 	private static final String ENTITY_RENDERER = "net/minecraft/client/renderer/entity/EntityRenderer";
 	private static final String COMPONENT = "Lnet/minecraft/network/chat/Component;";
 	private static final String EDIT_BOX = "Lnet/minecraft/client/gui/components/EditBox;";
+	private static final String SUGGESTIONS = "Lnet/minecraft/client/gui/components/CommandSuggestions;";
 	private static final String LEVEL_LOADING = "net/minecraft/client/gui/screens/LevelLoadingScreen";
 	private static final String CONNECT = "net/minecraft/client/gui/screens/ConnectScreen";
 	private static final String DELTA = "Lnet/minecraft/client/DeltaTracker;";
@@ -144,8 +145,9 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 			// Chat: Strg+Klick kopiert eine Nachricht; Addon-Befehle („.np“) statt Senden, Tab und Vorschläge dafür
 			case CHAT_SCREEN -> {
 				MethodNode click = Patches.method(node, "mouseClicked", "(Lnet/minecraft/client/input/MouseButtonEvent;Z)Z");
-				Patches.head(click, Code.begin().loadArg(click, 0)
-						.invokeStatic(HOOKS, "chatClick", "(Lnet/minecraft/client/input/MouseButtonEvent;)Z")
+				// Klicks auf HUD-Elemente (nach Strg+Klick; Befehlsvorschläge, Eingabefeld und Nachrichten haben Vorrang)
+				Patches.head(click, Code.begin().loadThis().getField(CHAT_SCREEN, "commandSuggestions", SUGGESTIONS).loadArg(click, 0)
+						.invokeStatic(HOOKS, "chatClick", "(" + SUGGESTIONS + "Lnet/minecraft/client/input/MouseButtonEvent;)Z")
 						.ifTrue(Code.begin().insn(ICONST_1).insn(IRETURN)));
 				MethodNode input = Patches.method(node, "handleChatInput", "(Ljava/lang/String;Z)V");
 				Patches.cancelAtHead(input, Code.begin().loadArgs(input, 0, 1).invokeStatic(HOOKS, "chatInput", "(Ljava/lang/String;Z)Z"));

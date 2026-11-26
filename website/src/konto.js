@@ -1,4 +1,5 @@
-// HeldixClient – Webseite: Konto-Bereich (/konto). Anmeldung per Einmal-Link aus Launcher oder Spiel (#code=…),
+// HeldixClient – Webseite: Konto-Bereich (/konto). Anmeldung per Einmal-Link aus Launcher oder Spiel (#code=…) oder
+// mit dem Minecraft-Konto (anmelden.js: Knopf zum Dienst, zurück mit #code=… oder #fehler=<code>),
 // danach Übersicht und Glocke (konto-uebersicht.js), Cape & Cosmetics (konto-cosmetics.js), Freunde, Nachrichten,
 // Support, Meine Addons (konto-addons.js), Privatsphäre, Sicherheit und Meine Daten über die Cookie-Sitzung beim
 // Heldix-Dienst. Rahmen mit Seitenleiste (auch zum Team-Bereich): app-shell.js.
@@ -42,6 +43,7 @@ import {
   toast,
   uid,
 } from './app-common.js';
+import { loginErrorText, minecraftLoginAvailable, setupMinecraftLogin } from './anmelden.js';
 import { createShell, parseShellHash, sectionHref, shellIcon } from './app-shell.js';
 import { initMyAddons } from './konto-addons.js';
 import { initCosmetics } from './konto-cosmetics.js';
@@ -125,11 +127,13 @@ function showView(id) {
   if (id !== 'konto-app') shell.closeAll();
 }
 
-function showGuest(message) {
+/** Anmeldeseite; `target`: Bereich nach der Anmeldung mit dem Minecraft-Konto (z. B. support, team). */
+function showGuest(message, target = null) {
   const notice = $('#konto-gast-hinweis');
   notice.textContent = message || '';
   notice.hidden = !message;
   document.title = 'Konto – HeldixClient';
+  setupMinecraftLogin($('#konto-gast'), target).catch(() => {});
   showView('konto-gast');
 }
 
@@ -144,10 +148,14 @@ async function start() {
   const params = new URLSearchParams(location.hash.slice(1));
   const code = params.get('code');
   const target = TARGETS.has(params.get('ziel')) ? params.get('ziel') : null;
-  if (code !== null || params.has('ziel')) {
-    // Einmal-Code und Ziel sofort aus der Adresszeile (und damit aus Verlauf und Lesezeichen) entfernen.
+  // Ob es die Anmeldung mit dem Minecraft-Konto gibt, schon jetzt fragen (der Knopf erscheint dann ohne Verzögerung).
+  minecraftLoginAvailable();
+  if (code !== null || params.has('ziel') || params.has('fehler')) {
+    // Einmal-Code, Ziel und Fehler sofort aus der Adresszeile (und damit aus Verlauf und Lesezeichen) entfernen.
     history.replaceState(null, '', location.pathname + location.search);
   }
+  // Zurück von der Anmeldung mit dem Minecraft-Konto, aber nicht geklappt: Text zum Code (nie der Code selbst)
+  if (params.has('fehler')) notice = loginErrorText(params.get('fehler'));
   if (code !== null) {
     try {
       const me = await api('POST', '/v1/web/session', { code });
@@ -174,7 +182,7 @@ async function start() {
   } catch (error) {
     if (error.status === 401) {
       const hint = target === 'support' ? 'Für eine Support-Anfrage meldest du dich zuerst an – ohne Passwort, über den Launcher oder im Spiel (siehe unten). Danach öffnet sich der Bereich Support.' : target ? 'Melde dich zuerst an – ohne Passwort, über den Launcher oder im Spiel (siehe unten).' : null;
-      showGuest(notice ?? hint);
+      showGuest(notice ?? hint, target);
     }
     else showUnavailable(error);
   }
@@ -1553,7 +1561,7 @@ function init() {
   bindCounter($('#ticket-text'), $('#ticket-zaehler'), MAX_TICKET_TEXT);
   // Neuer Einmal-Link, während die Seite offen ist: neu anmelden. Bereiche (#reiter=…) wechselt die Shell selbst.
   window.addEventListener('hashchange', () => {
-    if (/(^|&)(code|ziel)=/.test(location.hash.slice(1))) start();
+    if (/(^|&)(code|ziel|fehler)=/.test(location.hash.slice(1))) start();
   });
   start();
 }

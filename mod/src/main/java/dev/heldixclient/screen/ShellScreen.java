@@ -26,6 +26,8 @@ public abstract class ShellScreen extends Screen {
 	private static Shell.Page lineHead;
 	private int tabPadding;
 	private boolean tabIcons;
+	/** Stand von „Konten“ beim Aufbau der Seitenleiste */
+	private boolean accountsInNav;
 
 	protected final Shell.Page page;
 	protected final long openedAt = Shell.openedAt();
@@ -53,6 +55,7 @@ public abstract class ShellScreen extends Screen {
 	@Override
 	protected final void init() {
 		window = Shell.window(width, height);
+		accountsInNav = Shell.accountsVisible();
 		nav = Shell.createNav(this, page, inGame(), this::addRenderableWidget);
 		Shell.Rect content = Shell.content(window);
 		int pad = content.w() < 260 ? 10 : PAD;
@@ -243,6 +246,18 @@ public abstract class ShellScreen extends Screen {
 	@Override
 	public boolean isPauseScreen() {
 		return true;
+	}
+
+	@Override
+	public void tick() {
+		super.tick();
+		// Kontowechsel kam hinzu oder fiel weg (Launcher verbunden, Einstellung im Launcher): Seitenleiste neu aufbauen
+		if (Shell.accountsVisible() != accountsInNav) rebuildWidgets();
+	}
+
+	/** Seiten in der Seitenleiste (für den Autotest) */
+	public List<String> navIds() {
+		return nav.stream().map(button -> button.page().name()).toList();
 	}
 
 	@Override

@@ -13,8 +13,11 @@ public interface HeldixApi {
 	 * Regler/Farbe/Text als Einstellungen, neue Zeichenhilfen im HUD.
 	 * Version 4: Lage und Drehung der gedroppten Items in der Welt ({@link #droppedItems()}), Heldix-Cosmetics lesen,
 	 * lokal vorführen und kurz animieren ({@link #cosmetics()}).
+	 * Version 5: anklickbare HUD-Elemente ({@link HudRenderer#onClick}, {@link HudCanvas#hotspot}), HUD-Stil lesen
+	 * ({@link HudCanvas#style()}), Stil-Optionen im HUD-Editor ({@link ModuleHandle#addStyleToggle}) und weitere
+	 * Zeichenhilfen.
 	 */
-	int API_VERSION = 4;
+	int API_VERSION = 5;
 
 	/** Informationen über das eigene Addon (aus heldix.addon.json). */
 	AddonInfo addon();

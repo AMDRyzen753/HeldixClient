@@ -83,6 +83,34 @@ public interface ModuleHandle {
 	 */
 	Supplier<String> addText(String key, String label, String description, String defaultValue, int maxLength);
 
+	// --- ab API 5: Stil-Optionen für das Rechtsklick-Menü im HUD-Editor ------------------------
+
+	/**
+	 * Schalter für das Aussehen des Elements: erscheint im HUD-Editor im Rechtsklick-Menü des Elements (und im
+	 * Untermenü des Moduls). Gespeichert wird wie bei {@link #addToggle}; der Schlüssel teilt sich den Namensraum mit
+	 * den übrigen Einstellungen des Moduls. Bei Modulen ohne HUD-Element nur im Untermenü.
+	 *
+	 * @return liefert jederzeit den aktuellen Wert
+	 * @since 5
+	 */
+	BooleanSupplier addStyleToggle(String key, String label, boolean defaultValue);
+
+	/**
+	 * Auswahl für das Aussehen (z. B. „Kompakt“/„Groß“), im Rechtsklick-Menü als Liste zum Anklicken.
+	 *
+	 * @return liefert jederzeit den Index der gewählten Möglichkeit
+	 * @since 5
+	 */
+	IntSupplier addStyleChoice(String key, String label, List<String> options, int defaultIndex);
+
+	/**
+	 * Farbe für das Aussehen, im Rechtsklick-Menü als Palette (Heldix-Farben, die Standardfarbe ist immer dabei).
+	 *
+	 * @return liefert jederzeit die gewählte Farbe (ARGB)
+	 * @since 5
+	 */
+	IntSupplier addStyleColor(String key, String label, int defaultColor);
+
 	@FunctionalInterface
 	interface ToggleListener {
 		void onToggle(boolean enabled);

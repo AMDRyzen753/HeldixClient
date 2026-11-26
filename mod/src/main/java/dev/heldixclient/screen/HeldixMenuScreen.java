@@ -5,6 +5,8 @@ import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.renderpearl.api.device.GpuDevice;
 import dev.heldixclient.HeldixClient;
+import dev.heldixclient.account.AccountSwitcher;
+import dev.heldixclient.account.LauncherAccount;
 import dev.heldixclient.addon.AddonManager;
 import dev.heldixclient.addon.AddonStore;
 import dev.heldixclient.addon.LoadedAddon;
@@ -364,6 +366,40 @@ public class HeldixMenuScreen extends ShellScreen {
 		return result;
 	}
 
+	/** Konten der Seite Konten in Kurzform (für den Autotest): „Name[:im-spiel][:aktiv][:wechseln|:welt-verlassen]“ */
+	public List<String> describeAccounts() {
+		layout();
+		List<String> result = new ArrayList<>();
+		for (Row row : rows) {
+			if (!(row instanceof Group group)) continue;
+			for (Row child : group.rows) if (child instanceof AccountRow account) result.add(account.describe());
+		}
+		return result;
+	}
+
+	/** Seite Konten so scrollen, dass die Zeile des Kontos zu sehen ist (für den Autotest; Knopf-Mitte ab dem nächsten Bild) */
+	public void scrollToAccount(String name) {
+		layout();
+		for (Row row : rows) {
+			if (!(row instanceof Group group)) continue;
+			int cy = rowY(group) + group.head();
+			for (Row child : group.rows) {
+				int ch = group.childHeight(child, bodyW);
+				if (child instanceof AccountRow account && account.account.name().equals(name)) {
+					scroll = Math.clamp(cy + scroll - bodyY - (bodyH - ch) / 2.0, 0, maxScroll());
+					settingCenters.remove("account:" + name);
+					return;
+				}
+				cy += ch;
+			}
+		}
+	}
+
+	/** Mitte des Knopfs „Wechseln“ bzw. „Welt verlassen und wechseln“ eines Kontos (wie zuletzt gezeichnet), null = keiner */
+	public int[] accountButtonCenter(String name) {
+		return settingCenters.get("account:" + name);
+	}
+
 	/** Mitte des Schalters eines Addons auf der Seite Installiert (wie zuletzt gezeichnet), null = nicht zu sehen */
 	public int[] addonSwitchCenter(String id) {
 		return settingCenters.get("addon:" + id);
@@ -535,6 +571,11 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 		if (page == Shell.Page.MESSAGES) Messages.loadConversations();
 		if (page == Shell.Page.PRIVACY && Social.online()) Messages.loadBlocked();
+		if (page == Shell.Page.ACCOUNTS) {
+			// alter Fehler (z. B. aus einer Welt heraus versucht) gilt beim neuen Öffnen nicht mehr
+			AccountSwitcher.clearStatus();
+			if (AccountSwitcher.available()) AccountSwitcher.refresh();
+		}
 		if (openModule != null) {
 			String back = "Zurück";
 			int w = ActionButton.widthFor(back, "back");
@@ -977,6 +1018,8 @@ public class HeldixMenuScreen extends ShellScreen {
 				default -> AddonStore.available() ? "Lade …" : "Braucht den Heldix-Dienst";
 			};
 			case INFO -> "Versionen und geladene Mods";
+			case ACCOUNTS -> AccountSwitcher.available() ? "Du spielst als " + minecraft.getUser().getName()
+					: dev.heldixclient.account.LauncherLink.ready() ? "Im Launcher ausgeschaltet" : "Nur mit dem HeldixClient-Launcher";
 			default -> null;
 		};
 	}
@@ -1005,6 +1048,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			case MESSAGES -> buildMessageRows(list);
 			case REQUESTS -> buildRequestRows(list);
 			case PRIVACY -> buildPrivacyRows(list);
+			case ACCOUNTS -> buildAccountRows(list);
 			case WAYPOINTS -> buildWaypointRows(list);
 			case SHADER -> buildShaderRows(list);
 			case PERFORMANCE -> buildPerformanceRows(list);
@@ -1481,6 +1525,46 @@ public class HeldixMenuScreen extends ShellScreen {
 				})))));
 	}
 
+	/**
+	 * Seite Konten: die Konten des Launchers (das im Spiel zuerst), wechseln bzw. in einer Welt „Welt verlassen und
+	 * wechseln“, neues Konto über die Anmeldung im Launcher. Nur vom HeldixClient-Launcher gestartet und dort erlaubt.
+	 */
+	private void buildAccountRows(List<Row> list) {
+		String reason = AccountSwitcher.unavailableReason();
+		if (reason != null) {
+			list.add(new EmptyState("user", "Kontowechsel nicht verfügbar", reason));
+			return;
+		}
+		String status = AccountSwitcher.status();
+		if (status != null) {
+			boolean error = AccountSwitcher.statusError();
+			boolean running = AccountSwitcher.phase() != AccountSwitcher.Phase.IDLE;
+			list.add(new Notice(error ? "warning" : running ? "refresh" : "check", status, error ? Ui.WARNING : running ? Ui.ACCENT_TEXT : Ui.SUCCESS));
+		}
+		if (!AccountSwitcher.loaded()) {
+			list.add(new Text("Lade Konten aus dem Launcher …", Ui.MUTED));
+		} else {
+			List<LauncherAccount> accounts = new ArrayList<>(AccountSwitcher.accounts());
+			accounts.sort(java.util.Comparator.comparing((LauncherAccount a) -> !AccountSwitcher.isCurrent(a)));
+			if (accounts.stream().noneMatch(AccountSwitcher::isCurrent)) {
+				list.add(new Notice("info", "Du spielst als " + minecraft.getUser().getName() + " – dieses Konto steht nicht (mehr) im Launcher.", Ui.ACCENT_TEXT));
+			}
+			list.add(new Section("Konten im Launcher", Integer.toString(accounts.size())));
+			if (accounts.isEmpty()) list.add(new Text("Im Launcher ist kein Konto angemeldet.", Ui.MUTED));
+			else list.add(new Group(accounts.stream().<Row>map(AccountRow::new).toList()));
+		}
+		if (!AccountSwitcher.canSwitchHere() && minecraft.level != null) {
+			list.add(new Notice("info", "Gewechselt wird außerhalb einer Welt: „Welt verlassen und wechseln“ speichert deine Welt "
+					+ "bzw. trennt die Verbindung zum Server und wechselt dann.", Ui.ACCENT_TEXT));
+		}
+		boolean signingIn = AccountSwitcher.phase() == AccountSwitcher.Phase.SIGNING_IN;
+		list.add(new Group(List.of(new SettingRow(new Setting.Action("Konto hinzufügen",
+				signingIn ? "Melde dich im Fenster von Microsoft an, das der Launcher geöffnet hat" : "Microsoft-Anmeldung im Fenster des Launchers",
+				signingIn ? "Läuft …" : "Hinzufügen", () -> AccountSwitcher.addAccount(true))))));
+		list.add(new Text("Beim ersten Wechsel zu einem Konto fragt der Launcher zur Sicherheit nach. Das gewählte Konto nutzt auch "
+				+ "der nächste Start aus dem Launcher.", Ui.FAINT));
+	}
+
 	private Setting.Toggle socialToggle(String label, String description, BooleanSupplier get, Consumer<Boolean> set) {
 		return new Setting.Toggle(label, description, get, value -> {
 			set.accept(value);
@@ -1679,8 +1763,34 @@ public class HeldixMenuScreen extends ShellScreen {
 		list.add(new Group(List.of(
 				new SettingRow(new Setting.Action("HUD-Editor", "Elemente verschieben, vergrößern, ein- und ausblenden", "Öffnen",
 						() -> minecraft.gui.setScreen(new HudEditorScreen(this)))),
+				new SettingRow(new Setting.Choice("HUD-Stil", "Heldix wie das Menü, Minimal ohne Fläche, Klassisch wie früher", dev.heldixclient.hud.HudStyles.NAMES,
+						() -> config.hudStyle, v -> {
+							config.hudStyle = v;
+							HeldixConfig.save();
+						})),
+				new SettingRow(new Setting.Slider("Deckkraft", "Hintergrund der HUD-Elemente", 0, 1, 0.05, () -> config.hudOpacity, v -> {
+					config.hudOpacity = (float) v;
+					HeldixConfig.save();
+				}, Setting::percent)),
+				new SettingRow(new Setting.Slider("HUD-Größe", "Alle Elemente zusammen (einzelne im HUD-Editor)", 0.5, 2, 0.05, () -> config.hudScale, v -> {
+					config.hudScale = (float) v;
+					HeldixConfig.save();
+				}, Setting::percent)),
+				new SettingRow(new Setting.Color("Akzentfarbe", "Beschriftungen, Balken und Symbole im HUD",
+						dev.heldixclient.hud.HudStyles.defaultAccent(dev.heldixclient.hud.HudStyles.kind()), dev.heldixclient.hud.HudStyles::globalAccent, v -> {
+							config.hudAccent = v;
+							HeldixConfig.save();
+						})),
 				new SettingRow(configToggle("HUD-Hintergrund", "Dunkle Box hinter den HUD-Elementen",
 						() -> config.hudBackground, v -> config.hudBackground = v)),
+				new SettingRow(configToggle("Scharfe Schrift", "Größen so runden, dass Schrift und Kanten auf ganzen Bildschirmpixeln liegen",
+						() -> config.hudCrisp, v -> config.hudCrisp = v)),
+				new SettingRow(configToggle("Mit F3 ausblenden", "HUD-Elemente verschwinden, solange das F3-Menü offen ist",
+						() -> config.hudHideDebug, v -> config.hudHideDebug = v)),
+				new SettingRow(configToggle("Im Chat ausblenden", "HUD-Elemente verschwinden, solange der Chat offen ist",
+						() -> config.hudHideChat, v -> config.hudHideChat = v)),
+				new SettingRow(configToggle("Im Chat anklickbar", "Bei offenem Chat zeigen Elemente Tooltips und reagieren auf Klicks",
+						() -> config.hudClickable, v -> config.hudClickable = v)),
 				new SettingRow(new Setting.Action("Positionen", "Alle Elemente an ihre Standardstelle", "Zurücksetzen", () -> {
 					ModuleManager.hud().forEach(HudModule::resetPosition);
 					HeldixConfig.save();
@@ -1690,7 +1800,8 @@ public class HeldixMenuScreen extends ShellScreen {
 				new Info("Heldix-Menü", HeldixClient.menuKey.getTranslatedKeyMessage().getString()),
 				new Info("Zoom", HeldixClient.zoomKey.getTranslatedKeyMessage().getString()),
 				new Info("Freelook", HeldixClient.freelookKey.getTranslatedKeyMessage().getString()),
-				new Info("Wegpunkt setzen", HeldixClient.waypointKey.getTranslatedKeyMessage().getString()))));
+				new Info("Wegpunkt setzen", HeldixClient.waypointKey.getTranslatedKeyMessage().getString()),
+				new Info("HUD bedienen", HeldixClient.hudKey.isUnbound() ? "nicht belegt" : HeldixClient.hudKey.getTranslatedKeyMessage().getString()))));
 	}
 
 	private Setting.Toggle configToggle(String label, String description, BooleanSupplier get, Consumer<Boolean> set) {
@@ -3483,6 +3594,120 @@ public class HeldixMenuScreen extends ShellScreen {
 				return true;
 			}
 			return false;
+		}
+	}
+
+	/** Konto, bei dem „Welt verlassen und wechseln“ gerade bestätigt werden muss (zweiter Klick) */
+	private String confirmLeave;
+	private long confirmLeaveAt;
+
+	/**
+	 * Ein Konto des Launchers: Kopf, Name, Marken „Im Spiel“ und „Aktiv im Launcher“, Art des Kontos; rechts „Wechseln“
+	 * bzw. in einer Welt „Welt verlassen und wechseln“ (zweiter Klick bestätigt).
+	 */
+	private final class AccountRow implements Row, Groupable {
+		private final LauncherAccount account;
+
+		AccountRow(LauncherAccount account) {
+			this.account = account;
+		}
+
+		@Override
+		public void grouped() {
+		}
+
+		@Override
+		public int height(int width) {
+			return 40;
+		}
+
+		private boolean current() {
+			return AccountSwitcher.isCurrent(account);
+		}
+
+		private boolean confirming() {
+			return account.id().equals(confirmLeave) && System.currentTimeMillis() - confirmLeaveAt < 4000;
+		}
+
+		/** Beschriftung des Knopfs, null = keiner (das Konto im Spiel) */
+		private String buttonLabel() {
+			if (current()) return null;
+			if (AccountSwitcher.canSwitchHere()) return "Wechseln";
+			return confirming() ? "Wirklich verlassen?" : "Welt verlassen und wechseln";
+		}
+
+		/** {x, Breite} des Knopfs */
+		private int[] button(int x, int w) {
+			String label = buttonLabel();
+			if (label == null) return null;
+			int bw = Ui.width(label, Ui.Font.SMALL) + 16;
+			return new int[] {x + w - 10 - bw, bw};
+		}
+
+		/** Kurzform für den Autotest: Name, Marken und Knopf */
+		String describe() {
+			String label = buttonLabel();
+			return account.name() + (current() ? ":im-spiel" : "") + (account.active() ? ":aktiv" : "")
+					+ (label == null ? "" : label.equals("Wechseln") ? ":wechseln" : confirming() ? ":welt-verlassen-bestaetigen" : ":welt-verlassen");
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			boolean current = current();
+			if (current) Ui.rect(g, x + 3, y + 2, w - 6, 36, 7, (Ui.ACCENT & 0xFFFFFF) | 0x12000000);
+			else if (Ui.inside(mouseX, mouseY, x, y, w, 40)) Ui.rect(g, x + 3, y + 2, w - 6, 36, 7, Ui.SURFACE);
+			FriendWidget.face(g, account.uuid(), account.name(), x + 11, y + 11, 18, 1f);
+			int[] b = button(x, w);
+			int right = b != null ? b[0] - 8 : x + w - 10;
+			Ui.text(g, Ui.ellipsize(account.name(), right - x - 38, Ui.Font.LABEL), x + 38, y + 9, Ui.TEXT, Ui.Font.LABEL);
+			// Marken und Art des Kontos
+			int mx = x + 38;
+			int my = y + 22;
+			if (current) mx = marker(g, "Im Spiel", mx, my, Ui.ACCENT, 0xFFFFFFFF);
+			if (account.active()) mx = marker(g, "Aktiv im Launcher", mx, my, Ui.SURFACE_STRONG, Ui.TEXT);
+			String kind = account.offline() ? "Offline-Konto (Entwicklung)" : "Microsoft-Konto";
+			if (mx + 20 < right) Ui.text(g, Ui.ellipsize(kind, right - mx, Ui.Font.SMALL), mx, my + 2, Ui.FAINT, Ui.Font.SMALL);
+			if (b == null) return;
+			boolean busy = AccountSwitcher.phase() != AccountSwitcher.Phase.IDLE;
+			boolean over = !busy && Ui.inside(mouseX, mouseY, b[0], y + 12, b[1], 16);
+			boolean leave = !AccountSwitcher.canSwitchHere();
+			boolean confirm = confirming();
+			int fill = busy ? Ui.SURFACE_HOVER : confirm ? (over ? 0xFFFCD34D : Ui.WARNING) : leave ? (over ? Ui.SURFACE_STRONG : Ui.SURFACE_HOVER)
+					: over ? Ui.ACCENT_HOVER : Ui.ACCENT;
+			int text = busy ? Ui.FAINT : confirm ? 0xFF111111 : leave ? Ui.TEXT : 0xFFFFFFFF;
+			String label = buttonLabel();
+			Ui.rect(g, b[0], y + 12, b[1], 16, 8, fill);
+			Ui.text(g, label, b[0] + (b[1] - Ui.width(label, Ui.Font.SMALL)) / 2, y + 16, text, Ui.Font.SMALL);
+			settingCenters.put("account:" + account.name(), new int[] {b[0] + b[1] / 2, y + 20});
+			if (over && !leave && AccountSwitcher.needsConfirmation(account)) {
+				Ui.requestTooltip("Beim ersten Wechsel zu " + account.name() + " fragt der Launcher nach", mouseX, mouseY);
+			}
+		}
+
+		/** kleine Marke; gibt die x-Position dahinter zurück */
+		private int marker(GuiGraphicsExtractor g, String label, int x, int y, int fill, int color) {
+			int mw = Ui.width(label, Ui.Font.SMALL) + 10;
+			Ui.rect(g, x, y, mw, 12, 6, fill);
+			Ui.text(g, label, x + 5, y + 2, color, Ui.Font.SMALL);
+			return x + mw + 5;
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			int[] b = button(x, w);
+			if (b == null || !Ui.inside(mouseX, mouseY, b[0], y + 10, b[1], 20)) return false;
+			if (AccountSwitcher.phase() != AccountSwitcher.Phase.IDLE) return true;
+			HeldixMenuScreen.this.click();
+			if (AccountSwitcher.canSwitchHere()) {
+				AccountSwitcher.switchTo(account);
+			} else if (confirming()) {
+				confirmLeave = null;
+				AccountSwitcher.leaveWorldAndSwitch(account);
+			} else {
+				confirmLeave = account.id();
+				confirmLeaveAt = System.currentTimeMillis();
+			}
+			return true;
 		}
 	}
 

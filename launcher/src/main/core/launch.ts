@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import type { LogLine } from '../../shared/api';
+import { IpcLineFilter } from './accountipc';
 import { GameLogParser } from './gamelog';
 import type { LauncherPaths } from './paths';
 import { flattenArguments } from './rules';
@@ -105,33 +106,56 @@ export function buildLaunchArguments(ctx: LaunchContext): string[] {
 export interface RunningGame {
   process: ChildProcess;
   exited: Promise<number | null>;
+  /** Eine Zeile an das Spiel (stdin, Konto-Wechsel – siehe core/accountipc.ts); false, wenn das Spiel nicht mehr liest */
+  send(line: string): boolean;
 }
 
-/** Startet Minecraft und leitet die Log-Ausgabe zeilenweise an onLog weiter. */
-export function startGame(javaPath: string, args: string[], gameDir: string, onLog: (lines: LogLine[]) => void): RunningGame {
+/** Anfragen der Client-Mod über stdout (Zeilen mit IPC_MARKER) */
+export interface GameIpcHandler {
+  /** eine Anfrage (JSON ohne Marker) */
+  message(json: string): void;
+  /** verworfene Marker-Zeile: zu lang oder auf stderr (dort nimmt der Launcher keine Anfragen an) */
+  rejected?(reason: 'oversized' | 'stderr'): void;
+}
+
+/**
+ * Startet Minecraft und leitet die Log-Ausgabe zeilenweise an onLog weiter. stdin bleibt als Leitung offen (Antworten
+ * für die Client-Mod); Marker-Zeilen werden immer aus der Ausgabe geschnitten und gehen nur an ipc.
+ */
+export function startGame(javaPath: string, args: string[], gameDir: string, onLog: (lines: LogLine[]) => void, ipc?: GameIpcHandler): RunningGame {
   const child = spawn(javaPath, args, {
     cwd: gameDir,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env },
   });
+  // Spiel beendet, während noch geschrieben wird (EPIPE): kein Fehler für den Launcher
+  child.stdin?.on('error', () => undefined);
   const stdout = new GameLogParser('INFO');
   const stderr = new GameLogParser('ERROR');
+  const stdoutIpc = new IpcLineFilter((json) => ipc?.message(json), () => ipc?.rejected?.('oversized'));
+  const stderrIpc = new IpcLineFilter(() => ipc?.rejected?.('stderr'), () => ipc?.rejected?.('oversized'));
   child.stdout?.setEncoding('utf8').on('data', (chunk: string) => {
-    const lines = stdout.push(chunk);
+    const lines = stdout.push(stdoutIpc.push(chunk));
     if (lines.length) onLog(lines);
   });
   child.stderr?.setEncoding('utf8').on('data', (chunk: string) => {
-    const lines = stderr.push(chunk);
+    const lines = stderr.push(stderrIpc.push(chunk));
     if (lines.length) onLog(lines);
   });
 
   const exited = new Promise<number | null>((resolve, reject) => {
     child.once('error', reject);
     child.once('close', (code) => {
-      const rest = [...stdout.flush(), ...stderr.flush()];
+      const rest = [...stdout.push(stdoutIpc.flush()), ...stdout.flush(), ...stderr.push(stderrIpc.flush()), ...stderr.flush()];
       if (rest.length) onLog(rest);
       resolve(code);
     });
   });
-  return { process: child, exited };
+  const send = (line: string): boolean => {
+    const stdin = child.stdin;
+    if (line.includes('\n') || !stdin || stdin.destroyed || !stdin.writable || child.exitCode !== null) return false;
+    stdin.write(`${line}\n`);
+    return true;
+  };
+  return { process: child, exited, send };
 }

@@ -116,6 +116,24 @@ public final class AutoTest implements HeldixModInitializer {
 			t.waitFor("Welt verlassen", mc -> mc.level == null, 60);
 			return;
 		}
+		// Nur beim Entwickeln: HELDIX_AUTOTEST_ONLY=konten führt nur die Prüfungen zum Kontowechsel aus (mit Testwelt)
+		if ("konten".equals(System.getenv("HELDIX_AUTOTEST_ONLY"))) {
+			AccountTests.titleScreen(t);
+			createFlatWorld(t);
+			AccountTests.leaveWorld(t);
+			t.waitFor("Welt verlassen", mc -> mc.level == null && mc.gui.screen() instanceof TitleScreen, 60);
+			AccountTests.end(t);
+			return;
+		}
+		// Nur beim Entwickeln: HELDIX_AUTOTEST_ONLY=hud führt nur die HUD-Prüfungen in einer Testwelt aus
+		if ("hud".equals(System.getenv("HELDIX_AUTOTEST_ONLY"))) {
+			createFlatWorld(t);
+			t.run(mc -> ModuleManager.all().forEach(m -> m.setEnabled(true)));
+			HudTests.run(t, "fabric".equals(HeldixLoader.platform()));
+			t.run(mc -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));
+			t.waitFor("Welt verlassen", mc -> mc.level == null, 60);
+			return;
+		}
 		t.log(t.compute(mc -> "Fenster " + mc.getWindow().getScreenWidth() + "x" + mc.getWindow().getScreenHeight()
 				+ ", GUI " + mc.getWindow().getGuiScaledWidth() + "x" + mc.getWindow().getGuiScaledHeight()
 				+ ", Skalierung " + mc.getWindow().getGuiScale()));
@@ -178,8 +196,8 @@ public final class AutoTest implements HeldixModInitializer {
 		t.check("Kaputtes Addon als Fehler erkannt", addons.contains("Kaputtes Test-Addon=FAILED"));
 		t.check("Module des Uhrzeit-Addons vorhanden",
 				t.compute(mc -> ModuleManager.all().stream().anyMatch(m -> "uhrzeit:uhrzeit".equals(m.id()))));
-		// Spotify-Addon nutzt API 3: eigene Einstellungen, Tasten und Chat-Befehle
-		t.check("Spotify-Addon aktiv (API 3)", addons.contains("Spotify=ACTIVE"));
+		// Spotify-Addon nutzt API 5: eigene Einstellungen, Tasten, Chat-Befehle und Knöpfe im HUD
+		t.check("Spotify-Addon aktiv (API 5)", addons.contains("Spotify=ACTIVE"));
 		t.check("Item-Physics-Addon aktiv (API 4)", addons.contains("Item Physics=ACTIVE"));
 		t.check("Spotify-Modul mit eigenen Einstellungen", t.compute(mc -> ModuleManager.all().stream()
 				.filter(m -> "spotify:spotify".equals(m.id()))
@@ -223,6 +241,9 @@ public final class AutoTest implements HeldixModInitializer {
 		t.screenshot("heldix-01c-cape-hauptmenue");
 		t.setScreen(TitleScreen::new);
 		t.waitForScreen(TitleScreen.class, 10);
+
+		// Kontowechsel im Hauptmenü (mit test:launch als Launcher: zweites Offline-Konto, wechseln und zurück)
+		AccountTests.titleScreen(t);
 
 		// --- Welt ---------------------------------------------------------------------------
 		createFlatWorld(t);
@@ -347,9 +368,11 @@ public final class AutoTest implements HeldixModInitializer {
 		AddonApiTests.api(t);
 		// Heldix-API 4: gedroppte Items (Renderer anmelden, null, Fehler) und das Item-Physics-Addon
 		DroppedItemTests.run(t);
+		// HUD: Stile, Bezugspunkte, HUD-Editor mit Rechtsklick-Menü, anklickbare Elemente, HUD-API (Stufe 5) mit Spotify
+		HudTests.run(t, fabric);
 
-		// Welt verlassen
-		t.run(mc -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));
+		// Welt verlassen – mit Launcher über „Welt verlassen und wechseln“ auf der Seite Konten
+		AccountTests.leaveWorld(t);
 		t.waitFor("Welt verlassen", mc -> mc.level == null && mc.gui.screen() instanceof TitleScreen, 60);
 		t.check("Welt-verlassen-Event", left);
 
@@ -405,6 +428,8 @@ public final class AutoTest implements HeldixModInitializer {
 		// an/aus im Spiel zuletzt: das Uhrzeit-Addon bleibt danach bis zum Spielende aus
 		MinecraftAddonTests.toggles(t);
 		t.setScreen(() -> titleScreen);
+		// Kontowechsel zuletzt: zurück zum Startkonto, im Launcher aus/an, dann Launcher weg
+		AccountTests.end(t);
 	}
 
 	private static final String TEST_SERVER = "localhost:25599";
@@ -452,8 +477,12 @@ public final class AutoTest implements HeldixModInitializer {
 
 		t.run(mc -> mc.gui.screen().mouseClicked(new MouseButtonEvent(start[0] + 4, start[1] + 4,
 				new MouseButtonInfo(InputConstants.MOUSE_BUTTON_RIGHT, 0)), false));
+		t.waitTicks(3);
+		t.check("Rechtsklick öffnet das Menü des Elements", t.compute(mc -> ((HudEditorScreen) mc.gui.screen()).contextMenu().isOpen()));
+		int[] settingsRow = t.compute(mc -> ((HudEditorScreen) mc.gui.screen()).contextMenu().rowCenter(0, "Einstellungen öffnen"));
+		t.run(mc -> mc.gui.screen().mouseClicked(new MouseButtonEvent(settingsRow[0], settingsRow[1], leftButton), false));
 		t.waitTicks(5);
-		t.check("Rechtsklick öffnet die Einstellungen des Elements", first.id().equals(t.compute(mc ->
+		t.check("Menü → Einstellungen öffnen zeigt die Einstellungen des Elements", first.id().equals(t.compute(mc ->
 				mc.gui.screen() instanceof HeldixMenuScreen menu ? menu.openModuleId() : null)));
 		t.screenshot("heldix-04d-hud-einstellungen");
 		t.run(mc -> mc.gui.screen().onClose());

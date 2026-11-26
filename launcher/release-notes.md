@@ -2,12 +2,9 @@
 # Jede Zeile mit "- " erscheint im Launcher unter „Was ist neu“ und im Versionsverlauf auf heldixclient.com.
 # Vor jedem "npm run release" anpassen. Zeilen mit # werden ignoriert.
 
-- Neu: Cosmetics – Hüte, Flügel, Auren, Begleiter und neue Capes; auswählen im Heldix-Menü, im Launcher unter „Skins & Cosmetics“ oder auf heldixclient.com. Alle HeldixClient-Spieler sehen sie, ohne etwas zu installieren
-- Neu: Mods & Addons – Mods und Addons stehen je Instanz in einer Liste, mit Suche, Filtern und Updates; „Hinzufügen“ holt aus dem Addon-Store und von Modrinth, und Dateien landen von selbst im richtigen Ordner
-- Neu: Addons dürfen jetzt auch direkt in Minecraft eingreifen – solche Addons tragen den Hinweis „Greift in Minecraft ein“
-- Neu: Updates für Mods von Modrinth – zusammengehörige Mods (z. B. Iris und Sodium) werden gemeinsam aktualisiert
-- Neu: Item Physics im Addon-Store (von Kxyuzu) – Items fallen und liegen flach am Boden, statt zu schweben
-- Neu: Startseite überarbeitet – Serverstatus mit Spielerzahl und Ping bei „Weiterspielen“, Hinweise zu Addon-Updates und Abstürzen, Spielzeit und Fakten zur Instanz, Neuigkeiten mit Filter
-- Neu: Heldix-Menü: „Mods & Addons“ und „Cosmetics“ in der Seitenleiste; Addons lassen sich direkt im Spiel an- und ausschalten
-- Neu: Addon-API Stufe 4 für Entwickler (herumliegende Items, Cosmetics)
-- Geändert: Heldix Loader 2.4.0
+- Neu: HUD überarbeitet – drei Stile (Heldix, Minimal, Klassisch), Deckkraft, Größe und Akzentfarbe für alle Widgets; Widgets bleiben bei jeder Fenstergröße an ihrem Platz; Rüstung mit Haltbarkeit, Effekte mit Restzeit
+- Neu: HUD-Editor mit Rechtsklick-Menü (Ausrichtung, Größe, Hintergrund, Farben, Rahmen, Ebene …), Einrasten mit Hilfslinien, Mehrfachauswahl und Rückgängig (Strg+Z)
+- Neu: Widgets sind anklickbar, wenn der Chat offen ist oder du die Taste „HUD bedienen“ drückst – z. B. Koordinaten in den Chat einfügen oder Spotify steuern
+- Neu: Konto-Wechsler im Spiel – im Heldix-Menü unter „Konten“ zwischen deinen Microsoft-Konten aus dem Launcher wechseln, ohne Neustart (abschaltbar in den Launcher-Einstellungen)
+- Neu: Addon-API Stufe 5 für Entwickler – anklickbare HUD-Widgets im HUD-Stil und Stil-Optionen für den HUD-Editor
+- Geändert: Konto-Menü im Launcher – die Knöpfe passen wieder in eine Zeile

@@ -223,6 +223,31 @@ public final class Social {
 		state = newState;
 	}
 
+	/** wie oft im Spiel das Konto gewechselt wurde (für den Autotest) */
+	private static volatile int accountChanges;
+	/** Konto, für das nach dem letzten Wechsel neu angemeldet wurde */
+	private static volatile UUID accountChangedTo;
+
+	/**
+	 * Konto im Spiel gewechselt (dev.heldixclient.account): alles vom alten Konto vergessen – Anmeldung beim Dienst,
+	 * Freunde, Anfragen, Nachrichten, nachgeschlagene Spieler – und mit dem neuen Konto neu anmelden.
+	 */
+	public static synchronized void accountChanged() {
+		accountChanges++;
+		accountChangedTo = Minecraft.getInstance().getUser().getProfileId();
+		attempt = 0;
+		goOffline(State.CONNECTING);
+		connect();
+	}
+
+	public static int accountChanges() {
+		return accountChanges;
+	}
+
+	public static UUID accountChangedTo() {
+		return accountChangedTo;
+	}
+
 	/** Heldix-Dienst ein- oder ausschalten (Heldix-Menü → Freunde) */
 	public static void setEnabled(boolean enabled) {
 		HeldixConfig.get().socialEnabled = enabled;

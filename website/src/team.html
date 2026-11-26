@@ -33,9 +33,15 @@
     <div class="gate-head">
       <div class="badge-lg">{{icon:shield}}</div>
       <h1>Team-Bereich</h1>
-      <p class="lead">Für Moderatoren und Admins des Heldix-Dienstes. Melde dich zuerst im Konto-Bereich an – über den Launcher oder im Spiel, ohne Passwort.</p>
+      <p class="lead">Für Moderatoren und Admins des Heldix-Dienstes. <span data-ohne-minecraft>Melde dich zuerst im Konto-Bereich an – über den Launcher oder im Spiel, ohne Passwort.</span><span data-mit-minecraft hidden>Melde dich zuerst an – mit deinem Minecraft-Konto oder über den Launcher, ohne Passwort.</span></p>
       <p class="notice" id="team-gast-hinweis" role="alert" hidden></p>
-      <p><a class="button" href="/konto">{{icon:user}}Zum Konto-Bereich</a></p>
+      <!-- Nur, wenn der Dienst die Anmeldung mit dem Minecraft-Konto anbietet (anmelden.js); danach geht es zurück nach /team -->
+      <div class="mc-login" id="team-minecraft" data-mit-minecraft hidden>
+        <a class="button big mc-login-button" id="team-minecraft-knopf" data-minecraft-knopf href="/api/v1/web/auth/microsoft?ziel=team">{{icon:loader-vanilla}}<span>Mit Minecraft-Konto anmelden</span></a>
+        <p class="mc-login-hint">{{icon:microsoft}}<span>Du meldest dich bei Microsoft an – dort liegt dein Minecraft-Konto. Wir übernehmen nur deinen Minecraft-Namen und deine UUID.</span></p>
+        <p class="mc-login-alt">Oder im <a href="/konto">Konto-Bereich</a> über den Launcher oder im Spiel anmelden.</p>
+      </div>
+      <p data-ohne-minecraft><a class="button" href="/konto">{{icon:user}}Zum Konto-Bereich</a></p>
     </div>
   </div>
 

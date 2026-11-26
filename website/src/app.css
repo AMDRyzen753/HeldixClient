@@ -890,3 +890,47 @@ dialog.modal .dialog-actions {
     transform: none;
   }
 }
+
+/* ---------- Anmeldung mit dem Minecraft-Konto (Konto- und Team-Seite, nur wenn der Dienst sie anbietet) ---------- */
+.mc-login {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  max-width: 560px;
+  margin: 28px auto 0;
+  text-align: center;
+}
+.gate-head .mc-login .button,
+.mc-login .button {
+  margin: 0;
+  max-width: 100%;
+}
+.mc-login-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: left;
+}
+.mc-login-hint .icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  color: var(--faint);
+}
+.app .mc-login-alt {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+@media (max-width: 480px) {
+  .mc-login .button.big {
+    width: 100%;
+    padding: 0 18px;
+    font-size: 16px;
+  }
+}

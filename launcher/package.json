@@ -1,7 +1,7 @@
 {
   "name": "heldixclient-launcher",
   "productName": "HeldixClient",
-  "version": "0.13.2",
+  "version": "0.13.3",
   "description": "Minecraft-Launcher mit eigenem Mod-Loader (Heldix Loader), Client-Mod und Addon-System",
   "license": "MIT",
   "author": "HeldixClient contributors",
@@ -40,6 +40,7 @@
     "test:profile": "npm run build && node dist/scripts/test-profile.js",
     "test:store": "npm run build && node dist/scripts/test-store.js",
     "test:content": "npm run build && node dist/scripts/test-content.js",
+    "test:accounts-ipc": "npm run build && node dist/scripts/test-accounts-ipc.js",
     "dist:mac": "npm run mod && npm run build && electron-builder --mac"
   },
   "build": {

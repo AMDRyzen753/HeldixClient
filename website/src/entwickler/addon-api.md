@@ -2,9 +2,9 @@
 titel: Addon-API im Detail
 beschreibung: Module, HUD-Elemente, Einstellungen, Tasten, Einblendungen, Ereignisse und gedroppte Items – mit echten Beispielen aus den Addons Spotify, Uhrzeit & Spielzeit und Item Physics.
 reihenfolge: 2
-stichworte: api, heldixapi, cosmetics, cosmeticinfo, preview, animate, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate, api 4, droppeditems, droppeditemrenderer, droppeditem, droppeditempose, item physics, gedroppte items
+stichworte: api, heldixapi, hudclick, hudhover, hudstyle, hotspot, iconbutton, anklickbar, hud bedienen, stil-optionen, cosmetics, cosmeticinfo, preview, animate, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate, api 4, api 5, droppeditems, droppeditemrenderer, droppeditem, droppeditempose, item physics, gedroppte items
 ---
-Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **4** (Stand HeldixClient 0.13.2). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3` und alles unter [Ab API 4](#ab-api-4) den Eintrag `"api": 4`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Addons entwickeln](/entwickler/addons).
+Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **5** (Stand HeldixClient 0.13.3). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3`, alles unter [Ab API 4](#ab-api-4) den Eintrag `"api": 4` und alles unter [Ab API 5](#ab-api-5) den Eintrag `"api": 5`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Addons entwickeln](/entwickler/addons).
 
 > **Hinweis:** Die Heldix-API reicht für die meisten Addons und läuft über Minecraft-Updates hinweg. Was sie nicht kann, darf ein Addon auch direkt in Minecraft ändern – mit Transformern des Heldix Loaders, siehe [Weg 2: Eingriff in Minecraft](/entwickler/addons#weg-2-eingriff-in-minecraft). Mit der API-Stufe hat das nichts zu tun.
 
@@ -23,6 +23,7 @@ In `onEnable(HeldixApi api)` bekommst du ein Objekt, über das alles läuft:
 - ab API 2: `registerKey(...)`, `notify(...)` und `dataDirectory()`.
 - ab API 3: `game()`, `playerState()`, `scheduler()`, `registerCommand(...)` und `sendChatMessage(...)` – siehe [Ab API 3](#ab-api-3).
 - ab API 4: `droppedItems()` – Lage und Drehung der gedroppten Items in der Welt – und `cosmetics()` – der Cosmetics-Katalog, siehe [Ab API 4](#ab-api-4).
+- ab API 5: anklickbare HUD-Elemente im HUD-Stil (an `HudRenderer`, `HudCanvas` und `ModuleHandle`), siehe [Ab API 5](#ab-api-5).
 
 ## Ereignisse
 
@@ -431,9 +432,85 @@ Cosmetics sind reine Daten (Modell, Textur, Partikel), vom Team signiert. Heldix
 
 `DroppedItem`, `CosmeticInfo` und `CosmeticChange` sind Schnittstellen, damit spätere Versionen Werte ergänzen können, ohne Addons zu brechen. `DroppedItemPose` baust du selbst, deshalb ist es ein Record (wie `ItemInfo`). Funktionen der Stufe 4 sind in den API-Klassen mit `@since 4` gekennzeichnet.
 
+## Ab API 5
+
+Mit `"api": 5` (ab HeldixClient 0.13.3) lassen sich HUD-Elemente im Spiel anklicken, und sie passen sich dem HUD-Stil an, den der Spieler eingestellt hat. Fertige Addons für API 1 bis 4 laufen unverändert weiter.
+
+### Anklickbare HUD-Elemente und HUD-Stil
+
+Im Spiel lassen sich HUD-Elemente mit der Maus bedienen, solange der **Chat offen** ist oder der Spieler die Taste **„HUD bedienen“** gedrückt hat (Optionen → Steuerung → HeldixClient, ab Werk nicht belegt). Dann zeigen sie beim Überfahren einen Rahmen und einen Tooltip und reagieren auf Klicks – beim normalen Spielen nie, und ein Klick erreicht das Spiel nicht. Chatnachrichten und das Eingabefeld haben Vorrang.
+
+Dein Renderer macht mit, indem er zwei Methoden von `HudRenderer` überschreibt. Beide sind Default-Methoden – ein Lambda (`canvas -> …`) zeichnet weiter nur:
+
+- `onClick(HudClick klick)` – Klick auf das Element. `true` heißt „verbraucht“. Ein Rechtsklick, den du nicht verbrauchst, öffnet die Einstellungen deines Moduls. Der Klick gilt als Aktion des Spielers: `sendChatMessage` ist einmal erlaubt.
+- `onHover(HudHover maus)` – die Maus steht über dem Element: `tooltip(zeilen…)` (höchstens 12 Zeilen) und `cursor(HudHover.Cursor.HAND)` (außerdem `TEXT`, `CROSSHAIR`, `MOVE`, `NOT_ALLOWED`, `DEFAULT`).
+
+`HudClick` und `HudHover` kennen die Stelle in deinen Koordinaten (`x()`, `y()`), den Bereich unter der Maus (`hotspot()`) und ob der Chat offen ist (`chatOpen()`). `HudClick` hat dazu `button()` (`HudClick.LEFT`, `RIGHT`, `MIDDLE`), `shift()`, `control()`, `alt()`, `insertIntoChat(text)` (an der Schreibmarke ins Eingabefeld) und `copyToClipboard(text)`.
+
+Neu auf der Zeichenfläche:
+
+- `hotspot(id, x, y, breite, höhe, tooltip)` – ein klickbarer Bereich: Der Mauszeiger wird zur Hand, der Tooltip erscheint (`\n` trennt Zeilen), ein Klick kommt mit dieser ID an. Melde ihn jedes Bild beim Zeichnen neu an; später angemeldete liegen oben.
+- `iconButton(id, icon, x, y, größe, farbe, tooltip)` – runder Knopf mit Icon im HUD-Stil, hell hinterlegt bei Hover, zugleich ein Bereich. Gibt zurück, ob die Maus darüber ist.
+- `interactive()` und `hovered(x, y, breite, höhe)` – bedient der Spieler das HUD gerade (im HUD-Editor immer `false`) bzw. steht die Maus über diesem Bereich? Damit zeigst du Knöpfe nur, wenn man sie auch drücken kann.
+- `style()` – das eingestellte Aussehen als `HudStyle`: `kind()` (`HELDIX`, `MINIMAL`, `CLASSIC`), `accent()`, `labelColor()`, `textColor()`, `background()` (mit Deckkraft, `0` = ohne), `opacity()`, `border()`, `borderColor()`, `shadow()`, `radius()`, `padding()`, `align()`, `scale()` und `textStyle()`. Einstellungen, die der Spieler für dein Element im HUD-Editor gemacht hat, sind schon eingerechnet.
+- `panel(x, y, breite, höhe)` – die Fläche im HUD-Stil, genau wie bei den eingebauten Elementen.
+- `text(text, x, y, farbe, stil, schatten)` – Text an Kommazahl-Positionen, wahlweise mit Schatten.
+- `lineHeight(stil)`, `wrap(text, maxBreite, stil)` und `clippedText(text, x, y, maxBreite, farbe, stil)` – Zeilenhöhe, Umbruch nach Wörtern und hart abgeschnittener Text.
+- `pushClip(x, y, breite, höhe)` und `popClip()` – alles dazwischen erscheint nur in diesem Rechteck (verschachtelbar).
+- `hasIcon(name)` – gibt es dieses Icon?
+
+Abgerundete Flächen, Icons, Fortschrittsbalken, Items, Spielerköpfe und gekürzter Text gibt es schon seit API 2 und 3. Die Größe aus dem HUD-Editor ist beim Zeichnen schon eingerechnet; du zeichnest immer in deinen eigenen Koordinaten.
+
+Mit `addStyleToggle(schlüssel, label, standard)`, `addStyleChoice(…)` und `addStyleColor(…)` am `ModuleHandle` legst du Optionen für das Aussehen an. Sie stehen im HUD-Editor im Rechtsklick-Menü deines Elements unter „Optionen: <Name>“ und zusätzlich im Untermenü des Moduls.
+
+So zeigt die Uhr aus dem Uhrzeit-Addon einen Tooltip mit Datum und schreibt per Klick Uhr- und Spielzeit in den Chat:
+
+```java
+ModuleHandle clock = api.registerHudModule(
+        ModuleSpec.of("uhrzeit", "Uhrzeit", "Echte Uhrzeit im HUD").at(4, 190).withIcon("clock"), new HudRenderer() {
+    @Override
+    public void render(HudCanvas canvas) {
+        HudStyle style = canvas.style();
+        String time = LocalTime.now().format(TIME);
+        int width = style.padding() * 2 + canvas.textWidth(time, style.textStyle());
+        canvas.panel(0, 0, width, 16);
+        canvas.text(time, style.padding(), 4, style.textColor(), style.textStyle(), style.shadow());
+    }
+
+    @Override
+    public void onHover(HudHover hover) {
+        hover.tooltip(LocalDate.now().format(DATE), "Klick: im Chat anzeigen");
+        hover.cursor(HudHover.Cursor.HAND);
+    }
+
+    @Override
+    public boolean onClick(HudClick click) {
+        if (click.button() != HudClick.LEFT) return false;   // Rechtsklick öffnet die Einstellungen
+        if (click.shift() && click.insertIntoChat(LocalTime.now().format(TIME_SHORT) + " Uhr")) return true;
+        api.chat("Es ist " + LocalTime.now().format(TIME) + " Uhr.");
+        return true;
+    }
+});
+BooleanSupplier showDate = clock.addStyleToggle("date", "Datum", false);   // im Rechtsklick-Menü des HUD-Editors
+```
+
+Knöpfe zeigt das Spotify-Addon nur, solange man sie drücken kann:
+
+```java
+if (canvas.interactive()) {
+    int color = canvas.style().textColor();
+    canvas.iconButton("previous", "skip-previous", x, y, 12, color, "Vorheriger Song");
+    canvas.iconButton("play-pause", playing ? "pause" : "play", x + 14, y, 12, accent, playing ? "Pause" : "Abspielen");
+    canvas.iconButton("next", "skip-next", x + 28, y, 12, color, "Nächster Song");
+}
+// im onClick: switch (click.hotspot()) { case "play-pause" -> playPause(); … }
+```
+
+`HudClick`, `HudHover` und `HudStyle` stellt HeldixClient bereit, deshalb sind es Schnittstellen. `HudRenderer` bekommt nur Default-Methoden und bleibt ein funktionales Interface – fertige Renderer (auch Lambdas) laufen unverändert. Funktionen der Stufe 5 sind in den API-Klassen mit `@since 5` gekennzeichnet.
+
 ## Threads und Fehler
 
-- Ereignisse, Tasten, Aktionen, `onToggle`, HUD-Renderer und Renderer für gedroppte Items laufen im Haupt-Thread. Warte dort nie auf Netzwerk oder langsame Dateien, sonst ruckelt das Spiel.
+- Ereignisse, Tasten, Aktionen, `onToggle`, HUD-Renderer (auch `onClick` und `onHover`) und Renderer für gedroppte Items laufen im Haupt-Thread. Warte dort nie auf Netzwerk oder langsame Dateien, sonst ruckelt das Spiel.
 - Aus eigenen Threads ist nur `notify` ausdrücklich erlaubt. Alles andere legst du in Felder und verarbeitest es im nächsten Tick oder im Renderer – ab API 3 einfacher mit `api.scheduler().runAsync(…)` und `runOnMainThread(…)`.
 - Fehler in deinem Code fängt HeldixClient ab und schreibt sie ins Log. Nach drei Fehlern – auch in Befehlen, Knöpfen und Aufgaben des Schedulers – wird das Addon für diese Sitzung abgeschaltet, das Spiel läuft weiter. Ein Fehler im Renderer passiert meist jedes Bild – dann ist das Addon sehr schnell aus. Ist ein Renderer für gedroppte Items abgeschaltet, zeichnet wieder der vorige bzw. Minecraft.
 - Wirft `onEnable` einen Fehler, wird das Addon gar nicht erst geladen. Das Heldix-Menü zeigt es dann rot mit dem Grund an, siehe [Addons installieren und Fehler finden](/entwickler/addon-installieren).

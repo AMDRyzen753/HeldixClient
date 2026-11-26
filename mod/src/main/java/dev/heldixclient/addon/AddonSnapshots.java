@@ -179,7 +179,7 @@ final class AddonSnapshots {
 		if (screen instanceof ServersScreen) return "servers";
 		if (screen instanceof LevelLoadingScreen || screen instanceof ConnectScreen || screen instanceof ProgressScreen
 				|| screen instanceof GenericMessageScreen) return "loading";
-		if (screen instanceof ShellScreen || screen instanceof HudEditorScreen) return "heldix";
+		if (screen instanceof ShellScreen || screen instanceof HudEditorScreen || screen instanceof dev.heldixclient.screen.HudInteractScreen) return "heldix";
 		String name = screen.getClass().getName();
 		if (name.startsWith("net.minecraft.client.gui.screens.options.")) return "options";
 		if (name.startsWith("net.minecraft.client.gui.screens.worldselection.")) return "worlds";

@@ -15,7 +15,15 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.PlayerSkin;
 import net.minecraft.world.item.ItemStack;
 
+import dev.heldixclient.api.HudStyle;
+import dev.heldixclient.hud.HudStyles;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FormattedText;
+import net.minecraft.network.chat.Style;
+
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -28,15 +36,28 @@ final class AddonCanvas implements HudCanvas {
 	private final int originX;
 	private final int originY;
 	private final boolean preview;
+	/** Element, für das gezeichnet wird (Bereiche, Maus); null = ohne Bedienung */
+	private final AddonHudModule module;
 	private int width;
 	private int height;
+	/** offene pushClip-Aufrufe (am Ende des Bildes geschlossen, falls das Addon popClip vergisst) */
+	private int clips;
 
-	AddonCanvas(GuiGraphicsExtractor g, Font font, int originX, int originY, boolean preview) {
+	AddonCanvas(GuiGraphicsExtractor g, Font font, int originX, int originY, boolean preview, AddonHudModule module) {
 		this.g = g;
 		this.font = font;
 		this.originX = originX;
 		this.originY = originY;
 		this.preview = preview;
+		this.module = module;
+	}
+
+	/** nach dem Zeichnen: übrige Ausschnitte schließen */
+	void finish() {
+		while (clips > 0) {
+			g.disableScissor();
+			clips--;
+		}
 	}
 
 	int width() {
@@ -311,5 +332,114 @@ final class AddonCanvas implements HudCanvas {
 	@Override
 	public int imageColor(Path png) {
 		return png == null ? 0 : Ui.imageColor(png);
+	}
+
+	// --- API 5 ------------------------------------------------------------------------------
+
+	@Override
+	public HudStyle style() {
+		return HudStyles.current();
+	}
+
+	@Override
+	public void panel(float x, float y, float width, float height) {
+		if (width <= 0 || height <= 0) return;
+		HudStyles.panel(g, originX + x, originY + y, width, height);
+		grow(x + width, y + height);
+	}
+
+	@Override
+	public void text(String text, float x, float y, int color, TextStyle style, boolean shadow) {
+		if (text == null || text.isEmpty()) return;
+		int ix = Math.round(originX + x);
+		int iy = Math.round(originY + y);
+		if (style == null || style == TextStyle.MINECRAFT) {
+			g.text(font, text, ix, iy, color, shadow);
+			grow(x + font.width(text), y + font.lineHeight);
+		} else {
+			g.text(font, Ui.text(text, uiFont(style)), ix, iy, color, shadow);
+			grow(x + Ui.width(text, uiFont(style)), y + style.height);
+		}
+	}
+
+	@Override
+	public int lineHeight(TextStyle style) {
+		return style == null || style == TextStyle.MINECRAFT ? font.lineHeight : style.height;
+	}
+
+	@Override
+	public List<String> wrap(String text, int maxWidth, TextStyle style) {
+		if (text == null || text.isEmpty()) return List.of();
+		FormattedText formatted = style == null || style == TextStyle.MINECRAFT ? Component.literal(text) : Ui.text(text, uiFont(style));
+		List<String> lines = new ArrayList<>();
+		for (FormattedText line : font.getSplitter().splitLines(formatted, Math.max(1, maxWidth), Style.EMPTY)) lines.add(line.getString());
+		return lines;
+	}
+
+	@Override
+	public void clippedText(String text, float x, float y, int maxWidth, int color, TextStyle style) {
+		if (text == null || text.isEmpty() || maxWidth <= 0) return;
+		int h = lineHeight(style);
+		pushClip(x, y - 1, maxWidth, h + 2);
+		text(text, x, y, color, style, style == null || style == TextStyle.MINECRAFT);
+		popClip();
+		width = Math.max(width, (int) Math.ceil(x + maxWidth));
+	}
+
+	@Override
+	public void pushClip(float x, float y, float width, float height) {
+		int x0 = (int) Math.floor(originX + x);
+		int y0 = (int) Math.floor(originY + y);
+		g.enableScissor(x0, y0, Math.max(x0, (int) Math.ceil(originX + x + width)), Math.max(y0, (int) Math.ceil(originY + y + height)));
+		clips++;
+	}
+
+	@Override
+	public void popClip() {
+		if (clips <= 0) return;
+		g.disableScissor();
+		clips--;
+	}
+
+	@Override
+	public boolean hasIcon(String name) {
+		return name != null && Ui.hasIcon(name);
+	}
+
+	@Override
+	public boolean interactive() {
+		return module != null && !preview && module.canvasInteractive();
+	}
+
+	@Override
+	public boolean hovered(float x, float y, float width, float height) {
+		return interactive() && module.canvasHovered(x, y, width, height);
+	}
+
+	@Override
+	public void hotspot(String id, float x, float y, float width, float height, String tooltip) {
+		if (module == null || width <= 0 || height <= 0) return;
+		module.addHotspot(new HudModule.Hotspot(id == null ? "" : id, x, y, width, height, lines(tooltip), true));
+	}
+
+	@Override
+	public boolean iconButton(String id, String icon, float x, float y, float size, int color, String tooltip) {
+		if (size <= 0) return false;
+		boolean hover = hovered(x, y, size, size);
+		HudStyle s = style();
+		int fill = hover ? (s.accent() & 0x00FFFFFF) | 0x59000000 : 0x1AFFFFFF;
+		Ui.circle(g, originX + x + size / 2f, originY + y + size / 2f, size / 2f, fill);
+		float iconSize = Math.max(4, Math.round(size * 0.58f));
+		if (icon != null && Ui.hasIcon(icon)) {
+			Ui.icon(g, icon, originX + x + (size - iconSize) / 2f, originY + y + (size - iconSize) / 2f, iconSize, hover ? 0xFFFFFFFF : color);
+		}
+		if (module != null) module.addHotspot(new HudModule.Hotspot(id == null ? "" : id, x, y, size, size, lines(tooltip), false));
+		grow(x + size, y + size);
+		return hover;
+	}
+
+	private static List<String> lines(String tooltip) {
+		if (tooltip == null || tooltip.isBlank()) return List.of();
+		return List.of(tooltip.split("\n"));
 	}
 }

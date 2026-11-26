@@ -47,6 +47,7 @@ import {
 } from './app-common.js';
 import { ADDON_ID_RE, API_STUFE, KATEGORIEN, accessChips, addonIcon, hasIcon, platformText } from './addon-common.js';
 import { memberCard, newsCard, publicGet, skinHead } from './public-cards.js';
+import { setupMinecraftLogin } from './anmelden.js';
 import { AREAS, createShell, parseShellHash } from './app-shell.js';
 import { initTeamAddons, normalizeAccess } from './team-addons.js';
 import { initTeamActivity } from './team-activity.js';
@@ -189,6 +190,8 @@ function showView(id) {
 }
 
 function showGuest(message) {
+  // Anmeldung mit dem Minecraft-Konto (falls der Dienst sie anbietet): danach geht es zurück hierher (ziel=team).
+  setupMinecraftLogin($('#team-gast'), 'team').catch(() => {});
   const notice = $('#team-gast-hinweis');
   notice.textContent = message || '';
   notice.hidden = !message;

@@ -51,6 +51,8 @@ export interface Settings {
   addonUpdateNotifications: boolean;
   /** Addon-Updates automatisch installieren, wenn kein Spiel läuft */
   addonAutoUpdate: boolean;
+  /** Kontowechsel im Spiel (Heldix-Menü) erlauben; beim ersten Wechsel zu einem Konto fragt der Launcher nach */
+  gameAccountSwitch: boolean;
 }
 
 /** "Was ist neu" nach einem Update: alle Versionen seit der zuletzt gesehenen */

@@ -16,6 +16,8 @@ Klicke im Konto-Menü auf **Weiteres Microsoft-Konto** und melde dich im Fenster
 
 Das gewählte Konto gilt für alle Instanzen. Freunde, Nachrichten und Skins & Capes zeigen danach die Daten dieses Kontos.
 
+Läuft das Spiel schon, wechselst du auch direkt im Spiel – ohne Neustart: Heldix-Menü → **Konten**. Mehr dazu unter [Konto im Spiel wechseln](/hilfe/konto-wechseln-im-spiel).
+
 ## Konto abmelden
 Klicke beim aktiven Konto auf **Abmelden** oder bei einem anderen Konto auf das **×**. Die gespeicherte Anmeldung wird aus dem Launcher gelöscht; Welten, Instanzen und dein Minecraft-Konto bleiben erhalten.
 

@@ -14,9 +14,10 @@ import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 
 /**
- * Spotify-Addon für HeldixClient (API 3):
+ * Spotify-Addon für HeldixClient (API 5):
  * <ul>
- *   <li>HUD-Element in drei Darstellungen (Kompakt, Groß mit Cover, Nur Titel) mit Fortschritt und Akzentfarbe</li>
+ *   <li>HUD-Element in drei Darstellungen (Kompakt, Groß mit Cover, Nur Titel) mit Fortschritt und Akzentfarbe,
+ *   im HUD-Stil und bei offenem Chat bedienbar (Knöpfe, Zeitleiste, Titel)</li>
  *   <li>Tasten für Abspielen/Pause, Songwechsel, Spulen, Zufallswiedergabe, Wiederholen und Teilen</li>
  *   <li>Chat-Befehle {@code .np} und {@code .spotify …}</li>
  *   <li>Einblendung bei jedem Songwechsel (einstellbar)</li>
@@ -65,13 +66,14 @@ public final class SpotifyAddon implements HeldixAddon {
 		this.player = Player.create(os, api.logger(), api.dataDirectory(), api::notify, task -> api.scheduler().runAsync(task));
 		this.hud = new SpotifyHud(this);
 
-		module = api.registerHudModule(ModuleSpec.of("spotify", "Spotify", "Song im HUD, Musik per Taste").at(4, 140).withIcon("music"), hud::render);
-		layout = module.addChoice("layout", "Darstellung", "Wie das HUD-Element aussieht", List.of("Kompakt", "Groß mit Cover", "Nur Titel"), 0);
+		module = api.registerHudModule(ModuleSpec.of("spotify", "Spotify", "Song im HUD, Musik per Taste").at(4, 140).withIcon("music"), hud);
+		// ab API 5: Stil-Optionen erscheinen auch im Rechtsklick-Menü des HUD-Editors
+		layout = module.addStyleChoice("layout", "Darstellung", List.of("Kompakt", "Groß mit Cover", "Nur Titel"), 0);
 		showHud = module.addToggle("show-hud", "Im HUD anzeigen", "Aus: nur Tasten und Einblendungen, kein HUD-Element", true);
-		showCover = module.addToggle("cover", "Cover anzeigen", "Album-Cover im HUD-Element", true);
-		showProgress = module.addToggle("progress", "Fortschritt anzeigen", "Zeitleiste mit Spielzeit und Länge des Songs", true);
-		accentMode = module.addChoice("accent", "Akzentfarbe", "Farbe von Fortschritt und Equalizer", List.of("Spotify-Grün", "Aus dem Cover", "Eigene Farbe"), 0);
-		accentColor = module.addColor("accent-color", "Eigene Farbe", "Gilt, wenn die Akzentfarbe auf „Eigene Farbe“ steht", GREEN);
+		showCover = module.addStyleToggle("cover", "Cover anzeigen", true);
+		showProgress = module.addStyleToggle("progress", "Fortschritt anzeigen", true);
+		accentMode = module.addStyleChoice("accent", "Akzentfarbe", List.of("Spotify-Grün", "Aus dem Cover", "Eigene Farbe", "Wie das HUD"), 0);
+		accentColor = module.addStyleColor("accent-color", "Eigene Farbe", GREEN);
 		overflow = module.addChoice("overflow", "Lange Titel", "Laufschrift oder mit „…“ abkürzen", List.of("Laufschrift", "Abkürzen"), 0);
 		hideIdle = module.addToggle("hide-idle", "Ohne Musik ausblenden", "HUD-Element nur zeigen, wenn ein Song geladen ist", false);
 		hidePaused = module.addToggle("hide-paused", "Bei Pause ausblenden", "Nach 10 Sekunden Pause verschwindet das HUD-Element", false);
@@ -181,7 +183,7 @@ public final class SpotifyAddon implements HeldixAddon {
 		return true;
 	}
 
-	private void playPause() {
+	void playPause() {
 		if (!ready()) return;
 		Track track = player.track();
 		if (track == null) {
@@ -195,8 +197,28 @@ public final class SpotifyAddon implements HeldixAddon {
 		if (!hudVisible(track, now)) api.notify(willPlay ? "Wiedergabe" : "Pausiert", track.title(), track.cover());
 	}
 
-	private void seek(long delta) {
+	void seek(long delta) {
 		command(() -> player.seek(delta));
+	}
+
+	void next() {
+		command(() -> player.next());
+	}
+
+	void previous() {
+		command(() -> player.previous());
+	}
+
+	/** Laufenden Song nur im eigenen Chat zeigen (Klick auf den Titel im HUD, wie „.np“) */
+	void showNowPlaying() {
+		Track track = track();
+		if (track == null) {
+			api.chat("Gerade läuft nichts – " + idleMessage());
+			return;
+		}
+		long now = System.currentTimeMillis();
+		String time = track.durationMs() > 0 ? " (" + SpotifyHud.time(position(track, now)) + " / " + SpotifyHud.time(track.durationMs()) + ")" : "";
+		api.chat("♪ " + track.line() + time + (playing(track, now) ? "" : " – pausiert"));
 	}
 
 	private void shuffle() {

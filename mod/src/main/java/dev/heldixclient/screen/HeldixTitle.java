@@ -3,6 +3,7 @@ package dev.heldixclient.screen;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.realmsclient.RealmsMainScreen;
 import dev.heldixclient.HeldixClient;
+import dev.heldixclient.account.AccountSwitcher;
 import dev.heldixclient.config.HeldixConfig;
 import dev.heldixclient.loader.HeldixLoader;
 import dev.heldixclient.social.Social;
@@ -79,6 +80,8 @@ public class HeldixTitle {
 	private final Map<String, Identifier> images = new HashMap<>();
 	private volatile List<RecentRow.Entry> recent = List.of();
 	private Supplier<PlayerSkin> skin;
+	/** Fläche über dem Profil oben rechts: öffnet die Konten */
+	private ProfileButton chipButton;
 	/** schmale Fenster: „2 Freunde online“ unter den Knöpfen (statt der Tafel rechts) */
 	private FriendsStrip friendsStrip;
 
@@ -300,6 +303,10 @@ public class HeldixTitle {
 				() -> minecraft.gui.setScreen(new LanguageSelectScreen(screen, minecraft.options, minecraft.getLanguageManager()))));
 		bx -= 24;
 		widgets.add(ActionButton.icon(bx, by, 20, "options", "Optionen", () -> minecraft.gui.setScreen(new OptionsScreen(screen, minecraft.options))));
+		// Profil daneben: Lage und Breite setzt extractDecorations (hängen am Namen)
+		chipButton = new ProfileButton(bx - 4, by, 0, 20, 10, () -> Shell.open(minecraft, Shell.Page.ACCOUNTS, screen));
+		chipButton.visible = false;
+		widgets.add(chipButton);
 
 		// Copyright (Pflicht im Hauptmenü)
 		String copyright = "Copyright Mojang AB. Do not distribute!";
@@ -409,17 +416,25 @@ public class HeldixTitle {
 		Ui.text(g, "Heldix", edge + 24, edge + 6, Ui.withAlpha(Ui.TEXT, fade), Ui.Font.LABEL);
 		Ui.text(g, "Client", edge + 24 + Ui.width("Heldix ", Ui.Font.LABEL), edge + 6, Ui.withAlpha(Ui.ACCENT_TEXT, fade), Ui.Font.LABEL);
 
-		// Profil oben rechts, links neben den Knöpfen
+		// Profil oben rechts, links neben den Knöpfen; mit Kontowechsel (vom Launcher angeboten) anklickbar
 		String name = minecraft.getUser().getName();
 		int nameW = Ui.width(name, Ui.Font.LABEL);
-		int chipW = nameW + 32;
+		boolean switchable = AccountSwitcher.available();
+		int chipW = nameW + (switchable ? 42 : 32);
 		int chipX = width - edge - 4 * 24 - 4 - chipW;
-		if (chipX > edge + 110) {
+		boolean chipShown = chipX > edge + 110;
+		if (chipShown) {
 			Ui.rect(g, chipX, edge, chipW, 20, 10, Ui.withAlpha(0xCC0F1420, fade));
 			Ui.outline(g, chipX, edge, chipW, 20, 10, Ui.withAlpha(Ui.LINE_STRONG, fade));
 			if (skin == null) skin = minecraft.getSkinManager().createLookup(minecraft.getGameProfile(), false);
 			PlayerFaceExtractor.extractRenderState(g, skin.get(), chipX + 5, edge + 4, 12);
 			Ui.text(g, name, chipX + 22, edge + 6, Ui.withAlpha(Ui.TEXT, fade), Ui.Font.LABEL);
+			if (switchable) Ui.icon(g, "chevron-down", chipX + chipW - 17, edge + 6, 8, Ui.withAlpha(Ui.MUTED, fade));
+		}
+		if (chipButton != null) {
+			chipButton.setX(chipX);
+			chipButton.setWidth(chipW);
+			chipButton.visible = chipShown;
 		}
 
 		// Begrüßung

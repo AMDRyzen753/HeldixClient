@@ -1,11 +1,13 @@
 import { BrowserWindow } from 'electron';
 import { AuthError, buildAuthorizeUrl, createPkce, exchangeCode, type MicrosoftTokens } from './core/auth';
+import { bringToFront } from './front-window';
 
 /**
  * Öffnet das Microsoft-Anmeldefenster und fängt die Weiterleitung mit dem Code ab.
  * Nutzt PKCE, daher wird kein Client-Secret benötigt.
+ * onTop: Anmeldung aus dem laufenden Spiel – eigenes Fenster über allem (das Launcher-Fenster ist dann oft versteckt).
  */
-export function interactiveMicrosoftLogin(parent: BrowserWindow | null, clientId: string, redirectUri: string): Promise<MicrosoftTokens> {
+export function interactiveMicrosoftLogin(parent: BrowserWindow | null, clientId: string, redirectUri: string, options: { onTop?: boolean } = {}): Promise<MicrosoftTokens> {
   const { verifier, challenge, state } = createPkce();
   const authorizeUrl = buildAuthorizeUrl(clientId, redirectUri, challenge, state);
 
@@ -15,6 +17,7 @@ export function interactiveMicrosoftLogin(parent: BrowserWindow | null, clientId
       height: 680,
       parent: parent ?? undefined,
       modal: parent != null,
+      alwaysOnTop: options.onTop === true,
       autoHideMenuBar: true,
       title: 'Mit Microsoft anmelden',
       backgroundColor: '#ffffff',
@@ -66,6 +69,11 @@ export function interactiveMicrosoftLogin(parent: BrowserWindow | null, clientId
     });
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.on('closed', () => finish(new AuthError('Anmeldung abgebrochen.')));
+    if (options.onTop) {
+      bringToFront(win);
+      // nach dem Laden der Microsoft-Seite noch einmal (das Spiel kann den Fokus inzwischen zurückgeholt haben)
+      win.webContents.once('did-finish-load', () => bringToFront(win));
+    }
     win.loadURL(authorizeUrl).catch(() => undefined);
   });
 }

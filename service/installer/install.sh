@@ -18,7 +18,8 @@
 #   - Launcher-Updates: Installer und update.json kommen nach /var/lib/heldix-dienst/updates (per scp oder im Team-Bereich).
 #   - Addon-Store: signierte Addons (JAR) liegen in /var/lib/heldix-dienst/addons, veröffentlicht im Team-Bereich;
 #     Einreichungen von Spielern (noch ungeprüft) in addons/einreichungen, Screenshots in addons/screenshots.
-#   - Anmeldung auf der Webseite (ohne Passwort, über den Launcher) unter https://<domain>/konto, Team-Bereich dort.
+#   - Anmeldung auf der Webseite (ohne Passwort, über den Launcher) unter https://<domain>/konto, Team-Bereich dort;
+#     mit --minecraft-login zusätzlich direkt mit dem Minecraft-Konto (über Microsoft, docs/einrichtung.md).
 #   - Verwaltung (Meldungen, Sperren, Team): sudo heldix-dienst-admin hilfe; erster Admin: sudo heldix-dienst-admin team <name> admin
 #
 # Optionen:
@@ -30,6 +31,13 @@
 #   --port <zahl>        interner Port des Dienstes (Standard 8787)
 #   --no-https           ohne Caddy: der Dienst lauscht nur auf 127.0.0.1:<port>, ein eigener Reverse-Proxy macht HTTPS
 #                        (die Webseite liegt dann zum Ausliefern in /opt/heldix-dienst/app/website)
+#   --minecraft-login    Anmeldung mit dem Minecraft-Konto auf der Webseite einschalten (App-ID des Launchers; vorher in
+#                        Azure die Umleitungs-URI https://<api-domain>/v1/web/auth/microsoft/callback eintragen).
+#                        Fragt nach dem Client-Geheimnis (Eingabe unsichtbar; leer = ohne Geheimnis). Bleibt bei Updates an.
+#   --ms-client-secret-file <datei>
+#                        Client-Geheimnis aus dieser Datei übernehmen (schaltet die Anmeldung ein; Datei danach löschen)
+#   --ms-client-id <id>  andere App-ID (nur für eigene Builds: muss die von Mojang freigegebene App-ID des Launchers sein)
+#   --no-minecraft-login Anmeldung mit dem Minecraft-Konto wieder ausschalten (löscht auch das gespeicherte Geheimnis)
 #   --uninstall          alles entfernen (Daten bleiben); mit --purge auch Daten und Zertifikate
 #   --yes                keine Rückfragen
 #   --help               diese Hilfe
@@ -53,6 +61,10 @@ ENV_FILE="$CONFIG_DIR/dienst.env"
 CADDYFILE="$CONFIG_DIR/Caddyfile"
 # öffentlicher Update-Schlüssel (aus dem Launcher, liegt dem Installer bei): prüft Updates aus dem Team-Bereich
 UPDATE_KEY_FILE="$CONFIG_DIR/update-public-key.pem"
+# Client-Geheimnis der Azure-App (Anmeldung mit dem Minecraft-Konto): lesen dürfen nur root und der Dienst
+MS_SECRET_FILE="$CONFIG_DIR/ms-client-secret"
+# App-ID des Launchers (aus launcher/src/main/config.ts, eingesetzt von build.mjs): von Mojang freigegeben
+DEFAULT_MS_CLIENT_ID="__HELDIX_MS_CLIENT_ID__"
 SERVICE_USER="heldix-dienst"
 CADDY_USER="heldix-caddy"
 UNIT="heldix-dienst"
@@ -71,6 +83,10 @@ PLACEHOLDERS=0
 UNINSTALL=0
 PURGE=0
 ASSUME_YES=0
+# Anmeldung mit dem Minecraft-Konto: "" = wie bisher (bei Updates unverändert), 1 = einschalten, 0 = ausschalten
+MS_LOGIN=""
+MS_CLIENT_ID=""
+MS_SECRET_SOURCE=""
 
 # ---------------------------------------------------------------------------------------------
 # Ausgabe
@@ -126,6 +142,12 @@ parse_args() {
       --port) PORT="${2:-}"; shift 2 ;;
       --port=*) PORT="${1#*=}"; shift ;;
       --no-https) HTTPS=0; shift ;;
+      --minecraft-login) [ "$MS_LOGIN" != 0 ] || die "--minecraft-login und --no-minecraft-login schließen sich aus."; MS_LOGIN=1; shift ;;
+      --no-minecraft-login) [ "$MS_LOGIN" != 1 ] || die "--minecraft-login und --no-minecraft-login schließen sich aus."; MS_LOGIN=0; shift ;;
+      --ms-client-id) MS_CLIENT_ID="${2:-}"; [ "$MS_LOGIN" != 0 ] || die "--ms-client-id passt nicht zu --no-minecraft-login."; MS_LOGIN=1; shift 2 ;;
+      --ms-client-id=*) MS_CLIENT_ID="${1#*=}"; [ "$MS_LOGIN" != 0 ] || die "--ms-client-id passt nicht zu --no-minecraft-login."; MS_LOGIN=1; shift ;;
+      --ms-client-secret-file) MS_SECRET_SOURCE="${2:-}"; [ "$MS_LOGIN" != 0 ] || die "--ms-client-secret-file passt nicht zu --no-minecraft-login."; MS_LOGIN=1; shift 2 ;;
+      --ms-client-secret-file=*) MS_SECRET_SOURCE="${1#*=}"; [ "$MS_LOGIN" != 0 ] || die "--ms-client-secret-file passt nicht zu --no-minecraft-login."; MS_LOGIN=1; shift ;;
       --uninstall) UNINSTALL=1; shift ;;
       --purge) PURGE=1; shift ;;
       --yes|-y) ASSUME_YES=1; shift ;;
@@ -161,6 +183,24 @@ parse_args() {
     fi
     case "$PORT" in ''|*[!0-9]*) die "Ungültiger Port: $PORT" ;; esac
     [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] || die "Port bitte zwischen 1024 und 65535 wählen."
+    check_microsoft_args
+  fi
+}
+
+check_microsoft_args() {
+  [ "$MS_LOGIN" = 1 ] || return 0
+  [ "$WEBSITE" = 1 ] || die "Die Anmeldung mit dem Minecraft-Konto gibt es nur mit Webseite (ohne --no-website)."
+  [ -n "$API_DOMAIN" ] || die "Für die Anmeldung mit dem Minecraft-Konto braucht es die Adresse der API (--domain oder --api-domain): Daraus entsteht die Umleitungs-URI."
+  if [ -z "$MS_CLIENT_ID" ]; then
+    case "$DEFAULT_MS_CLIENT_ID" in __*) MS_CLIENT_ID="" ;; *) MS_CLIENT_ID="$DEFAULT_MS_CLIENT_ID" ;; esac
+  fi
+  [ -n "$MS_CLIENT_ID" ] || die "Diesem Installer liegt keine App-ID bei (launcher/src/main/config.ts). Bitte mit --ms-client-id angeben."
+  MS_CLIENT_ID="$(printf '%s' "$MS_CLIENT_ID" | tr '[:upper:]' '[:lower:]')"
+  printf '%s' "$MS_CLIENT_ID" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' \
+    || die "Ungültige App-ID: $MS_CLIENT_ID (erwartet die Anwendungs-ID aus Azure, z. B. 00000000-0000-0000-0000-000000000000)"
+  if [ -n "$MS_SECRET_SOURCE" ]; then
+    [ -f "$MS_SECRET_SOURCE" ] && [ -r "$MS_SECRET_SOURCE" ] || die "Datei mit dem Client-Geheimnis nicht lesbar: $MS_SECRET_SOURCE"
+    [ -n "$(head -n1 "$MS_SECRET_SOURCE" | tr -d '[:space:]')" ] || die "Die Datei mit dem Client-Geheimnis ist leer: $MS_SECRET_SOURCE"
   fi
 }
 
@@ -418,6 +458,9 @@ EOF
   set_env HELDIX_DIENST_TRUST_PROXY 1
   # Anmeldung auf der Webseite: Adresse der Webseite (Einmal-Links und Schutz vor fremden Seiten)
   if [ "$WEBSITE" = 1 ] && [ -n "$DOMAIN" ]; then set_env HELDIX_DIENST_WEBSITE "https://$DOMAIN"; fi
+  # Öffentliche Adresse der API: daraus die Umleitungs-URI der Anmeldung mit dem Minecraft-Konto (allein ändert sie nichts)
+  if [ -n "$API_DOMAIN" ]; then set_env HELDIX_DIENST_API_URL "https://$API_DOMAIN"; fi
+  configure_microsoft
   # Update-Schlüssel aus dem Installer (fehlt er, bleibt Veröffentlichen im Team-Bereich aus)
   if [ -f "$INSTALL_DIR/app/update-public-key.pem" ]; then
     install -m 644 "$INSTALL_DIR/app/update-public-key.pem" "$UPDATE_KEY_FILE"
@@ -438,6 +481,59 @@ EOF
       || { rm -rf "$check"; die "Caddy lehnt die Konfiguration ab: $CADDYFILE"; }
     rm -rf "$check"
     ok "$CADDYFILE"
+  fi
+}
+
+save_secret() {
+  # save_secret: Geheimnis von stdin (erste Zeile) atomar nach $MS_SECRET_FILE, lesbar nur für root und den Dienst.
+  # Der Wert erscheint nie in der Ausgabe und nie in einer Befehlszeile.
+  local tmp
+  tmp="$(umask 077 && mktemp "$CONFIG_DIR/.ms-client-secret.XXXXXX")"
+  head -n1 | tr -d '\r' > "$tmp"
+  if [ -z "$(tr -d '[:space:]' < "$tmp")" ]; then rm -f "$tmp"; return 1; fi
+  chown root:"$SERVICE_USER" "$tmp"
+  chmod 640 "$tmp"
+  mv -f "$tmp" "$MS_SECRET_FILE"
+}
+
+ask_secret() {
+  # Rückfrage nur mit Terminal und ohne --yes; die Eingabe bleibt unsichtbar. Leer: ohne Geheimnis (öffentlicher Client).
+  [ "$ASSUME_YES" = 0 ] && [ -r /dev/tty ] || return 1
+  local secret=""
+  printf '    Client-Geheimnis der Azure-App (Eingabe unsichtbar; leer lassen, wenn die Umleitungs-URI unter\n    „Mobil- und Desktopanwendungen“ steht): ' > /dev/tty
+  IFS= read -rs secret < /dev/tty || secret=""
+  printf '\n' > /dev/tty
+  [ -n "$secret" ] || return 1
+  local saved=1
+  if printf '%s\n' "$secret" | save_secret; then saved=0; fi
+  secret=""
+  return "$saved"
+}
+
+configure_microsoft() {
+  # Anmeldung mit dem Minecraft-Konto auf der Webseite (optional). Ohne Option bleibt alles, wie es ist.
+  if [ "$MS_LOGIN" = 0 ]; then
+    sed -i '/^HELDIX_DIENST_MS_CLIENT_ID=/d; /^HELDIX_DIENST_MS_CLIENT_SECRET_FILE=/d' "$ENV_FILE"
+    rm -f "$MS_SECRET_FILE"
+    ok "Anmeldung mit dem Minecraft-Konto: aus"
+    return 0
+  fi
+  [ "$MS_LOGIN" = 1 ] || return 0
+  set_env HELDIX_DIENST_MS_CLIENT_ID "$MS_CLIENT_ID"
+  if [ -n "$MS_SECRET_SOURCE" ]; then
+    save_secret < "$MS_SECRET_SOURCE" || die "Die Datei mit dem Client-Geheimnis ist leer: $MS_SECRET_SOURCE"
+    info "Client-Geheimnis übernommen. Die Datei $MS_SECRET_SOURCE wird nicht mehr gebraucht – bitte löschen."
+  elif [ ! -s "$MS_SECRET_FILE" ]; then
+    ask_secret || true
+  fi
+  if [ -s "$MS_SECRET_FILE" ]; then
+    chown root:"$SERVICE_USER" "$MS_SECRET_FILE"
+    chmod 640 "$MS_SECRET_FILE"
+    set_env HELDIX_DIENST_MS_CLIENT_SECRET_FILE "$MS_SECRET_FILE"
+    ok "Anmeldung mit dem Minecraft-Konto: an (App-ID $MS_CLIENT_ID, Client-Geheimnis in $MS_SECRET_FILE, Rechte 640)"
+  else
+    sed -i '/^HELDIX_DIENST_MS_CLIENT_SECRET_FILE=/d' "$ENV_FILE"
+    ok "Anmeldung mit dem Minecraft-Konto: an (App-ID $MS_CLIENT_ID, ohne Client-Geheimnis: öffentlicher Client mit PKCE)"
   fi
 }
 
@@ -731,6 +827,17 @@ summary() {
   echo "    Daten        $DATA_DIR (Sicherung: Ordner kopieren, während der Dienst gestoppt ist)"
   echo "    Verwaltung   sudo heldix-dienst-admin meldungen   (Meldungen, Sperren, Team: sudo heldix-dienst-admin hilfe)"
   echo ""
+  if [ "$WEBSITE" = 1 ] && grep -q '^HELDIX_DIENST_MS_CLIENT_ID=' "$ENV_FILE" 2>/dev/null; then
+    echo "  Anmeldung mit dem Minecraft-Konto auf der Webseite ist an. Einmalig in Azure (dieselbe App-Registrierung wie der Launcher)"
+    echo "  diese Umleitungs-URI eintragen – mit Client-Geheimnis unter „Web“, ohne unter „Mobil- und Desktopanwendungen“:"
+    printf '    %shttps://%s/v1/web/auth/microsoft/callback%s\n' "$BOLD" "$API_DOMAIN" "$RESET"
+    echo "    Anleitung: docs/einrichtung.md. Ausschalten: Installer mit --no-minecraft-login erneut ausführen."
+    echo ""
+  elif [ "$WEBSITE" = 1 ]; then
+    echo "  Optional: Anmeldung auf der Webseite direkt mit dem Minecraft-Konto – erst in Azure einrichten (docs/einrichtung.md),"
+    echo "  dann den Installer mit --minecraft-login erneut ausführen."
+    echo ""
+  fi
   echo "  Team-Bereich der Webseite: Den ersten Admin legst du hier an (er muss sich schon einmal angemeldet haben):"
   printf '    %ssudo heldix-dienst-admin team <spielername> admin%s
 ' "$BOLD" "$RESET"

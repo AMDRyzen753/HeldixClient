@@ -14,12 +14,14 @@
 // Nutzt einen eigenen Testordner (<Datenordner>/test-instances).
 
 import AdmZip from 'adm-zip';
+import { randomUUID } from 'node:crypto';
 import { copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { GraphicsApi, InstanceLoader } from '../shared/api';
 import { CLIENT_MOD_PREFIX, DATA_DIR_NAME } from '../main/config';
 import { offlineUuid } from '../main/core/auth';
 import { buildLaunchArguments, startGame } from '../main/core/launch';
+import { AccountBridge, IPC_JVM_FLAG } from '../main/core/accountipc';
 import { GraphicsWatch, graphicsArguments, tunedJvmArguments } from '../main/core/performance';
 import { getVersionManifest } from '../main/core/mojang';
 import { createPaths, defaultDataRoot } from '../main/core/paths';
@@ -186,6 +188,41 @@ async function main(): Promise<void> {
     if (flag('engine')) testArgs.push(`-Dheldix.benchmark.engine=${{ aus: 0, dezent: 1, kraeftig: 2 }[flag('engine') ?? ''] ?? Number(flag('engine'))}`);
     if (flags.includes('--boost')) testArgs.push('-Dheldix.benchmark.boost=true');
   }
+  // Kontowechsel im Spiel (docs/konto-wechsel.md): test:launch beantwortet die Anfragen wie der Launcher in der
+  // Entwicklung (npm start), mit zwei Offline-Konten; Bestätigungen gibt es automatisch, Anmeldungen werden abgebrochen.
+  // Der Autotest schaltet über Log-Zeilen „HELDIX-AUTOTEST-KONTO: …“ den Wechsel aus/an und beendet die Verbindung.
+  // --no-ipc: ohne (wie ein Start über einen anderen Launcher)
+  const ipc = withClient && !benchmark && !flags.includes('--no-ipc');
+  let bridge: AccountBridge | null = null;
+  let writeToGame: (line: string) => boolean = () => false;
+  let switchAllowed = true;
+  if (ipc) {
+    testArgs.push(IPC_JVM_FLAG);
+    const accounts = [name, `${name}2`].map((n, i) => ({ id: randomUUID(), type: 'offline' as const, name: n, uuid: offlineUuid(n), active: i === 0 }));
+    bridge = new AccountBridge({
+      listAccounts: async () => accounts.map((a) => ({ ...a })),
+      session: async (id) => {
+        const account = accounts.find((a) => a.id === id);
+        if (!account) throw new Error('Dieses Konto gibt es im Launcher nicht (mehr).');
+        return { name: account.name, uuid: account.uuid, accessToken: '0', userType: 'legacy' };
+      },
+      signIn: async () => {
+        throw new Error('Anmeldung abgebrochen.');
+      },
+      setActive: async (id) => {
+        for (const account of accounts) account.active = account.id === id;
+      },
+      allowed: async () => switchAllowed,
+      confirmSwitch: async (account) => {
+        console.log(`  [konto] Bestätigung im Launcher (Test: automatisch „Wechseln“): ${account.name}`);
+        return true;
+      },
+      launchedAccountId: accounts[0].id,
+      offlineAllowed: () => true,
+      launcherVersion: 'test',
+      log: (text, level) => console.log(`  [konto] ${level === 'WARN' ? 'WARNUNG ' : ''}${text}`),
+    }, (line) => writeToGame(line));
+  }
   console.log(`Grafik-Argumente: ${graphicsArgs.join(' ') || '(keine)'}; JVM: ${tuningArgs.join(' ') || '(Standard)'}`);
   const graphicsWatch = new GraphicsWatch(graphicsArgs.length ? graphicsApi : 'default');
   const benchmarkLines: string[] = [];
@@ -243,6 +280,19 @@ async function main(): Promise<void> {
         // Fabric zeigt bei Mod-Konflikten ein Fenster und wartet – sofort beenden statt bis zur Zeitüberschreitung
         if (/Incompatible mods found/i.test(line.text)) game.process.kill();
       }
+      // Kontowechsel: der Autotest steuert hier den „Launcher“ (Einstellung aus/an, Verbindung beenden)
+      const konto = /HELDIX-AUTOTEST-KONTO: (\S+)/.exec(line.text);
+      if (konto && bridge) {
+        if (konto[1] === 'erlaubt=aus' || konto[1] === 'erlaubt=an') {
+          switchAllowed = konto[1] === 'erlaubt=an';
+          console.log(`  [konto] Einstellung „Kontowechsel im Spiel erlauben“: ${switchAllowed ? 'an' : 'aus'}`);
+          bridge.notifyChanged();
+        } else if (konto[1] === 'launcher-weg') {
+          console.log('  [konto] Launcher beendet die Verbindung (stdin zu)');
+          bridge.dispose();
+          game.process.stdin?.end();
+        }
+      }
       if (/HELDIX-AUTOTEST: ERFOLGREICH/.test(line.text)) autotestResult = 'ok';
       if (/HELDIX-AUTOTEST: FEHLGESCHLAGEN/.test(line.text)) {
         autotestResult = 'failed';
@@ -254,7 +304,8 @@ async function main(): Promise<void> {
         if (!autotest) setTimeout(() => game.process.kill(), 15000);
       }
     }
-  });
+  }, bridge ? { message: (json) => bridge.handle(json), rejected: (reason) => bridge.rejected(reason) } : undefined);
+  writeToGame = (line) => game.send(line);
 
   const timeout = setTimeout(() => {
     failure ??= `Zeitüberschreitung nach ${timeoutSeconds} s`;

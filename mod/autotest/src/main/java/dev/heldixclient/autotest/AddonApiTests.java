@@ -184,7 +184,7 @@ final class AddonApiTests {
 		t.setScreen(() -> null);
 		LoadedAddon uhrzeit = addon(t, "uhrzeit");
 		HeldixApi api = uhrzeit.api();
-		t.check("Heldix-API " + HeldixApi.API_VERSION + " (mindestens 1)", HeldixApi.API_VERSION == 4 && AddonManager.MIN_API == 1);
+		t.check("Heldix-API " + HeldixApi.API_VERSION + " (mindestens 1)", HeldixApi.API_VERSION == 5 && AddonManager.MIN_API == 1);
 		int errorsBefore = t.compute(mc -> uhrzeit.errorCount());
 
 		// --- Spiel- und Spielerdaten ------------------------------------------------------

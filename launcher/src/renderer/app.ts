@@ -1070,6 +1070,7 @@ function renderSettings(): void {
   $<HTMLInputElement>('#res-width').value = String(s.resolution?.width ?? 1280);
   $<HTMLInputElement>('#res-height').value = String(s.resolution?.height ?? 720);
   $<HTMLInputElement>('#hide-toggle').checked = s.hideLauncherOnLaunch;
+  $<HTMLInputElement>('#account-switch-toggle').checked = s.gameAccountSwitch;
   $<HTMLInputElement>('#java-path').value = s.javaPath;
   $<HTMLInputElement>('#jvm-args').value = s.jvmArgs;
   $('#data-dir').textContent = info.dataDir;
@@ -1320,6 +1321,7 @@ $('#resolution-toggle').addEventListener('change', async () => {
 for (const id of ['#res-width', '#res-height']) $(id).addEventListener('change', () => save({ resolution: readResolution() }));
 
 $('#hide-toggle').addEventListener('change', (e) => save({ hideLauncherOnLaunch: (e.target as HTMLInputElement).checked }));
+$('#account-switch-toggle').addEventListener('change', (e) => save({ gameAccountSwitch: (e.target as HTMLInputElement).checked }));
 $('#java-path').addEventListener('change', (e) => save({ javaPath: (e.target as HTMLInputElement).value.trim() }));
 $('#jvm-args').addEventListener('change', (e) => save({ jvmArgs: (e.target as HTMLInputElement).value.trim() }));
 

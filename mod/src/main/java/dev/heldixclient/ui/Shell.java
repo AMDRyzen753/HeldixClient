@@ -2,7 +2,9 @@ package dev.heldixclient.ui;
 
 import com.mojang.realmsclient.RealmsMainScreen;
 import dev.heldixclient.HeldixClient;
+import dev.heldixclient.account.AccountSwitcher;
 import dev.heldixclient.config.HeldixConfig;
+import dev.heldixclient.screen.ProfileButton;
 import dev.heldixclient.screen.HeldixMenuScreen;
 import dev.heldixclient.screen.HudEditorScreen;
 import dev.heldixclient.screen.PauseMenuScreen;
@@ -60,6 +62,8 @@ public final class Shell {
 		MESSAGES("Nachrichten", "chat", FRIENDS),
 		REQUESTS("Anfragen", "user-plus", FRIENDS),
 		PRIVACY("Privatsphäre", "shield", FRIENDS),
+		/** Konten des Launchers (nur vom HeldixClient-Launcher gestartet und dort erlaubt) */
+		ACCOUNTS("Konten", "user", Section.PROFILE),
 		SETTINGS("Allgemein", "settings", Section.SYSTEM, "Einstellungen"),
 		INFO("Info", "info", SETTINGS),
 		/** eigener Bildschirm, nicht in der Seitenleiste (Knöpfe bei Module, Übersicht, Einstellungen) */
@@ -119,6 +123,7 @@ public final class Shell {
 			return switch (this) {
 				case RESUME, PAUSE -> inGame;
 				case START, WORLDS, SERVERS, REALMS, QUIT -> !inGame;
+				case ACCOUNTS -> accountsVisible();
 				default -> true;
 			};
 		}
@@ -256,7 +261,19 @@ public final class Shell {
 			add.accept(button);
 			y += layout.itemH();
 		}
+		// Profil unten: Klick öffnet die Konten (nur, wenn der Launcher den Wechsel anbietet)
+		if (layout.footer() && !compact) {
+			add.accept(new ProfileButton(window.x() + 6, window.bottom() - 27, sidebarWidth(window) - 12, 24, 6,
+					() -> {
+						if (active != Page.ACCOUNTS) open(Minecraft.getInstance(), Page.ACCOUNTS, screen);
+					}));
+		}
 		return buttons;
+	}
+
+	/** Konten in der Seitenleiste und Profil anklickbar? (vom Launcher gestartet und dort erlaubt) */
+	public static boolean accountsVisible() {
+		return AccountSwitcher.available();
 	}
 
 	/**
@@ -347,6 +364,11 @@ public final class Shell {
 		return skin;
 	}
 
+	/** Konto gewechselt: Skin beim nächsten Bild für das neue Konto laden */
+	public static void forgetSkin() {
+		skin = null;
+	}
+
 	/**
 	 * Hintergrund hinter dem Fenster: im Hauptmenü das Heldix-Motiv (oder das Minecraft-Panorama, wenn eingestellt,
 	 * dann zeichnet es der Aufrufer vorher), im Spiel die verschwommene Welt; darüber eine Abdunkelung.
@@ -369,7 +391,7 @@ public final class Shell {
 			case WORLDS -> minecraft.gui.setScreen(new WorldsScreen());
 			case SERVERS -> minecraft.gui.setScreen(minecraft.options.skipMultiplayerWarning ? new ServersScreen() : new SafetyScreen(from));
 			case REALMS -> minecraft.gui.setScreen(new RealmsMainScreen(from));
-			case OVERVIEW, MODULES, CAPE, FRIENDS, MESSAGES, REQUESTS, PRIVACY, WAYPOINTS, SHADER, PERFORMANCE, ADDONS, STORE, SETTINGS, INFO ->
+			case OVERVIEW, MODULES, CAPE, FRIENDS, MESSAGES, REQUESTS, PRIVACY, ACCOUNTS, WAYPOINTS, SHADER, PERFORMANCE, ADDONS, STORE, SETTINGS, INFO ->
 					minecraft.gui.setScreen(new HeldixMenuScreen(back, page));
 			case HUD -> minecraft.gui.setScreen(new HudEditorScreen(from));
 			case OPTIONS -> minecraft.gui.setScreen(new OptionsScreen(from, minecraft.options));

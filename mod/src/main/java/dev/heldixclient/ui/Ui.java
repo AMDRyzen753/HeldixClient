@@ -87,8 +87,28 @@ public final class Ui {
 		return HeldixClient.id("textures/gui/heldix/" + name);
 	}
 
+	/** Bildschirmpixel pro GUI-Pixel für Schrift und Formen; 0 = GUI-Skalierung (siehe {@link #pushScale}) */
+	private static int scaleOverride;
+
 	public static int scale() {
+		if (scaleOverride > 0) return scaleOverride;
 		return Math.max(1, Minecraft.getInstance().getWindow().getGuiScale());
+	}
+
+	/**
+	 * Für Inhalte, die mit einem eigenen Faktor gezeichnet werden (HUD-Elemente mit Größe ≠ 100 %): Schrift und
+	 * Formen rechnen bis {@link #popScale} mit diesen Bildschirmpixeln pro (lokalem) GUI-Pixel.
+	 *
+	 * @return vorheriger Wert für popScale
+	 */
+	public static int pushScale(int pixels) {
+		int previous = scaleOverride;
+		scaleOverride = Math.clamp(pixels, 1, 12);
+		return previous;
+	}
+
+	public static void popScale(int previous) {
+		scaleOverride = previous;
 	}
 
 	// ======================================================================================
@@ -665,6 +685,38 @@ public final class Ui {
 		rect(g, x, y, w, h, 5, 0xF51B2232);
 		outline(g, x, y, w, h, 5, LINE_STRONG);
 		text(g, text, x + 6, y + 4, TEXT, Font.BODY);
+	}
+
+	/**
+	 * Mehrzeiliger Tooltip neben dem Mauszeiger (sofort gezeichnet, oberste Ebene): erste Zeile hell und halbfett,
+	 * die übrigen gedämpft. Passt er rechts/unten nicht, steht er links/oben.
+	 */
+	public static void drawTooltipLines(GuiGraphicsExtractor g, List<String> lines, int mouseX, int mouseY, int screenWidth, int screenHeight) {
+		if (lines == null || lines.isEmpty()) return;
+		int maxText = Math.max(60, Math.min(220, screenWidth - 16));
+		List<String> shown = new java.util.ArrayList<>();
+		int w = 0;
+		for (int i = 0; i < lines.size(); i++) {
+			Font style = i == 0 ? Font.LABEL : Font.BODY;
+			String line = ellipsize(lines.get(i), maxText, style);
+			shown.add(line);
+			w = Math.max(w, width(line, style));
+		}
+		w += 12;
+		int h = shown.size() * 11 + 6;
+		int x = mouseX + 10;
+		if (x + w > screenWidth - 2) x = mouseX - w - 6;
+		x = Math.clamp(x, 2, Math.max(2, screenWidth - w - 2));
+		int y = mouseY + 12;
+		if (y + h > screenHeight - 2) y = mouseY - h - 6;
+		y = Math.clamp(y, 2, Math.max(2, screenHeight - h - 2));
+		g.nextStratum();
+		shadow(g, x, y, w, h, 0.35f);
+		rect(g, x, y, w, h, 5, 0xF51B2232);
+		outline(g, x, y, w, h, 5, LINE_STRONG);
+		for (int i = 0; i < shown.size(); i++) {
+			text(g, shown.get(i), x + 6, y + 4 + i * 11, i == 0 ? TEXT : MUTED, i == 0 ? Font.LABEL : Font.BODY);
+		}
 	}
 
 	// ======================================================================================
