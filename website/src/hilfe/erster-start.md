@@ -20,7 +20,7 @@ Drücke [[Rechte Umschalttaste]], um das [Heldix-Menü](/hilfe/heldix-menue) zu 
 
 ## Die Startseite im Überblick
 - **Instanz-Auswahl:** Klicke auf die Instanz neben **Spielen**, um zu wechseln oder eine neue anzulegen.
-- **Schnellzugriff:** Mods, Shader, Ordner und Einstellungen der gewählten Instanz.
+- **Schnellzugriff:** Mods & Addons, Shader, Ordner und Einstellungen der gewählten Instanz.
 - **Weiterspielen:** deine zuletzt gespielten Welten und Server. Ein Klick startet das Spiel und bringt dich direkt hinein.
 - **Instanzen:** die zuletzt gespielten Instanzen zum schnellen Wechseln und Starten.
 - **Neuigkeiten:** Neuigkeiten des HeldixClient-Teams und die Patch Notes von Minecraft.

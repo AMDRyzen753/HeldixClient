@@ -2,7 +2,9 @@ package dev.heldixclient.api;
 
 /**
  * Eine Anmeldung, die man wieder aufheben kann: ein Listener aus {@link HeldixEvents}, ein Chat-Befehl
- * ({@link HeldixApi#registerCommand}) oder eine geplante Aufgabe ({@link Scheduler}).
+ * ({@link HeldixApi#registerCommand}), eine geplante Aufgabe ({@link Scheduler}) oder ab API 4 ein Renderer für
+ * gedroppte Items ({@link DroppedItems#addRenderer}), eine Vorschau oder ein Listener für Cosmetics
+ * ({@link Cosmetics#preview}, {@link Cosmetics#onChange}).
  * Wird vom HeldixClient bereitgestellt, nicht selbst implementieren.
  *
  * @since 3

@@ -1,0 +1,10 @@
+{
+	"id": "mcnurheldix",
+	"name": "Nur-Heldix-Test-Addon",
+	"version": "1.0.0",
+	"description": "Nur für den Autotest: verändert eine Klasse, die der Heldix Loader in Fabric nicht verändern kann.",
+	"authors": ["HeldixClient"],
+	"clientEntrypoint": "dev.heldixclient.testaddons.nurheldix.NurHeldixStart",
+	"transformers": ["dev.heldixclient.testaddons.nurheldix.InventoryTransformer"],
+	"minecraft": "${minecraft_version}"
+}

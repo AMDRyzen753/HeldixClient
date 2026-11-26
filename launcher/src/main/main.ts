@@ -34,15 +34,15 @@ import {
   MICROSOFT_REDIRECT_URI,
 } from './config';
 import { loginMinecraft, offlineUuid, refreshMicrosoft, sessionFromAccessToken } from './core/auth';
-import { addContentFiles, countEnabled, listContent, removeContent, setContentEnabled } from './core/content';
+import { addContentFiles, countEnabled, importContentFiles, listAllContent, listContent, removeContent, setContentEnabled, type ContentContext } from './core/content';
 import { applyPendingRemovals, installStoreAddon, storeForInstance, uninstallStoreAddon, type OverviewInstance } from './core/addonstore';
 import { AddonStoreService, noticeList, type StoreNotice } from './core/storeservice';
 import { DiscordRpc } from './core/discord';
 import { getFabricGameVersions } from './core/fabric';
 import { ADDON_DIR, InstanceStore, usesHeldixClient, type InstanceConfig } from './core/instances';
 import { buildLaunchArguments, startGame, type GameAccount, type RunningGame } from './core/launch';
-import { installModrinth, installPerformancePack, searchModrinth } from './core/modrinth';
-import { findClientMods, findLoaderJar } from './core/mods';
+import { installModrinth, installPerformancePack, modrinthUpdates, searchModrinth, updateModrinthMod } from './core/modrinth';
+import { findClientMods, findFabricLoaderJar, findLoaderJar } from './core/mods';
 import { getVersionManifest, listInstalledVersions } from './core/mojang';
 import { createPaths, defaultDataRoot } from './core/paths';
 import { GraphicsWatch, graphicsArguments, tunedJvmArguments } from './core/performance';
@@ -50,6 +50,7 @@ import { prepareGame } from './core/prepare';
 import { SHADERPACK_DIR, addShaderpackFiles, installShaderpack, listShaderpacks, removeShaderpack, searchShaderpacks, setActiveShaderpack } from './core/shaderpacks';
 import { buildActivity, parseStatusLine, type GameStatus } from './core/presence';
 import { listQuickPlay, validateQuickPlay } from './core/quickplay';
+import { serverStatus } from './core/serverstatus';
 import { loaderLogos } from './core/loaderlogos';
 import { removeOfficialProfile } from './core/officialcleanup';
 import { analyzeCrash, anonymize, collectCrashFiles, tail, type CrashFiles } from './core/crash';
@@ -57,6 +58,7 @@ import { listHeldixNews, listNews, newsBody } from './core/news';
 import { webLoginUrl } from './core/weblogin';
 import { isLoopback } from './core/heldixservice';
 import { MOJANG_API, MojangApi, ProfileService, loadHeldixCapes } from './core/profile';
+import { CosmeticCatalog } from './core/cosmeticcatalog';
 import { SocialClient, joinableServer, pickJoinInstance, type SocialNotice } from './core/social';
 import { allowTestTextureOrigin, skinFor } from './core/skins';
 import { Updater, compareVersions } from './core/updater';
@@ -79,6 +81,13 @@ const MOJANG_TEST_URL = isDev && process.env.HELDIX_MOJANG_TEST_URL && isLoopbac
   ? process.env.HELDIX_MOJANG_TEST_URL.replace(/\/+$/, '')
   : null;
 if (MOJANG_TEST_URL) allowTestTextureOrigin(MOJANG_TEST_URL);
+/**
+ * Nur für Tests im Entwicklungsmodus gegen einen lokalen Dienst (HELDIX_SERVICE_URL auf Loopback):
+ * HELDIX_STORE_TEST_KEY=<PEM-Datei> prüft die Addon-Manifeste mit diesem Test-Schlüssel statt mit dem Update-Schlüssel.
+ */
+const STORE_PUBLIC_KEY = isDev && process.env.HELDIX_STORE_TEST_KEY && isLoopback(HELDIX_SERVICE_URL)
+  ? readFileSync(process.env.HELDIX_STORE_TEST_KEY, 'utf8')
+  : UPDATE_PUBLIC_KEY;
 /** Offline-Konten beim Heldix-Dienst über POST /v1/auth/dev (nur Tests gegen einen lokalen Dienst) */
 const SERVICE_DEV_AUTH = process.env.HELDIX_WEB_LOGIN_DEV === '1';
 
@@ -436,7 +445,7 @@ async function heldixInstances(): Promise<OverviewInstance[]> {
 
 const addonStore = new AddonStoreService({
   serviceUrl: HELDIX_SERVICE_URL,
-  publicKey: UPDATE_PUBLIC_KEY,
+  publicKey: STORE_PUBLIC_KEY,
   instances: heldixInstances,
   busy: instanceBusy,
   gameRunning,
@@ -522,6 +531,24 @@ async function importSkins(files?: unknown): Promise<import('../shared/api').Sav
     sources = result.filePaths;
   }
   return profiles.importSkins(sources);
+}
+
+// ---------- Cosmetics (siehe core/cosmeticcatalog.ts) ----------
+
+const cosmetics = new CosmeticCatalog({
+  serviceUrl: HELDIX_SERVICE_URL,
+  // derselbe Schlüssel wie beim Addon-Store (Update-Schlüssel; nur in Tests gegen einen lokalen Dienst ein Test-Schlüssel)
+  publicKey: STORE_PUBLIC_KEY,
+  cacheDir: path.join(paths.cache, 'cosmetics'),
+  auth: HELDIX_SERVICE_URL ? social : null,
+  builtinCapes: async () => (await loadCapes()).map((c) => c.id),
+  log: (line) => launcherLog(line),
+});
+
+async function setCosmetic(slot: unknown, id: unknown): Promise<import('../shared/api').CosmeticsState> {
+  const state = await cosmetics.choose(slot, id);
+  broadcast('cosmetics:changed', null);
+  return state;
 }
 
 // ---------- Instanzen ----------
@@ -741,6 +768,21 @@ function assertKind(kind: ContentKind): ContentKind {
   return kind;
 }
 
+/** Minecraft-Version, Loader, HeldixClient und die mitgelieferte Heldix-Loader-Version einer Instanz (für „Mods & Addons“) */
+async function contentContext(instance: InstanceConfig): Promise<ContentContext> {
+  const loaderVersion = instance.loader === 'heldix'
+    ? ((await findLoaderJar(loaderDir()))?.version ?? null)
+    : instance.loader === 'fabric' ? ((await findFabricLoaderJar(fabricLoaderDir()))?.version ?? null) : null;
+  return { loader: instance.loader, minecraft: instance.minecraft, heldixClient: usesHeldixClient(instance), loaderVersion };
+}
+
+/** Datei im laufenden Spiel gesperrt (Windows)? Dann verständlich melden. */
+function lockedFileError(error: unknown): Error {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') return new Error('Die Datei ist gerade vom laufenden Spiel geöffnet – bitte erst das Spiel beenden.');
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 // ---------- IPC ----------
 
 function registerIpc(): void {
@@ -818,9 +860,41 @@ function registerIpc(): void {
     if (assertKind(kind) === 'addons' && gameInstanceId !== id) await applyPendingRemovals(instances.dir(instance.id));
     return listContent(instances.dir(instance.id), assertKind(kind), instance.loader);
   });
+  // „Mods & Addons“: mods/ und heldix-addons/ in einer Liste, geprüft gegen Minecraft-Version, Loader und HeldixClient
+  ipcMain.handle('content:listAll', async (_e, id: string) => {
+    const instance = await instances.require(id);
+    if (!instanceBusy(instance.id)) await applyPendingRemovals(instances.dir(instance.id));
+    return listAllContent(instances.dir(instance.id), await contentContext(instance));
+  });
   ipcMain.handle('content:setEnabled', async (_e, id: string, kind: ContentKind, file: string, enabled: boolean) => {
-    if (gameInstanceId === id) throw new Error('Bitte erst das Spiel beenden.');
-    await setContentEnabled(instances.dir((await instances.require(id)).id), assertKind(kind), file, Boolean(enabled));
+    const instance = await instances.require(id);
+    // Addons lassen sich auch während des Spiels schalten (wirkt nach dem Neustart), Mods erst nach dem Beenden
+    const busy = instanceBusy(instance.id);
+    if (busy && assertKind(kind) === 'mods') throw new Error('Bitte erst das Spiel beenden.');
+    try {
+      await setContentEnabled(instances.dir(instance.id), assertKind(kind), file, Boolean(enabled));
+    } catch (error) {
+      throw busy ? lockedFileError(error) : error;
+    }
+  });
+  ipcMain.handle('content:import', async (_e, id: string, files?: string[]) => {
+    const instance = await instances.require(id);
+    if (instance.loader === 'vanilla') throw new Error('Vanilla-Instanzen haben keine Mods und Addons.');
+    // ältere Versionen werden dabei ersetzt – das geht nicht, solange das Spiel die Dateien geöffnet hat
+    if (instanceBusy(instance.id)) throw new Error('Bitte erst das Spiel beenden, dann Dateien hinzufügen.');
+    let sources = Array.isArray(files) ? files.filter((f): f is string => typeof f === 'string') : [];
+    if (sources.length === 0) {
+      const result = await dialog.showOpenDialog(mainWindow!, {
+        title: 'Mods & Addons hinzufügen',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: usesHeldixClient(instance) ? (instance.loader === 'fabric' ? 'Fabric-Mods und Heldix-Addons' : 'Heldix-Addons') : 'Fabric-Mods', extensions: ['jar'] }],
+      });
+      if (result.canceled) return { added: [], errors: [] };
+      sources = result.filePaths;
+    }
+    const result = await importContentFiles(instances.dir(instance.id), await contentContext(instance), sources);
+    if (result.added.some((a) => a.kind === 'addons')) storeChanged();
+    return result;
   });
   ipcMain.handle('content:remove', async (_e, id: string, kind: ContentKind, file: string) => {
     if (gameInstanceId === id) throw new Error('Bitte erst das Spiel beenden.');
@@ -846,14 +920,14 @@ function registerIpc(): void {
     const instance = await instances.require(id);
     if (!usesHeldixClient(instance)) return [];
     if (gameInstanceId !== id) await applyPendingRemovals(instances.dir(instance.id));
-    return storeForInstance(instances.dir(instance.id), HELDIX_SERVICE_URL, UPDATE_PUBLIC_KEY);
+    return storeForInstance(instances.dir(instance.id), HELDIX_SERVICE_URL, STORE_PUBLIC_KEY, instance);
   });
   ipcMain.handle('addons:installStore', async (_e, id: string, addonId: string) => {
-    if (gameInstanceId === id) throw new Error('Bitte erst das Spiel beenden – oder im Spiel über Einstellungen → Addons → Store installieren.');
+    if (gameInstanceId === id) throw new Error('Bitte erst das Spiel beenden – oder im Spiel über das Heldix-Menü → Mods & Addons → Store installieren.');
     const instance = await instances.require(id);
     if (!usesHeldixClient(instance)) throw new Error('Heldix-Addons laufen nur in Instanzen mit HeldixClient.');
     await applyPendingRemovals(instances.dir(instance.id));
-    const name = await installStoreAddon(instances.dir(instance.id), HELDIX_SERVICE_URL, UPDATE_PUBLIC_KEY, String(addonId));
+    const name = await installStoreAddon(instances.dir(instance.id), HELDIX_SERVICE_URL, STORE_PUBLIC_KEY, String(addonId), undefined, instance);
     storeChanged();
     return name;
   });
@@ -861,7 +935,7 @@ function registerIpc(): void {
   ipcMain.handle('store:overview', () => addonStore.overview());
   ipcMain.handle('store:uninstall', async (_e, id: string, addonId: string) => {
     const instance = await instances.require(String(id));
-    if (instanceBusy(instance.id)) throw new Error('Bitte erst das Spiel beenden – oder im Spiel über Einstellungen → Addons entfernen.');
+    if (instanceBusy(instance.id)) throw new Error('Bitte erst das Spiel beenden – oder im Spiel über das Heldix-Menü → Mods & Addons entfernen.');
     await uninstallStoreAddon(instances.dir(instance.id), String(addonId));
     storeChanged();
   });
@@ -891,7 +965,7 @@ function registerIpc(): void {
   ipcMain.handle('social:join', (_e, uuid: unknown, instanceId?: unknown) => joinFriend(uuid, instanceId));
   ipcMain.handle('social:skin', (_e, uuid: unknown) => social.playerSkin(uuid));
 
-  // Skins & Capes
+  // Skins & Cosmetics
   ipcMain.handle('profile:get', (_e, refresh?: unknown) => profiles.state(refresh === true));
   ipcMain.handle('profile:import', (_e, files?: unknown) => importSkins(files));
   ipcMain.handle('profile:updateSkin', (_e, id: unknown, patch: unknown) => profiles.updateSavedSkin(id, patch));
@@ -900,6 +974,8 @@ function registerIpc(): void {
   ipcMain.handle('profile:resetSkin', () => profiles.resetSkin());
   ipcMain.handle('profile:mojangCape', (_e, id: unknown) => profiles.setMojangCape(id));
   ipcMain.handle('profile:heldixCape', (_e, id: unknown) => profiles.setHeldixCape(id));
+  ipcMain.handle('cosmetics:get', (_e, refresh?: unknown) => cosmetics.state(refresh === true));
+  ipcMain.handle('cosmetics:set', (_e, slot: unknown, id: unknown) => setCosmetic(slot, id));
 
   ipcMain.handle('modrinth:search', async (_e, id: string, query: string, offset: number) => {
     const instance = await instances.require(id);
@@ -917,6 +993,17 @@ function registerIpc(): void {
       throw new Error('Mods von Modrinth sind Fabric-Mods und laufen nur in Fabric-Instanzen, nicht mit dem Heldix Loader.');
     }
     return installModrinth(instances.dir(instance.id), instance.minecraft, String(projectId));
+  });
+  ipcMain.handle('modrinth:updates', async (_e, id: string) => {
+    const instance = await instances.require(id);
+    if (instance.loader !== 'fabric') return [];
+    return modrinthUpdates(instances.dir(instance.id), instance.minecraft);
+  });
+  ipcMain.handle('modrinth:update', async (_e, id: string, file: string) => {
+    if (instanceBusy(id)) throw new Error('Bitte erst das Spiel beenden.');
+    const instance = await instances.require(id);
+    if (instance.loader !== 'fabric') throw new Error('Modrinth-Mods gibt es nur in Fabric-Instanzen.');
+    return updateModrinthMod(instances.dir(instance.id), instance.minecraft, String(file), sendProgress);
   });
 
   // Shaderpacks laufen über Iris und damit nur in Fabric-Instanzen
@@ -1021,6 +1108,14 @@ function registerIpc(): void {
   ipcMain.handle('instances:quickPlay', async (_e, id: string) => {
     const instance = await instances.require(id);
     return listQuickPlay(instances.dir(instance.id), paths.versions, instance.minecraft);
+  });
+  // nur Server, die in der Serverliste dieser Instanz stehen
+  ipcMain.handle('instances:serverStatus', async (_e, id: string, address: string) => {
+    const instance = await instances.require(id);
+    const list = await listQuickPlay(instances.dir(instance.id), paths.versions, instance.minecraft);
+    const wanted = String(address ?? '').trim().toLowerCase();
+    if (!list.targets.some((t) => t.kind === 'server' && (t.address ?? t.id).trim().toLowerCase() === wanted)) throw new Error('Diesen Server gibt es in der Serverliste nicht.');
+    return serverStatus(wanted);
   });
   ipcMain.handle('game:kill', () => {
     if (game) killedByUser = true;

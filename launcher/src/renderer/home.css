@@ -1,6 +1,7 @@
 /* =========================================================
-   Startseite: großer Bereich mit Hintergrundmotiv, Spielen-Knopf
-   und Figur, darunter Weiterspielen, Instanzen und Neuigkeiten
+   Startseite: großer Bereich mit Hintergrundmotiv, Spielen-Knopf,
+   Fakten und Figur; darunter Hinweise und zwei Spalten:
+   Weiterspielen + Instanzen | Freunde + Neuigkeiten
    ========================================================= */
 .home-page { padding-top: 6px; }
 
@@ -126,7 +127,7 @@
 .picker-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .picker-actions .ghost { height: 32px; font-size: 12.5px; }
 
-.home-status { display: flex; align-items: center; gap: 8px; max-width: 100%; min-height: 18px; margin-top: 12px; color: var(--muted); font-size: 12.5px; }
+.home-status { display: flex; align-items: center; gap: 8px; max-width: 100%; min-height: 20px; margin-top: 12px; color: var(--muted); font-size: 12.5px; }
 .home-status .status-text { color: var(--text); font-weight: 700; white-space: nowrap; }
 .home-status .status-sub { margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
@@ -179,9 +180,10 @@
 .home.busy .home-progress { opacity: 1; }
 
 /* ---------- Bereiche unter dem großen Feld ---------- */
-.home-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; max-width: 1180px; margin-top: 14px; align-items: start; }
+.home-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; max-width: 1180px; margin-top: 14px; align-items: start; }
 .home-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.home-col:empty { display: none; }
+/* Spalte ohne sichtbaren Bereich (z. B. kein Heldix-Dienst und offline): die andere nimmt die ganze Breite */
+.home-col:not(:has(> .panel:not([hidden]))) { display: none; }
 .row-icon.head { image-rendering: pixelated; }
 .row-item .row-badge { flex: none; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
 .row-meta.online { color: var(--ok); }
@@ -245,3 +247,47 @@
 .whatsnew h4 { margin: 14px 0 6px; font-size: 13px; color: var(--accent-text); }
 .whatsnew h4:first-child { margin-top: 0; }
 .whatsnew ul { margin: 0; padding-left: 18px; line-height: 1.6; }
+
+/* ---------- Fakten zur Instanz (unter dem Spielen-Knopf, wenn sonst nichts zu sagen ist) ---------- */
+.home-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; max-width: 100%; min-height: 20px; margin-top: 12px; color: #aeb8c8; font-size: 12.5px; }
+.home-fact { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.home-fact svg { width: 14px; height: 14px; flex: none; color: var(--faint); }
+
+/* ---------- Hinweise zwischen großem Feld und Bereichen ---------- */
+.home-notices { display: flex; flex-direction: column; gap: 8px; max-width: 1180px; margin-top: 14px; }
+.home-notice { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 12px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--line); animation: fade-up 0.3s backwards; }
+.home-notice.accent { border-color: var(--accent-line); background: linear-gradient(90deg, var(--accent-soft), var(--panel) 60%); }
+.home-notice.warn { border-color: rgba(251, 191, 36, 0.35); background: linear-gradient(90deg, rgba(251, 191, 36, 0.1), var(--panel) 60%); }
+.home-notice-icon { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: 9px; color: var(--accent-text); background: var(--accent-soft); }
+.home-notice.warn .home-notice-icon { color: var(--warn); background: rgba(251, 191, 36, 0.14); }
+.home-notice-icon svg { width: 16px; height: 16px; }
+.home-notice-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.home-notice-text strong { font-size: 13px; }
+.home-notice-text span { overflow: hidden; color: var(--muted); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.home-notice-actions { display: flex; flex: none; gap: 6px; }
+.home-notice .icon-button.small { width: 28px; height: 28px; flex: none; }
+
+/* ---------- Weiterspielen: Serverstatus ---------- */
+.row-meta .server-dot { display: inline-block; width: 6px; height: 6px; margin: 0 6px 1px 1px; border-radius: 50%; background: currentColor; vertical-align: middle; }
+.row-meta.loading::after { content: " · prüfe …"; color: var(--faint); }
+.row-meta.online { color: var(--ok); }
+.row-meta.online .server-ping { color: var(--faint); }
+.row-meta.offline { color: var(--faint); }
+
+/* ---------- Freunde: offline, Hinweiszeile, Trenner ---------- */
+.row-item.offline .row-icon { filter: grayscale(1); opacity: 0.55; }
+.row-item.offline .row-name { color: var(--muted); }
+.row-note { padding: 6px 8px 8px; color: var(--faint); font-size: 12px; }
+.row-divider { padding: 8px 8px 2px; color: var(--faint); font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* ---------- Neuigkeiten: Filter und „Neu“ ---------- */
+.news-filter { flex: none; margin-right: 0; padding: 2px; }
+.news-filter button { height: 24px; padding: 0 9px; font-size: 11.5px; }
+.row-kind.heldix { color: var(--accent-text); }
+.row-new { flex: none; height: 18px; padding: 0 7px; border-radius: 9px; background: var(--accent-soft); color: var(--accent-text); font-size: 10.5px; font-weight: 700; line-height: 18px; }
+.row-icon.thumb.placeholder { display: grid; place-items: center; }
+
+@media (max-width: 760px) {
+  .home-notice { flex-wrap: wrap; }
+  .home-notice-actions { order: 3; width: 100%; justify-content: flex-end; }
+}

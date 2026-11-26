@@ -1,9 +1,15 @@
 // HeldixClient – Webseite: Team-Bereich (/team) für Moderatoren und Admins
 // (Meldungen, Support, Spieler, Sperren, Neuigkeiten, Addons: Einreichungen und Addon-Meldungen (team-addons.js), Mein
-// Teamprofil; Admins zusätzlich Updates, Addons freigeben und veröffentlichen, Team, Protokoll).
+// Teamprofil; Admins zusätzlich Updates, Addons freigeben und veröffentlichen, Cosmetics, Team, Protokoll).
+// Startseite ist die Übersicht (team-overview.js); dazu Schnellsuche (Strg+K, team-search.js) und Aktivität mit Glocke
+// (team-activity.js). Übersicht und Glocke nutzen dieselben Daten wie das Nachfragen alle 30 Sekunden (live).
 // Zugang: Cookie-Sitzung + Team-Rolle + Zwei-Faktor-Anmeldung (TOTP), in dieser Sitzung bestätigt (12 Stunden).
 // Der Dienst antwortet sonst mit 403 und code forbidden / 2fa_setup_required / 2fa_required – dann zeigt
 // die Seite die passende Sperre (Einrichten, Code eingeben, kein Zugang).
+// Rahmen mit Seitenleiste (app-shell.js): „Mein Konto“ bleibt auch hinter der Zwei-Faktor-Abfrage erreichbar; ein
+// Link wie /team#reiter=support öffnet den Bereich direkt (nach der Abfrage), mit Werten auch einen Eintrag:
+// #reiter=support&anfrage=12, #reiter=meldungen&meldung=5, #reiter=spieler&spieler=<uuid>, #reiter=addons&einreichung=<id>
+// (oder &unterreiter=meldungen, &addon=<id>), #reiter=cosmetics&cosmetic=<id>.
 import {
   $,
   $$,
@@ -32,7 +38,6 @@ import {
   rerender,
   ROLE_LABELS,
   setSkinSource,
-  setupTabs,
   showError,
   textBlocks,
   timeEl,
@@ -40,9 +45,14 @@ import {
   uid,
   upload,
 } from './app-common.js';
-import { ADDON_ID_RE, API_STUFE, KATEGORIEN, addonIcon, hasIcon, platformText } from './addon-common.js';
+import { ADDON_ID_RE, API_STUFE, KATEGORIEN, accessChips, addonIcon, hasIcon, platformText } from './addon-common.js';
 import { memberCard, newsCard, publicGet, skinHead } from './public-cards.js';
-import { initTeamAddons } from './team-addons.js';
+import { AREAS, createShell, parseShellHash } from './app-shell.js';
+import { initTeamAddons, normalizeAccess } from './team-addons.js';
+import { initTeamActivity } from './team-activity.js';
+import { initTeamCosmetics } from './team-cosmetics.js';
+import { initTeamOverview } from './team-overview.js';
+import { initTeamSearch } from './team-search.js';
 import { attachmentList, normalizeAttachments } from './support-attachments.js';
 
 // Spielerbilder im Team-Bereich: Minecraft-Köpfe über die Cookie-Sitzung (das bestätigte Team darf alle).
@@ -85,8 +95,27 @@ const state = {
   previewHead: null,
 };
 
-let tabs = null;
+/** Bereich, wenn die Adresse keinen nennt. */
+const DEFAULT_SECTION = 'uebersicht';
+
+let shell = null;
 let teamAddonsUi = null;
+let overview = null;
+let activity = null;
+let quickSearch = null;
+let cosmeticsUi = null;
+
+/**
+ * Was gerade offen ist – aus dem Nachfragen (Zähler) und den Listen der Bereiche, ohne eigene Anfragen. Nutzen
+ * Übersicht, Glocke und Suche. null = noch nicht geladen.
+ */
+const live = { reports: null, tickets: null, submissions: null, addonReports: null, addonReportsForbidden: false, at: 0 };
+
+function liveChanged() {
+  live.at = Date.now();
+  overview?.update();
+  activity?.update({ ...live });
+}
 const teamRefresher = poller(() => teamTick(), 30_000);
 
 // ---------------------------------------------------------------------------------------------------------
@@ -136,14 +165,26 @@ async function reloadMe() {
 // ---------------------------------------------------------------------------------------------------------
 
 const VIEWS = ['team-laden', 'team-fehler', 'team-gast', 'team-kein-zugang', 'team-2fa-einrichten', 'team-2fa-pruefen', 'team-app'];
+/** Ansichten im Rahmen (mit Seitenleiste); die anderen stehen allein auf der Seite. */
+const SHELL_VIEWS = new Set(['team-kein-zugang', 'team-2fa-einrichten', 'team-2fa-pruefen', 'team-app']);
 
 function showView(id) {
   for (const view of VIEWS) $(`#${view}`).hidden = view !== id;
+  $('#team-shell').hidden = !SHELL_VIEWS.has(id);
+  if (!SHELL_VIEWS.has(id)) shell.closeAll();
+  shell.setTeamLocked(id === 'team-2fa-einrichten' || id === 'team-2fa-pruefen');
+  if (id === 'team-kein-zugang') shell.setTitle('Team-Bereich');
   for (const dialog of document.querySelectorAll('dialog.modal, dialog.lightbox-dialog')) if (id !== 'team-app') dialog.remove();
   if (id !== 'team-app') {
     teamRefresher.stop();
     // Signier-Schlüssel nie über das Ende der Team-Ansicht hinaus behalten
     teamAddonsUi?.reset();
+    // Suche, Glocke und Daten der Übersicht gehören zur bestätigten Team-Ansicht
+    quickSearch?.disable();
+    activity?.stop();
+    overview?.reset();
+    cosmeticsUi?.reset();
+    Object.assign(live, { reports: null, tickets: null, submissions: null, addonReports: null, addonReportsForbidden: false, at: 0 });
   }
 }
 
@@ -171,10 +212,16 @@ async function start() {
 
 function route(me) {
   state.me = me;
+  shell.setUser(me);
   if (!me.role) {
     $('#kein-zugang-name').textContent = me.name;
     showView('team-kein-zugang');
-  } else if (!me.twoFactor?.enabled) {
+    return;
+  }
+  // Gewünschten Bereich schon markieren – auch hinter der Zwei-Faktor-Abfrage (Titel in der Kopfzeile)
+  const wanted = parseShellHash().section;
+  if (!shell.current() || (shell.has(wanted) && wanted !== shell.current())) shell.select(shell.has(wanted) ? wanted : DEFAULT_SECTION, { silent: true, history: 'none' });
+  if (!me.twoFactor?.enabled) {
     showSetup();
   } else if (!me.twoFactor?.verified) {
     showVerify();
@@ -285,41 +332,109 @@ const isAdmin = () => state.me?.role === 'admin';
 
 function showApp() {
   const admin = isAdmin();
+  // Unterreiter nur für Admins (die Bereiche in der Seitenleiste blendet die Shell selbst aus)
   for (const tab of $$('[data-admin]')) tab.hidden = !admin;
-  $('#team-meta').replaceChildren(
-    h('span', { text: `Angemeldet als ${state.me.name}` }),
-    h('span', { class: 'chip accent', text: ROLE_LABELS[state.me.role] ?? state.me.role }),
-    h('span', { class: 'chip success' }, icon('lock'), '2FA bestätigt'),
-  );
+  shell.setMeta([`Angemeldet als ${state.me.name}`, h('span', { class: 'chip success' }, icon('lock'), '2FA bestätigt')]);
   showView('team-app');
-  const wanted = location.hash.slice(1);
-  const current = tabs.current();
-  tabs.select(tabs.has(wanted) ? wanted : current && tabs.has(current) ? current : 'meldungen');
-  refreshSupportCount().catch(() => {});
-  teamAddonsUi.refreshCounts().catch(() => {});
-  if (tabs.current() !== 'profil') loadProfile().catch(() => {});
+  quickSearch.enable();
+  activity.start(state.me);
+  const { section: wanted, extra } = parseShellHash();
+  const current = shell.current();
+  // Die Übersicht lädt die Zähler selbst (sonst doppelt beim Start)
+  const target = shell.has(wanted) ? wanted : current && shell.has(current) ? current : DEFAULT_SECTION;
+  if (target !== 'uebersicht') refreshLive().catch(() => {});
+  shell.select(target, { params: shell.has(wanted) ? extra : null });
+  if (shell.current() !== 'profil') loadProfile().catch(() => {});
   teamRefresher.start();
 }
 
-function onTab(name) {
-  history.replaceState(null, '', `${location.pathname}${location.search}#${name}`);
+/** Zähler (Meldungen, Support, Einreichungen, Addon-Meldungen) neu laden – dieselben Anfragen wie das Nachfragen. */
+function refreshLive() {
+  return Promise.all([refreshReportCount(), refreshSupportCount(), teamAddonsUi.refreshCounts()]);
+}
+
+/** Werte aus der Adresse (#reiter=…&anfrage=12) als Zahl bzw. Text. */
+const paramId = (params, key) => {
+  const value = params?.[key];
+  return /^\d{1,9}$/.test(String(value ?? '')) ? Number(value) : null;
+};
+const paramText = (params, key, re) => {
+  const value = params?.[key];
+  return typeof value === 'string' && re.test(value) ? value : value !== undefined && value !== null && re.test(String(value)) ? String(value) : null;
+};
+
+/**
+ * Bereich gewählt (Seitenleiste, Adresse, Suche, Glocke, Übersicht). params: Werte aus der Adresse, die einen Eintrag
+ * gleich öffnen (siehe Kopf der Datei).
+ */
+function onTab(name, { params = null } = {}) {
+  // Hinter der Zwei-Faktor-Abfrage nur merken, was gewählt ist – geladen wird erst danach (showApp).
+  if ($('#team-app').hidden) return;
+  const report = paramId(params, 'meldung');
+  const ticket = paramId(params, 'anfrage');
+  const player = paramText(params, 'spieler', /^[0-9a-f]{32}$/);
+  const submission = paramText(params, 'einreichung', /^[A-Za-z0-9_-]{1,64}$/);
+  const addon = paramText(params, 'addon', /^[a-z0-9][a-z0-9_-]{0,39}$/);
+  const sub = paramText(params, 'unterreiter', /^(einreichungen|veroeffentlicht|meldungen)$/);
+  const cosmetic = paramText(params, 'cosmetic', /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/);
   const loaders = {
-    meldungen: loadReports,
+    uebersicht: () => overview.load(),
+    meldungen: () => {
+      if (report === null) return loadReports();
+      setReportFilter('all');
+      return loadReports({ focusId: report });
+    },
     sperren: loadBans,
     neuigkeiten: loadNews,
     updates: loadUpdates,
     addons: async () => {
-      teamAddonsUi.show();
+      teamAddonsUi.show({ sub: addon ? 'veroeffentlicht' : sub, submission });
       // Admins: Liste, öffentlicher Schlüssel (für die Prüfung der Schlüsseldatei) und ausgeblendete Addons
       if (isAdmin()) await loadTeamAddons();
+      if (addon) focusTeamAddon(addon);
     },
+    cosmetics: () => cosmeticsUi.show({ focusId: cosmetic }),
     team: loadMembers,
     protokoll: loadAudit,
-    support: loadSupport,
+    support: async () => {
+      const job = loadSupport();
+      if (ticket !== null) openTeamTicket(ticket);
+      await job;
+    },
     profil: loadProfile,
   };
   if (loaders[name]) loaders[name]().catch(showError);
-  if (name === 'spieler' && !state.players.length && !state.selectedPlayer) $('#spieler-liste').replaceChildren(h('p', { class: 'hint', text: 'Gib einen Namen (oder den Anfang) oder eine UUID ein.' }));
+  if (name === 'spieler') {
+    if (player) openPlayer(player);
+    else if (!state.players.length && !state.selectedPlayer) $('#spieler-liste').replaceChildren(h('p', { class: 'hint', text: 'Gib einen Namen (oder den Anfang) oder eine UUID ein.' }));
+  }
+}
+
+/** Zu einem Bereich (mit Eintrag) springen: neuer Eintrag im Verlauf, Seite hoch, Fokus auf den Titel. */
+function jump(section, params = null) {
+  shell.select(section, { history: 'push', params, scroll: true, source: 'search' });
+  $('#shell-titel').focus({ preventScroll: true });
+}
+
+/** Bereich öffnen und danach etwas darin tun (z. B. ein Feld fokussieren). */
+function jumpThen(section, then) {
+  jump(section);
+  requestAnimationFrame(() => then());
+}
+
+/** Adresse an den offenen Eintrag anpassen (ohne neuen Eintrag im Verlauf, ohne neu zu laden): teilbare Links. */
+function syncHash(section, params) {
+  if (shell.current() === section) shell.select(section, { silent: true, history: 'replace', params });
+}
+
+/** Veröffentlichtes Addon in der Verwaltung zeigen (Suche, Links). */
+function focusTeamAddon(id) {
+  const card = [...document.querySelectorAll('#addon-verwaltung .addon-admin')].find((element) => element.dataset.id === id);
+  if (!card) return;
+  card.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  card.classList.add('highlight');
+  card.querySelector('input, a, button')?.focus({ preventScroll: true });
+  setTimeout(() => card.classList.remove('highlight'), 2400);
 }
 
 /** Kleiner Kopf + Name als Knopf (Meldungen). */
@@ -389,8 +504,8 @@ async function loadReports({ focusId } = {}) {
   const data = await teamCall('GET', `/v1/team/reports?status=${filter}`);
   if (filter !== state.reportFilter) return;
   state.reports = Array.isArray(data?.reports) ? data.reports : [];
-  if (filter === 'open') setOpenCount(state.reports.length);
-  else if (filter === 'all') setOpenCount(state.reports.filter((report) => report.status !== 'done').length);
+  if (filter === 'open') setOpenReports(state.reports);
+  else if (filter === 'all') setOpenReports(state.reports.filter((report) => report.status !== 'done'));
   renderReports();
   if (focusId !== undefined) {
     const card = $(`#meldung-${focusId}`);
@@ -405,10 +520,20 @@ async function loadReports({ focusId } = {}) {
 }
 
 function setOpenCount(count) {
-  const badge = $('#count-meldungen');
-  badge.hidden = !count;
-  badge.textContent = count > 99 ? '99+' : String(count);
-  badge.setAttribute('aria-label', `${count} offen`);
+  shell.setBadge('meldungen', count, { label: `${count} offen` });
+}
+
+/** Offene Meldungen: Zähler und Daten für Übersicht und Glocke. */
+function setOpenReports(reports) {
+  live.reports = reports;
+  setOpenCount(reports.length);
+  liveChanged();
+}
+
+/** Zähler „Meldungen“ (offen), auch wenn der Bereich nicht offen ist. */
+async function refreshReportCount() {
+  const data = await teamCall('GET', '/v1/team/reports?status=open');
+  setOpenReports(Array.isArray(data?.reports) ? data.reports : []);
 }
 
 function renderReports() {
@@ -428,7 +553,7 @@ function reportCard(report) {
   const messages = Array.isArray(report.messages) ? report.messages : [];
   return h(
     'article',
-    { class: 'app-card report', id: `meldung-${report.id}`, tabindex: '-1', 'aria-labelledby': `meldung-${report.id}-titel` },
+    { class: 'app-card report', id: `meldung-${report.id}`, tabindex: '-1', 'aria-labelledby': `meldung-${report.id}-titel`, dataset: { status: done ? 'done' : 'open' } },
     h(
       'div',
       { class: 'report-head' },
@@ -485,7 +610,8 @@ async function markDone(button, report) {
     const data = await busy(button, () => teamCall('POST', `/v1/team/reports/${report.id}/done`));
     const updated = data?.report ?? { ...report, status: 'done' };
     state.reports = state.reportFilter === 'open' ? state.reports.filter((entry) => entry.id !== report.id) : state.reports.map((entry) => (entry.id === report.id ? updated : entry));
-    if (state.reportFilter === 'open') setOpenCount(state.reports.length);
+    const open = live.reports ?? (state.reportFilter === 'open' ? state.reports : null);
+    if (open) setOpenReports(open.filter((entry) => entry.id !== report.id));
     renderReports();
     toast(`Meldung #${report.id} ist erledigt.`, 'success');
     $('#meldungen-filter [aria-pressed="true"]')?.focus();
@@ -506,8 +632,7 @@ function setReportFilter(status) {
 
 async function showReport(id) {
   setReportFilter('all');
-  tabs.select('meldungen', { silent: true });
-  history.replaceState(null, '', `${location.pathname}#meldungen`);
+  shell.select('meldungen', { silent: true });
   await loadReports({ focusId: id }).catch(showError);
 }
 
@@ -576,13 +701,14 @@ function renderPlayers() {
 }
 
 async function openPlayer(uuid, { fromList = false } = {}) {
-  if (tabs.current() !== 'spieler') tabs.select('spieler');
+  if (shell.current() !== 'spieler') shell.select('spieler');
   const detail = $('#spieler-detail');
   detail.replaceChildren(loadingState('Spieler wird geladen …'));
   try {
     const player = await teamCall('GET', `/v1/team/players/${uuid}`);
     state.selectedPlayer = player;
     renderPlayerDetail(player);
+    syncHash('spieler', { spieler: player.uuid });
     if (!fromList) {
       // Aus einer Meldung gekommen: die Suche zeigt den Spieler mit an.
       $('#spieler-q').value = player.name;
@@ -722,6 +848,7 @@ async function deletePlayer(player) {
   if (!ok) return;
   toast(`Die Daten von ${player.name} sind gelöscht.`, 'success');
   state.selectedPlayer = null;
+  syncHash('spieler', null);
   $('#spieler-detail').replaceChildren(emptyState(`Die Daten von ${player.name} sind gelöscht.`, 'check'));
   search().catch(() => {});
 }
@@ -1510,6 +1637,8 @@ function addonAdminItem(addon) {
           chip(`Version ${addon.latest ?? latest?.version ?? '?'}`, 'accent'),
           addon.hidden ? chip('ausgeblendet', 'warning') : null,
           addon.official === false || ownerName(addon) ? h('span', { class: 'chip community' }, icon('friends'), 'Community') : h('span', { class: 'chip official' }, icon('shield'), 'Offiziell'),
+          // Mods & Addons: Zugriff der neuesten Version (Dienst ab 1.6.1; ältere Angaben = nur Heldix-API)
+          accessChips(normalizeAccess(addon, latest)),
         ),
         ownerName(addon)
           ? h('div', { class: 'row-meta addon-owner' }, 'Besitzer: ', addon.owner?.uuid ? h('button', { type: 'button', class: 'link-button', onClick: () => openPlayer(addon.owner.uuid) }, ownerName(addon)) : h('span', { text: ownerName(addon) }))
@@ -1538,7 +1667,7 @@ function addonAdminItem(addon) {
           h(
             'div',
             { class: 'row-main' },
-            h('div', { class: 'row-title' }, h('strong', { text: version.version }), index === 0 ? chip('neueste', 'success') : null, version.api ? chip(`API ${version.api}`) : null),
+            h('div', { class: 'row-title' }, h('strong', { text: version.version }), index === 0 ? chip('neueste', 'success') : null, version.api ? chip(`API ${version.api}`) : null, index > 0 ? accessChips(normalizeAccess(version), { compact: true }) : null),
             h('div', { class: 'row-sub', text: [formatBytes(version.size), version.publishedAt ? `veröffentlicht ${formatDateTime(version.publishedAt)}` : null, version.publishedBy ? `von ${version.publishedBy}` : null].filter(Boolean).join(' · ') }),
             h('div', { class: 'row-meta' }, h('code', { class: 'mono', title: version.sha256 ?? '', text: `SHA-256 ${shortSha(version.sha256)}` })),
             notes.length ? h('ul', { class: 'plain-list addon-admin-notes' }, notes.map((note) => h('li', { text: note }))) : null,
@@ -1642,6 +1771,11 @@ function addonManifestProblems(m) {
   if (typeof m.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(m.sha256)) problems.push('„sha256“: 64 Hex-Zeichen (klein).');
   if (typeof m.date !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(m.date) || !Number.isFinite(Date.parse(m.date))) problems.push('„date“: Datum nach ISO 8601, z. B. 2026-11-25.');
   if (m.notes !== undefined && (!Array.isArray(m.notes) || m.notes.length > 20 || !m.notes.every((note) => isText(note, 1, 300)))) problems.push('„notes“: höchstens 20 Texte mit je 1–300 Zeichen.');
+  // Mods & Addons (Dienst ab 1.6.1): freiwillig; fehlen sie, gilt access api
+  if (m.access !== undefined && !['api', 'minecraft'].includes(m.access)) problems.push('„access“: api oder minecraft.');
+  if (m.minecraft !== undefined && (!Array.isArray(m.minecraft) || m.minecraft.length > 50 || !m.minecraft.every((version) => typeof version === 'string' && /^[0-9A-Za-z][0-9A-Za-z._+*-]{0,31}$/.test(version)) || new Set(m.minecraft).size !== m.minecraft.length)) problems.push('„minecraft“: Liste mit höchstens 50 Minecraft-Versionen (z. B. 26.3), ohne Doppelte.');
+  else if (m.access === 'minecraft' && !(m.minecraft ?? []).length) problems.push('„minecraft“ darf nicht leer sein, wenn das Addon in Minecraft eingreift.');
+  if (m.loaders !== undefined && (!Array.isArray(m.loaders) || !m.loaders.length || !m.loaders.every((loader) => ['heldix', 'fabric'].includes(loader)) || new Set(m.loaders).size !== m.loaders.length)) problems.push('„loaders“: heldix und/oder fabric, ohne Doppelte.');
   return problems;
 }
 
@@ -1866,6 +2000,8 @@ function renderAddonCheck() {
       h('dd', { text: platformText(platforms.filter((system) => ['windows', 'mac', 'linux'].includes(system))) }),
       h('dt', { text: 'API-Stufe' }),
       h('dd', { text: String(inner.api ?? '–') }),
+      h('dt', { text: 'Zugriff' }),
+      h('dd', null, normalizeAccess(inner).access === 'minecraft' ? h('span', { class: 'chips-row' }, accessChips(normalizeAccess(inner))) : 'Nur Heldix-API'),
       h('dt', { text: 'Autoren' }),
       h('dd', { text: Array.isArray(inner.authors) ? inner.authors.join(', ') : '–' }),
       notes.length ? [h('dt', { text: 'Neu' }), h('dd', null, h('ul', { class: 'plain-list' }, notes.map((note) => h('li', { text: note }))))] : null,
@@ -2081,16 +2217,15 @@ function supportChip(status) {
 }
 
 function setSupportCount(count) {
-  const badge = $('#count-support');
-  badge.hidden = !count;
-  badge.textContent = count > 99 ? '99+' : String(count);
-  badge.setAttribute('aria-label', count === 1 ? '1 wartet auf Antwort' : `${count} warten auf Antwort`);
+  shell.setBadge('support', count, { label: count === 1 ? '1 wartet auf Antwort' : `${count} warten auf Antwort` });
 }
 
-/** Zähler am Reiter: Anfragen, deren letzte Nachricht vom Spieler ist. */
+/** Zähler am Reiter: Anfragen, deren letzte Nachricht vom Spieler ist (dazu die Daten für Übersicht und Glocke). */
 async function refreshSupportCount() {
   const data = await teamCall('GET', '/v1/team/support?status=open');
-  setSupportCount((Array.isArray(data?.tickets) ? data.tickets : []).filter((ticket) => ticket.unread).length);
+  live.tickets = Array.isArray(data?.tickets) ? data.tickets : [];
+  setSupportCount(live.tickets.filter((ticket) => ticket.unread).length);
+  liveChanged();
 }
 
 function setSupportFilter(status) {
@@ -2110,6 +2245,10 @@ async function loadSupport() {
   if (filter !== state.supportFilter) return;
   state.supportTickets = Array.isArray(data?.tickets) ? data.tickets : [];
   if (filter === 'open' || filter === 'all') setSupportCount(state.supportTickets.filter((ticket) => ticket.unread && ticket.status !== 'closed').length);
+  if (filter === 'open') {
+    live.tickets = state.supportTickets;
+    liveChanged();
+  }
   renderSupportList();
 }
 
@@ -2168,7 +2307,7 @@ function authorNote(playerName) {
 }
 
 async function openTeamTicket(id) {
-  if (tabs.current() !== 'support') tabs.select('support');
+  if (shell.current() !== 'support') shell.select('support');
   state.ticket = { id, loading: true };
   renderSupportList();
   const detail = $('#team-ticket');
@@ -2178,6 +2317,7 @@ async function openTeamTicket(id) {
     const data = await teamCall('GET', `/v1/team/support/${encodeURIComponent(id)}`);
     if (state.ticket?.id !== id) return;
     buildTicketView(data.ticket);
+    syncHash('support', { anfrage: id });
     $('#team-ticket-titel')?.focus({ preventScroll: true });
   } catch (error) {
     if (error.handled || state.ticket?.id !== id) return;
@@ -2312,8 +2452,8 @@ async function closeTeamTicket() {
 /** Alle 30 Sekunden (solange sichtbar): Zähler am Reiter, im Support-Reiter auch Liste und offene Anfrage. */
 async function teamTick() {
   if ($('#team-app').hidden) return;
-  const tasks = [refreshSupportCount(), teamAddonsUi.refreshCounts()];
-  if (tabs.current() === 'support') {
+  const tasks = [refreshReportCount(), refreshSupportCount(), teamAddonsUi.refreshCounts()];
+  if (shell.current() === 'support') {
     tasks.push(loadSupport());
     const id = state.ticket?.id;
     if (id && !state.ticket.loading) {
@@ -2346,14 +2486,26 @@ function profileDirty() {
   return now.public !== state.profile.public || now.title !== state.profile.title || now.about !== state.profile.about;
 }
 
-async function loadProfile() {
+let profileLoading = null;
+
+/** Teamprofil laden. Läuft schon ein Laden, kommt dessen Ergebnis (Start der Seite + Öffnen des Bereichs). */
+function loadProfile() {
+  if (!profileLoading) profileLoading = fetchProfile().finally(() => (profileLoading = null));
+  return profileLoading;
+}
+
+async function fetchProfile() {
   const data = await teamCall('GET', '/v1/team/me/profile');
+  // Hat jemand währenddessen schon getippt, bleiben die Eingaben stehen (sonst wären sie still weg).
+  const keepInput = profileDirty();
   state.profile = { public: Boolean(data?.public), title: String(data?.title ?? ''), about: String(data?.about ?? '') };
-  $('#profil-public').checked = state.profile.public;
-  $('#profil-titel').value = state.profile.title;
-  $('#profil-text').value = state.profile.about;
-  $('#profil-titel').dispatchEvent(new Event('input'));
-  $('#profil-text').dispatchEvent(new Event('input'));
+  if (!keepInput) {
+    $('#profil-public').checked = state.profile.public;
+    $('#profil-titel').value = state.profile.title;
+    $('#profil-text').value = state.profile.about;
+    $('#profil-titel').dispatchEvent(new Event('input'));
+    $('#profil-text').dispatchEvent(new Event('input'));
+  }
   $('#profil-fehler').hidden = true;
   state.previewHead = null;
   renderProfilePreview();
@@ -2482,6 +2634,10 @@ const ACTIONS = {
   'addon.report.done': 'Addon-Meldung erledigt',
   'addon-report.done': 'Addon-Meldung erledigt',
   'addon.report': 'Addon-Meldung erledigt',
+  'cosmetic.publish': 'Cosmetic veröffentlicht',
+  'cosmetic.hide': 'Cosmetic ausgeblendet',
+  'cosmetic.show': 'Cosmetic wieder im Katalog',
+  'cosmetic.delete': 'Cosmetic gelöscht',
   'member.add': 'Mitglied hinzugefügt',
   'team.add': 'Mitglied hinzugefügt',
   'member.role': 'Rolle geändert',
@@ -2550,7 +2706,7 @@ async function loadAudit() {
 
 /** Aus dem Addons-Reiter zu den Spieler-Details wechseln. */
 function openPlayerFromAddons(uuid) {
-  tabs.select('spieler');
+  shell.select('spieler');
   openPlayer(uuid);
 }
 
@@ -2564,10 +2720,54 @@ async function logout() {
 }
 
 function init() {
-  tabs = setupTabs($('#team-tabs'), onTab);
-  teamAddonsUi = initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlayer: (uuid) => openPlayerFromAddons(uuid), getTeamAddons: () => state.teamAddons, loadTeamAddons, setAddonHidden });
+  shell = createShell({ root: $('#team-shell'), page: 'team', defaultSection: DEFAULT_SECTION, onSelect: onTab, onSignOut: logout });
+  shell.mountOverview($('#uebersicht-kacheln'));
+  teamAddonsUi = initTeamAddons({
+    teamCall,
+    handleAccessError,
+    isAdmin,
+    openPlayer: (uuid) => openPlayerFromAddons(uuid),
+    getTeamAddons: () => state.teamAddons,
+    loadTeamAddons,
+    setAddonHidden,
+    setBadge: (count, label) => shell.setBadge('addons', count, { label }),
+    onData: (data) => {
+      if (data.submissions) live.submissions = data.submissions;
+      if (data.reports) live.addonReports = data.reports;
+      live.addonReportsForbidden = data.reportsForbidden;
+      liveChanged();
+    },
+    onNavigate: (params) => syncHash('addons', params),
+  });
+  overview = initTeamOverview({ shell, teamCall, isAdmin, getMe: () => state.me, getLive: () => live, refreshLive, actionLabel });
+  activity = initTeamActivity({ shell });
+  cosmeticsUi = initTeamCosmetics({ teamCall, onChange: () => quickSearch?.invalidate() });
+  quickSearch = initTeamSearch({
+    shell,
+    teamCall,
+    isAdmin,
+    sections: () => shell.sections().map((id) => AREAS.team.sections.find((section) => section.id === id)).filter(Boolean),
+    getTeamAddons: () => state.teamAddons,
+    getCosmetics: () => cosmeticsUi.list(),
+    open: {
+      section: (id) => jump(id),
+      player: (uuid) => jump('spieler', { spieler: uuid }),
+      ticket: (id) => jump('support', { anfrage: id }),
+      report: (id) => jump('meldungen', { meldung: id }),
+      submission: (id) => jump('addons', { einreichung: id }),
+      addon: (id) => (isAdmin() ? jump('addons', { addon: id }) : window.open(`/addons#${encodeURIComponent(id)}`, '_blank', 'noopener')),
+      cosmetic: (id) => jump('cosmetics', { cosmetic: id }),
+    },
+    actions: () =>
+      [
+        { id: 'neuigkeit', label: 'Neue Neuigkeit schreiben', text: 'Neuigkeiten → Editor öffnen', icon: 'news', keywords: ['news', 'beitrag', 'schreiben', 'neuigkeit'], run: () => jumpThen('neuigkeiten', () => openEditor(null)) },
+        { id: 'sperren', label: 'Spieler sperren …', text: 'Sperren → Name und Grund eingeben', icon: 'ban', keywords: ['bann', 'ban', 'sperre'], run: () => jumpThen('sperren', () => $('#sperre-name').focus()) },
+        isAdmin() ? { id: 'mitglied', label: 'Mitglied hinzufügen …', text: 'Team → Spielername und Rolle', icon: 'user-plus', keywords: ['team', 'moderator', 'admin', 'rolle'], run: () => jumpThen('team', () => $('#mitglied-name').focus()) } : null,
+        isAdmin() ? { id: 'cosmetic', label: 'Cosmetic veröffentlichen …', text: 'Cosmetics → .cosmetic.json wählen', icon: 'sparkles', keywords: ['cosmetic', 'hut', 'flügel', 'cape', 'katalog'], run: () => jumpThen('cosmetics', () => $('#cosmetic-datei').focus()) } : null,
+        isAdmin() ? { id: 'update', label: 'Launcher-Update veröffentlichen …', text: 'Updates → Installer und update.json', icon: 'download', keywords: ['update', 'version', 'release', 'installer'], run: () => jumpThen('updates', () => $('#upload-exe').focus()) } : null,
+      ].filter(Boolean),
+  });
   $('#team-erneut').addEventListener('click', start);
-  $('#team-abmelden').addEventListener('click', logout);
 
   $('#setup-start').addEventListener('click', startSetup);
   $('#setup-kopieren').addEventListener('click', async () => {
@@ -2656,10 +2856,6 @@ function init() {
       event.preventDefault();
       event.returnValue = '';
     }
-  });
-  window.addEventListener('hashchange', () => {
-    const wanted = location.hash.slice(1);
-    if (!$('#team-app').hidden && tabs.has(wanted) && tabs.current() !== wanted) tabs.select(wanted);
   });
   start();
 }

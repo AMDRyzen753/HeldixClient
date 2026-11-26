@@ -130,9 +130,39 @@ export interface ContentItem {
   /** Modrinth-Projekt, falls über den Launcher installiert */
   projectId: string | null;
   error: string | null;
+  /** Ordner der Datei: mods/ oder heldix-addons/ */
+  kind: ContentKind;
+  /** Was in der JAR steckt (null = nicht lesbar) */
+  format: ContentFormat | null;
+  /** Addons: api = nur Heldix-API, minecraft = greift in Minecraft ein (clientEntrypoint/transformers, alte Heldix-Mods); null bei Fabric-Mods */
+  access: AddonAccess | null;
+  /** Minecraft-Versionen aus heldix.addon.json bzw. heldix.mod.json (leer = jede) */
+  minecraft: string[];
 }
 
 export type ContentKind = 'mods' | 'addons';
+/** fabric = Fabric-Mod (fabric.mod.json), addon = Heldix-Addon (heldix.addon.json), heldix-mod = ältere Heldix-Mod (heldix.mod.json) */
+export type ContentFormat = 'fabric' | 'addon' | 'heldix-mod';
+/** Zugriff eines Addons: nur über die Heldix-API oder direkt in Minecraft (Transformer, Start mit dem Heldix Loader) */
+export type AddonAccess = 'api' | 'minecraft';
+
+/** Ergebnis von „Datei hinzufügen“: JARs werden anhand ihrer Beschreibung einsortiert */
+export interface ContentImportResult {
+  added: { file: string; name: string; kind: ContentKind; format: ContentFormat }[];
+  /** deutsche Meldung je abgelehnter Datei */
+  errors: string[];
+}
+
+/** Neuere Version einer über Modrinth installierten Mod (für Minecraft-Version und Loader der Instanz) */
+export interface ModrinthUpdate {
+  /** Datei im mods-Ordner (auch .jar.disabled) */
+  file: string;
+  projectId: string;
+  title: string;
+  versionId: string;
+  /** Versionsnummer laut Modrinth */
+  version: string;
+}
 
 // ---------- Freunde & Nachrichten (Heldix-Dienst, siehe docs/dienst.md) ----------
 
@@ -275,6 +305,112 @@ export interface ProfileState {
   error: string | null;
 }
 
+// ---------- Cosmetics (Katalog des Heldix-Dienstes, siehe core/cosmeticcatalog.ts) ----------
+
+/** head = Hüte & Kopf, back = Flügel & Rücken, aura = Partikel, companion = Begleiter, cape = zusätzliche Capes */
+export type CosmeticSlotName = 'head' | 'back' | 'aura' | 'companion' | 'cape';
+/** Slots, die an der Figur als Modell oder Partikel erscheinen (Capes laufen über die Cape-Auswahl) */
+export type CosmeticModelSlot = 'head' | 'back' | 'aura' | 'companion';
+export type CosmeticVec3 = [number, number, number];
+
+/**
+ * Fläche eines Würfels mit Box-UV wie in Minecraft (aus core/cosmetics.ts → cosmeticCubeFaces). Modellkoordinaten in
+ * Pixeln (1/16 Block), +Y oben, +Z vorn, +X = linke Seite des Trägers.
+ */
+export interface CosmeticFace {
+  /** oben links, oben rechts, unten rechts, unten links (bezogen auf die Textur) */
+  corners: [CosmeticVec3, CosmeticVec3, CosmeticVec3, CosmeticVec3];
+  /** Texturpixel zu den Ecken */
+  uvs: [[number, number], [number, number], [number, number], [number, number]];
+  normal: CosmeticVec3;
+}
+
+export interface CosmeticBoneData {
+  name: string;
+  /** Eltern-Bone (steht immer vorher in der Liste) */
+  parent: string | null;
+  /** absolut in Modellkoordinaten (nicht relativ zum Eltern-Bone) */
+  pivot: CosmeticVec3;
+  /** Ruhelage in Grad; Matrix = Eltern · T(pivot + bob) · Rz · Ry · Rx · T(−pivot) */
+  rotation: CosmeticVec3;
+  faces: CosmeticFace[];
+}
+
+export interface CosmeticAnimationData {
+  bone: string;
+  type: 'flap' | 'sway' | 'spin' | 'bob';
+  axis: 'x' | 'y' | 'z';
+  amplitude: number;
+  speed: number;
+  phase: number;
+}
+
+export interface CosmeticParticlesData {
+  frames: number;
+  /** pro Sekunde */
+  rate: number;
+  /** Ticks (1/20 s) */
+  lifetime: number;
+  /** Kantenlänge in Blöcken */
+  size: number;
+  motion: 'rise' | 'fall' | 'orbit' | 'spark' | 'float';
+  /** Blöcke */
+  radius: number;
+  /** #rrggbb, tönt multiplikativ */
+  color: string;
+  fullbright: boolean;
+}
+
+/** Cosmetic aus dem Katalog: Signatur und alle Regeln geprüft */
+export interface CosmeticItem {
+  id: string;
+  slot: CosmeticSlotName;
+  version: number;
+  name: string;
+  description: string;
+  /** access: team – nur Team-Mitglieder dürfen es wählen (alle sehen es) */
+  teamOnly: boolean;
+  /** SHA-256 des Umschlags (neu mit jeder Version) */
+  sha256: string;
+  /** PNG als data:-URL (auch Palette-PNGs) */
+  texture: string;
+  /** Leuchtebene (ohne Licht gezeichnet), gleich groß wie texture */
+  glow: string | null;
+  /** Breite und Höhe der Textur in Pixeln */
+  textureSize: [number, number];
+  /** Modell (head, back, companion), sonst leer */
+  bones: CosmeticBoneData[];
+  animations: CosmeticAnimationData[];
+  /** nur aura: Textur = frames quadratische Bilder nebeneinander */
+  particles: CosmeticParticlesData | null;
+  /** nur cape: Bilder (64, 128 oder 256 breit, je halb so hoch) untereinander */
+  cape: { frames: number; fps: number } | null;
+  /** nur companion: Platz in Blöcken (x rechts, y hoch, z vorn) und Größe */
+  companion: { offset: CosmeticVec3; scale: number } | null;
+}
+
+/** Eigene Auswahl je Slot (null = nichts); cape auch eingebaute Heldix-Capes */
+export interface CosmeticSelection {
+  head: string | null;
+  back: string | null;
+  aura: string | null;
+  companion: string | null;
+  cape: string | null;
+}
+
+export interface CosmeticsState {
+  /** Katalog in der Reihenfolge des Dienstes (nach Slot, dann Name) */
+  items: CosmeticItem[];
+  /** null = unbekannt (kein Konto, Offline-Konto, Dienst nicht erreichbar) */
+  selection: CosmeticSelection | null;
+  /** Auswahl lässt sich ändern (angemeldet beim Heldix-Dienst) */
+  canChoose: boolean;
+  /** im HeldixClient-Team (darf Cosmetics „nur fürs Team“ wählen); null = unbekannt */
+  team: boolean | null;
+  /** deutsche Meldung, wenn etwas nicht ging (Rest bleibt nutzbar) */
+  error: string | null;
+}
+
 // ---------- Addon-Store als eigene Seite ----------
 
 /** Einreicher eines Community-Addons (aus dem signierten Manifest) */
@@ -322,9 +458,16 @@ export interface StoreListing {
   myRating: number | null;
   /** Anzahl Screenshots (Bilder über getAddonScreenshot) */
   screenshots: number;
-  /** warum es hier nicht läuft (System oder API), sonst null */
+  /** warum es auf diesem PC nicht läuft (System oder API), sonst null */
   problem: string | null;
-  installs: { instanceId: string; state: StoreAddon['state']; installedVersion: string | null }[];
+  /** api = nur Heldix-API, minecraft = greift in Minecraft ein (aus dem signierten Manifest) */
+  access: AddonAccess;
+  /** Minecraft-Versionen (leer = jede) */
+  minecraft: string[];
+  /** Instanzen, in denen es läuft: Heldix Loader und/oder Fabric mit HeldixClient */
+  loaders: ('heldix' | 'fabric')[];
+  /** reason: warum es in dieser Instanz nicht läuft (bei unsupported-*), sonst null */
+  installs: { instanceId: string; state: StoreAddon['state']; installedVersion: string | null; reason: string | null }[];
 }
 
 export interface StoreOverview {
@@ -354,9 +497,18 @@ export interface StoreAddon {
   date: string;
   notes: string[];
   downloads: number;
-  /** available = nicht installiert, update = ältere Version installiert, unsupported-* = läuft hier nicht */
-  state: 'available' | 'installed' | 'update' | 'unsupported-api' | 'unsupported-platform';
-  /** Warum es hier nicht läuft (bei unsupported-*) */
+  /** api = nur Heldix-API, minecraft = greift in Minecraft ein */
+  access: AddonAccess;
+  /** Minecraft-Versionen (leer = jede) */
+  minecraft: string[];
+  /** Instanzen, in denen es läuft */
+  loaders: ('heldix' | 'fabric')[];
+  /**
+   * available = nicht installiert, update = ältere Version installiert, unsupported-* = läuft hier nicht
+   * (API-Stufe, System, Minecraft-Version der Instanz, Loader der Instanz)
+   */
+  state: 'available' | 'installed' | 'update' | 'unsupported-api' | 'unsupported-platform' | 'unsupported-minecraft' | 'unsupported-loader';
+  /** Warum es hier nicht läuft (bei unsupported-*), z. B. „Nur für Minecraft 26.3“ */
   reason: string | null;
   installedVersion: string | null;
   installedEnabled: boolean | null;
@@ -543,6 +695,18 @@ export interface QuickPlayList {
   targets: QuickPlayTarget[];
 }
 
+/** Status eines Servers aus der Serverliste (wie in Minecrafts Mehrspieler-Liste) */
+export interface ServerStatus {
+  online: boolean;
+  players: { online: number; max: number } | null;
+  /** Antwortzeit in ms */
+  latencyMs: number | null;
+  /** Versionsname des Servers, z. B. "Paper 1.21.4" */
+  version: string | null;
+  /** Nachricht des Servers als Klartext (Zeilen mit „ · “ verbunden) */
+  motd: string | null;
+}
+
 export type DiscordStatus =
   | { state: 'disabled' }
   | { state: 'unconfigured' }
@@ -568,8 +732,19 @@ export interface HeldixApi {
   selectInstance(id: string): Promise<void>;
 
   listContent(instanceId: string, kind: ContentKind): Promise<ContentItem[]>;
+  /** „Mods & Addons“: Fabric-Mods, Heldix-Addons und ältere Heldix-Mods der Instanz in einer Liste (ohne Netz) */
+  listInstanceContent(instanceId: string): Promise<ContentItem[]>;
+  /**
+   * Addons (heldix-addons/) lassen sich auch schalten, während die Instanz läuft – das wirkt nach dem Neustart;
+   * Mods (mods/) erst nach dem Beenden.
+   */
   setContentEnabled(instanceId: string, kind: ContentKind, file: string, enabled: boolean): Promise<void>;
   removeContent(instanceId: string, kind: ContentKind, file: string): Promise<void>;
+  /**
+   * „Datei hinzufügen“ und Drag & Drop: JARs anhand ihrer Beschreibung einsortieren – heldix.addon.json → heldix-addons/,
+   * heldix.mod.json und fabric.mod.json → mods/. Ohne paths öffnet sich die Dateiauswahl.
+   */
+  importContentFiles(instanceId: string, paths?: string[]): Promise<ContentImportResult>;
   /** Ohne Pfade öffnet sich ein Dateidialog */
   addContentFiles(instanceId: string, kind: ContentKind, paths?: string[]): Promise<number>;
   /** Addons aus dem Addon-Store mit Status in der Instanz */
@@ -600,6 +775,10 @@ export interface HeldixApi {
 
   searchModrinth(instanceId: string, query: string, offset: number): Promise<ModrinthSearchResult>;
   installModrinth(instanceId: string, projectId: string): Promise<string[]>;
+  /** neuere Versionen der über Modrinth installierten Mods (nur Fabric-Instanzen; 15 Minuten zwischengespeichert) */
+  listModrinthUpdates(instanceId: string): Promise<ModrinthUpdate[]>;
+  /** eine Modrinth-Mod aktualisieren; passt die neue Version nicht zu den übrigen Mods, bleibt die alte */
+  updateModrinthMod(instanceId: string, file: string): Promise<{ title: string; version: string; notes: string[] }>;
   /** Sodium, Lithium, FerriteCore & Co. in eine Fabric-Instanz installieren */
   installPerformancePack(instanceId: string): Promise<PerformancePackResult>;
 
@@ -655,6 +834,12 @@ export interface HeldixApi {
   resetSkin(): Promise<ProfileState>;
   setMojangCape(id: string | null): Promise<ProfileState>;
   setHeldixCape(id: string | null): Promise<ProfileState>;
+  /** Cosmetics-Katalog (geprüft, zwischengespeichert) und eigene Auswahl */
+  getCosmetics(refresh?: boolean): Promise<CosmeticsState>;
+  /** Cosmetic anlegen (id) oder ablegen (null); cape nimmt auch eingebaute Heldix-Capes */
+  setCosmetic(slot: CosmeticSlotName, id: string | null): Promise<CosmeticsState>;
+  /** eigene Auswahl hat sich geändert (Figur auf der Startseite neu laden) */
+  onCosmeticsChanged(callback: () => void): () => void;
   listNews(): Promise<NewsEntry[]>;
   loaderLogos(): Promise<LoaderLogos>;
   getNewsBody(id: string): Promise<string>;
@@ -673,6 +858,8 @@ export interface HeldixApi {
   sendCrashReport(id: string, note: string, includeFiles: boolean): Promise<{ ticketId: number; attached: number; attachmentError: string | null }>;
   openCrashReport(id: string): Promise<void>;
   listQuickPlay(instanceId: string): Promise<QuickPlayList>;
+  /** Status eines Servers aus der Serverliste dieser Instanz (eine Minute zwischengespeichert) */
+  getServerStatus(instanceId: string, address: string): Promise<ServerStatus>;
   killGame(): Promise<void>;
   getGameState(): Promise<GameState>;
   openFolder(kind: FolderKind, instanceId?: string): Promise<void>;

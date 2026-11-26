@@ -6,7 +6,7 @@
 // Leiste rechts (Esc, ✕ oder Klick daneben schließt sie): Bewertung, eine Zeile je Heldix-Instanz (Installieren,
 // Aktualisieren, Entfernen), Screenshots mit Großansicht, Versionsverlauf, Melden. Texte aus dem Store sind Klartext
 // (Absätze und „- “-Listen) und landen nur über textContent im DOM, nie als HTML.
-// Eigene Klassen heißen store-…, aber nicht wie die Store-Karten im Instanz-Reiter (store-card, store-chip … in instances.css).
+// Eigene Klassen heißen store-…; store-message und link-button stehen in instances.css (Instanz-Reiter „Mods & Addons“).
 import type { AddonReportReason, AddonRating, GameState, StoreListing, StoreOverview } from '../shared/api';
 import { $, api, confirmDialog, errorMessage, formatCount, formatDate, h, instanceTile, on, reloadInstances, state, toast, uiIcon } from './core.js';
 import { UI_ICONS } from './ui-icons.js';
@@ -260,6 +260,12 @@ function stateIn(addon: StoreListing, instanceId: string): InstallState {
 }
 
 const isInstalled = (s: InstallState) => s === 'installed' || s === 'update';
+const isUnsupported = (s: InstallState) => s.startsWith('unsupported-');
+
+/** Warum es in dieser Instanz nicht läuft (Minecraft-Version, Loader, System oder API) */
+function reasonIn(addon: StoreListing, instanceId: string): string {
+  return installIn(addon, instanceId)?.reason ?? addon.problem ?? 'Läuft hier nicht';
+}
 
 /** Instanz, in der gerade ein Spiel startet oder läuft (dort ändert der Launcher nichts) */
 function gameInstance(): string | null {
@@ -303,7 +309,8 @@ function searchText(addon: StoreListing): string {
   let text = searchCache.get(addon);
   if (text == null) {
     text = [addon.name, addon.id, addon.summary, addon.description, CATEGORY_LABELS[addon.category], addon.official ? 'offiziell' : 'community',
-      authorOf(addon)?.name, ...addon.platforms.map((p) => PLATFORM_LABELS[p]), ...addon.authors]
+      authorOf(addon)?.name, ...addon.platforms.map((p) => PLATFORM_LABELS[p]), ...addon.authors,
+      addon.access === 'minecraft' ? 'greift in minecraft ein' : '', ...(addon.minecraft ?? []).map((v) => `minecraft ${v}`)]
       .filter(Boolean).join(' ').toLowerCase();
     searchCache.set(addon, text);
   }
@@ -366,6 +373,21 @@ function dateText(date: string): string | null {
 function loaderText(instance: StoreInstance): string {
   return instance.loader === 'heldix' ? 'Heldix Loader' : 'Fabric + HeldixClient';
 }
+
+/** „Minecraft 26.3“, „Minecraft 26.2, 26.3“, ab vier Versionen gekürzt */
+function minecraftText(versions: string[]): string {
+  return `Minecraft ${versions.length > 3 ? `${versions.slice(0, 2).join(', ')} +${versions.length - 2}` : versions.join(', ')}`;
+}
+
+/** Nur in Heldix-Instanzen (bzw. nur in Fabric-Instanzen)? null = in beiden */
+function loaderLimit(addon: StoreListing): string | null {
+  const loaders = addon.loaders ?? ['heldix', 'fabric'];
+  if (loaders.includes('heldix') && loaders.includes('fabric')) return null;
+  return loaders.includes('heldix') ? 'Nur Heldix-Instanzen' : 'Nur Fabric-Instanzen';
+}
+
+const MINECRAFT_ACCESS = 'Greift in Minecraft ein';
+const MINECRAFT_ACCESS_HINT = 'Verändert Minecraft direkt, nicht nur über die Heldix-API – vom HeldixClient-Team geprüft. An und Aus wirkt erst nach dem Neustart.';
 
 const averageText = (rating: AddonRating) => rating.average.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const ratingsText = (count: number) => (count === 1 ? '1 Bewertung' : `${count.toLocaleString('de-DE')} Bewertungen`);
@@ -477,6 +499,8 @@ function renderBadge(): void {
   badge.hidden = n === 0;
   badge.textContent = n ? String(n) : '';
   badge.title = n === 1 ? '1 Addon-Update' : `${n} Addon-Updates`;
+  // Startseite zeigt daraus den Hinweis „Addon-Updates verfügbar“
+  document.dispatchEvent(new CustomEvent('heldix:store-updates', { detail: n }));
 }
 
 function notice(kind: 'accent' | 'warn' | 'info', icon: string, title: string, sub: (string | Node)[], ...actions: HTMLElement[]): HTMLElement {
@@ -679,6 +703,10 @@ function installSummary(addon: StoreListing): { kind: string; icon: string; text
   if (installed) return { kind: 'installed', icon: 'check', text: `In ${installed} von ${list.length} Instanzen` };
   if (addon.problem) return { kind: 'problem', icon: 'ban', text: addon.problem };
   if (!list.length) return { kind: 'none', icon: 'info', text: 'Keine Heldix-Instanz' };
+  // Minecraft-Version oder Loader passen nicht zu jeder Instanz
+  const fitting = states.filter((s) => !isUnsupported(s)).length;
+  if (fitting === 0) return { kind: 'problem', icon: 'ban', text: list.length === 1 ? reasonIn(addon, list[0].id) : `Passt zu keiner Instanz · ${reasonIn(addon, list[0].id)}` };
+  if (fitting < list.length) return { kind: 'none', icon: 'download', text: `Nicht installiert · passt zu ${fitting} von ${list.length} Instanzen` };
   return { kind: 'none', icon: 'download', text: 'Nicht installiert' };
 }
 
@@ -692,8 +720,13 @@ function cardRating(addon: StoreListing): HTMLElement {
 function pills(addon: StoreListing): HTMLElement {
   const limit = platformLimit(addon.platforms);
   const wrongSystem = addon.platforms.length > 0 && !addon.platforms.includes(currentPlatform());
+  const minecraft = addon.minecraft ?? [];
+  const loaders = loaderLimit(addon);
   return h('div', { class: 'store-pills' },
+    addon.access === 'minecraft' ? h('span', { class: 'store-pill minecraft', title: MINECRAFT_ACCESS_HINT, text: MINECRAFT_ACCESS }) : null,
     h('span', { class: 'store-pill', text: CATEGORY_LABELS[addon.category] ?? 'Sonstiges' }),
+    minecraft.length ? h('span', { class: 'store-pill', title: `Läuft mit Minecraft ${minecraft.join(', ')}`, text: minecraftText(minecraft) }) : null,
+    loaders ? h('span', { class: 'store-pill', text: loaders }) : null,
     limit ? h('span', { class: `store-pill${wrongSystem ? ' warn' : ''}`, text: limit }) : null,
     h('span', { class: 'store-pill', text: downloadsText(addon.downloads) }));
 }
@@ -795,6 +828,9 @@ function renderDrawer(): void {
     ['Herkunft', addon.official ? `Offiziell – vom ${TEAM}` : `Community – eingereicht von ${addon.author?.name ?? 'einem Spieler'}`],
     ['Größe', formatBytes(addon.size)],
     ['Systeme', platformLimit(addon.platforms) ? addon.platforms.map((p) => PLATFORM_LABELS[p]).join(', ') : 'Alle Systeme'],
+    ['Zugriff', addon.access === 'minecraft' ? MINECRAFT_ACCESS : 'Nur über die Heldix-API'],
+    ['Minecraft', addon.minecraft?.length ? addon.minecraft.join(', ') : 'Jede Version'],
+    ['Instanzen', loaderLimit(addon) === 'Nur Heldix-Instanzen' ? 'Nur mit Heldix Loader' : loaderLimit(addon) ? 'Nur Fabric mit HeldixClient' : 'Heldix Loader und Fabric mit HeldixClient'],
     ['Addon-API', `Stufe ${addon.api}`],
     [addon.authors.length === 1 ? 'Autor' : 'Autoren', addon.authors.join(', ') || '–'],
     ['Downloads', addon.downloads.toLocaleString('de-DE')],
@@ -814,6 +850,11 @@ function renderDrawer(): void {
       addon.summary ? h('p', { class: 'store-lead', text: addon.summary }) : null,
       ratingBox(addon),
       addon.problem ? h('div', { class: 'store-warn' }, uiIcon('warning'), h('span', { text: problemText(addon) })) : null,
+      addon.access === 'minecraft'
+        ? h('div', { class: 'store-access' }, uiIcon('code'), h('div', {},
+          h('strong', { text: MINECRAFT_ACCESS }),
+          h('span', { text: ` – verändert Minecraft direkt, nicht nur über die Heldix-API. Das HeldixClient-Team hat die Eingriffe geprüft. Läuft mit ${minecraftText(addon.minecraft ?? [])}${loaderLimit(addon) === 'Nur Heldix-Instanzen' ? ', nur in Heldix-Instanzen' : ''}; An und Aus wirkt erst nach dem Neustart.` })))
+        : null,
       instanceSection(addon),
       gallery(addon),
       addon.description ? h('section', { class: 'store-section' }, h('h4', { class: 'store-section-title', text: 'Beschreibung' }), plainText(addon.description)) : null,
@@ -950,7 +991,7 @@ function instanceRow(addon: StoreListing, instance: StoreInstance): HTMLElement 
   else if (s === 'update') status = ['update', 'refresh', `Update: ${install?.installedVersion ?? 'ältere Version'} → ${addon.version}`];
   else if (s === 'installed') status = ['ok', 'check', install?.installedVersion ? `Installiert · ${install.installedVersion}` : 'Installiert'];
   else if (s === 'available') status = ['muted', 'download', 'Nicht installiert'];
-  else status = ['warn', 'ban', `Nicht verfügbar: ${addon.problem ?? 'läuft hier nicht'}`];
+  else status = ['warn', 'ban', reasonIn(addon, instance.id)];
 
   const actions = h('div', { class: 'store-inst-actions' });
   const button = (cls: string, icon: string, label: string, action: Action | null) => {
@@ -970,7 +1011,7 @@ function instanceRow(addon: StoreListing, instance: StoreInstance): HTMLElement 
   } else if (s === 'installed') actions.append(button('ghost', 'trash', 'Entfernen', 'remove'));
   else {
     const unavailable = button('ghost', 'ban', 'Nicht verfügbar', null);
-    unavailable.title = addon.problem ?? 'Läuft auf diesem PC nicht';
+    unavailable.title = reasonIn(addon, instance.id);
     actions.append(unavailable);
   }
 
@@ -1360,7 +1401,7 @@ export function activateStore(): void {
   void refresh();
 }
 
-/** Seite mit diesem Addon geöffnet zeigen (z. B. aus dem Instanz-Reiter „Heldix-Addons“) */
+/** Seite mit diesem Addon geöffnet zeigen (z. B. aus dem Instanz-Reiter „Mods & Addons“) */
 export function openStoreAddon(id: string): void {
   initStore();
   if (findAddon(id)) {

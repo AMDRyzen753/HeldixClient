@@ -7,6 +7,8 @@ import com.google.gson.JsonParser;
 import dev.heldixclient.HeldixClient;
 import dev.heldixclient.api.HeldixApi;
 import dev.heldixclient.config.HeldixConfig;
+import dev.heldixclient.loader.HeldixLoader;
+import dev.heldixclient.loader.api.AddonManifest;
 import dev.heldixclient.social.Social;
 
 import java.io.IOException;
@@ -62,6 +64,9 @@ public final class AddonStore {
 	private static final Pattern ICON = Pattern.compile("[a-z0-9-]{1,30}");
 	private static final Set<String> CATEGORIES = Set.of("hud", "musik", "chat", "werkzeuge", "sonstiges");
 	private static final Set<String> PLATFORMS = Set.of("windows", "mac", "linux");
+	private static final List<String> LOADERS = List.of("heldix", "fabric");
+	/** Minecraft-Versionen im Store: genaue Versionen oder Muster wie 26.x und * (Regeln wie >=26.2 nur in lokalen JARs) */
+	private static final Pattern MINECRAFT = Pattern.compile("[0-9A-Za-z][0-9A-Za-z._+*-]{0,31}");
 	private static final long MAX_SIZE = 50L * 1024 * 1024;
 	/** Liste höchstens so lange wiederverwenden, ohne neu zu fragen */
 	private static final long FRESH_MS = 5 * 60 * 1000L;
@@ -77,7 +82,13 @@ public final class AddonStore {
 	/** Ein Addon aus dem Store (nur aus dem geprüften, signierten Manifest) */
 	public record Entry(String id, String name, String version, String summary, String description, List<String> authors, int api,
 			String icon, String category, List<String> platforms, String file, long size, String sha256, String date, List<String> notes,
-			long downloads, boolean official, String author, double ratingAverage, int ratingCount) {
+			long downloads, boolean official, String author, double ratingAverage, int ratingCount,
+			String access, List<String> minecraft, List<String> loaders) {
+		/** Greift das Addon direkt in Minecraft ein? (signiertes Feld "access") */
+		public boolean minecraftAccess() {
+			return AddonManifest.ACCESS_MINECRAFT.equals(access);
+		}
+
 		/** Herkunft für die Anzeige: „Offiziell“ oder „Community · <Name>“ (aus dem signierten Manifest) */
 		public String origin() {
 			return official ? "Offiziell" : author != null ? "Community · " + author : "Community";
@@ -89,11 +100,20 @@ public final class AddonStore {
 			return String.format(Locale.GERMANY, "%.1f", ratingAverage) + (ratingCount == 1 ? " Sterne (1)" : " Sterne (" + ratingCount + ")");
 		}
 
-		/** Warum es hier nicht läuft, sonst null */
+		/**
+		 * Warum es hier nicht läuft, sonst null. Reihenfolge wie im Launcher: API-Stufe, System, Minecraft-Version, Loader
+		 * (Heldix-Instanz oder Fabric-Instanz).
+		 */
 		public String problem() {
-			if (api > HeldixApi.API_VERSION) return "Braucht einen neueren HeldixClient";
+			return problem(HeldixLoader.minecraftVersion(), HeldixLoader.platform());
+		}
+
+		/** wie oben für eine bestimmte Minecraft-Version und Plattform ("heldix" oder "fabric") – für den Autotest */
+		public String problem(String minecraftVersion, String loader) {
+			if (api > HeldixApi.API_VERSION || !(AddonManifest.ACCESS_API.equals(access) || minecraftAccess())) return "Braucht einen neueren HeldixClient";
 			if (!platforms.isEmpty() && !platforms.contains(platform())) return "Nur für " + platformList(platforms);
-			return null;
+			if (!AddonManifest.minecraftMatches(minecraft, minecraftVersion)) return "Nur für Minecraft " + AddonManifest.versionList(minecraft);
+			return AddonManifest.platformProblem(loaders, loader);
 		}
 
 		public String categoryLabel() {
@@ -221,7 +241,7 @@ public final class AddonStore {
 		if (count <= 0) return;
 		updateHintShown = true;
 		dev.heldixclient.hud.Notifications.show("addon-updates", "Addon-Updates verfügbar",
-				(count == 1 ? "1 Addon kann" : count + " Addons können") + " aktualisiert werden – Heldix-Menü → Addons", null);
+				(count == 1 ? "1 Addon kann" : count + " Addons können") + " aktualisiert werden – Heldix-Menü → Mods & Addons", null);
 	}
 
 	/** Liste (neu) laden; ohne force nur, wenn sie älter als fünf Minuten ist. */
@@ -314,10 +334,33 @@ public final class AddonStore {
 			String name = a.has("name") && a.get("name").isJsonPrimitive() ? a.get("name").getAsString() : "";
 			if (name.matches("[A-Za-z0-9_]{1,16}")) author = name;
 		}
+		Compatibility compatibility = Compatibility.of(m);
 		return new Entry(id, text(m, "name", 1, 40), version, text(m, "summary", 1, 200),
 				m.has("description") ? text(m, "description", 0, 4000) : "", strings(m, "authors", 5, 40), api, icon, category,
 				platforms, file, size, sha256, m.has("date") ? text(m, "date", 1, 40) : "", strings(m, "notes", 20, 300), downloads,
-				official, official ? null : author, ratingAverage, ratingCount);
+				official, official ? null : author, ratingAverage, ratingCount,
+				compatibility.access(), compatibility.minecraft(), compatibility.loaders());
+	}
+
+	/**
+	 * Zugriff, Minecraft-Versionen und Loader aus dem signierten Manifest. Fehlen sie (alte Manifeste): Zugriff "api",
+	 * jede Minecraft-Version, Heldix- und Fabric-Instanzen; bei Zugriff "minecraft" ohne "loaders" nur Heldix-Instanzen.
+	 * Ungültige Angaben werfen (das Addon erscheint dann nicht im Store).
+	 */
+	public record Compatibility(String access, List<String> minecraft, List<String> loaders) {
+		public static Compatibility of(JsonObject m) {
+			String access = m.has("access") ? text(m, "access", 1, 20) : AddonManifest.ACCESS_API;
+			List<String> minecraft = strings(m, "minecraft", 20, 32);
+			for (String version : minecraft) {
+				if (!MINECRAFT.matcher(version).matches()) throw new IllegalArgumentException("Minecraft-Versionen ungültig");
+			}
+			List<String> loaders = strings(m, "loaders", 2, 10);
+			if (m.has("loaders") && (loaders.isEmpty() || !LOADERS.containsAll(loaders) || Set.copyOf(loaders).size() != loaders.size())) {
+				throw new IllegalArgumentException("Loader ungültig");
+			}
+			if (loaders.isEmpty()) loaders = AddonManifest.ACCESS_MINECRAFT.equals(access) ? List.of("heldix") : LOADERS;
+			return new Compatibility(access, minecraft, loaders);
+		}
 	}
 
 	private static String text(JsonObject object, String key, int min, int max) {

@@ -11,7 +11,16 @@ import { createServer, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { ADDON_SIGNATURE_PREFIX, currentPlatform, parseAddonManifest, uninstallStoreAddon, type OverviewInstance } from '../main/core/addonstore';
+import {
+  ADDON_SIGNATURE_PREFIX,
+  currentPlatform,
+  incompatibility,
+  installStoreAddon,
+  parseAddonManifest,
+  storeForInstance,
+  uninstallStoreAddon,
+  type OverviewInstance,
+} from '../main/core/addonstore';
 import { SocialClient } from '../main/core/social';
 import { AddonStoreService, noticeList, type StoreNotice } from '../main/core/storeservice';
 import { check, encodePng, finish, rejects, skinPixels } from './testkit';
@@ -30,11 +39,13 @@ interface FakeAddon {
   /** unsignierte Felder, die etwas anderes behaupten (dürfen nicht zählen) */
   lie?: boolean;
   badSignature?: boolean;
+  /** Manifest v2: access, minecraft, loaders (fehlen = altes Manifest) */
+  v2?: Record<string, unknown>;
 }
 
-function addonJar(id: string, version: string, name: string): Buffer {
+function addonJar(id: string, version: string, name: string, extra: Record<string, unknown> = {}): Buffer {
   const zip = new AdmZip();
-  zip.addFile('heldix.addon.json', Buffer.from(JSON.stringify({ id, name, version, api: 1, entrypoint: 'test.Main', description: `${name} zum Testen` })));
+  zip.addFile('heldix.addon.json', Buffer.from(JSON.stringify({ id, name, version, api: 1, entrypoint: 'test.Main', description: `${name} zum Testen`, ...extra })));
   zip.addFile('test/Main.class', Buffer.from([0xca, 0xfe, 0xba, 0xbe]));
   return zip.toBuffer();
 }
@@ -59,6 +70,7 @@ function manifestOf(addon: FakeAddon): Record<string, unknown> {
     notes: ['Neu: Test'],
     official: addon.official,
     author: addon.author,
+    ...addon.v2,
   };
 }
 
@@ -313,6 +325,66 @@ async function main(): Promise<void> {
     const left = await readdir(path.join(dirs.one, 'heldix-addons'));
     check('entfernen: auch .jar.disabled, andere bleiben', removed === 1 && !left.some((f) => f.includes('chatplus')) && left.includes('eigenes.jar') && left.includes('heldix-addon-spotify-1.2.0.jar'), left);
     await rejects('entfernen: ungültige ID', () => uninstallStoreAddon(dirs.one, '../x'), /Ungültige Addon-ID/);
+
+    // ---------- Manifest v2: Zugriff, Minecraft-Versionen, Loader ----------
+    const legacy = parseAddonManifest(plain);
+    check('v2: altes Manifest = api, jede Version, beide Loader', legacy.access === 'api' && legacy.minecraft.length === 0 && legacy.loaders.join() === 'heldix,fabric', legacy);
+    const deep = parseAddonManifest({ ...plain, access: 'minecraft', minecraft: ['26.3'], loaders: ['heldix'] });
+    check('v2: Zugriff minecraft mit Versionen und Loader', deep.access === 'minecraft' && deep.minecraft.join() === '26.3' && deep.loaders.join() === 'heldix', deep);
+    check('v2: Zugriff minecraft ohne loaders = nur Heldix', parseAddonManifest({ ...plain, access: 'minecraft', minecraft: ['26.3'] }).loaders.join() === 'heldix');
+    check('v2: API-Addon darf Versionen nennen', parseAddonManifest({ ...plain, minecraft: ['26.2', '26.3'] }).minecraft.length === 2);
+    for (const [label, patch, pattern] of [
+      ['access unbekannt', { access: 'alles' }, /access/],
+      ['Zugriff minecraft ohne Minecraft-Versionen', { access: 'minecraft' }, /minecraft/],
+      ['minecraft kein Array', { minecraft: '26.3' }, /minecraft/],
+      ['minecraft doppelt', { minecraft: ['26.3', '26.3'] }, /minecraft/],
+      ['minecraft mit Leerzeichen', { minecraft: ['26 3'] }, /minecraft/],
+      ['loaders unbekannt', { loaders: ['forge'] }, /loaders/],
+      ['loaders leer', { loaders: [] }, /loaders/],
+    ] as const) {
+      try {
+        parseAddonManifest({ ...plain, ...patch });
+        check(`v2 abgelehnt: ${label}`, false);
+      } catch (error) {
+        check(`v2 abgelehnt: ${label}`, pattern.test((error as Error).message), error);
+      }
+    }
+    check('Kompatibilität: falsche Minecraft-Version', JSON.stringify(incompatibility(deep, { minecraft: '26.2', loader: 'heldix' })) === JSON.stringify({ state: 'unsupported-minecraft', reason: 'Nur für Minecraft 26.3' }));
+    check('Kompatibilität: nur Heldix-Instanzen', JSON.stringify(incompatibility(deep, { minecraft: '26.3', loader: 'fabric' })) === JSON.stringify({ state: 'unsupported-loader', reason: 'Läuft nur in Heldix-Instanzen' }));
+    check('Kompatibilität: passt / ohne Instanz nur System und API', incompatibility(deep, { minecraft: '26.3', loader: 'heldix' }) === null && incompatibility(deep) === null);
+    check('Kompatibilität: API-Stufe vor Minecraft-Version', incompatibility({ ...deep, api: 99 }, { minecraft: '26.2', loader: 'fabric' })?.state === 'unsupported-api');
+
+    const store = (id: string, name: string, v2: Record<string, unknown>, jarExtra: Record<string, unknown>): FakeAddon => ({
+      id, name, version: '1.0.0', official: true, author: null, platforms: [], jar: addonJar(id, '1.0.0', name, jarExtra),
+      rating: { average: 0, count: 0 }, screenshots: 0, screenshotsVersion: '', v2,
+    });
+    addons.push(
+      store('zeitlupe', 'Zeitlupe', { access: 'minecraft', minecraft: ['26.3'], loaders: ['heldix'] }, { entrypoint: undefined, clientEntrypoint: 'z.Start', transformers: ['z.T'], minecraft: ['26.3'] }),
+      store('altmc', 'Alte Version', { minecraft: ['26.2'] }, { minecraft: ['26.2'] }),
+      store('heimlich', 'Heimlich', {}, { transformers: ['h.T'], minecraft: ['26.3'] }),
+      store('andersmc', 'Andere Liste', { access: 'minecraft', minecraft: ['26.3'], loaders: ['heldix', 'fabric'] }, { clientEntrypoint: 'a.S', minecraft: ['26.2'] }),
+    );
+    const v2view = await service.overview();
+    const zeit = v2view.addons.find((a) => a.id === 'zeitlupe');
+    const stateOf = (id: string, instance: string) => v2view.addons.find((a) => a.id === id)?.installs.find((i) => i.instanceId === instance);
+    check('Übersicht v2: Felder aus dem signierten Manifest', zeit?.access === 'minecraft' && zeit.minecraft.join() === '26.3' && zeit.loaders.join() === 'heldix' && zeit.problem === null, zeit);
+    check('Übersicht v2: alte Einträge mit Standardwerten', v2view.addons.find((a) => a.id === 'spotify')?.access === 'api' && v2view.addons.find((a) => a.id === 'spotify')?.loaders.join() === 'heldix,fabric');
+    check('Übersicht v2: je Instanz – Heldix ja, Fabric nein', stateOf('zeitlupe', 'eins')?.state === 'available' && stateOf('zeitlupe', 'eins')?.reason === null
+      && stateOf('zeitlupe', 'zwei')?.state === 'unsupported-loader' && stateOf('zeitlupe', 'zwei')?.reason === 'Läuft nur in Heldix-Instanzen', [stateOf('zeitlupe', 'eins'), stateOf('zeitlupe', 'zwei')]);
+    check('Übersicht v2: Minecraft-Version passt nirgends', stateOf('altmc', 'eins')?.state === 'unsupported-minecraft' && stateOf('altmc', 'zwei')?.reason === 'Nur für Minecraft 26.2');
+    const forTwo = await storeForInstance(dirs.two, base, pem, instances[1]);
+    check('Instanz-Liste: Zustand und Grund für Fabric', forTwo.find((a) => a.id === 'zeitlupe')?.state === 'unsupported-loader' && forTwo.find((a) => a.id === 'zeitlupe')?.reason === 'Läuft nur in Heldix-Instanzen' && forTwo.find((a) => a.id === 'zeitlupe')?.access === 'minecraft');
+    await rejects('installieren: passt nicht zur Instanz', () => installStoreAddon(dirs.two, base, pem, 'zeitlupe', undefined, instances[1]), /Läuft nur in Heldix-Instanzen/);
+    await rejects('installieren: falsche Minecraft-Version', () => installStoreAddon(dirs.one, base, pem, 'altmc', undefined, instances[0]), /Nur für Minecraft 26\.2/);
+    check('installieren: Addon mit Minecraft-Zugriff in Heldix-Instanz', (await installStoreAddon(dirs.one, base, pem, 'zeitlupe', undefined, instances[0])) === 'Zeitlupe' && (await readdir(path.join(dirs.one, 'heldix-addons'))).includes('heldix-addon-zeitlupe-1.0.0.jar'));
+    await rejects('installieren: JAR greift heimlich in Minecraft ein', () => installStoreAddon(dirs.one, base, pem, 'heimlich', undefined, instances[0]), /greift in Minecraft ein/);
+    await rejects('installieren: Minecraft-Versionen der JAR weichen ab', () => installStoreAddon(dirs.one, base, pem, 'andersmc', undefined, instances[0]), /Minecraft-Versionen weichen ab/);
+    check('installieren: abgelehnte JARs nicht liegen geblieben', !(await readdir(path.join(dirs.one, 'heldix-addons'))).some((f) => f.includes('heimlich') || f.includes('andersmc')));
+    // ältere Version in der Fabric-Instanz: kein Update anbieten, wenn die neue dort nicht läuft
+    await writeFile(path.join(dirs.two, 'heldix-addons', 'heldix-addon-zeitlupe-0.9.0.jar'), addonJar('zeitlupe', '0.9.0', 'Zeitlupe', { entrypoint: undefined, clientEntrypoint: 'z.Start', minecraft: ['26.3'] }));
+    const later = await service.overview();
+    check('Update nur, wenn die neue Version zur Instanz passt', later.addons.find((a) => a.id === 'zeitlupe')?.installs.find((i) => i.instanceId === 'zwei')?.state === 'installed' && service.updates === 0, later.addons.find((a) => a.id === 'zeitlupe')?.installs);
+    await rm(path.join(dirs.two, 'heldix-addons', 'heldix-addon-zeitlupe-0.9.0.jar'), { force: true });
 
     // ---------- ohne installierte Addons: kein Abruf ----------
     const empty = path.join(tmp, 'leer');

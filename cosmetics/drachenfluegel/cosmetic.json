@@ -1,0 +1,179 @@
+{
+  "format": 1,
+  "id": "drachenfluegel",
+  "version": 1,
+  "slot": "back",
+  "name": "Drachenflügel",
+  "description": "Ledrige Drachenschwingen mit Krallen – kräftiger Flügelschlag",
+  "access": "all",
+  "model": {
+    "textureSize": [
+      64,
+      24
+    ],
+    "bones": [
+      {
+        "name": "fluegel_links",
+        "pivot": [
+          1,
+          -3,
+          -2.5
+        ],
+        "rotation": [
+          0,
+          16,
+          6
+        ],
+        "cubes": [
+          {
+            "origin": [
+              1,
+              -13,
+              -2.5
+            ],
+            "size": [
+              10,
+              19,
+              0
+            ],
+            "uv": [
+              38,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "spitze_links",
+        "parent": "fluegel_links",
+        "pivot": [
+          11,
+          -3,
+          -2.5
+        ],
+        "rotation": [
+          0,
+          14,
+          0
+        ],
+        "cubes": [
+          {
+            "origin": [
+              11,
+              -16,
+              -2.5
+            ],
+            "size": [
+              19,
+              24,
+              0
+            ],
+            "uv": [
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "fluegel_rechts",
+        "pivot": [
+          -1,
+          -3,
+          -2.5
+        ],
+        "rotation": [
+          0,
+          -16,
+          -6
+        ],
+        "cubes": [
+          {
+            "origin": [
+              -11,
+              -13,
+              -2.5
+            ],
+            "size": [
+              10,
+              19,
+              0
+            ],
+            "uv": [
+              38,
+              0
+            ],
+            "mirror": true
+          }
+        ]
+      },
+      {
+        "name": "spitze_rechts",
+        "parent": "fluegel_rechts",
+        "pivot": [
+          -11,
+          -3,
+          -2.5
+        ],
+        "rotation": [
+          0,
+          -14,
+          0
+        ],
+        "cubes": [
+          {
+            "origin": [
+              -30,
+              -16,
+              -2.5
+            ],
+            "size": [
+              19,
+              24,
+              0
+            ],
+            "uv": [
+              0,
+              0
+            ],
+            "mirror": true
+          }
+        ]
+      }
+    ]
+  },
+  "animations": [
+    {
+      "bone": "fluegel_links",
+      "type": "flap",
+      "axis": "y",
+      "amplitude": 20,
+      "speed": 0.8,
+      "phase": 0
+    },
+    {
+      "bone": "fluegel_rechts",
+      "type": "flap",
+      "axis": "y",
+      "amplitude": 20,
+      "speed": 0.8,
+      "phase": 0.5
+    },
+    {
+      "bone": "spitze_links",
+      "type": "flap",
+      "axis": "y",
+      "amplitude": 16,
+      "speed": 0.8,
+      "phase": 0.1
+    },
+    {
+      "bone": "spitze_rechts",
+      "type": "flap",
+      "axis": "y",
+      "amplitude": 16,
+      "speed": 0.8,
+      "phase": 0.6
+    }
+  ]
+}

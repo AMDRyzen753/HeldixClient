@@ -27,7 +27,7 @@ Klappt der Start nicht, steht unter dem **Spielen**-Knopf „Start fehlgeschlage
 Meldet der Launcher „Die Anmeldung von … ist abgelaufen“, war das Konto früher über den offiziellen Minecraft Launcher angemeldet. Melde dich unten links einmal mit **Mit Microsoft anmelden** neu an.
 
 ## Fabric-Instanz mit vielen Mods?
-Schalte unter **Instanzen → Instanz → Mods** die zuletzt hinzugefügten Mods mit ihrem Schalter aus und versuche es erneut. Der Launcher prüft vor jedem Start, ob die Mods zusammenpassen, und schreibt Konflikte in die Konsole.
+Schalte unter **Instanzen → Instanz → Mods & Addons** die zuletzt hinzugefügten Mods mit ihrem Schalter aus und versuche es erneut. Der Launcher prüft vor jedem Start, ob die Mods zusammenpassen, und schreibt Konflikte in die Konsole.
 
 ## Immer noch nichts?
 Öffne die **Konsole**, klicke auf **Kopieren** und schicke den Text mit einer kurzen Beschreibung über eine [Support-Anfrage](/hilfe/support-anfrage) an das Team.

@@ -40,12 +40,13 @@ import java.util.stream.Stream;
 
 /**
  * Capes von HeldixClient: eigene, animierte Motive mit leuchtenden Teilen (textures/cape/, erzeugt von
- * launcher/scripts/render-capes.mjs) und eigene Bilder aus dem Ordner heldix-capes der Instanz.
+ * launcher/scripts/render-capes.mjs), Capes aus dem Cosmetics-Katalog des Heldix-Dienstes ({@link CosmeticCatalog},
+ * Slot cape, signiert) und eigene Bilder aus dem Ordner heldix-capes der Instanz.
  * Das Leuchten zeichnet {@link dev.heldixclient.transform.Hooks#capeModel} als zweiten, voll hellen Durchgang.
  *
  * <p>Das gewählte Cape ersetzt das Cape im Skin des eigenen Spielers ({@link #forPlayer}); Minecraft zeichnet es dann
- * selbst – mit Wehen beim Laufen und auf Wunsch auch auf der Elytra. Andere Spieler sehen es nicht, dafür bräuchte
- * es einen Server, der die Capes verteilt.
+ * selbst – mit Wehen beim Laufen und auf Wunsch auch auf der Elytra. Andere HeldixClient-Spieler sehen eingebaute und
+ * Katalog-Capes über den Heldix-Dienst; eigene Bilder bleiben auf dem PC.
  */
 public final class Capes {
 	/** Ordner für eigene Cape-Bilder im Spielordner der Instanz */
@@ -59,9 +60,11 @@ public final class Capes {
 	 *
 	 * @param frames Bilder der Animation (eins bei unbewegten Capes)
 	 * @param glow   leuchtende Teile je Bild (leer = leuchtet nicht)
-	 * @param fps    Bilder pro Sekunde der Animation
+	 * @param fps     Bilder pro Sekunde der Animation
+	 * @param catalog Eintrag im Cosmetics-Katalog (null bei eingebauten und eigenen Capes)
 	 */
-	public record Cape(String id, String name, String description, List<Identifier> frames, List<Identifier> glow, int fps, boolean custom) {
+	public record Cape(String id, String name, String description, List<Identifier> frames, List<Identifier> glow, int fps, boolean custom,
+			CosmeticCatalog.Item catalog) {
 		/** erstes Bild (z. B. für unbewegte Vorschauen) */
 		public Identifier texture() {
 			return frames.getFirst();
@@ -74,7 +77,15 @@ public final class Capes {
 		public boolean glows() {
 			return !glow.isEmpty();
 		}
+
+		/** nur für Team-Mitglieder wählbar (Katalog-Capes mit access: team) */
+		public boolean teamOnly() {
+			return catalog != null && catalog.teamOnly();
+		}
 	}
+
+	/** Katalog-Capes, einmal je Version des Eintrags erzeugt */
+	private static final Map<CosmeticCatalog.Item, Cape> CATALOG = new java.util.concurrent.ConcurrentHashMap<>();
 
 	private static List<Cape> builtin;
 	private static List<Cape> custom;
@@ -139,7 +150,7 @@ public final class Capes {
 					if (glows) glow.add(HeldixClient.id("cape/" + id + "/glow_" + f));
 				}
 				list.add(new Cape(id, json.get("name").getAsString(), json.get("description").getAsString(),
-						List.copyOf(frames), List.copyOf(glow), Math.max(1, json.get("fps").getAsInt()), false));
+						List.copyOf(frames), List.copyOf(glow), Math.max(1, json.get("fps").getAsInt()), false, null));
 			}
 		} catch (Exception e) {
 			HeldixClient.LOGGER.warn("Heldix-Capes nicht lesbar", e);
@@ -163,8 +174,57 @@ public final class Capes {
 		for (Cape cape : builtin()) if (cape.id().equals(id)) return cape;
 		if (id.startsWith("datei:")) {
 			for (Cape cape : custom()) if (cape.id().equals(id)) return cape;
+			return null;
 		}
-		return null;
+		CosmeticCatalog.Item item = CosmeticCatalog.item(id, "cape");
+		return item == null ? null : catalogCape(item);
+	}
+
+	/** Ist das die ID eines eingebauten Capes? (ohne die Ressourcen zu lesen) */
+	public static boolean isBuiltin(String id) {
+		return CosmeticFormat.BUILTIN_CAPE_IDS.contains(id);
+	}
+
+	/** Capes aus dem Cosmetics-Katalog (geprüft), in der Reihenfolge des Katalogs */
+	public static List<Cape> catalog() {
+		List<Cape> list = new ArrayList<>();
+		for (CosmeticCatalog.Item item : CosmeticCatalog.items("cape")) list.add(catalogCape(item));
+		return list;
+	}
+
+	private static Cape catalogCape(CosmeticCatalog.Item item) {
+		return CATALOG.computeIfAbsent(item, it -> {
+			CosmeticFormat.Cape info = it.manifest().cape();
+			String base = "cape/katalog/" + it.id() + "/" + it.sha256().substring(0, 12) + "/";
+			List<Identifier> frames = new ArrayList<>();
+			List<Identifier> glow = new ArrayList<>();
+			for (int f = 0; f < info.frames(); f++) {
+				frames.add(HeldixClient.id(base + f));
+				if (it.manifest().glow() != null) glow.add(HeldixClient.id(base + "glow_" + f));
+			}
+			return new Cape(it.id(), it.name(), it.description(), List.copyOf(frames), List.copyOf(glow), info.fps(), false, it);
+		});
+	}
+
+	/** Eintrag aus dem Katalog verschwunden oder ersetzt: Texturen freigeben (im Render-Thread) */
+	static void forgetCatalog(CosmeticCatalog.Item item) {
+		Cape cape = CATALOG.remove(item);
+		if (cape == null) return;
+		release(cape);
+		lastInput = null;
+		OTHERS.clear();
+	}
+
+	private static void release(Cape cape) {
+		if (PREVIEWS.remove(cape.id())) {
+			for (int i = 0; i < cape.frames().size(); i++) Minecraft.getInstance().getTextureManager().release(frontId(cape, i));
+		}
+		if (!LOADED.remove(cape.id())) return;
+		for (Identifier id : cape.frames()) {
+			Minecraft.getInstance().getTextureManager().release(id);
+			GLOW.remove(id);
+		}
+		for (Identifier id : cape.glow()) Minecraft.getInstance().getTextureManager().release(id);
 	}
 
 	/** Gewähltes Cape oder null (kein Heldix-Cape) */
@@ -172,10 +232,22 @@ public final class Capes {
 		return byId(HeldixConfig.get().cape);
 	}
 
+	/** Was der eigene Spieler trägt: eine Vorschau der Addon-API, sonst das gewählte Cape */
+	public static Cape own() {
+		String preview = Cosmetics.capePreview();
+		if (preview != null) {
+			Cape cape = byId(preview);
+			if (cape != null) return cape;
+		}
+		return selected();
+	}
+
 	public static void select(Cape cape) {
+		String before = HeldixConfig.get().cape;
 		HeldixConfig.get().cape = cape == null ? "" : cape.id();
 		HeldixConfig.save();
 		dev.heldixclient.social.Social.profileChanged();
+		Cosmetics.capeChanged(before == null || before.isEmpty() ? null : before, cape == null ? null : cape.id());
 	}
 
 	// ======================================================================================
@@ -262,14 +334,37 @@ public final class Capes {
 	}
 
 	private static Decoded decode(Cape cape) {
+		if (cape.catalog() != null) {
+			CosmeticFormat.Manifest manifest = cape.catalog().manifest();
+			List<NativeImage> frames = split(manifest.texture(), cape.frames().size(), 2);
+			List<NativeImage> glow = manifest.glow() != null ? split(manifest.glow(), cape.glow().size(), 2) : List.of();
+			return new Decoded(frames, glow);
+		}
 		List<NativeImage> frames = split(HeldixClient.id("textures/cape/" + cape.id() + ".png"), cape.frames().size(), 2);
 		List<NativeImage> glow = cape.glows() ? split(HeldixClient.id("textures/cape/" + cape.id() + "_glow.png"), cape.glow().size(), 2) : List.of();
 		return new Decoded(frames, glow);
 	}
 
+	/** Bilder eines Katalog-Capes (geprüftes PNG aus dem Manifest, auch Palette-PNGs) zerlegen */
+	private static List<NativeImage> split(byte[] png, int count, int aspect) {
+		try (NativeImage strip = NativeImage.read(png)) {
+			return split(strip, count, aspect);
+		} catch (Exception e) {
+			throw new IllegalStateException("Katalog-Cape nicht ladbar", e);
+		}
+	}
+
 	/** Bildstreifen in count Bilder zerlegen; aspect = Breite / Höhe eines Bildes */
 	private static List<NativeImage> split(Identifier resource, int count, int aspect) {
 		try (InputStream in = Minecraft.getInstance().getResourceManager().open(resource); NativeImage strip = NativeImage.read(in)) {
+			return split(strip, count, aspect);
+		} catch (Exception e) {
+			throw new IllegalStateException("Cape-Grafik " + resource + " nicht ladbar", e);
+		}
+	}
+
+	private static List<NativeImage> split(NativeImage strip, int count, int aspect) {
+		{
 			int w = strip.getWidth();
 			int h = w / aspect;
 			int available = Math.max(1, strip.getHeight() / h);
@@ -282,18 +377,22 @@ public final class Capes {
 				frames.add(frame);
 			}
 			return frames;
-		} catch (Exception e) {
-			throw new IllegalStateException("Cape-Grafik " + resource + " nicht ladbar", e);
 		}
+	}
+
+	private static Identifier frontId(Cape cape, int frame) {
+		if (cape.catalog() != null) return HeldixClient.id("cape/katalog/" + cape.id() + "/" + cape.catalog().sha256().substring(0, 12) + "/front_" + frame);
+		return HeldixClient.id("cape/" + cape.id() + "/front_" + frame);
 	}
 
 	/** Außenseite eines eingebauten Capes für die Kacheln im Menü (null, solange sie noch geladen wird) */
 	private static Identifier preview(Cape cape) {
 		pump();
-		if (PREVIEWS.contains(cape.id())) return HeldixClient.id("cape/" + cape.id() + "/front_" + frame(cape));
+		if (PREVIEWS.contains(cape.id())) return frontId(cape, frame(cape));
 		if (FAILED.contains(cape.id()) || !LOADING.add("front:" + cape.id())) return null;
 		CompletableFuture.supplyAsync(() -> {
-			List<NativeImage> frames = split(HeldixClient.id("textures/cape/" + cape.id() + ".png"), cape.frames().size(), 2);
+			List<NativeImage> frames = cape.catalog() != null ? split(cape.catalog().manifest().texture(), cape.frames().size(), 2)
+					: split(HeldixClient.id("textures/cape/" + cape.id() + ".png"), cape.frames().size(), 2);
 			List<NativeImage> fronts = new ArrayList<>();
 			for (NativeImage frame : frames) {
 				int s = frame.getWidth() / 64;
@@ -310,7 +409,7 @@ public final class Capes {
 				return;
 			}
 			for (int i = 0; i < fronts.size(); i++) {
-				Identifier id = HeldixClient.id("cape/" + cape.id() + "/front_" + i);
+				Identifier id = frontId(cape, i);
 				NativeImage image = fronts.get(i);
 				UPLOADS.add(new Upload(bytes(image), () -> Ui.registerLinear(id, image)));
 			}
@@ -325,18 +424,19 @@ public final class Capes {
 	/** Bilder aller eingebauten Capes außer dem gewählten freigeben (nach dem Verlassen der Cape-Auswahl) */
 	public static void trim() {
 		Cape keep = selected();
-		for (Cape cape : builtin()) {
-			if (PREVIEWS.remove(cape.id())) {
-				for (int i = 0; i < cape.frames().size(); i++) Minecraft.getInstance().getTextureManager().release(HeldixClient.id("cape/" + cape.id() + "/front_" + i));
+		List<Cape> all = new ArrayList<>(builtin());
+		all.addAll(CATALOG.values());
+		for (Cape cape : all) {
+			if (cape == keep) {
+				if (PREVIEWS.remove(cape.id())) {
+					for (int i = 0; i < cape.frames().size(); i++) Minecraft.getInstance().getTextureManager().release(frontId(cape, i));
+				}
+				continue;
 			}
-			if (cape == keep || !LOADED.remove(cape.id())) continue;
-			for (Identifier id : cape.frames()) {
-				Minecraft.getInstance().getTextureManager().release(id);
-				GLOW.remove(id);
-			}
-			for (Identifier id : cape.glow()) Minecraft.getInstance().getTextureManager().release(id);
+			release(cape);
 		}
 		lastInput = null;
+		OTHERS.clear();
 	}
 
 	// ======================================================================================
@@ -350,7 +450,7 @@ public final class Capes {
 	public static PlayerSkin forPlayer(PlayerSkin skin, AbstractClientPlayer player) {
 		if (skin == null || player == null) return skin;
 		UUID own = Minecraft.getInstance().getGameProfile().id();
-		if (own != null && own.equals(player.getUUID())) return apply(skin, selected());
+		if (own != null && own.equals(player.getUUID())) return apply(skin, own());
 		String capeId = dev.heldixclient.social.Social.capeOf(player.getUUID());
 		Cape cape = capeId == null ? null : byId(capeId);
 		if (cape == null || cape.custom()) return skin;
@@ -484,7 +584,7 @@ public final class Capes {
 			}
 			Identifier id = HeldixClient.id("cape/custom/" + (++customCounter));
 			Ui.registerMipmapped(id, image);
-			return new Cape("datei:" + fileName, base.replace('_', ' '), description, List.of(id), List.of(), 1, true);
+			return new Cape("datei:" + fileName, base.replace('_', ' '), description, List.of(id), List.of(), 1, true, null);
 		} catch (Exception e) {
 			HeldixClient.LOGGER.warn("Cape-Bild {} nicht ladbar: {}", fileName, e.toString());
 			return null;
@@ -614,8 +714,10 @@ public final class Capes {
 	 * @param cape null = ohne Heldix-Cape (ein Cape des Minecraft-Kontos bleibt sichtbar)
 	 */
 	public static void drawPlayer(GuiGraphicsExtractor g, PlayerSkin baseSkin, Cape cape, int x0, int y0, int x1, int y1, float seconds) {
-		// von hinten, langsam hin und her gedreht, damit man das Cape auch etwas von der Seite sieht
-		drawFigure(g, baseSkin, cape, x0, y0, x1, y1, seconds, (float) Math.sin(seconds * 0.7) * 32f);
+		// von hinten, langsam hin und her gedreht, damit man das Cape auch etwas von der Seite sieht; ohne Rücken-Cosmetic,
+		// das würde das Cape verdecken
+		CAPE_DRESS.copyOwn().back = null;
+		drawFigure(g, baseSkin, cape, CAPE_DRESS, x0, y0, x1, y1, seconds, (float) Math.sin(seconds * 0.7) * 32f, 1f, -1f);
 	}
 
 	/**
@@ -624,10 +726,23 @@ public final class Capes {
 	 * @param cape null = ohne Heldix-Cape (ein Cape des Minecraft-Kontos bleibt sichtbar)
 	 */
 	public static void drawShowcase(GuiGraphicsExtractor g, PlayerSkin baseSkin, Cape cape, int x0, int y0, int x1, int y1, float seconds) {
-		drawFigure(g, baseSkin, cape, x0, y0, x1, y1, seconds, 180f + seconds * 24f % 360f);
+		drawFigure(g, baseSkin, cape, OWN_DRESS.copyOwn(), x0, y0, x1, y1, seconds, 180f + seconds * 24f % 360f, 1f, -1f);
 	}
 
-	private static void drawFigure(GuiGraphicsExtractor g, PlayerSkin baseSkin, Cape cape, int x0, int y0, int x1, int y1, float seconds, float bodyRot) {
+	/** eigene Cosmetics an den Figuren der Menüs (wiederverwendet: kein neues Objekt je Bild) */
+	private static final Cosmetics.Dress OWN_DRESS = new Cosmetics.Dress();
+	private static final Cosmetics.Dress CAPE_DRESS = new Cosmetics.Dress();
+
+	/**
+	 * Spielerfigur mit Cape und Cosmetics für Menüs (z. B. die Seite Cosmetics).
+	 *
+	 * @param dress   was die Figur trägt (null = nichts); bitte dasselbe Objekt über mehrere Bilder wiederverwenden
+	 * @param bodyRot Drehung in Grad (180 = Gesicht zum Betrachter, 0 = Rücken)
+	 * @param zoom    Vergrößerung (1 = ganze Figur passt in die Höhe)
+	 * @param focusY  Höhe in Blöcken über den Füßen, die in die Mitte kommt (negativ = Mitte der Figur)
+	 */
+	public static void drawFigure(GuiGraphicsExtractor g, PlayerSkin baseSkin, Cape cape, Cosmetics.Dress dress, int x0, int y0, int x1, int y1,
+			float seconds, float bodyRot, float zoom, float focusY) {
 		PlayerSkin skin = cape == null ? baseSkin : apply(baseSkin, cape);
 		AvatarRenderState state = new AvatarRenderState();
 		state.entityType = EntityTypes.PLAYER;
@@ -653,10 +768,12 @@ public final class Capes {
 		state.capeLean = 22f + (float) Math.sin(seconds * 1.1) * 10f;
 		state.capeLean2 = (float) Math.sin(seconds * 0.8) * 6f;
 
-		int size = Math.round((y1 - y0) / 2.25f);
+		if (dress != null) CosmeticRenderer.dress(state, dress);
+
+		int size = Math.round((y1 - y0) / 2.25f * zoom);
 		Quaternionf camera = new Quaternionf().rotateX((float) Math.toRadians(-8));
 		Quaternionf rotation = new Quaternionf().rotateZ((float) Math.PI).mul(camera);
-		Vector3f translation = new Vector3f(0f, state.boundingBoxHeight / 2f + 0.0625f, 0f);
+		Vector3f translation = new Vector3f(0f, focusY < 0 ? state.boundingBoxHeight / 2f + 0.0625f : focusY, 0f);
 		g.entity(state, size, translation, rotation, camera, x0, y0, x1, y1);
 	}
 }

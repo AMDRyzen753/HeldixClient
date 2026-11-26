@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "id": "blaetter",
+  "version": 1,
+  "slot": "aura",
+  "name": "Blätter",
+  "description": "Grüne Blätter rieseln sanft um dich herab",
+  "access": "all",
+  "particles": {
+    "frames": 4,
+    "rate": 3,
+    "lifetime": 60,
+    "size": 0.2,
+    "motion": "fall",
+    "radius": 0.8,
+    "color": "#ffffff"
+  }
+}

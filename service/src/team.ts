@@ -1,8 +1,9 @@
-// Team-Bereich der Webseite: Meldungen, Sperren, Spieler, Neuigkeiten, Updates, Addons, Mitglieder und Protokoll.
+// Team-Bereich der Webseite: Meldungen, Sperren, Spieler, Neuigkeiten, Updates, Addons, Cosmetics, Mitglieder und Protokoll.
 // Zugang (Rolle, 2FA) prüft app.ts mit Web.teamGate; hier stehen nur noch die Aktionen.
 import type { KeyObject } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Addons } from './addons';
+import type { Cosmetics } from './cosmetics';
 import type { AuditRow, BanRow, NewsRow, ReportRow, ReportStatus, Store, TeamMemberRow, TeamProfilePatch, TeamRole, UserRow } from './db';
 import { UNKNOWN_PLAYER } from './friends';
 import { HttpError } from './http';
@@ -75,6 +76,7 @@ export class Team {
     private readonly realtime: Realtime,
     private readonly updates: Updates,
     private readonly addons: Addons,
+    private readonly cosmetics: Cosmetics,
     private readonly options: TeamOptions,
   ) {}
 
@@ -573,5 +575,36 @@ export class Team {
     const result = await this.addons.deleteVersion(id, version);
     this.audit(actor, 'addon.delete', `${id} ${version}`, result.removed ? `${result.file} (letzte Version, Addon entfernt)` : result.file);
     return this.addonsOverview();
+  }
+
+  // ---------- Cosmetics ----------
+
+  cosmeticsOverview() {
+    return this.cosmetics.overview(this.options.updateKey);
+  }
+
+  /** Umschlag aus `npm run cosmetic` (`{ manifest, signature }`), signiert über "heldix-cosmetic\n" + Manifest; ohne Schlüssel 503. */
+  publishCosmetic(actor: Actor, input: Record<string, unknown>) {
+    if (!this.options.updateKey) {
+      throw new HttpError(503, 'Auf diesem Server ist kein Update-Schlüssel eingerichtet. Cosmetics lassen sich hier nicht veröffentlichen.');
+    }
+    const result = this.cosmetics.publish(input, this.options.updateKey, actor.name);
+    const detail = result.previous === null ? `${result.slot}, neu` : `${result.slot}, vorher Version ${result.previous}`;
+    this.audit(actor, 'cosmetic.publish', `${result.id} ${result.version}`, detail);
+    return this.cosmeticsOverview();
+  }
+
+  /** `{ "hidden": true | false }`: Träger sehen es nicht mehr bzw. wieder; die Auswahl bleibt gespeichert. */
+  setCosmeticHidden(actor: Actor, id: string, input: Record<string, unknown>) {
+    if (typeof input.hidden !== 'boolean') throw new HttpError(400, '„hidden“ muss true oder false sein.');
+    if (this.cosmetics.setHidden(id, input.hidden)) this.audit(actor, input.hidden ? 'cosmetic.hide' : 'cosmetic.show', id);
+    return this.cosmeticsOverview();
+  }
+
+  /** Löschen setzt die Auswahl aller Träger zurück. */
+  deleteCosmetic(actor: Actor, id: string) {
+    const { info, reset } = this.cosmetics.remove(id);
+    this.audit(actor, 'cosmetic.delete', `${id} ${info.version}`, `${info.slot}, ${reset} Träger zurückgesetzt`);
+    return this.cosmeticsOverview();
   }
 }

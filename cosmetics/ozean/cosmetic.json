@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "id": "ozean",
+  "version": 1,
+  "slot": "cape",
+  "name": "Ozean",
+  "description": "Wellen, Fische, Luftblasen und wogendes Seegras",
+  "access": "all",
+  "cape": {
+    "frames": 24,
+    "fps": 10
+  }
+}

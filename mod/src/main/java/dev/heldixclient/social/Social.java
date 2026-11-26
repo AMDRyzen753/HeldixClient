@@ -78,8 +78,11 @@ public final class Social {
 	public record Request(UUID uuid, String name, long at) {
 	}
 
-	/** Ergebnis des Nachschlagens; role ist bei heldix immer gesetzt (PLAYER ohne besondere Rolle) */
-	private record Lookup(boolean heldix, String cape, Badge.Role role, long at) {
+	/**
+	 * Ergebnis des Nachschlagens; role ist bei heldix immer gesetzt (PLAYER ohne besondere Rolle). cosmetics: Slot → ID
+	 * (head, back, aura, companion; nur belegte Slots, wie vom Dienst gemeldet).
+	 */
+	private record Lookup(boolean heldix, String cape, Badge.Role role, Map<String, String> cosmetics, long at) {
 	}
 
 	private static final long LOOKUP_POSITIVE_MS = 30_000;
@@ -195,6 +198,7 @@ public final class Social {
 			try {
 				login(user);
 				if (gen != generation) return;
+				fetchCosmetics();
 				syncProfile();
 				openSocket(gen);
 			} catch (Exception e) {
@@ -240,6 +244,7 @@ public final class Social {
 		NET.execute(() -> {
 			try {
 				call("DELETE", "/v1/me", null, true);
+				dev.heldixclient.cosmetic.Cosmetics.forgetMine();
 				HeldixConfig.get().socialEnabled = false;
 				HeldixConfig.save();
 				goOffline(State.OFF);
@@ -292,13 +297,49 @@ public final class Social {
 		token = result.get("token").getAsString();
 	}
 
+	/** Eigene Auswahl an Cosmetics und ob man Team-Cosmetics wählen darf (GET /v1/me/cosmetics, ab Dienst 1.6.0) */
+	private static void fetchCosmetics() {
+		try {
+			dev.heldixclient.cosmetic.Cosmetics.applyMine(call("GET", "/v1/me/cosmetics", null, true));
+		} catch (Exception e) {
+			HeldixClient.LOGGER.info("Heldix-Dienst: Cosmetics nicht geladen ({})", e.getMessage());
+		}
+	}
+
+	/** Cosmetic im Slot anlegen oder ablegen (PUT /v1/me/cosmetics); Ergebnis: MyCosmetics des Dienstes */
+	public static CompletableFuture<JsonObject> putCosmetic(String slot, String id) {
+		CompletableFuture<JsonObject> result = new CompletableFuture<>();
+		if (!online()) {
+			result.completeExceptionally(new ServiceException("Nicht mit dem Heldix-Dienst verbunden"));
+			return result;
+		}
+		NET.execute(() -> {
+			try {
+				JsonObject body = new JsonObject();
+				body.addProperty("slot", slot);
+				if (id == null) body.add("id", com.google.gson.JsonNull.INSTANCE);
+				else body.addProperty("id", id);
+				result.complete(call("PUT", "/v1/me/cosmetics", body, true));
+			} catch (Exception e) {
+				result.completeExceptionally(e instanceof ServiceException ? e : new ServiceException("Dienst nicht erreichbar"));
+			}
+		});
+		return result;
+	}
+
 	/** Eigene Einstellungen (Cape, Sichtbarkeit) an den Dienst schicken – die lokale Einstellung gilt. */
 	private static void syncProfile() throws Exception {
 		HeldixConfig.Data config = HeldixConfig.get();
 		JsonObject body = new JsonObject();
-		Capes.Cape cape = Capes.selected();
-		// eigene Bilder bleiben auf dem PC: nur Heldix-Capes gehen an den Dienst
-		body.addProperty("cape", cape != null && !cape.custom() ? cape.id() : "");
+		// eigene Bilder bleiben auf dem PC: nur Heldix-Capes gehen an den Dienst. Ein Katalog-Cape nur, wenn es im
+		// geprüften Katalog steht (und man es wählen darf) – sonst bleibt die Auswahl beim Dienst, wie sie ist.
+		String capeId = config.cape == null ? "" : config.cape;
+		if (capeId.isEmpty() || Capes.isBuiltin(capeId)) body.addProperty("cape", capeId);
+		else if (capeId.startsWith("datei:")) body.addProperty("cape", "");
+		else {
+			dev.heldixclient.cosmetic.CosmeticCatalog.Item item = dev.heldixclient.cosmetic.CosmeticCatalog.item(capeId, "cape");
+			if (item != null && (!item.teamOnly() || dev.heldixclient.cosmetic.Cosmetics.team())) body.addProperty("cape", capeId);
+		}
 		body.addProperty("visible", config.socialVisible);
 		body.addProperty("presence", config.socialPresence);
 		body.addProperty("showServer", config.socialShowServer);
@@ -701,8 +742,28 @@ public final class Social {
 
 	/** Eintrag aus der Antwort von /v1/players/lookup (null = kein erkennbarer HeldixClient-Spieler) */
 	private static Lookup lookupOf(JsonObject entry, long at) {
-		if (entry == null) return new Lookup(false, null, null, at);
-		return new Lookup(true, blankToNull(string(entry, "cape")), Badge.Role.of(string(entry, "badge")), at);
+		if (entry == null) return new Lookup(false, null, null, Map.of(), at);
+		Map<String, String> cosmetics = new java.util.HashMap<>();
+		JsonElement worn = entry.get("cosmetics");
+		if (worn != null && worn.isJsonObject()) {
+			for (String slot : dev.heldixclient.cosmetic.Cosmetics.WORN_SLOTS) {
+				// null (nichts, ausgeblendet, gelöscht) und Unsinn zählen als nichts
+				JsonElement value = worn.getAsJsonObject().get(slot);
+				String id = value != null && value.isJsonPrimitive() ? value.getAsString() : null;
+				if (id != null && dev.heldixclient.cosmetic.CosmeticFormat.ID_RE.matcher(id).matches()) cosmetics.put(slot, id);
+			}
+		}
+		return new Lookup(true, blankToNull(string(entry, "cape")), Badge.Role.of(string(entry, "badge")), Map.copyOf(cosmetics), at);
+	}
+
+	/**
+	 * Cosmetic eines anderen Spielers im Slot (head, back, aura, companion), wie der Dienst es meldet; null = nichts oder
+	 * unbekannt. Nur aus dem Zwischenspeicher, darf in jedem Bild aufgerufen werden.
+	 */
+	public static String cosmeticOf(UUID uuid, String slot) {
+		if (uuid == null) return null;
+		Lookup lookup = LOOKUP.get(uuid);
+		return lookup != null && lookup.heldix() ? lookup.cosmetics().get(slot) : null;
 	}
 
 	/** Nutzt dieser Spieler HeldixClient (und will erkennbar sein)? */
@@ -729,6 +790,12 @@ public final class Social {
 	public static String capeOf(UUID uuid) {
 		if (uuid == null || !HeldixConfig.get().socialCapes) return null;
 		Lookup lookup = LOOKUP.get(uuid);
+		return lookup != null && lookup.heldix() ? lookup.cape() : null;
+	}
+
+	/** Cape eines anderen Spielers laut Nachschlagen, unabhängig von der Einstellung „Capes anderer Spieler“ (Addon-API) */
+	public static String lookupCape(UUID uuid) {
+		Lookup lookup = uuid == null ? null : LOOKUP.get(uuid);
 		return lookup != null && lookup.heldix() ? lookup.cape() : null;
 	}
 

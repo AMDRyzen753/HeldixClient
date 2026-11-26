@@ -1,7 +1,13 @@
 // HeldixClient – Webseite: Konto-Bereich (/konto). Anmeldung per Einmal-Link aus Launcher oder Spiel (#code=…),
-// danach Profil, Freunde, Nachrichten, Support, Meine Addons (konto-addons.js), Privatsphäre und Meine Daten über die
-// Cookie-Sitzung beim Heldix-Dienst.
-// Ein Ziel im Link (#code=…&ziel=support) öffnet nach der Anmeldung den passenden Reiter, ziel=team die Seite /team.
+// danach Übersicht und Glocke (konto-uebersicht.js), Cape & Cosmetics (konto-cosmetics.js), Freunde, Nachrichten,
+// Support, Meine Addons (konto-addons.js), Privatsphäre, Sicherheit und Meine Daten über die Cookie-Sitzung beim
+// Heldix-Dienst. Rahmen mit Seitenleiste (auch zum Team-Bereich): app-shell.js.
+// Ein Ziel im Link (#code=…&ziel=support) öffnet nach der Anmeldung den passenden Bereich, ziel=team die Seite /team;
+// ohne Anmeldung genügen #reiter=support (oder ältere Links wie #support und #ziel=support). Weitere Werte in der
+// Adresse: #reiter=nachrichten&mit=<uuid> öffnet den Chat, #reiter=support&anfrage=<id> die Anfrage.
+//
+// Nachfragen (nur solange die Seite sichtbar ist): Freunde und Unterhaltungen alle 10 s, Support alle 15 s, eigene
+// Addons alle 15 s im Reiter „Meine Addons“ und sonst höchstens jede Minute (für Übersicht und Glocke).
 import {
   $,
   ApiError,
@@ -10,7 +16,6 @@ import {
   avatar,
   bindCounter,
   busy,
-  CAPES,
   confirmAction,
   dayLabel,
   emptyState,
@@ -30,7 +35,6 @@ import {
   rerender,
   ROLE_LABELS,
   setSkinSource,
-  setupTabs,
   shortWhen,
   showError,
   textBlocks,
@@ -38,7 +42,10 @@ import {
   toast,
   uid,
 } from './app-common.js';
+import { createShell, parseShellHash, sectionHref, shellIcon } from './app-shell.js';
 import { initMyAddons } from './konto-addons.js';
+import { initCosmetics } from './konto-cosmetics.js';
+import { initOverview } from './konto-uebersicht.js';
 import { attachmentList, normalizeAttachments } from './support-attachments.js';
 
 // Alle Spielerbilder auf dieser Seite: Minecraft-Köpfe über die Cookie-Sitzung (sonst Initialen).
@@ -66,12 +73,23 @@ const state = {
   ended: false,
 };
 
-let tabs = null;
+/** Bereich, wenn die Adresse keinen nennt. */
+const DEFAULT_SECTION = 'uebersicht';
+/** Eigene Addons für Übersicht und Glocke, solange „Meine Addons“ zu ist: höchstens so oft. */
+const ADDONS_BACKGROUND_MS = 60_000;
+const DAY = 24 * 60 * 60 * 1000;
+/** Wie der Dienst: 30 Tage ab Anmeldung, höchstens 7 Tage ohne Nutzung (GET /v1/web/sessions nennt kein Ende). */
+const SESSION_TTL = 30 * DAY;
+const SESSION_IDLE = 7 * DAY;
+
+let shell = null;
 let myAddons = null;
+let overview = null;
+let cosmetics = null;
 const refresher = poller(refreshLive, POLL_MS);
 const supportRefresher = poller(() => refreshSupport(), 15_000);
 /** Ziele aus dem Einmal-Link (#code=…&ziel=…), siehe Spezifikation 2 §6. */
-const TARGETS = new Set(['profil', 'freunde', 'nachrichten', 'privatsphaere', 'daten', 'support', 'addons', 'team']);
+const TARGETS = new Set(['uebersicht', 'profil', 'freunde', 'nachrichten', 'privatsphaere', 'sicherheit', 'daten', 'support', 'addons', 'team']);
 
 // ---------------------------------------------------------------------------------------------------------
 // Anfragen mit Sitzung: 401 heißt abgemeldet (abgelaufen, anderswo beendet oder Daten gelöscht)
@@ -92,6 +110,8 @@ function sessionEnded(message) {
   refresher.stop();
   supportRefresher.stop();
   myAddons?.stop();
+  cosmetics?.stop();
+  overview?.reset();
   for (const dialog of document.querySelectorAll('dialog.modal')) dialog.remove();
   showGuest(message);
 }
@@ -102,6 +122,7 @@ function sessionEnded(message) {
 
 function showView(id) {
   for (const view of ['konto-laden', 'konto-fehler', 'konto-gast', 'konto-app']) $(`#${view}`).hidden = view !== id;
+  if (id !== 'konto-app') shell.closeAll();
 }
 
 function showGuest(message) {
@@ -152,7 +173,7 @@ async function start() {
     if (notice) toast(notice, 'error');
   } catch (error) {
     if (error.status === 401) {
-      const hint = target === 'support' ? 'Für eine Support-Anfrage meldest du dich zuerst an – ohne Passwort, über den Launcher oder im Spiel (siehe unten). Danach öffnet sich der Reiter Support.' : target ? 'Melde dich zuerst an – ohne Passwort, über den Launcher oder im Spiel (siehe unten).' : null;
+      const hint = target === 'support' ? 'Für eine Support-Anfrage meldest du dich zuerst an – ohne Passwort, über den Launcher oder im Spiel (siehe unten). Danach öffnet sich der Bereich Support.' : target ? 'Melde dich zuerst an – ohne Passwort, über den Launcher oder im Spiel (siehe unten).' : null;
       showGuest(notice ?? hint);
     }
     else showUnavailable(error);
@@ -162,110 +183,110 @@ async function start() {
 function showApp(me, target = null) {
   state.me = me;
   state.ended = false;
+  state.sessions = null;
   renderHeader();
-  renderCapes();
   renderSettings();
+  overview.setUser(me);
+  cosmetics.setUser(me);
+  renderTwoFactor();
   showView('konto-app');
-  const wanted = target ?? location.hash.slice(1);
-  tabs.select(tabs.has(wanted) ? wanted : 'profil', { silent: false });
+  const address = parseShellHash();
+  const wanted = target ?? address.section;
+  shell.select(shell.has(wanted) ? wanted : DEFAULT_SECTION, { params: target ? null : address.extra });
   refreshFriends().catch(showError);
   refreshConversations().catch(() => {});
   if (wanted !== 'support') refreshSupportList().catch(() => {});
+  if (wanted !== 'addons') myAddons.refreshInBackground().catch(() => {});
+  if (wanted !== 'sicherheit') loadSessions().catch(() => {});
   refresher.start();
   supportRefresher.start();
 }
 
+/** Kopfzeile und Seitenleiste: eigener Spieler, Rolle (Team-Gruppe nur mit Rolle), Ablauf der Sitzung. */
 function renderHeader() {
   const { me } = state;
-  $('#konto-avatar').replaceWith(Object.assign(avatar(me.name, me.uuid, { size: 'lg' }), { id: 'konto-avatar' }));
-  $('#konto-name').textContent = me.name;
-  const meta = $('#konto-meta');
-  const parts = [h('span', { text: 'Angemeldet beim Heldix-Dienst' })];
-  if (me.role) parts.push(h('span', { class: 'chip accent', text: ROLE_LABELS[me.role] ?? me.role }));
-  if (me.expiresAt) parts.push(h('span', { class: 'muted', text: `Sitzung gültig bis spätestens ${formatDate(me.expiresAt)}` }));
-  meta.replaceChildren(...parts);
-  $('#konto-team').hidden = !me.role;
+  shell.setUser(me);
+  shell.setMeta(['Angemeldet beim Heldix-Dienst', me.expiresAt ? `Sitzung gültig bis spätestens ${formatDate(me.expiresAt)}` : null]);
 }
 
-function onTab(name) {
-  history.replaceState(null, '', `${location.pathname}${location.search}#${name}`);
+/** Bereich gewechselt. params: weitere Werte aus der Adresse oder einem Eintrag der Glocke (mit, anfrage). */
+function onTab(name, { params = null } = {}) {
   if (name === 'freunde') refreshFriends().catch(showError);
   if (name === 'nachrichten') {
+    const uuid = typeof params?.mit === 'string' && /^[0-9a-f]{32}$/.test(params.mit) ? params.mit : null;
+    if (uuid && state.chat?.uuid !== uuid) openChat(uuid);
+    else if (state.chat) markRead(state.chat.uuid);
     refreshConversations().catch(showError);
-    if (state.chat) markRead(state.chat.uuid);
   }
   if (name === 'privatsphaere') {
     loadBlocks().catch(showError);
     loadReports().catch(showError);
   }
-  if (name === 'daten') loadSessions().catch(showError);
-  myAddons.onTab(name);
-  if (name === 'support') {
-    refreshSupportList().catch(showError);
-    if (state.support.ticket?.id) refreshOpenTicket().catch(() => {});
+  if (name === 'sicherheit') {
+    loadSessions().catch(showError);
+    refreshMe().catch(() => {});
   }
+  myAddons.onTab(name);
+  cosmetics.onTab(name, params);
+  if (name === 'support') {
+    const ticket = params?.anfrage !== undefined && /^[0-9]{1,12}$/.test(String(params.anfrage)) ? Number(params.anfrage) : null;
+    refreshSupportList().catch(showError);
+    if (ticket !== null && state.support.ticket?.id !== ticket) openTicket(ticket);
+    else if (state.support.ticket?.id) refreshOpenTicket().catch(() => {});
+  }
+}
+
+/** Profil neu holen (Zwei-Faktor-Stand, Rolle) – beim Öffnen von „Sicherheit“. */
+async function refreshMe() {
+  const me = await call('GET', '/v1/web/me');
+  if (state.ended || !me) return;
+  const roleChanged = me.role !== state.me.role;
+  state.me = { ...state.me, ...me };
+  if (roleChanged) renderHeader();
+  renderTwoFactor();
+  overview.update({ me: state.me });
 }
 
 /** Alle 10 Sekunden (solange sichtbar): Freunde, Unterhaltungen und der offene Chat. */
 async function refreshLive() {
   if (state.ended) return;
-  await Promise.all([refreshFriends(), refreshConversations(), tabs.current() === 'nachrichten' && state.chat ? refreshChat() : null]);
+  await Promise.all([refreshFriends(), refreshConversations(), shell.current() === 'nachrichten' && state.chat ? refreshChat() : null]);
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// Profil: Cape und Einstellungen
+// Profil: Einstellungen (Cape und Cosmetics: konto-cosmetics.js)
 // ---------------------------------------------------------------------------------------------------------
 
-let capeTimer = null;
 // Änderungen nacheinander speichern, damit schnelle Klicks in der richtigen Reihenfolge ankommen.
 let saving = Promise.resolve();
 
-function renderCapes() {
-  const current = state.me.cape || '';
-  const options = [['', 'Kein Cape'], ...CAPES];
-  // Ein Cape, das diese Seite nicht kennt (eigene Liste auf dem Server), trotzdem anzeigen.
-  if (current && !CAPES.some(([id]) => id === current)) options.push([current, current]);
-  rerender($('#cape-grid'), undefined, () =>
-    options.map(([id, name]) => {
-      const input = h('input', { type: 'radio', name: 'cape', value: id, 'aria-label': name, dataset: { focusKey: `cape:${id}` } });
-      input.checked = id === current;
-      const known = id === '' || CAPES.some(([capeId]) => capeId === id);
-      return h(
-        'label',
-        { class: 'cape-option' },
-        input,
-        h('span', { class: `cape-art${id === '' ? ' none' : ''}${known ? '' : ' unknown'}`, dataset: { cape: id || 'none' }, 'aria-hidden': 'true' }, id === '' ? icon('close') : null),
-        h('span', { class: 'cape-name', text: name, 'aria-hidden': 'true' }),
-        h('span', { class: 'cape-tick', 'aria-hidden': 'true' }, icon('check')),
-      );
-    }),
-  );
-  updateProfileHints();
+/** Aufgabe in die Reihe der Speichervorgänge stellen (Einstellungen, Cape, Cosmetics). */
+function enqueue(task) {
+  saving = saving.then(task, task);
+  return saving;
 }
 
-function onCapeChange(event) {
-  if (event.target.name !== 'cape') return;
-  const cape = event.target.value;
-  // Pfeiltasten wechseln sofort die Auswahl: erst speichern, wenn sie kurz stehen bleibt.
-  clearTimeout(capeTimer);
-  capeTimer = setTimeout(() => {
-    saving = saving.then(() => saveSettings({ cape }, $('#cape-gespeichert'), cape ? 'Cape gespeichert' : 'Kein Cape gewählt'));
-  }, 350);
+/** Profil geändert (z. B. Cape): Hinweise, Übersicht. */
+function applyMe(patch) {
+  state.me = { ...state.me, ...patch };
+  updateProfileHints();
+  overview.update({ me: state.me });
 }
 
 async function saveSettings(patch, savedElement, savedText) {
   try {
     const me = await call('PUT', '/v1/me', patch);
-    state.me = { ...state.me, ...me };
+    applyMe(me ?? {});
     flashSaved(savedElement, savedText);
-    updateProfileHints();
+    return true;
   } catch (error) {
     showError(error);
     // Den Stand des Dienstes zeigen, also den alten Wert.
     if (!state.ended) {
-      renderCapes();
+      cosmetics.render();
       renderSettings();
     }
+    return false;
   }
 }
 
@@ -283,7 +304,7 @@ function renderSettings() {
 
 /** Hinweise, die von mehreren Einstellungen abhängen. */
 function updateProfileHints() {
-  $('#cape-unsichtbar').hidden = state.me.visible !== false || !state.me.cape;
+  $('#cape-unsichtbar').hidden = state.me.visible !== false || !(state.me.cape || cosmetics?.wearsSomething());
   const serverRow = $('#einstellungen [name="showServer"]')?.closest('.switch-row');
   if (serverRow) serverRow.classList.toggle('dim', state.me.presence === false);
 }
@@ -292,7 +313,7 @@ function onSettingChange(event) {
   const input = event.target;
   if (!input.classList.contains('switch')) return;
   const patch = { [input.name]: input.checked };
-  saving = saving.then(() => saveSettings(patch, $('#einstellungen-gespeichert')));
+  enqueue(() => saveSettings(patch, $('#einstellungen-gespeichert')));
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -309,6 +330,11 @@ async function refreshFriends() {
   renderFriends();
   renderConversations();
   updateBadges();
+}
+
+/** Stand für Übersicht und Glocke. */
+function pushOverview() {
+  overview.update({ me: state.me, friends: state.friends, conversations: state.conversations, tickets: state.support.tickets });
 }
 
 function friendByUuid(uuid) {
@@ -478,14 +504,10 @@ function applyFriends(data) {
 function updateBadges() {
   const incoming = state.friends?.incoming.length ?? 0;
   const unread = (state.conversations ?? []).reduce((sum, conversation) => sum + (conversation.unread || 0), 0);
-  const setCount = (element, count, label) => {
-    element.hidden = !count;
-    element.textContent = count > 99 ? '99+' : String(count);
-    element.setAttribute('aria-label', label);
-  };
-  setCount($('#count-freunde'), incoming, `${incoming} offene Anfragen`);
-  setCount($('#count-nachrichten'), unread, `${unread} ungelesen`);
+  shell.setBadge('freunde', incoming, { label: incoming === 1 ? '1 offene Anfrage' : `${incoming} offene Anfragen` });
+  shell.setBadge('nachrichten', unread, { label: `${unread} ungelesen` });
   document.title = `${unread ? `(${unread}) ` : ''}Konto – HeldixClient`;
+  pushOverview();
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -496,7 +518,7 @@ async function refreshConversations() {
   const data = await call('GET', '/v1/messages');
   state.conversations = Array.isArray(data?.conversations) ? data.conversations : [];
   // Offener Chat: neue Nachrichten gelten als gelesen, sobald man hinsieht.
-  if (state.chat && tabs.current() === 'nachrichten' && document.visibilityState === 'visible') {
+  if (state.chat && shell.current() === 'nachrichten' && document.visibilityState === 'visible') {
     const open = state.conversations.find((conversation) => conversation.uuid === state.chat.uuid);
     if (open && open.unread) markRead(open.uuid);
   }
@@ -586,7 +608,7 @@ function renderConversations() {
 }
 
 function openChatFromFriends(uuid) {
-  tabs.select('nachrichten');
+  shell.select('nachrichten');
   openChat(uuid);
 }
 
@@ -757,6 +779,8 @@ async function markRead(uuid) {
   try {
     await call('POST', `/v1/messages/${uuid}/read`);
     conversation.unread = 0;
+    // Inzwischen neu geladen (älterer Stand vom Dienst): auch dort als gelesen führen.
+    for (const entry of state.conversations ?? []) if (entry.uuid === uuid) entry.unread = 0;
     renderConversations();
     updateBadges();
   } catch {
@@ -897,10 +921,8 @@ async function refreshSupportList() {
 function renderSupportList() {
   const tickets = state.support.tickets ?? [];
   const unread = tickets.filter((ticket) => ticket.unread).length;
-  const badge = $('#count-support');
-  badge.hidden = !unread;
-  badge.textContent = String(unread);
-  badge.setAttribute('aria-label', unread === 1 ? '1 neue Antwort' : `${unread} neue Antworten`);
+  shell.setBadge('support', unread, { label: unread === 1 ? '1 neue Antwort' : `${unread} neue Antworten` });
+  if (state.support.tickets) pushOverview();
   const openCount = tickets.filter((ticket) => ticket.status !== 'closed').length;
   $('#support-limit').hidden = openCount < MAX_OPEN_TICKETS;
   $('#support-neu').disabled = openCount >= MAX_OPEN_TICKETS;
@@ -1131,7 +1153,9 @@ async function refreshOpenTicket() {
 
 async function refreshSupport() {
   if (state.ended) return;
-  await Promise.all([refreshSupportList(), tabs.current() === 'support' ? refreshOpenTicket() : null]);
+  // Eigene Addons im selben Takt mitnehmen, aber selten (Reiter offen: der fragt selbst nach).
+  const addons = shell.current() !== 'addons' ? myAddons.refreshInBackground(ADDONS_BACKGROUND_MS) : null;
+  await Promise.all([refreshSupportList(), shell.current() === 'support' ? refreshOpenTicket() : null, addons]);
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -1232,7 +1256,7 @@ async function loadReports() {
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// Meine Daten: Export, Sitzungen, alles löschen
+// Meine Daten: Export, alles löschen
 // ---------------------------------------------------------------------------------------------------------
 
 async function exportData(event) {
@@ -1269,6 +1293,10 @@ async function exportData(event) {
   }
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// Sicherheit: angemeldete Browser, Zwei-Faktor-Anmeldung (Team)
+// ---------------------------------------------------------------------------------------------------------
+
 async function loadSessions() {
   const box = $('#sitzungen');
   if (!box.firstChild) box.replaceChildren(loadingState());
@@ -1276,37 +1304,73 @@ async function loadSessions() {
   renderSessions(data);
 }
 
+/** Ende einer Anmeldung: vom Dienst, sonst wie der Dienst rechnet (30 Tage ab Anmeldung, 7 Tage ohne Nutzung). */
+function sessionEnd(session) {
+  if (session.current && state.me?.expiresAt) return state.me.expiresAt;
+  if (typeof session.expiresAt === 'number') return session.expiresAt;
+  const created = typeof session.createdAt === 'number' ? session.createdAt : null;
+  const used = typeof session.lastUsedAt === 'number' ? session.lastUsedAt : created;
+  if (created === null || used === null) return null;
+  return Math.min(created + SESSION_TTL, used + SESSION_IDLE);
+}
+
+/** Gerät aus dem Text des Dienstes („Firefox · Windows“): Handy oder Rechner – nur fürs Symbol. */
+const isPhone = (device) => /iphone|android|ipad|handy|mobil/i.test(String(device || ''));
+
+/** Symbol „Handy“ (gibt es im Heldix-Icon-Set nicht; gleicher Stil). */
+function phoneIcon() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'icon');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of ['M8.5 3 H15.5 A2 2 0 0 1 17.5 5 V19 A2 2 0 0 1 15.5 21 H8.5 A2 2 0 0 1 6.5 19 V5 A2 2 0 0 1 8.5 3 Z', 'M11 17.5 H13']) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
+}
+
 function renderSessions(data) {
   const sessions = Array.isArray(data?.sessions) ? [...data.sessions] : [];
   sessions.sort((a, b) => Number(b.current) - Number(a.current) || (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0));
   state.sessions = sessions;
   const others = sessions.filter((session) => !session.current);
-  $('#sitzungen-andere').hidden = others.length < 2;
-  rerender($('#sitzungen'), JSON.stringify(sessions), () => {
+  $('#sitzungen-andere').hidden = others.length < 1;
+  $('#sitzungen-anzahl').textContent = sessions.length ? `(${sessions.length})` : '';
+  overview.update({ sessions });
+  rerender($('#sitzungen'), JSON.stringify([sessions, state.me?.expiresAt]), () => {
     if (!sessions.length) return emptyState('Keine Anmeldungen.', 'clock');
     return h(
       'ul',
-      { class: 'rows' },
-      sessions.map((session) =>
-        h(
+      { class: 'rows sec-sessions' },
+      sessions.map((session) => {
+        const end = sessionEnd(session);
+        return h(
           'li',
-          { class: 'row' },
-          h('span', { class: 'row-icon', 'aria-hidden': 'true' }, icon(session.current ? 'check' : 'clock')),
+          { class: `row sec-session${session.current ? ' current' : ''}`, dataset: { sitzung: session.id } },
+          h('span', { class: 'row-icon', 'aria-hidden': 'true' }, isPhone(session.device) ? phoneIcon() : icon('monitor')),
           h(
             'div',
             { class: 'row-main' },
             h('div', { class: 'row-title' }, h('span', { text: session.device || 'Unbekannter Browser' }), session.current ? h('span', { class: 'chip accent', text: 'Dieser Browser' }) : null),
-            h('div', { class: 'row-sub', text: `angemeldet am ${formatDate(session.createdAt)} · zuletzt aktiv ${relativeTime(session.lastUsedAt)}` }),
+            h(
+              'dl',
+              { class: 'sec-times' },
+              h('div', null, h('dt', { text: 'Angemeldet' }), h('dd', null, timeEl(session.createdAt, formatDate(session.createdAt)))),
+              h('div', null, h('dt', { text: 'Zuletzt aktiv' }), h('dd', null, session.current ? 'jetzt' : timeEl(session.lastUsedAt, relativeTime(session.lastUsedAt)))),
+              h('div', null, h('dt', { text: 'Läuft ab' }), h('dd', null, end ? timeEl(end, formatDate(end)) : '–')),
+            ),
           ),
           h(
             'div',
             { class: 'row-actions' },
             session.current
               ? h('button', { type: 'button', class: 'button tiny ghost', dataset: { focusKey: 'logout' }, onClick: logout }, 'Abmelden')
-              : h('button', { type: 'button', class: 'button tiny ghost', dataset: { focusKey: `${session.id}:end` }, onClick: (event) => endSession(event.currentTarget, session) }, 'Abmelden'),
+              : h('button', { type: 'button', class: 'button tiny ghost', 'aria-label': `${session.device || 'Browser'} abmelden`, dataset: { focusKey: `${session.id}:end` }, onClick: (event) => endSession(event.currentTarget, session) }, 'Abmelden'),
           ),
-        ),
-      ),
+        );
+      }),
     );
   });
 }
@@ -1316,26 +1380,74 @@ async function endSession(button, session) {
     const data = await busy(button, () => call('DELETE', `/v1/web/sessions/${encodeURIComponent(session.id)}`));
     renderSessions(data);
     toast(`${session.device || 'Der Browser'} ist abgemeldet.`);
+    $('#sitzungen-titel').focus?.();
   } catch (error) {
     showError(error);
   }
 }
 
+/** „Überall abmelden (außer hier)“: jede andere Anmeldung einzeln beenden (der Dienst kennt kein „alle“). */
 async function endOtherSessions(event) {
   const others = (state.sessions ?? []).filter((session) => !session.current);
   if (!others.length) return;
+  const opener = event.currentTarget;
+  let failed = 0;
   const ok = await confirmAction({
-    title: 'Alle anderen Browser abmelden?',
-    text: `${others.length} andere Anmeldungen enden sofort. Dieser Browser bleibt angemeldet.`,
-    confirmLabel: 'Abmelden',
+    title: 'Überall abmelden – außer hier?',
+    text: [
+      others.length === 1 ? 'Die andere Anmeldung endet sofort.' : `${others.length} andere Anmeldungen enden sofort.`,
+      'Dieser Browser bleibt angemeldet. Launcher und Spiel sind davon nicht betroffen.',
+    ],
+    confirmLabel: 'Überall abmelden',
     onConfirm: async () => {
       let data = null;
-      for (const session of others) data = await call('DELETE', `/v1/web/sessions/${encodeURIComponent(session.id)}`);
-      renderSessions(data);
+      for (const session of others) {
+        try {
+          data = await call('DELETE', `/v1/web/sessions/${encodeURIComponent(session.id)}`);
+        } catch (error) {
+          if (error.status === 401) throw error;
+          failed++;
+        }
+      }
+      if (data) renderSessions(data);
+      else await loadSessions();
     },
   });
-  if (ok) toast('Alle anderen Browser sind abgemeldet.', 'success');
-  else event.currentTarget?.focus?.();
+  if (!ok) return opener?.focus?.();
+  if (failed) toast(`${failed === 1 ? 'Eine Anmeldung ließ' : `${failed} Anmeldungen ließen`} sich gerade nicht beenden. Versuch es gleich noch einmal.`, 'error');
+  else toast(others.length === 1 ? 'Die andere Anmeldung ist beendet.' : 'Alle anderen Anmeldungen sind beendet.', 'success');
+  $('#sitzungen-titel').focus?.();
+}
+
+/** Karte „Zwei-Faktor-Anmeldung“: nur für Team-Mitglieder (GET /v1/web/me → role, twoFactor). */
+function renderTwoFactor() {
+  const me = state.me;
+  const card = $('#zweifaktor');
+  if (!me?.role) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  const twoFactor = me.twoFactor ?? { enabled: false, verified: false };
+  const status = $('#zweifaktor-status');
+  status.className = `chip ${twoFactor.enabled ? 'success' : 'warning'}`;
+  status.textContent = twoFactor.enabled ? 'Eingerichtet' : 'Nicht eingerichtet';
+  const role = ROLE_LABELS[me.role] ?? me.role;
+  const check = (ok, text) => h('li', { class: ok ? 'ok' : 'todo' }, icon(ok ? 'check' : 'warning'), h('span', { text }));
+  $('#zweifaktor-liste').replaceChildren(
+    check(true, `Du bist im Team als ${role}.`),
+    check(twoFactor.enabled, twoFactor.enabled ? 'Die Zwei-Faktor-Anmeldung ist eingerichtet.' : 'Die Zwei-Faktor-Anmeldung ist noch nicht eingerichtet – ohne sie bleibt der Team-Bereich zu.'),
+    twoFactor.enabled ? check(twoFactor.verified, twoFactor.verified ? 'Dieser Browser ist mit einem Code bestätigt (12 Stunden lang).' : 'Dieser Browser ist gerade nicht bestätigt. Der Team-Bereich fragt nach dem Code.') : null,
+  );
+  const actions = [];
+  if (!twoFactor.enabled) actions.push(h('a', { class: 'button small', href: '/team', id: 'zweifaktor-einrichten' }, icon('lock'), 'Jetzt einrichten'));
+  else if (!twoFactor.verified) actions.push(h('a', { class: 'button small', href: '/team', id: 'zweifaktor-bestaetigen' }, icon('lock'), 'Code eingeben'));
+  else actions.push(h('a', { class: 'button small ghost', href: sectionHref('team', 'uebersicht'), id: 'zweifaktor-team' }, icon('shield'), 'Zum Team-Bereich'));
+  if (twoFactor.enabled && me.role === 'admin') actions.push(h('a', { class: 'button small ghost', href: sectionHref('team', 'team'), id: 'zweifaktor-verwalten' }, icon('friends'), 'Mitglieder und 2FA verwalten'));
+  $('#zweifaktor-aktionen').replaceChildren(...actions);
+  $('#zweifaktor-hilfe').textContent = twoFactor.enabled
+    ? 'Neues Handy oder App verloren? Ein Admin kann deine Zwei-Faktor-Anmeldung zurücksetzen (Team → Team). Danach richtest du sie im Team-Bereich neu ein.'
+    : 'Du brauchst eine Authenticator-App (z. B. Aegis, 2FAS, Google oder Microsoft Authenticator). Der Team-Bereich zeigt dir den Schlüssel und fragt einmal nach einem Code.';
 }
 
 async function logout() {
@@ -1372,11 +1484,40 @@ async function deleteEverything() {
 // ---------------------------------------------------------------------------------------------------------
 
 function init() {
-  tabs = setupTabs($('#konto-tabs'), onTab);
-  myAddons = initMyAddons({ call, onUnauthorized: () => sessionEnded('Deine Anmeldung ist abgelaufen oder wurde beendet. Melde dich über den Launcher oder im Spiel erneut an.') });
+  shell = createShell({ root: $('#konto-app'), page: 'konto', defaultSection: DEFAULT_SECTION, onSelect: onTab, onSignOut: logout });
+  shell.mountOverview($('#uebersicht-kacheln'));
+  const goTo = (section, then) => {
+    shell.select(section, { history: 'push', scroll: true, source: 'user' });
+    $('#shell-titel').focus({ preventScroll: true });
+    if (then) requestAnimationFrame(then);
+  };
+  overview = initOverview({
+    shell,
+    actions: {
+      freund: () => goTo('freunde', () => $('#freund-name').focus()),
+      nachricht: () => goTo('nachrichten', () => $('#unterhaltungen .conv')?.focus()),
+      cosmetics: () => goTo('profil'),
+      support: () => goTo('support', () => (!$('#support-neu').disabled ? openSupportForm() : $('#support-limit').scrollIntoView({ block: 'nearest' }))),
+      addon: () => goTo('addons', () => myAddons.openWizard()),
+    },
+  });
+  myAddons = initMyAddons({
+    call,
+    onUnauthorized: () => sessionEnded('Deine Anmeldung ist abgelaufen oder wurde beendet. Melde dich über den Launcher oder im Spiel erneut an.'),
+    onChange: ({ submissions, addons }) => overview.update({ submissions, addons }),
+  });
+  cosmetics = initCosmetics({
+    call,
+    enqueue,
+    getMe: () => state.me,
+    applyMe,
+    saveCape: (cape, savedText) => saveSettings({ cape }, $('#cape-gespeichert'), savedText),
+    onLook: (look) => {
+      overview.update({ look });
+      updateProfileHints();
+    },
+  });
   $('#konto-erneut').addEventListener('click', start);
-  $('#konto-abmelden').addEventListener('click', logout);
-  $('#cape-grid').addEventListener('change', onCapeChange);
   $('#einstellungen').addEventListener('change', onSettingChange);
   $('#freund-form').addEventListener('submit', onFriendSubmit);
   $('#chat-form').addEventListener('submit', onSend);
@@ -1391,6 +1532,7 @@ function init() {
   $('#block-form').addEventListener('submit', onBlockSubmit);
   $('#export').addEventListener('click', exportData);
   $('#sitzungen-andere').addEventListener('click', endOtherSessions);
+  $('#sitzungen-andere .sec-logout-icon').replaceWith(shellIcon('logout'));
   $('#loeschen').addEventListener('click', deleteEverything);
   bindCounter($('#chat-text'), $('#chat-zaehler'), MAX_MESSAGE);
   $('#support-neu').addEventListener('click', openSupportForm);
@@ -1409,13 +1551,9 @@ function init() {
   bindCounter($('#support-betreff'), $('#support-betreff-zaehler'), MAX_SUBJECT);
   bindCounter($('#support-text'), $('#support-text-zaehler'), MAX_TICKET_TEXT);
   bindCounter($('#ticket-text'), $('#ticket-zaehler'), MAX_TICKET_TEXT);
+  // Neuer Einmal-Link, während die Seite offen ist: neu anmelden. Bereiche (#reiter=…) wechselt die Shell selbst.
   window.addEventListener('hashchange', () => {
-    const wanted = location.hash.slice(1);
-    if (/(^|&)(code|ziel)=/.test(wanted)) {
-      start();
-      return;
-    }
-    if (state.me && !state.ended && tabs.has(wanted) && tabs.current() !== wanted) tabs.select(wanted);
+    if (/(^|&)(code|ziel)=/.test(location.hash.slice(1))) start();
   });
   start();
 }

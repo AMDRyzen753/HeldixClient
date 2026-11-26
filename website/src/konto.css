@@ -1,0 +1,887 @@
+/* HeldixClient – Webseite: Konto (/konto) – Übersicht, Cape & Cosmetics, Sicherheit. Nur auf /konto geladen,
+   nach styles.css und app.css; nutzt deren Farben und Bausteine. Bewegung entfällt bei prefers-reduced-motion. */
+
+/* ---------- Übersicht: Gruß und Schnellaktionen ---------- */
+.app .ov-hero {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 14px;
+  background: radial-gradient(120% 170% at 0% 0%, rgba(59, 130, 246, 0.18), transparent 55%), radial-gradient(80% 120% at 100% 100%, rgba(56, 189, 248, 0.08), transparent 60%), var(--surface);
+}
+.ov-hero-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.ov-avatar {
+  flex: none;
+  display: grid;
+}
+.ov-avatar .avatar {
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.ov-hero-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.app .ov-eyebrow {
+  margin: 0;
+  color: var(--accent-text);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.app .ov-hero h2 {
+  margin: 0;
+  font-size: clamp(22px, 1.2vw + 15px, 28px);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+.app .ov-lead {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+.ov-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ov-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 13px;
+  border-radius: 10px;
+  border: 1px solid var(--surface-line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ov-action:hover {
+  border-color: rgba(147, 197, 253, 0.35);
+  background: rgba(59, 130, 246, 0.12);
+  text-decoration: none;
+}
+.ov-action .icon {
+  width: 17px;
+  height: 17px;
+  color: var(--accent-text);
+}
+
+/* ---------- Übersicht: Kacheln mit dem Stand ---------- */
+.ov-status {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.ov-tile-item {
+  display: grid;
+  min-width: 0;
+}
+.ov-tile {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 16px 40px 16px 16px;
+  border-radius: 14px;
+  border: 1px solid var(--surface-line);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s var(--ease);
+}
+.ov-tile:hover {
+  border-color: rgba(147, 197, 253, 0.35);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), transparent 70%), var(--surface);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+.ov-tile.news {
+  border-color: rgba(147, 197, 253, 0.34);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12), transparent 65%), var(--surface);
+}
+.ov-tile.warn {
+  border-color: rgba(251, 191, 36, 0.3);
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.08), transparent 65%), var(--surface);
+}
+.ov-tile-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ov-tile-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--accent-text);
+  overflow: hidden;
+}
+.ov-tile.warn .ov-tile-icon {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fde68a;
+}
+.ov-tile-icon .icon {
+  width: 19px;
+  height: 19px;
+}
+.ov-tile-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-tile-value {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.ov-tile-sub {
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.ov-tile.warn .ov-tile-sub {
+  color: #fde68a;
+}
+.ov-tile-go {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  color: var(--faint);
+}
+.ov-tile-go .icon {
+  width: 18px;
+  height: 18px;
+}
+/* Cape als Bild in der Kachel (Ausschnitt aus images/capes.png bzw. Vorschaubild) */
+.ov-tile-icon .ov-cape-art {
+  width: 24px;
+  border-radius: 3px;
+}
+.ov-thumb {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+/* ---------- Übersicht: Aktivität und alle Bereiche ---------- */
+.ov-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.ov-columns > .app-card + .app-card {
+  margin-top: 0;
+}
+.ov-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  margin-bottom: 12px;
+}
+.app .ov-card-head h2,
+.app .ov-all h2 {
+  margin: 0;
+}
+.ov-act-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--surface-line);
+  border-radius: 12px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.ov-act-list > li + li {
+  border-top: 1px solid var(--surface-line);
+}
+.ov-act {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 11px 14px;
+  color: var(--text);
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.ov-act:hover {
+  background: var(--surface-hover);
+  text-decoration: none;
+}
+.ov-act:focus-visible {
+  outline-offset: -2px;
+}
+.ov-act.unread {
+  box-shadow: inset 3px 0 0 var(--accent);
+  background: rgba(59, 130, 246, 0.06);
+}
+.ov-act-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--accent-text);
+}
+.ov-act-icon .icon {
+  width: 17px;
+  height: 17px;
+}
+.ov-act-icon.addon {
+  background: rgba(52, 211, 153, 0.1);
+  color: #6ee7b7;
+}
+.ov-act-body {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ov-act-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.ov-act-text {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-act-side {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  flex: none;
+  color: var(--faint);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.app .ov-activity-hint {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+}
+/* Alle Bereiche: dieselben Einträge wie die Seitenleiste, als kurze Liste */
+.ov-all .shell-tiles {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  margin-top: 12px;
+  border: 1px solid var(--surface-line);
+  border-radius: 12px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.ov-all .shell-tile {
+  gap: 12px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.ov-all .shell-tile + .shell-tile {
+  border-top: 1px solid var(--surface-line);
+}
+.ov-all .shell-tile:hover {
+  background: var(--surface-hover);
+  transform: none;
+}
+.ov-all .shell-tile-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+.ov-all .shell-tile-icon .icon {
+  width: 16px;
+  height: 16px;
+}
+.ov-all .shell-tile-title {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.ov-all .shell-tile-text {
+  font-size: 12.5px;
+}
+.ov-all .shell-tile-news {
+  display: none;
+}
+
+/* ---------- Cape & Cosmetics ---------- */
+.cos-studio {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 18px;
+  align-items: start;
+}
+.cos-viewer {
+  position: sticky;
+  top: calc(var(--nav-h) + 16px);
+  height: clamp(380px, 58vh, 520px);
+  border-radius: 14px;
+  border: 1px solid rgba(147, 197, 253, 0.16);
+  overflow: hidden;
+  background: radial-gradient(70% 60% at 50% 40%, rgba(59, 130, 246, 0.26), transparent 70%), linear-gradient(180deg, rgba(16, 23, 39, 0.85), rgba(7, 10, 18, 0.92));
+  touch-action: pan-y;
+}
+.cos-viewer::after {
+  content: "";
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  bottom: 13%;
+  height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.55), transparent);
+  pointer-events: none;
+}
+.cos-viewer canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+.cos-viewer canvas:active {
+  cursor: grabbing;
+}
+.cos-viewer.loading canvas {
+  opacity: 0.6;
+}
+.app .cos-viewer-hint {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  margin: 0;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(7, 10, 18, 0.6);
+  border: 1px solid var(--surface-line);
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.cos-viewer[data-webgl="nein"] .cos-viewer-hint {
+  display: none;
+}
+.cos-viewer-controls {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.cos-viewer-controls .button[aria-pressed="true"] {
+  border-color: rgba(147, 197, 253, 0.4);
+  background: rgba(59, 130, 246, 0.2);
+}
+/* Ersatz ohne WebGL (oder ohne 3D-Meshes): die Auswahl als Bilder */
+.cos-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  align-content: center;
+  gap: 14px;
+  padding: 18px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.cos-viewer[data-webgl="ja"] .cos-fallback {
+  inset: auto 10px 58px auto;
+  width: min(46%, 190px);
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--surface-line);
+  background: rgba(7, 10, 18, 0.78);
+  font-size: 12px;
+}
+.cos-fallback-items {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+.cos-fallback-item {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 12.5px;
+}
+.cos-fallback-art {
+  width: 96px;
+  height: 96px;
+  image-rendering: pixelated;
+}
+.cos-viewer[data-webgl="ja"] .cos-fallback-art {
+  width: 64px;
+  height: 64px;
+}
+
+.cos-picker {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.cos-slots {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid var(--surface-line);
+  background: var(--surface-2);
+}
+.cos-slot {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 4px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 13.5px/1.25 var(--font);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.cos-slot:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.cos-slot[aria-selected="true"] {
+  color: #fff;
+  background: rgba(59, 130, 246, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.25);
+}
+.cos-slot:focus-visible {
+  outline-offset: -2px;
+}
+.cos-slot-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.cos-slot.worn .cos-slot-icon {
+  background: rgba(59, 130, 246, 0.18);
+  color: var(--accent-text);
+}
+.cos-slot.worn .cos-slot-icon::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px #0d1320;
+}
+.cos-slot-icon .icon {
+  width: 18px;
+  height: 18px;
+}
+.cos-slot-text {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  width: 100%;
+  min-width: 0;
+}
+.cos-slot-label,
+.cos-slot-current {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cos-slot-current {
+  color: var(--faint);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.cos-slot[aria-selected="true"] .cos-slot-current {
+  color: var(--accent-text);
+}
+.cos-slot-panel:focus-visible {
+  outline-offset: 4px;
+}
+.app .cos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+}
+.cos-option {
+  min-width: 0;
+}
+.cos-option .cape-name {
+  hyphens: auto;
+  overflow-wrap: break-word;
+}
+.cos-option.pending {
+  opacity: 0.6;
+  cursor: progress;
+}
+.cos-option.pending input {
+  cursor: progress;
+}
+.cos-thumb {
+  width: 88px;
+  height: 95px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+.cos-art-none,
+.cos-art-pending {
+  width: 62px;
+}
+.cos-art-pending .spinner {
+  width: 18px;
+  height: 18px;
+}
+.cos-team {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.2);
+  color: var(--accent-text);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.app .cos-grid-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+.cos-detail {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--surface-line);
+  background: var(--surface-2);
+}
+.cos-detail-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.app .cos-detail-eyebrow {
+  margin: 0;
+  color: var(--faint);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.cos-detail-name {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.app .cos-detail-desc {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+.cos-detail .chips-row {
+  margin-top: 4px;
+}
+.cos-detail .button {
+  flex: none;
+}
+
+/* ---------- Sicherheit ---------- */
+.app .sec-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+}
+.sec-head > div {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.sec-head > .chip {
+  flex: none;
+  margin-top: 2px;
+}
+.sec-logout-icon,
+#sitzungen-andere .icon {
+  width: 17px;
+  height: 17px;
+}
+.app .sec-sessions .row {
+  align-items: flex-start;
+}
+.app .sec-session.current {
+  background: rgba(59, 130, 246, 0.06);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.sec-session .row-icon {
+  margin-top: 2px;
+}
+.sec-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.sec-times > div {
+  display: flex;
+  gap: 5px;
+}
+.sec-times dt {
+  color: var(--faint);
+}
+.sec-times dt::after {
+  content: ":";
+}
+.sec-times dd {
+  margin: 0;
+  color: var(--text);
+}
+.sec-facts {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.sec-facts li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.sec-facts .icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--faint);
+}
+.sec-checks {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+.sec-checks li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.sec-checks .icon {
+  flex: none;
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+}
+.sec-checks li.ok .icon {
+  color: var(--success);
+}
+.sec-checks li.todo .icon {
+  color: var(--warning);
+}
+.app .sec-2fa .card-actions:empty {
+  display: none;
+}
+.app .sec-tips {
+  margin-top: 12px;
+}
+
+/* ---------- Meine Addons: erwartete Prüf-Hinweise (Addon greift angegeben in Minecraft ein) ---------- */
+#panel-addons .inspect-item.expected {
+  color: var(--accent-text);
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(147, 197, 253, 0.3);
+}
+#panel-addons .access-fact .chip {
+  vertical-align: middle;
+}
+
+/* ---------- Breiten ---------- */
+@media (max-width: 1240px) {
+  .ov-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 980px) {
+  .ov-columns,
+  .cos-studio {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cos-viewer {
+    position: relative;
+    top: auto;
+    height: clamp(320px, 52vh, 440px);
+  }
+}
+@media (max-width: 760px) {
+  .app .ov-hero {
+    gap: 14px;
+  }
+  .ov-avatar .avatar-lg {
+    width: 52px;
+    height: 52px;
+    border-radius: 15px;
+    font-size: 20px;
+  }
+  .ov-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ov-action {
+    min-width: 0;
+    height: auto;
+    min-height: 38px;
+    padding: 7px 10px;
+    font-size: 13.5px;
+    line-height: 1.25;
+  }
+  .ov-action:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .ov-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .ov-tile {
+    gap: 4px;
+    padding: 12px;
+  }
+  .ov-tile-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+  }
+  .ov-tile-icon .icon {
+    width: 16px;
+    height: 16px;
+  }
+  .ov-tile-label {
+    font-size: 12.5px;
+  }
+  .ov-tile-value {
+    font-size: 15px;
+  }
+  .ov-tile-sub {
+    font-size: 12.5px;
+  }
+  .ov-tile-go {
+    display: none;
+  }
+  .ov-act {
+    padding: 10px 12px;
+  }
+  .cos-slots {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+    padding: 3px;
+  }
+  .cos-slot {
+    padding: 8px 2px 7px;
+    font-size: 12px;
+  }
+  .cos-slot-current {
+    display: none;
+  }
+  .app .cos-grid {
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    gap: 8px;
+  }
+  .cos-thumb {
+    width: 76px;
+    height: 82px;
+  }
+  .cos-detail {
+    flex-wrap: wrap;
+  }
+  .sec-times {
+    display: grid;
+    gap: 2px;
+  }
+  .app .sec-sessions .row {
+    flex-wrap: wrap;
+  }
+  .app .sec-sessions .row-actions {
+    margin-left: 46px;
+  }
+  #sitzungen-andere {
+    width: 100%;
+    justify-content: center;
+  }
+}
+@media (max-width: 380px) {
+  .cos-slot-icon {
+    width: 26px;
+    height: 26px;
+  }
+  .cos-slot {
+    font-size: 11.5px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-tile:hover {
+    transform: none;
+  }
+}

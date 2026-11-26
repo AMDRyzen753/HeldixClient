@@ -1,5 +1,5 @@
-// Instanzen: Übersicht, Detailansicht (Mods, Addons, Einstellungen), Modrinth-Suche, neue Instanz
-import type { ContentItem, ContentKind, InstanceInfo, InstanceLoader, ModrinthHit, QuickPlayTarget, ShaderpackList, StoreAddon, VersionInfo } from '../shared/api';
+// Instanzen: Übersicht, Detailansicht („Mods & Addons“, Shader, Einstellungen), Hinzufügen (Addon-Store, Modrinth), neue Instanz
+import type { ContentItem, GameState, InstanceInfo, InstanceLoader, ModrinthHit, ModrinthUpdate, QuickPlayTarget, ShaderpackList, StoreAddon, VersionInfo } from '../shared/api';
 import {
   $,
   api,
@@ -24,15 +24,21 @@ import {
 import { openStoreAddon } from './store.js';
 
 const COLORS = ['#3b82f6', '#06b6d4', '#10b981', '#8b5cf6', '#f59e0b', '#f43f5e'];
-export type DetailTab = 'mods' | 'addons' | 'shaders' | 'settings';
-/** Wofür der Modrinth-Dialog gerade sucht */
-type BrowseMode = 'mods' | 'shaders';
+/** Reiter der Detailansicht; 'mods' und 'addons' (die früheren Reiter) öffnen „Mods & Addons“ */
+export type DetailTab = 'content' | 'mods' | 'addons' | 'shaders' | 'settings';
+type Tab = 'content' | 'shaders' | 'settings';
+/** Wofür der Dialog gerade sucht: Addon-Store, Fabric-Mods von Modrinth oder Shaderpacks */
+type BrowseMode = 'store' | 'mods' | 'shaders';
 let browseMode: BrowseMode = 'mods';
+/** zuletzt gewählte Quelle in „Hinzufügen“ (für das nächste Öffnen) */
+let lastSource: 'store' | 'mods' | null = null;
 let shaderList: ShaderpackList | null = null;
 
 let detailId: string | null = null;
-let detailTab: DetailTab = 'mods';
+let detailTab: Tab = 'content';
 let contentItems: ContentItem[] = [];
+/** Instanz, zu der contentItems gehört */
+let contentFor: string | null = null;
 
 export function initInstances(showView: (view: string) => void): void {
   $('#new-instance').addEventListener('click', openNewInstance);
@@ -42,15 +48,18 @@ export function initInstances(showView: (view: string) => void): void {
   });
   $('#detail-folder').addEventListener('click', () => detailId && api.openFolder('instance', detailId));
   document.querySelectorAll<HTMLButtonElement>('#detail-tabs button').forEach((button) =>
-    button.addEventListener('click', () => switchTab(button.dataset.tab as DetailTab)));
+    button.addEventListener('click', () => switchTab(button.dataset.tab as Tab)));
   $('#content-filter').addEventListener('input', renderContent);
-  $('#content-add-file').addEventListener('click', () => addFiles());
-  $('#content-browse').addEventListener('click', () => {
-    if (detailTab === 'addons') showView('store');
-    else openModrinth('mods');
-  });
+  document.querySelectorAll<HTMLButtonElement>('#content-filters button').forEach((button) =>
+    button.addEventListener('click', () => {
+      contentFilter = button.dataset.filter as ContentFilter;
+      renderContent();
+    }));
+  $('#content-update-all').addEventListener('click', () => void updateAll());
+  $('#content-add-file').addEventListener('click', () => void importFiles());
+  $('#content-browse').addEventListener('click', () => openBrowser(defaultSource()));
   $('#content-perf').addEventListener('click', () => void installPerformance());
-  $('#shader-browse').addEventListener('click', () => openModrinth('shaders'));
+  $('#shader-browse').addEventListener('click', () => openBrowser('shaders'));
   $('#shader-folder').addEventListener('click', () => detailId && api.openFolder('shaderpacks', detailId));
   $('#shader-add-file').addEventListener('click', async () => {
     if (!detailId) return;
@@ -71,6 +80,7 @@ export function initInstances(showView: (view: string) => void): void {
     renderGrid();
     if (detailId) renderDetailHead();
   });
+  api.onGameState((game) => onGameChanged(game));
 }
 
 export async function launchInstance(
@@ -230,10 +240,11 @@ export function openDetail(id: string, tab?: DetailTab): void {
   $('#instances-overview').hidden = true;
   $('#instance-detail').hidden = false;
   const instance = current();
-  const fallback: DetailTab = instance?.loader === 'vanilla' ? 'settings' : 'mods';
-  // Reiter, die es für diesen Loader nicht gibt, auf den Standard umbiegen
-  const allowed = tab && !(instance?.loader === 'vanilla' && tab !== 'settings' && tab !== 'shaders') && !(tab === 'addons' && !instance?.heldixClient);
-  switchTab(allowed ? tab : fallback);
+  const fallback: Tab = instance?.loader === 'vanilla' ? 'settings' : 'content';
+  // frühere Reiter „Mods“ und „Heldix-Addons“ sind jetzt „Mods & Addons“; Vanilla hat keinen
+  const wanted: Tab | undefined = tab === 'mods' || tab === 'addons' ? 'content' : tab;
+  const allowed = wanted && !(instance?.loader === 'vanilla' && wanted === 'content');
+  switchTab(allowed ? wanted : fallback);
   renderDetailHead();
 }
 
@@ -265,287 +276,407 @@ function renderDetailHead(): void {
     h('span', { text: formatRelative(instance.lastPlayed) }),
     h('span', { text: `Spielzeit ${formatPlayTime(instance.playTimeMs)}` }),
   );
-  $<HTMLButtonElement>('#detail-tabs [data-tab="addons"]').hidden = !instance.heldixClient;
-  $<HTMLButtonElement>('#detail-tabs [data-tab="mods"]').hidden = instance.loader === 'vanilla';
+  $<HTMLButtonElement>('#detail-tabs [data-tab="content"]').hidden = instance.loader === 'vanilla';
   renderSettingsTab();
+  // HeldixClient in den Einstellungen ein- oder ausgeschaltet: Prüfungen und Quellen passen sich an
+  if (detailTab === 'content' && contentFor === instance.id && contentKey !== contentKeyOf(instance)) void loadContent();
 }
 
-function switchTab(tab: DetailTab): void {
+function switchTab(tab: Tab): void {
   detailTab = tab;
   document.querySelectorAll<HTMLButtonElement>('#detail-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  $('#tab-content').hidden = tab === 'settings' || tab === 'shaders';
+  $('#tab-content').hidden = tab !== 'content';
   $('#tab-settings').hidden = tab !== 'settings';
   $('#tab-shaders').hidden = tab !== 'shaders';
-  $('#bundled-addons').hidden = true;
   if (tab === 'shaders') void loadShaders();
-  if (tab === 'addons') void loadStore();
-  if (tab === 'mods' || tab === 'addons') {
-    const isMods = tab === 'mods';
-    const heldix = current()?.loader === 'heldix';
+  if (tab === 'content') {
     $<HTMLInputElement>('#content-filter').value = '';
-    $<HTMLInputElement>('#content-filter').placeholder = isMods ? 'Installierte Mods durchsuchen …' : 'Installierte Addons durchsuchen …';
-    // Modrinth liefert Fabric-Mods – die laufen nur in Fabric-Instanzen
-    $('#content-browse').hidden = isMods && heldix;
-    $('#content-browse').lastChild!.textContent = isMods ? 'Mods entdecken' : 'Addon-Store';
-    $('#content-perf').hidden = !isMods || current()?.loader !== 'fabric';
-    $('#content-add-file').lastChild!.textContent = isMods ? 'Mod-Datei hinzufügen' : 'Addon-Datei hinzufügen';
-    $('#content-hint').textContent = !isMods
-      ? 'Heldix-Addons als .jar hierher ziehen. Addons nutzen die Heldix-API und laufen versionsunabhängig.'
-      : heldix
-        ? 'Heldix-Mods (mit heldix.mod.json) als .jar hierher ziehen. Der Heldix Loader ist ein eigener Loader – Fabric-Mods laufen nur in Fabric-Instanzen.'
-        : current()?.heldixClient
-          ? 'Fabric-Mods als .jar hierher ziehen oder über „Mods entdecken“ installieren. HeldixClient läuft hier über den Heldix Loader als Fabric-Mod mit. Das Leistungs-Paket bringt Sodium, Lithium & Co.'
-          : 'Fabric-Mods als .jar hierher ziehen oder über „Mods entdecken“ direkt von Modrinth installieren. Das Leistungs-Paket bringt Sodium, Lithium & Co.';
+    contentFilter = 'all';
+    $('#content-perf').hidden = current()?.loader !== 'fabric';
     void loadContent();
   }
 }
 
+// ---------- Mods & Addons ----------
+// Eine Liste für mods/ (Fabric-Mods, ältere Heldix-Mods) und heldix-addons/ (Heldix-Addons). Die Liste selbst kommt ohne
+// Netz; Updates (Addon-Store, Modrinth) lädt loadExtras() danach und ergänzt die Zeilen.
+
+type ContentFilter = 'all' | 'mods' | 'addons' | 'updates' | 'disabled';
+const FILTER_LABELS: Record<ContentFilter, string> = { all: 'Alle', mods: 'Mods', addons: 'Addons', updates: 'Updates', disabled: 'Ausgeschaltet' };
+let contentFilter: ContentFilter = 'all';
+/** Stand, mit dem die Liste geladen wurde (Instanz, Loader, HeldixClient) */
+let contentKey = '';
+/** Addon-Store für diese Instanz (Updates, Icons, „Im Addon-Store öffnen“); null = nicht geladen oder nicht erreichbar */
+let storeAddons: StoreAddon[] | null = null;
+/** Modrinth-Updates je Datei */
+let modrinthUpdates = new Map<string, ModrinthUpdate>();
+/** für welche Instanz storeAddons und modrinthUpdates gelten */
+let extrasFor: string | null = null;
+/** während des Spiels geschaltete Addons: "instanz/ordner/datei" (ohne .disabled) → Zustand beim Spielstart */
+const pendingRestart = new Map<string, boolean>();
+/** laufende Updates (Schlüssel wie pendingRestart) */
+const updating = new Set<string>();
+let updatingAll = false;
+
 /** Icons installierter Addons (Name aus dem Heldix-Icon-Set); der Addon-Store ergänzt sie */
 const ADDON_ICONS: Record<string, string> = { spotify: 'music', uhrzeit: 'clock' };
 const CATEGORY_LABELS: Record<StoreAddon['category'], string> = { hud: 'HUD', musik: 'Musik & Medien', chat: 'Chat & Freunde', werkzeuge: 'Werkzeuge', sonstiges: 'Sonstiges' };
-const PLATFORM_LABELS: Record<StoreAddon['platforms'][number], string> = { windows: 'Windows', mac: 'macOS', linux: 'Linux' };
-/** Sichtbare Karten, bevor „Alle anzeigen“ nötig wird */
-const STORE_PREVIEW = 4;
-let storeExpanded = false;
-let storeOpen: string | null = null;
+const MINECRAFT_HINT = 'Verändert Minecraft direkt, nicht nur über die Heldix-API. Vom HeldixClient-Team geprüft (Store); An und Aus wirkt erst nach dem Neustart.';
 
-/** Beschreibung aus dem Store als Klartext: Absätze und „- “-Listen, nie HTML */
-function plainText(text: string): HTMLElement {
-  const box = h('div', { class: 'store-text' });
-  for (const block of text.split(/\n\s*\n/)) {
-    const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
-    if (!lines.length) continue;
-    if (lines.every((line) => line.startsWith('- '))) {
-      box.append(h('ul', {}, ...lines.map((line) => h('li', { text: line.slice(2) }))));
-    } else {
-      box.append(h('p', { text: lines.join(' ') }));
-    }
-  }
-  return box;
+function contentKeyOf(instance: InstanceInfo): string {
+  return `${instance.id}:${instance.loader}:${instance.heldixClient}`;
 }
 
-/** Addon-Store: alle Addons vom Heldix-Dienst mit Zustand in dieser Instanz (über der Liste der installierten) */
-async function loadStore(): Promise<void> {
-  const box = $('#bundled-addons');
-  const requested = detailId;
-  if (!requested || kind() !== 'addons') return;
-  let addons: StoreAddon[] = [];
-  let failure: string | null = null;
-  try {
-    addons = await api.listStoreAddons(requested);
-  } catch (error) {
-    failure = errorMessage(error);
-  }
-  if (requested !== detailId || kind() !== 'addons') return;
-  for (const addon of addons) ADDON_ICONS[addon.id] = addon.icon;
-  box.textContent = '';
-  box.hidden = false;
-  const web = h('button', { class: 'link-button store-web', title: 'Alle Addons mit Beschreibung auf heldixclient.com' }, 'Auf heldixclient.com ansehen');
-  web.addEventListener('click', () => void api.openWebsite('addons'));
-  box.append(h('div', { class: 'bundled-head' },
-    h('span', { class: 'bundled-title', text: 'Addon-Store' }),
-    h('span', { class: 'bundled-sub', text: 'Geprüft und signiert vom HeldixClient-Team · aktiv ab dem nächsten Spielstart' }),
-    web));
-  if (failure) {
-    const retry = h('button', { class: 'ghost' }, uiIcon('refresh', 'btn-icon'), 'Erneut versuchen');
-    retry.addEventListener('click', () => void loadStore());
-    box.append(h('div', { class: 'store-message' }, uiIcon('warning'), h('span', { text: failure }), retry));
-    return;
-  }
-  if (addons.length === 0) {
-    box.append(h('div', { class: 'store-message' }, uiIcon('addons'), h('span', { text: 'Im Addon-Store gibt es gerade keine Addons.' })));
-    return;
-  }
-  // Updates zuerst, dann noch nicht installierte, dann installierte; nicht passende ans Ende
-  const order: Record<StoreAddon['state'], number> = { update: 0, available: 1, installed: 2, 'unsupported-platform': 3, 'unsupported-api': 4 };
-  const sorted = [...addons].sort((a, b) => order[a.state] - order[b.state] || b.downloads - a.downloads || a.name.localeCompare(b.name, 'de'));
-  const visible = storeExpanded ? sorted : sorted.slice(0, STORE_PREVIEW);
-  const grid = h('div', { class: 'bundled-grid' });
-  for (const addon of visible) grid.append(storeCard(requested, addon));
-  box.append(grid);
-  if (sorted.length > STORE_PREVIEW) {
-    const more = h('button', { class: 'link-button store-more' }, storeExpanded ? 'Weniger anzeigen' : `Alle ${sorted.length} Addons anzeigen`);
-    more.addEventListener('click', () => {
-      storeExpanded = !storeExpanded;
-      void loadStore();
-    });
-    box.append(more);
+/** Instanz, in der gerade ein Spiel startet oder läuft */
+function runningInstanceOf(game: GameState): string | null {
+  return game.state === 'preparing' || game.state === 'running' ? game.instanceId : null;
+}
+
+function runningHere(): boolean {
+  return detailId != null && runningInstanceOf(state.game) === detailId;
+}
+
+function onGameChanged(game: GameState): void {
+  const running = runningInstanceOf(game);
+  // Spiel beendet: „Wirkt nach dem Neustart“ ist erledigt
+  for (const key of [...pendingRestart.keys()]) if (!running || !key.startsWith(`${running}/`)) pendingRestart.delete(key);
+  if (detailId && detailTab === 'content') {
+    // state.game setzt app.ts – hier mit dem neuen Zustand zeichnen
+    state.game = game;
+    renderContent();
   }
 }
 
-function storeCard(instanceId: string, addon: StoreAddon): HTMLElement {
-  const update = addon.state === 'update';
-  const installed = addon.state === 'installed';
-  const unsupported = addon.state === 'unsupported-api' || addon.state === 'unsupported-platform';
-  const label = h('span', { text: update ? 'Aktualisieren' : installed ? 'Installiert' : unsupported ? 'Nicht verfügbar' : 'Installieren' });
-  const button = h('button', { class: update || installed || unsupported ? 'ghost' : 'primary' },
-    uiIcon(update ? 'refresh' : installed ? 'check' : unsupported ? 'ban' : 'download', 'btn-icon'), label) as HTMLButtonElement;
-  button.disabled = installed || unsupported;
-  if (unsupported && addon.reason) button.title = addon.reason;
-  button.addEventListener('click', async () => {
-    button.disabled = true;
-    label.textContent = update ? 'Wird aktualisiert …' : 'Wird installiert …';
-    try {
-      const name = await api.installStoreAddon(instanceId, addon.id);
-      toast(`${name} ${addon.version} ist installiert und beim nächsten Spielstart dabei.`, 'success');
-      await loadContent();
-      await loadStore();
-      await reloadInstances();
-    } catch (error) {
-      button.disabled = false;
-      label.textContent = update ? 'Aktualisieren' : 'Installieren';
-      toast(errorMessage(error), 'error');
-    }
-  });
-  const version = update && addon.installedVersion ? `${addon.installedVersion} → ${addon.version}` : addon.version;
-  const chips = h('div', { class: 'store-chips' },
-    h('span', { class: 'store-chip', text: CATEGORY_LABELS[addon.category] ?? 'Sonstiges' }),
-    addon.platforms.length && !(Object.keys(PLATFORM_LABELS) as StoreAddon['platforms']).every((p) => addon.platforms.includes(p))
-      ? h('span', { class: 'store-chip', text: `Nur ${addon.platforms.map((p) => PLATFORM_LABELS[p]).join(' & ')}` })
-      : null,
-    h('span', { class: 'store-chip', text: addon.downloads === 1 ? '1 Download' : `${formatCount(addon.downloads)} Downloads` }),
-    installed && addon.installedEnabled === false ? h('span', { class: 'store-chip warn', text: 'Ausgeschaltet' }) : null,
-    unsupported && addon.reason ? h('span', { class: 'store-chip warn', text: addon.reason }) : null);
-  const open = storeOpen === addon.id;
-  const details = h('button', { class: 'link-button store-details-toggle', 'aria-expanded': String(open) }, open ? 'Weniger' : 'Details');
-  details.addEventListener('click', () => {
-    storeOpen = storeOpen === addon.id ? null : addon.id;
-    void loadStore();
-  });
-  const date = Date.parse(addon.date);
-  const extra = open
-    ? h('div', { class: 'store-details' },
-      addon.description ? plainText(addon.description) : null,
-      addon.notes.length ? h('div', { class: 'store-notes' }, h('strong', { text: `Neu in ${addon.version}` }), h('ul', {}, ...addon.notes.map((note) => h('li', { text: note })))) : null,
-      h('div', { class: 'store-meta', text: `von ${addon.authors.join(', ')} · Addon-API ${addon.api}${Number.isFinite(date) ? ` · ${formatDate(date)}` : ''}` }),
-      h('button', {
-        class: 'link-button',
-        type: 'button',
-        onclick: () => {
-          document.querySelector<HTMLButtonElement>('.nav-item[data-view="store"]')?.click();
-          openStoreAddon(addon.id);
-        },
-      }, 'Im Addon-Store öffnen (Screenshots, Bewertungen, Versionen)'))
-    : null;
-  return h('div', { class: `bundled-card store-card bundled-${addon.id}${open ? ' open' : ''}` },
-    h('div', { class: 'store-row' },
-      h('div', { class: 'bundled-icon' }, uiIcon(addon.icon)),
-      h('div', { class: 'bundled-main' },
-        h('div', { class: 'bundled-name' },
-          h('span', { text: addon.name }),
-          h('span', { class: 'content-version', text: version }),
-          update ? h('span', { class: 'tag tag-type', text: 'UPDATE' }) : null),
-        h('div', { class: 'bundled-desc', text: addon.summary }),
-        chips,
-        details),
-      button),
-    extra);
+const itemKey = (item: ContentItem) => `${detailId}/${item.kind}/${item.file.replace(/\.disabled$/, '')}`;
+
+/** Addon (Heldix-Addon oder ältere Heldix-Mod) oder Mod (Fabric-Mod, vom Launcher verwaltet)? */
+function isAddon(item: ContentItem): boolean {
+  return !item.managed && (item.format === 'addon' || item.format === 'heldix-mod');
 }
 
-function kind(): ContentKind {
-  return detailTab === 'addons' ? 'addons' : 'mods';
+function storeEntry(item: ContentItem): StoreAddon | undefined {
+  return item.kind === 'addons' && item.id && extrasFor === detailId ? storeAddons?.find((a) => a.id === item.id) : undefined;
 }
 
-async function loadContent(): Promise<void> {
-  if (!detailId) return;
+type ItemUpdate = { source: 'store' | 'modrinth'; version: string; from: string | null };
+
+function updateOf(item: ContentItem): ItemUpdate | null {
+  if (extrasFor !== detailId) return null;
+  const store = storeEntry(item);
+  if (store?.state === 'update') return { source: 'store', version: store.version, from: store.installedVersion ?? item.version };
+  const modrinth = item.kind === 'mods' ? modrinthUpdates.get(item.file) : undefined;
+  return modrinth ? { source: 'modrinth', version: modrinth.version, from: item.version } : null;
+}
+
+function matchesFilter(item: ContentItem, filter: ContentFilter): boolean {
+  switch (filter) {
+    case 'mods': return !isAddon(item);
+    case 'addons': return isAddon(item);
+    case 'updates': return updateOf(item) != null;
+    case 'disabled': return !item.enabled;
+    default: return true;
+  }
+}
+
+async function loadContent(extras = true): Promise<void> {
+  const id = detailId;
+  const instance = current();
+  if (!id || !instance) return;
   const list = $('#content-list');
-  list.textContent = '';
-  list.append(h('div', { class: 'content-empty', text: 'Lade …' }));
-  try {
-    contentItems = await api.listContent(detailId, kind());
-  } catch (error) {
+  if (contentFor !== id) {
     contentItems = [];
+    list.replaceChildren(h('div', { class: 'content-empty', text: 'Lade …' }));
+  }
+  let items: ContentItem[] = [];
+  try {
+    items = await api.listInstanceContent(id);
+  } catch (error) {
     toast(errorMessage(error), 'error');
   }
+  if (detailId !== id) return;
+  contentItems = items;
+  contentFor = id;
+  contentKey = contentKeyOf(instance);
+  renderContent();
+  if (extras) void loadExtras();
+}
+
+/** Addon-Store (Updates, Icons) und Modrinth-Updates für die offene Instanz – Fehler stören die Liste nicht */
+async function loadExtras(): Promise<void> {
+  const instance = current();
+  if (!instance || instance.loader === 'vanilla') return;
+  const id = instance.id;
+  const [store, modrinth] = await Promise.all([
+    instance.heldixClient ? api.listStoreAddons(id).catch(() => null) : Promise.resolve([] as StoreAddon[]),
+    instance.loader === 'fabric' ? api.listModrinthUpdates(id).catch(() => [] as ModrinthUpdate[]) : Promise.resolve([] as ModrinthUpdate[]),
+  ]);
+  if (detailId !== id) return;
+  storeAddons = store;
+  for (const addon of store ?? []) ADDON_ICONS[addon.id] = addon.icon;
+  modrinthUpdates = new Map(modrinth.map((u) => [u.file, u]));
+  extrasFor = id;
   renderContent();
 }
 
-function renderContent(): void {
-  const list = $('#content-list');
-  list.textContent = '';
-  const query = $<HTMLInputElement>('#content-filter').value.trim().toLowerCase();
-  const items = contentItems.filter((item) => !query || `${item.name} ${item.id ?? ''} ${item.description}`.toLowerCase().includes(query));
-  const isMods = kind() === 'mods';
-  $('#content-count').textContent = `${contentItems.filter((i) => i.enabled).length} von ${contentItems.length} aktiv`;
+function contentChip(kind: string, text: string, title?: string, icon?: string): HTMLElement {
+  return h('span', { class: `content-chip ${kind}`, title }, icon ? uiIcon(icon, '') : null, text);
+}
 
-  if (items.length === 0) {
-    list.append(h('div', { class: 'content-empty' },
-      svgIcon(isMods ? ICONS.compass : ICONS.file, 'empty-icon'),
-      h('div', { class: 'content-empty-title', text: query ? 'Nichts gefunden' : isMods ? 'Noch keine eigenen Mods' : 'Noch keine Addons' }),
-      h('div', {
-        text: query
-          ? 'Andere Suche probieren.'
-          : !isMods
-            ? 'Lege .jar-Dateien von Heldix-Addons hier ab.'
-            : current()?.loader === 'heldix'
-              ? 'HeldixClient ist schon dabei. Weitere Heldix-Mods als .jar hier ablegen.'
-              : 'Über „Mods entdecken“ findest du tausende Fabric-Mods.',
-      })));
+/** Hinweis über der Liste: was hier läuft, und während des Spiels, was jetzt geht */
+function renderContentHint(instance: InstanceInfo, running: boolean): void {
+  const hint = $('#content-hint');
+  hint.classList.toggle('running', running);
+  if (running) {
+    hint.textContent = 'Die Instanz läuft gerade. Addons kannst du trotzdem an- und ausschalten – das wirkt nach dem Neustart. Mods lassen sich erst nach dem Beenden ändern.';
     return;
   }
+  hint.textContent = instance.loader === 'heldix'
+    ? 'Addons aus dem Addon-Store – oder .jar-Dateien hierher ziehen, der Launcher sortiert sie selbst ein. Addons nutzen die Heldix-API oder greifen direkt in Minecraft ein. Fabric-Mods laufen nur in Fabric-Instanzen.'
+    : instance.heldixClient
+      ? 'Fabric-Mods von Modrinth und Addons aus dem Addon-Store – oder .jar-Dateien hierher ziehen, der Launcher sortiert sie selbst ein. HeldixClient läuft hier über den Heldix Loader als Fabric-Mod mit.'
+      : 'Fabric-Mods von Modrinth – oder .jar-Dateien hierher ziehen. Das Leistungs-Paket bringt Sodium, Lithium & Co. Für Addons HeldixClient unter Einstellungen einschalten.';
+}
 
-  for (const item of items) {
-    const bundledIcon = !isMods && item.id ? ADDON_ICONS[item.id] : undefined;
-    const icon = item.icon
-      ? h('img', { class: 'content-icon', src: item.icon, alt: '' })
-      : bundledIcon
-        ? h('div', { class: `content-icon placeholder bundled-${item.id}` }, uiIcon(bundledIcon))
-        : h('div', { class: 'content-icon placeholder', text: item.name.charAt(0).toUpperCase() });
-    const toggle = h('input', { type: 'checkbox', class: 'switch', title: item.enabled ? 'Ausschalten' : 'Einschalten' }) as HTMLInputElement;
-    toggle.checked = item.enabled;
-    toggle.disabled = item.managed;
-    toggle.addEventListener('change', async () => {
-      try {
-        await api.setContentEnabled(detailId!, kind(), item.file, toggle.checked);
-        await loadContent();
-        await reloadInstances();
-      } catch (error) {
-        toggle.checked = !toggle.checked;
-        toast(errorMessage(error), 'error');
-      }
-    });
-    const remove = item.managed
-      ? h('span', { class: 'managed-lock', title: 'Wird vom Launcher verwaltet' }, svgIcon(ICONS.lock))
-      : h('button', { class: 'icon-button danger-hover', title: 'Löschen', onclick: () => void removeItem(item) }, svgIcon(ICONS.trash));
+function renderContent(): void {
+  const instance = current();
+  const list = $('#content-list');
+  if (!instance || contentFor !== instance.id) return;
+  list.textContent = '';
+  const running = runningHere();
+  renderContentHint(instance, running);
+  for (const [id, title] of [
+    ['#content-add-file', 'JAR-Dateien hinzufügen – der Launcher sortiert Fabric-Mods und Heldix-Addons selbst ein'],
+    ['#content-perf', 'Sodium, Lithium, FerriteCore und weitere Mods für mehr FPS'],
+  ]) {
+    const button = $<HTMLButtonElement>(id);
+    button.disabled = running;
+    button.title = running ? 'Erst das Spiel beenden' : title;
+  }
 
-    list.append(h('div', { class: `content-row${item.enabled ? '' : ' disabled'}${item.error ? ' broken' : ''}` },
-      icon,
-      h('div', { class: 'content-main' },
-        h('div', { class: 'content-title' },
-          h('span', { class: 'content-name', text: item.name }),
-          item.version ? h('span', { class: 'content-version', text: item.version }) : null,
-          item.managed ? h('span', { class: 'tag tag-type', text: 'VERWALTET' }) : null,
-          item.projectId ? h('span', { class: 'tag tag-modrinth', text: 'MODRINTH' }) : null),
-        h('div', { class: 'content-desc', text: item.error ?? (item.description || item.file) }),
-        item.authors.length ? h('div', { class: 'content-authors', text: `von ${item.authors.slice(0, 3).join(', ')}` }) : null),
-      toggle,
-      remove));
+  // Filter mit Anzahl; leere ausblenden (außer „Alle“ und dem gewählten)
+  const counts = Object.fromEntries((Object.keys(FILTER_LABELS) as ContentFilter[]).map((key) => [key, contentItems.filter((item) => matchesFilter(item, key)).length])) as Record<ContentFilter, number>;
+  if (contentFilter !== 'all' && counts[contentFilter] === 0) contentFilter = 'all';
+  document.querySelectorAll<HTMLButtonElement>('#content-filters button').forEach((button) => {
+    const key = button.dataset.filter as ContentFilter;
+    button.hidden = key !== 'all' && counts[key] === 0;
+    button.classList.toggle('active', key === contentFilter);
+    button.setAttribute('aria-pressed', String(key === contentFilter));
+    button.replaceChildren(FILTER_LABELS[key], h('span', { class: 'content-filter-count', text: String(counts[key]) }));
+  });
+  $('#content-filters').hidden = contentItems.length === 0;
+  $('#content-count').textContent = contentItems.length ? `${contentItems.filter((i) => i.enabled).length} von ${contentItems.length} aktiv` : '';
+  const updateAll = $<HTMLButtonElement>('#content-update-all');
+  updateAll.hidden = counts.updates < 2;
+  updateAll.disabled = running || updatingAll;
+  updateAll.textContent = updatingAll ? 'Wird aktualisiert …' : `Alle ${counts.updates} aktualisieren`;
+
+  const query = $<HTMLInputElement>('#content-filter').value.trim().toLowerCase();
+  const items = contentItems.filter((item) => matchesFilter(item, contentFilter)
+    && (!query || `${item.name} ${item.id ?? ''} ${item.description} ${item.file}`.toLowerCase().includes(query)));
+
+  if (items.length === 0) {
+    list.append(emptyContent(instance, query));
+    return;
+  }
+  for (const item of items) list.append(contentRow(item, running));
+}
+
+function emptyContent(instance: InstanceInfo, query: string): HTMLElement {
+  const fabric = instance.loader === 'fabric';
+  let title: string;
+  let text: string;
+  if (query) {
+    title = 'Nichts gefunden';
+    text = 'Andere Suche probieren.';
+  } else if (contentItems.length === 0) {
+    title = 'Noch keine Mods und Addons';
+    text = instance.loader === 'heldix'
+      ? 'HeldixClient ist schon dabei. Über „Hinzufügen“ findest du Addons im Addon-Store.'
+      : instance.heldixClient
+        ? 'Über „Hinzufügen“ findest du Addons im Addon-Store und tausende Fabric-Mods auf Modrinth.'
+        : 'Über „Hinzufügen“ findest du tausende Fabric-Mods auf Modrinth.';
+  } else {
+    title = 'Nichts in dieser Ansicht';
+    text = fabric ? 'Andere Ansicht wählen oder über „Hinzufügen“ etwas Neues holen.' : 'Andere Ansicht wählen oder über „Hinzufügen“ Addons holen.';
+  }
+  return h('div', { class: 'content-empty' },
+    uiIcon(query ? 'search' : 'addons', 'empty-icon'),
+    h('div', { class: 'content-empty-title', text: title }),
+    h('div', { text }));
+}
+
+function contentRow(item: ContentItem, running: boolean): HTMLElement {
+  const addon = isAddon(item);
+  const store = storeEntry(item);
+  const update = updateOf(item);
+  const key = itemKey(item);
+  // Loader sagt nur der Store (die JAR weiß nicht, ob ihre Transformer in Fabric greifen)
+  const loader = current()?.loader;
+  const problem = item.error ?? (store && loader && loader !== 'vanilla' && !store.loaders.includes(loader)
+    ? (store.loaders.includes('heldix') ? 'Läuft nur in Heldix-Instanzen' : 'Läuft nur in Fabric-Instanzen')
+    : null);
+  const iconName = item.kind === 'addons' && item.id ? ADDON_ICONS[item.id] : undefined;
+  const icon = item.icon
+    ? h('img', { class: 'content-icon', src: item.icon, alt: '' })
+    : addon || iconName
+      ? h('div', { class: `content-icon placeholder${item.id ? ` bundled-${item.id}` : ''}` }, uiIcon(iconName ?? 'addons'))
+      : h('div', { class: 'content-icon placeholder', text: item.name.charAt(0).toUpperCase() });
+
+  // Typ-Chips: was es ist und ob es in Minecraft eingreift
+  const chips: HTMLElement[] = [];
+  if (item.managed) chips.push(contentChip('managed', 'Verwaltet', 'Wird vom Launcher verwaltet und aktuell gehalten', 'lock'));
+  if (item.format === 'fabric') chips.push(contentChip('fabric', 'Fabric-Mod'));
+  else if (addon) chips.push(contentChip('addon', 'Addon', item.format === 'heldix-mod' ? 'Ältere Heldix-Mod (heldix.mod.json) – läuft weiter wie ein Addon' : 'Heldix-Addon'));
+  if (addon && item.access === 'minecraft') chips.push(contentChip('minecraft', 'Greift in Minecraft ein', MINECRAFT_HINT));
+  if (item.projectId) chips.push(contentChip('modrinth', 'Modrinth', 'Über Modrinth installiert'));
+  if (update) chips.push(contentChip('update', `Update ${update.version}`, `${update.from ? `${update.from} → ${update.version}` : update.version} · neue Version ${update.source === 'store' ? 'im Addon-Store' : 'auf Modrinth'}`, 'refresh'));
+  if (pendingRestart.has(key)) chips.push(contentChip('restart', 'Wirkt nach dem Neustart', 'Während des Spiels geändert – gilt ab dem nächsten Start', 'clock'));
+
+  const toggle = h('input', { type: 'checkbox', class: 'switch' }) as HTMLInputElement;
+  toggle.checked = item.enabled;
+  // Addons lassen sich während des Spiels schalten (wirkt nach dem Neustart), Mods nicht
+  const modLocked = running && item.kind === 'mods';
+  toggle.disabled = item.managed || modLocked;
+  toggle.title = item.managed ? 'Wird vom Launcher verwaltet' : modLocked ? 'Erst das Spiel beenden' : item.enabled ? 'Ausschalten' : 'Einschalten';
+  toggle.addEventListener('change', () => void toggleItem(item, toggle));
+
+  const remove = item.managed
+    ? h('span', { class: 'managed-lock', title: 'Wird vom Launcher verwaltet' }, svgIcon(ICONS.lock))
+    : h('button', { class: 'icon-button danger-hover', title: running ? 'Erst das Spiel beenden' : 'Löschen', disabled: running, onclick: () => void removeItem(item) }, svgIcon(ICONS.trash));
+
+  const busy = updating.has(key) || updatingAll;
+  const updateButton = update
+    ? h('button', {
+      class: 'ghost small content-update',
+      type: 'button',
+      disabled: running || busy,
+      title: running ? 'Erst das Spiel beenden' : `Auf ${update.version} aktualisieren`,
+      onclick: () => void updateItem(item),
+    }, uiIcon('refresh', 'btn-icon'), busy && updating.has(key) ? 'Wird aktualisiert …' : 'Aktualisieren')
+    : null;
+
+  const meta: (string | HTMLElement)[] = [];
+  if (item.authors.length) meta.push(`von ${item.authors.slice(0, 3).join(', ')}`);
+  if (store) {
+    if (meta.length) meta.push(' · ');
+    meta.push(h('button', { class: 'link-button', type: 'button', onclick: () => openInStore(item.id!) }, 'Im Addon-Store öffnen'));
+  }
+  return h('div', { class: `content-row${item.enabled ? '' : ' disabled'}${problem ? ' broken' : ''}`, 'data-file': item.file },
+    icon,
+    h('div', { class: 'content-main' },
+      h('div', { class: 'content-title' },
+        h('span', { class: 'content-name', text: item.name }),
+        item.version ? h('span', { class: 'content-version', text: item.version }) : null,
+        ...chips),
+      h('div', { class: 'content-desc', text: problem ?? (item.description || item.file), title: problem ?? item.description }),
+      meta.length ? h('div', { class: 'content-authors' }, ...meta) : null),
+    updateButton,
+    toggle,
+    remove);
+}
+
+/** Store-Seite mit diesem Addon (Screenshots, Bewertungen, Versionen) */
+function openInStore(id: string): void {
+  $('#modrinth-modal').hidden = true;
+  document.querySelector<HTMLButtonElement>('.nav-item[data-view="store"]')?.click();
+  openStoreAddon(id);
+}
+
+async function toggleItem(item: ContentItem, toggle: HTMLInputElement): Promise<void> {
+  const running = runningHere();
+  const key = itemKey(item);
+  try {
+    await api.setContentEnabled(detailId!, item.kind, item.file, toggle.checked);
+    if (running) {
+      // Zustand beim Spielstart merken: zurückgeschaltet = kein Hinweis mehr
+      const before = pendingRestart.has(key) ? pendingRestart.get(key)! : item.enabled;
+      if (before === toggle.checked) pendingRestart.delete(key);
+      else pendingRestart.set(key, before);
+      toast(`${item.name} ist ${toggle.checked ? 'eingeschaltet' : 'ausgeschaltet'} – wirkt nach dem Neustart.`);
+    }
+    await loadContent(false);
+    await reloadInstances();
+  } catch (error) {
+    toggle.checked = !toggle.checked;
+    toast(errorMessage(error), 'error');
   }
 }
 
 async function removeItem(item: ContentItem): Promise<void> {
-  const what = kind() === 'mods' ? 'Mod' : 'Addon';
+  const what = isAddon(item) ? 'Addon' : 'Mod';
   if (!(await confirmDialog(`${what} löschen?`, `„${item.name}“ wird aus dieser Instanz entfernt.`, 'Löschen'))) return;
   try {
-    await api.removeContent(detailId!, kind(), item.file);
+    await api.removeContent(detailId!, item.kind, item.file);
     toast(`${item.name} wurde entfernt.`, 'success');
-    await loadContent();
-    if (kind() === 'addons') await loadStore();
+    await loadContent(item.kind === 'addons');
     await reloadInstances();
   } catch (error) {
     toast(errorMessage(error), 'error');
   }
 }
 
-async function addFiles(paths?: string[]): Promise<void> {
+/** Ein Update: Addon aus dem Addon-Store neu installieren oder Modrinth-Mod tauschen */
+async function runUpdate(item: ContentItem, update: ItemUpdate): Promise<boolean> {
+  try {
+    if (update.source === 'store') {
+      const name = await api.installStoreAddon(detailId!, item.id!);
+      toast(`${name} ist auf ${update.version} aktualisiert – aktiv ab dem nächsten Spielstart.`, 'success');
+    } else {
+      const result = await api.updateModrinthMod(detailId!, item.file);
+      toast(`${result.title} ist auf ${result.version} aktualisiert.`, 'success');
+      for (const note of result.notes) toast(note, 'info');
+    }
+    return true;
+  } catch (error) {
+    toast(errorMessage(error), 'error');
+    return false;
+  }
+}
+
+async function updateItem(item: ContentItem): Promise<void> {
+  const update = updateOf(item);
+  if (!update || !detailId) return;
+  const key = itemKey(item);
+  updating.add(key);
+  renderContent();
+  await runUpdate(item, update);
+  updating.delete(key);
+  await loadContent();
+  await reloadInstances();
+}
+
+async function updateAll(): Promise<void> {
+  if (!detailId || updatingAll) return;
+  const jobs = contentItems.flatMap((item) => {
+    const update = updateOf(item);
+    return update ? [{ item, update }] : [];
+  });
+  updatingAll = true;
+  renderContent();
+  for (const { item, update } of jobs) await runUpdate(item, update);
+  updatingAll = false;
+  await loadContent();
+  await reloadInstances();
+}
+
+/** „Datei hinzufügen“ und Drag & Drop: der Hauptprozess sortiert jede JAR nach ihrer Beschreibung ein */
+async function importFiles(paths?: string[]): Promise<void> {
   if (!detailId) return;
   try {
-    const count = await api.addContentFiles(detailId, kind(), paths);
-    if (count > 0) {
-      toast(`${count} ${kind() === 'mods' ? (count === 1 ? 'Mod' : 'Mods') : count === 1 ? 'Addon' : 'Addons'} hinzugefügt.`, 'success');
-      await loadContent();
-      await reloadInstances();
+    const result = await api.importContentFiles(detailId, paths);
+    for (const error of result.errors) toast(error, 'error');
+    if (result.added.length === 0) return;
+    const as = (format: ContentItem['format']) => (format === 'fabric' ? 'Fabric-Mod' : format === 'heldix-mod' ? 'Addon (ältere Heldix-Mod)' : 'Addon');
+    if (result.added.length === 1) {
+      toast(`${result.added[0].name} ist als ${as(result.added[0].format)} hinzugefügt.`, 'success');
+    } else {
+      const addons = result.added.filter((a) => a.kind === 'addons').length;
+      const mods = result.added.length - addons;
+      const parts = [addons ? (addons === 1 ? '1 Addon' : `${addons} Addons`) : '', mods ? (mods === 1 ? '1 Mod' : `${mods} Mods`) : ''].filter(Boolean);
+      toast(`${parts.join(' und ')} hinzugefügt.`, 'success');
     }
+    await loadContent();
+    await reloadInstances();
   } catch (error) {
     toast(errorMessage(error), 'error');
   }
@@ -565,10 +696,10 @@ function setupDropzone(): void {
     zone.classList.remove('dragging');
     const files = [...(event.dataTransfer?.files ?? [])].filter((f) => f.name.toLowerCase().endsWith('.jar'));
     if (files.length === 0) {
-      toast('Bitte nur .jar-Dateien ablegen.', 'error');
+      toast('Bitte nur .jar-Dateien ablegen (Fabric-Mods oder Heldix-Addons).', 'error');
       return;
     }
-    void addFiles(files.map((f) => api.pathForFile(f)));
+    void importFiles(files.map((f) => api.pathForFile(f)));
   });
 }
 
@@ -666,7 +797,8 @@ function renderSettingsTab(): void {
 let modrinthOffset = 0;
 let modrinthTotal = 0;
 let modrinthTimer: number | undefined;
-let modrinthChanged = false;
+/** im Dialog etwas installiert: beim Schließen die Liste neu laden */
+let browserChanged = false;
 
 // ---------- Leistungs-Paket (Fabric) ----------
 
@@ -784,11 +916,20 @@ function renderShaders(): void {
   }
 }
 
+// ---------- Hinzufügen: Addon-Store und Modrinth (Modrinth nur in Fabric-Instanzen); derselbe Dialog sucht Shaderpacks ----------
+
+/** Store-Liste im Dialog (null = noch nicht geladen) und ob nicht passende Addons zu sehen sind */
+let browserStore: StoreAddon[] | null = null;
+let browserStoreError: string | null = null;
+let showUnfit = false;
+
 function setupModrinthModal(): void {
   const modal = $('#modrinth-modal');
   const close = async () => {
     modal.hidden = true;
-    if (modrinthChanged) {
+    window.clearTimeout(modrinthTimer);
+    if (browserChanged) {
+      browserChanged = false;
       if (browseMode === 'shaders') await loadShaders();
       else await loadContent();
       await reloadInstances();
@@ -796,30 +937,200 @@ function setupModrinthModal(): void {
   };
   $('#mr-close').addEventListener('click', () => void close());
   modal.addEventListener('click', (event) => event.target === modal && void close());
+  modal.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') void close();
+  });
   $('#mr-query').addEventListener('input', () => {
     window.clearTimeout(modrinthTimer);
-    modrinthTimer = window.setTimeout(() => void searchModrinth(true), 300);
+    if (browseMode === 'store') renderStoreBrowser();
+    else modrinthTimer = window.setTimeout(() => void searchModrinth(true), 300);
   });
   $('#mr-more').addEventListener('click', () => void searchModrinth(false));
+  document.querySelectorAll<HTMLButtonElement>('#mr-sources button').forEach((button) =>
+    button.addEventListener('click', () => {
+      const source = button.dataset.source as 'store' | 'mods';
+      if (source !== browseMode) {
+        $<HTMLInputElement>('#mr-query').value = '';
+        showSource(source);
+      }
+    }));
 }
 
-function openModrinth(mode: BrowseMode): void {
+/** Quelle beim Öffnen: passend zum Filter, sonst die zuletzt gewählte, sonst der Addon-Store (mit HeldixClient) */
+function defaultSource(): 'store' | 'mods' {
+  const instance = current();
+  if (instance?.loader !== 'fabric') return 'store';
+  if (contentFilter === 'mods') return 'mods';
+  if (contentFilter === 'addons') return 'store';
+  return lastSource ?? (instance.heldixClient ? 'store' : 'mods');
+}
+
+function openBrowser(mode: BrowseMode): void {
+  const instance = current();
+  if (!instance) return;
+  browserChanged = false;
+  browserStore = null;
+  browserStoreError = null;
+  showUnfit = false;
+  $<HTMLInputElement>('#mr-query').value = '';
+  $('#modrinth-modal').hidden = false;
+  showSource(mode);
+}
+
+function showSource(mode: BrowseMode): void {
   const instance = current();
   if (!instance) return;
   browseMode = mode;
-  modrinthChanged = false;
+  if (mode !== 'shaders') lastSource = mode;
   const shaders = mode === 'shaders';
-  $('#mr-title').textContent = shaders ? 'Shaderpacks entdecken' : 'Mods entdecken';
-  $('#mr-sub').textContent = `für ${instance.name} · Minecraft ${instance.minecraft} · ${shaders ? 'Iris' : 'Fabric'} · von Modrinth`;
-  $<HTMLInputElement>('#mr-query').placeholder = shaders ? 'z. B. BSL, Complementary, Photon …' : 'z. B. Sodium, Iris, Mod Menu …';
-  $<HTMLInputElement>('#mr-query').value = '';
-  $('#modrinth-modal').hidden = false;
+  // Umschalter nur, wenn es beide Quellen gibt (Modrinth-Mods laufen nur in Fabric-Instanzen)
+  $('#mr-sources').hidden = shaders || instance.loader !== 'fabric';
+  document.querySelectorAll<HTMLButtonElement>('#mr-sources button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.source === mode);
+    b.setAttribute('aria-pressed', String(b.dataset.source === mode));
+  });
+  $('#mr-title').textContent = shaders ? 'Shaderpacks entdecken' : 'Mods & Addons hinzufügen';
+  $('#mr-sub').textContent = `für ${instance.name} · Minecraft ${instance.minecraft} · ${
+    shaders ? 'Iris · von Modrinth' : mode === 'store' ? 'Addon-Store, geprüft und signiert vom HeldixClient-Team' : 'Fabric-Mods von Modrinth'}`;
+  $<HTMLInputElement>('#mr-query').placeholder = shaders ? 'z. B. BSL, Complementary, Photon …' : mode === 'store' ? 'Addons durchsuchen …' : 'z. B. Sodium, Iris, Mod Menu …';
+  $('#mr-list').textContent = '';
+  $('#mr-more').hidden = true;
   $<HTMLInputElement>('#mr-query').focus();
-  void searchModrinth(true);
+  if (mode === 'store') void loadStoreBrowser();
+  else void searchModrinth(true);
+}
+
+function storeMessage(icon: string, text: string, action?: HTMLElement): HTMLElement {
+  return h('div', { class: 'store-message' }, uiIcon(icon), h('span', { text }), action ?? null);
+}
+
+async function loadStoreBrowser(): Promise<void> {
+  const instance = current();
+  if (!instance) return;
+  const id = instance.id;
+  const list = $('#mr-list');
+  if (!instance.heldixClient) {
+    const settings = h('button', { class: 'ghost small', type: 'button' }, uiIcon('options', 'btn-icon'), 'Zu den Einstellungen');
+    settings.addEventListener('click', () => {
+      $('#modrinth-modal').hidden = true;
+      switchTab('settings');
+    });
+    list.replaceChildren(storeMessage('info', 'Addons laufen mit HeldixClient. Schalte HeldixClient unter Einstellungen dieser Instanz ein – dann findest du hier die Addons aus dem Addon-Store.', settings));
+    return;
+  }
+  if (!browserStore) {
+    list.replaceChildren(h('div', { class: 'content-empty', text: 'Lade den Addon-Store …' }));
+    try {
+      browserStore = await api.listStoreAddons(id);
+      browserStoreError = null;
+      for (const addon of browserStore) ADDON_ICONS[addon.id] = addon.icon;
+    } catch (error) {
+      browserStoreError = errorMessage(error);
+    }
+  }
+  if (browseMode !== 'store' || detailId !== id) return;
+  renderStoreBrowser();
+}
+
+const STATE_ORDER: Record<StoreAddon['state'], number> = {
+  update: 0, available: 1, installed: 2, 'unsupported-minecraft': 3, 'unsupported-loader': 4, 'unsupported-platform': 5, 'unsupported-api': 6,
+};
+const unfit = (addon: StoreAddon) => addon.state.startsWith('unsupported-');
+
+/** Store-Addons für diese Instanz: passende zuerst (Updates, neue, installierte), nicht passende auf Wunsch */
+function renderStoreBrowser(): void {
+  const list = $('#mr-list');
+  list.textContent = '';
+  $('#mr-more').hidden = true;
+  if (browserStoreError) {
+    const retry = h('button', { class: 'ghost small', type: 'button' }, uiIcon('refresh', 'btn-icon'), 'Erneut versuchen');
+    retry.addEventListener('click', () => {
+      browserStoreError = null;
+      void loadStoreBrowser();
+    });
+    list.append(storeMessage('warning', browserStoreError, retry));
+    return;
+  }
+  const all = browserStore ?? [];
+  if (all.length === 0) {
+    list.append(storeMessage('addons', 'Im Addon-Store gibt es gerade keine Addons.'));
+    return;
+  }
+  const terms = $<HTMLInputElement>('#mr-query').value.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const text = (a: StoreAddon) => [a.name, a.id, a.summary, CATEGORY_LABELS[a.category], ...a.authors, a.access === 'minecraft' ? 'greift in minecraft ein' : ''].join(' ').toLowerCase();
+  const matching = all
+    .filter((addon) => terms.every((term) => text(addon).includes(term)))
+    .sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || b.downloads - a.downloads || a.name.localeCompare(b.name, 'de'));
+  const hidden = matching.filter(unfit);
+  const shown = showUnfit ? matching : matching.filter((addon) => !unfit(addon));
+  for (const addon of shown) list.append(storeRow(addon));
+  if (shown.length === 0) {
+    list.append(h('div', { class: 'content-empty', text: terms.length ? 'Keine passenden Addons gefunden.' : 'Für diese Instanz gibt es gerade keine passenden Addons.' }));
+  }
+  if (hidden.length) {
+    const toggle = h('button', { class: 'link-button mr-unfit', type: 'button' },
+      showUnfit
+        ? 'Nicht passende ausblenden'
+        : `${hidden.length === 1 ? '1 weiteres Addon passt' : `${hidden.length} weitere Addons passen`} nicht zu dieser Instanz – anzeigen`);
+    toggle.addEventListener('click', () => {
+      showUnfit = !showUnfit;
+      renderStoreBrowser();
+    });
+    list.append(toggle);
+  }
+}
+
+function storeRow(addon: StoreAddon): HTMLElement {
+  const running = runningHere();
+  const update = addon.state === 'update';
+  const installed = addon.state === 'installed';
+  const blocked = unfit(addon);
+  const label = h('span', { text: update ? 'Aktualisieren' : installed ? 'Installiert' : blocked ? 'Nicht verfügbar' : 'Installieren' });
+  const button = h('button', { class: installed ? 'ghost installed' : blocked ? 'ghost' : 'primary', type: 'button' },
+    uiIcon(update ? 'refresh' : installed ? 'check' : blocked ? 'ban' : 'download', 'btn-icon'), label) as HTMLButtonElement;
+  button.disabled = installed || blocked || running;
+  if (blocked && addon.reason) button.title = addon.reason;
+  else if (running && !installed) button.title = 'Die Instanz läuft gerade – nach dem Beenden installieren oder im Spiel über das Heldix-Menü → Mods & Addons.';
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    label.textContent = update ? 'Wird aktualisiert …' : 'Wird installiert …';
+    try {
+      const name = await api.installStoreAddon(detailId!, addon.id);
+      browserChanged = true;
+      toast(update ? `${name} ist auf ${addon.version} aktualisiert – aktiv ab dem nächsten Spielstart.` : `${name} ${addon.version} ist installiert und beim nächsten Spielstart dabei.`, 'success');
+      browserStore = null;
+      await loadStoreBrowser();
+    } catch (error) {
+      button.disabled = false;
+      label.textContent = update ? 'Aktualisieren' : 'Installieren';
+      toast(errorMessage(error), 'error');
+    }
+  });
+  const version = update && addon.installedVersion ? `${addon.installedVersion} → ${addon.version}` : addon.version;
+  const details = h('button', { class: 'link-button', type: 'button', onclick: () => openInStore(addon.id) }, 'Details im Addon-Store');
+  return h('div', { class: `content-row${blocked ? ' unfit' : ''}` },
+    h('div', { class: `content-icon placeholder bundled-${addon.id}` }, uiIcon(addon.icon)),
+    h('div', { class: 'content-main' },
+      h('div', { class: 'content-title' },
+        h('span', { class: 'content-name', text: addon.name }),
+        h('span', { class: 'content-version', text: version }),
+        addon.access === 'minecraft' ? contentChip('minecraft', 'Greift in Minecraft ein', MINECRAFT_HINT) : null,
+        addon.minecraft.length ? contentChip('neutral', `Minecraft ${addon.minecraft.length > 3 ? `${addon.minecraft.slice(0, 2).join(', ')} +${addon.minecraft.length - 2}` : addon.minecraft.join(', ')}`, `Läuft mit Minecraft ${addon.minecraft.join(', ')}`) : null,
+        installed && addon.installedEnabled === false ? contentChip('neutral', 'Ausgeschaltet') : null,
+        // installiert, passt aber nicht (mehr) zur Instanz
+        installed && addon.reason ? contentChip('restart', addon.reason, 'Läuft in dieser Instanz nicht', 'warning') : null),
+      h('div', { class: 'content-desc', text: addon.summary }),
+      h('div', { class: 'content-authors' },
+        blocked && addon.reason ? h('span', { class: 'mr-reason' }, uiIcon('ban', 'inline-icon'), addon.reason) : null,
+        blocked && addon.reason ? ' · ' : null,
+        `${CATEGORY_LABELS[addon.category] ?? 'Sonstiges'} · von ${addon.authors.join(', ')} · ${addon.downloads === 1 ? '1 Download' : `${formatCount(addon.downloads)} Downloads`} · `,
+        details)),
+    button);
 }
 
 async function searchModrinth(reset: boolean): Promise<void> {
-  if (!detailId) return;
+  if (!detailId || browseMode === 'store') return;
+  const mode = browseMode;
   const list = $('#mr-list');
   if (reset) {
     modrinthOffset = 0;
@@ -828,15 +1139,17 @@ async function searchModrinth(reset: boolean): Promise<void> {
   }
   try {
     const query = $<HTMLInputElement>('#mr-query').value;
-    const result = browseMode === 'shaders'
+    const result = mode === 'shaders'
       ? await api.searchShaderpacks(detailId, query, modrinthOffset)
       : await api.searchModrinth(detailId, query, modrinthOffset);
+    if (browseMode !== mode) return;
     if (reset) list.textContent = '';
     modrinthTotal = result.total;
     modrinthOffset = result.offset + 20;
-    if (result.hits.length === 0 && reset) list.append(h('div', { class: 'content-empty', text: browseMode === 'shaders' ? 'Keine passenden Shaderpacks gefunden.' : 'Keine passenden Mods gefunden.' }));
+    if (result.hits.length === 0 && reset) list.append(h('div', { class: 'content-empty', text: mode === 'shaders' ? 'Keine passenden Shaderpacks gefunden.' : 'Keine passenden Mods gefunden.' }));
     for (const hit of result.hits) list.append(modrinthRow(hit));
   } catch (error) {
+    if (browseMode !== mode) return;
     if (reset) list.textContent = '';
     list.append(h('div', { class: 'content-empty', text: `Modrinth nicht erreichbar: ${errorMessage(error)}` }));
   }
@@ -854,7 +1167,7 @@ function modrinthRow(hit: ModrinthHit): HTMLElement {
     try {
       if (browseMode === 'shaders') {
         const result = await api.installShaderpack(detailId!, hit.projectId);
-        modrinthChanged = true;
+        browserChanged = true;
         button.className = 'ghost installed';
         button.replaceChildren(svgIcon(ICONS.check), 'Aktiv');
         const extra = result.mods.length ? ` Dazu installiert: ${result.mods.join(', ')}.` : '';
@@ -863,7 +1176,7 @@ function modrinthRow(hit: ModrinthHit): HTMLElement {
         return;
       }
       const installed = await api.installModrinth(detailId!, hit.projectId);
-      modrinthChanged = true;
+      browserChanged = true;
       button.className = 'ghost installed';
       button.replaceChildren(svgIcon(ICONS.check), 'Installiert');
       const extra = installed.length > 1 ? ` (inkl. ${installed.slice(1).join(', ')})` : '';

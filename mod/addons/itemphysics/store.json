@@ -1,0 +1,13 @@
+{
+	"_hinweis": "Angaben für den Addon-Store (nicht in der JAR). Name, Version, Kurzbeschreibung, Autoren und API kommen aus src/main/resources/heldix.addon.json.",
+	"icon": "cube",
+	"kategorie": "sonstiges",
+	"plattformen": [],
+	"beschreibung": "Items, die auf dem Boden liegen, schweben nicht mehr und drehen sich nicht mehr, sondern liegen flach und still da – wie echte Gegenstände.\n\n- In der Luft überschlagen sich Items beim Fallen. Je schneller sie fliegen, desto mehr drehen sie sich.\n- Am Boden und im Wasser legen sie sich in einer Viertelsekunde hin: flache Items wie Diamanten oder Schwerter flach, Blöcke auf eine Seite. Jedes Item hat eine feste, zufällige Ausrichtung.\n- Stapel liegen übereinander (flache Items) oder verstreut (Blöcke), wie gewohnt.\n- Einstellbar im Heldix-Menü unter Module → Item Physics: wie stark sich Items in der Luft drehen, wie schnell sie sich hinlegen und ob Blöcke kippen.\n- Umschalten geht auch mit einer eigenen Taste, die du unter Optionen → Steuerung → Heldix-Addons belegst.\n\nRein optisch und nur bei dir: Am Aufsammeln, an der Hitbox und am Spielablauf ändert sich nichts, auf Servern ist nichts nötig. Entwickelt von Kxyuzu, braucht HeldixClient 0.13.2 oder neuer.",
+	"hinweise": [
+		"Erste Version im Addon-Store",
+		"Items liegen flach am Boden, Blöcke auf einer Seite",
+		"Einstellbar: Drehung in der Luft, Dauer des Hinlegens, Blöcke kippen",
+		"Eigene Taste zum Umschalten (ab Werk nicht belegt)"
+	]
+}

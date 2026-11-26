@@ -1,0 +1,14 @@
+{
+	"id": "mctest",
+	"name": "Minecraft-Test-Addon",
+	"version": "1.0.0",
+	"description": "Nur für den Autotest: greift über einen Transformer in Minecraft ein und nutzt die Heldix-API.",
+	"authors": ["HeldixClient"],
+	"entrypoint": "dev.heldixclient.testaddons.minecraft.TestAddon",
+	"api": 4,
+	"clientEntrypoint": "dev.heldixclient.testaddons.minecraft.TestStart",
+	"transformers": ["dev.heldixclient.testaddons.minecraft.TickTransformer"],
+	"minecraft": ["${minecraft_version}"],
+	"loader": ">=${loader_version}",
+	"loaders": ["heldix", "fabric"]
+}

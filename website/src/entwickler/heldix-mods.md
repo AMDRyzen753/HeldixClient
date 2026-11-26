@@ -1,25 +1,54 @@
 ---
-titel: Heldix-Mods mit dem Heldix Loader
-beschreibung: Der eigene Mod-Loader von HeldixClient – heldix.mod.json, Einstiegspunkte, Ereignisse, Tasten und Eingriffe in Minecraft-Klassen.
+titel: Eingriffe in Minecraft mit dem Heldix Loader
+beschreibung: Für Addons, die direkt in Minecraft eingreifen: Einstiegspunkt, Ereignisse, Tasten und Transformer des Heldix Loaders – dazu ältere Heldix-Mods mit heldix.mod.json.
 reihenfolge: 3
-stichworte: mod, loader, heldix loader, heldix.mod.json, transformer, asm, patches, events, fabric, ressourcen
+stichworte: mod, loader, heldix loader, heldix.mod.json, heldix.addon.json, clientEntrypoint, transformer, asm, patches, events, fabric, ressourcen, greift in minecraft ein, minecraft-version
 ---
-Der **Heldix Loader** ist der eigene Mod-Loader von HeldixClient. Er läuft als Java-Agent, verändert Minecraft-Klassen beim Laden direkt mit ASM und braucht weder Fabric noch Mixin. HeldixClient selbst ist eine ganz normale Heldix-Mod. Aktuell ist Heldix Loader **2.3.0** für Minecraft **26.3**.
+Der **Heldix Loader** ist der eigene Mod-Loader von HeldixClient. Er läuft als Java-Agent, verändert Minecraft-Klassen beim Laden direkt mit ASM und braucht weder Fabric noch Mixin. HeldixClient selbst nutzt ihn genauso. Aktuell ist Heldix Loader **2.4.0** für Minecraft **26.3**.
 
-> **Hinweis:** Heldix-Mods sind die Profi-Stufe. Sie greifen direkt in Minecraft ein und müssen für jede Minecraft-Version neu gebaut werden. Für HUD-Elemente, Tasten und Einblendungen reicht meist ein [Heldix-Addon](/entwickler/addons).
+Diese Seite ist für **Addons, die direkt in Minecraft eingreifen** ([Weg 2](/entwickler/addons#weg-2-eingriff-in-minecraft)): mit `clientEntrypoint` und `transformers` in ihrer `heldix.addon.json`. Dieselbe Loader-API nutzen auch ältere Heldix-Mods mit einer `heldix.mod.json` im Ordner `mods` – die laufen weiter.
+
+> **Hinweis:** Eingriffe in Minecraft sind die Profi-Stufe. Sie sind an die Minecraft-Version gebunden und müssen für neue Versionen angepasst werden. Für HUD-Elemente, Tasten, Einblendungen und vieles mehr reicht die [Heldix-API](/entwickler/addons) – sie läuft über Minecraft-Updates hinweg.
 
 ## So startet ein Heldix-Spiel
 
 1. Der Launcher startet ganz normales Vanilla-Minecraft und hängt zusätzlich `-javaagent:heldix-loader-<version>.jar` und `-Dheldix.gameDir=<Instanz>` an.
-2. Noch bevor Minecraft startet, liest der Loader alle JARs im Ordner `mods` und prüft ihre `heldix.mod.json` (Minecraft-Version, Loader-Version, Abhängigkeiten). Passende Mods legt er auf den Classpath, liest ihre Übersetzungen und registriert ihre Transformer.
+2. Noch bevor Minecraft startet, liest der Loader die Addons mit Eingriff in Minecraft aus dem Ordner `heldix-addons` (abgeschaltete `.jar.disabled` lässt er liegen) und die älteren Heldix-Mods aus `mods`. Er prüft Minecraft-Version, Loader-Version und Abhängigkeiten, legt passende JARs auf den Classpath, liest ihre Übersetzungen und registriert ihre Transformer. Passt die Minecraft-Version nicht, lädt er das Addon nicht und meldet den Grund.
 3. Während Minecraft seine Klassen lädt, verändert der Loader die nötigen Stellen per ASM. Stack-Map-Frames berechnet er selbst, ohne dabei Klassen zu früh zu laden.
-4. Im Konstruktor von `Minecraft` ruft der Loader die Einstiegspunkte der Mods auf, also `onInitialize()`.
+4. Im Konstruktor von `Minecraft` ruft der Loader erst die `clientEntrypoint`s der Addons auf (ein Fehler hält nur das Addon an), dann die Einstiegspunkte der älteren Heldix-Mods, also `onInitialize()`. Den `entrypoint` (Heldix-API) eines Addons lädt danach HeldixClient über denselben Classloader.
 
 Fabric-Mods im `mods`-Ordner einer Heldix-Instanz erkennt der Loader und überspringt sie mit einem Hinweis, ohne dass das Spiel abstürzt. Dasselbe gilt für Heldix-Addons, die versehentlich dort liegen.
 
-## Die heldix.mod.json
+## Im Addon: die heldix.addon.json
 
-Eine Heldix-Mod ist eine JAR mit einer `heldix.mod.json` im Wurzelverzeichnis:
+Ein Addon mit Eingriff in Minecraft nennt in seiner `heldix.addon.json` zusätzlich zu den üblichen Angaben ([Aufbau eines Addons](/entwickler/addons#die-heldix-addon-json)) seinen Einstiegspunkt für den Loader, seine Transformer und die passenden Minecraft-Versionen:
+
+```json
+{
+  "id": "weites-sichtfeld",
+  "name": "Weites Sichtfeld",
+  "version": "1.0.0",
+  "authors": ["Du"],
+  "api": 4,
+  "clientEntrypoint": "de.du.sichtfeld.SichtfeldStart",
+  "transformers": ["de.du.sichtfeld.SichtfeldTransformer"],
+  "minecraft": ["26.3"],
+  "loader": ">=2.4.0"
+}
+```
+
+- `clientEntrypoint` – eine Klasse, die `HeldixModInitializer` implementiert (siehe [Der Einstiegspunkt](#der-einstiegspunkt)).
+- `transformers` – Klassen, die `ClassTransformer` implementieren (siehe [Transformer](#eingriffe-in-minecraft-transformer)).
+- `minecraft` – Pflicht bei Eingriffen: die Minecraft-Versionen als Liste, z. B. `["26.2", "26.3"]`. Einträge dürfen auch Regeln wie unten sein, etwa `26.x` oder `>=26.2` – im Addon-Store aber nur genaue Versionen und Muster wie `26.x` oder `*`.
+- `loader` – optional, die nötige Version des Heldix Loaders.
+- `loaders` – optional, `["heldix"]`, `["fabric"]` oder beides. Ohne Angabe läuft das Addon überall, wo es geht; im Addon-Store gilt es dann als „nur Heldix-Instanzen“.
+- `entrypoint` – optional zusätzlich: eine `HeldixAddon`-Klasse für die Heldix-API.
+
+Anders als ältere Heldix-Mods liegen solche Addons im Ordner `heldix-addons`, kommen über den [Addon-Store](/addons) und erscheinen dort mit **Greift in Minecraft ein**.
+
+## Ältere Heldix-Mods: die heldix.mod.json
+
+Eine ältere Heldix-Mod ist eine JAR mit einer `heldix.mod.json` im Wurzelverzeichnis und liegt im Ordner `mods`. Sie läuft weiter, und der Launcher zeigt sie in der Liste **Mods & Addons** als Addon an. In den Addon-Store kommt sie aber nur mit einer `heldix.addon.json` wie oben.
 
 ```json
 {
@@ -29,7 +58,7 @@ Eine Heldix-Mod ist eine JAR mit einer `heldix.mod.json` im Wurzelverzeichnis:
   "description": "Was die Mod macht.",
   "authors": ["Du"],
   "minecraft": "26.3",
-  "loader": ">=2.3.0",
+  "loader": ">=2.4.0",
   "entrypoints": { "client": ["de.du.meinemod.MeineMod"] },
   "transformers": ["de.du.meinemod.MeinTransformer"],
   "depends": { "heldixclient": ">=0.10.0" }
@@ -78,7 +107,7 @@ public class MeineMod implements HeldixModInitializer {
 
 Die Klasse `dev.heldixclient.loader.HeldixLoader` gibt Auskunft über den Loader:
 
-- `version()` und `minecraftVersion()` – z. B. `"2.3.0"` und `"26.3"`.
+- `version()` und `minecraftVersion()` – z. B. `"2.4.0"` und `"26.3"`.
 - `platform()` – `"heldix"` (eigenständig als Java-Agent) oder `"fabric"` (als Fabric-Mod).
 - `gameDir()`, `configDir()` und `modsDir()` – Spielordner der Instanz, deren `config` und `mods`.
 - `mods()`, `mod(id)` und `isLoaded(id)` – geladene Mods als `ModInfo` mit `id()`, `name()`, `version()`, `description()`, `authors()` und `file()`.
@@ -209,7 +238,7 @@ Liegt eine `pack.mcmeta` in der JAR, lädt der Loader die Mod als eingebautes Re
 
 Heldix-Mods werden für Java 25 gebaut. Zum Kompilieren brauchst du zwei Dinge, beide nur als `compileOnly`:
 
-- **den Heldix Loader** (`heldix-loader-2.3.0.jar`, ASM ist darin schon enthalten). Nach dem ersten Start einer Heldix-Instanz liegt die Datei im Datenordner des Launchers unter `libraries/dev/heldixclient/heldix-loader/2.3.0/`; unter Windows ist das `%APPDATA%\.heldixclient`.
+- **den Heldix Loader** (`heldix-loader-2.4.0.jar`, ASM ist darin schon enthalten). Nach dem ersten Start einer Heldix-Instanz liegt die Datei im Datenordner des Launchers unter `libraries/dev/heldixclient/heldix-loader/2.4.0/`; unter Windows ist das `%APPDATA%\.heldixclient`.
 - **Minecraft selbst**: die Client-JAR und ihre Bibliotheken. Seit 26.1 ist Minecraft nicht mehr verschleiert, Mappings und Loom brauchst du deshalb nicht.
 
 Im Beispielprojekt lädt das Skript `gradle/minecraft.gradle` die Client-JAR und alle Bibliotheken direkt von Mojang und legt sie auf den Compile-Classpath. Die Minecraft-Version steht in der `gradle.properties`:
@@ -230,7 +259,9 @@ version = '1.0.0'
 
 dependencies {
     // Heldix Loader inklusive ASM, im Spiel bringt ihn der Launcher mit
-    compileOnly files('libs/heldix-loader-2.3.0.jar')
+    compileOnly files('libs/heldix-loader-2.4.0.jar')
+    // nutzt dein Addon auch die Heldix-API (entrypoint):
+    // compileOnly files('libs/heldix-api-1.0.0.jar')
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -243,9 +274,11 @@ Das Beispielprojekt mit diesem Skript bekommst du auf Anfrage über den [Support
 
 ## In Fabric-Instanzen
 
-Den Loader gibt es zusätzlich als Fabric-Mod `heldixloader`. Damit laufen Heldix-Mods auch in Fabric-Instanzen, zusammen mit Sodium, Iris und anderen Fabric-Mods. Der Launcher legt ihn automatisch in Fabric-Instanzen, in denen HeldixClient eingeschaltet ist (Instanz → Einstellungen → HeldixClient).
+Den Loader gibt es zusätzlich als Fabric-Mod `heldixloader`. Damit laufen HeldixClient, Addons und Heldix-Mods auch in Fabric-Instanzen, zusammen mit Sodium, Iris und anderen Fabric-Mods. Der Launcher legt ihn automatisch in Fabric-Instanzen, in denen HeldixClient eingeschaltet ist (Instanz → Einstellungen → HeldixClient).
 
-Damit deine Mod auch dort läuft, bekommt die JAR neben der `heldix.mod.json` eine `fabric.mod.json` ohne Einstiegspunkte:
+**Addons mit Eingriff in Minecraft** kennt Fabric selbst nicht. Der Loader erzeugt ihre Transformer beim Start einmal zur Prüfung: Stehen alle Ziele in der Liste unten (und schließen `loaders` Fabric nicht aus), legt er die JAR auf den Classpath von Fabric, meldet die Transformer an und ruft den `clientEntrypoint` auf – wie in Heldix-Instanzen. Sonst bleibt das Addon aus und zeigt „Läuft nur in Heldix-Instanzen“ mit den fehlenden Klassen. Addons nur mit `clientEntrypoint` und reine API-Addons laufen in Fabric immer.
+
+Damit eine ältere Heldix-Mod auch dort läuft, bekommt die JAR neben der `heldix.mod.json` eine `fabric.mod.json` ohne Einstiegspunkte:
 
 ```json
 {
@@ -255,7 +288,7 @@ Damit deine Mod auch dort läuft, bekommt die JAR neben der `heldix.mod.json` ei
   "name": "Meine Mod",
   "environment": "client",
   "depends": {
-    "heldixloader": ">=2.3.0",
+    "heldixloader": ">=2.4.0",
     "minecraft": "26.3"
   }
 }
@@ -263,13 +296,25 @@ Damit deine Mod auch dort läuft, bekommt die JAR neben der `heldix.mod.json` ei
 
 - Fabric lädt die JAR dann selbst; deine Heldix-Einstiegspunkte ruft weiter der Heldix Loader auf.
 - Die Transformer laufen in Fabric über ein Mixin-Plugin, nach allen anderen Mixins, mit denselben ASM-Eingriffen wie beim Java-Agent.
-- Verändern lassen sich in Fabric nur die Minecraft-Klassen, die der Heldix Loader dafür vorgesehen hat – die Klassen, die der Loader selbst und HeldixClient brauchen, z. B. `Minecraft`, `Camera`, `Gui`, `Hud`, `Screen` und `GameRenderer`. Für jede andere Zielklasse meldet der Loader beim Start „In Fabric kann … nicht verändert werden“ unter `HeldixLoader.problems()`.
+- Verändern lassen sich in Fabric nur die Minecraft-Klassen, die der Heldix Loader dafür vorgesehen hat – die Liste steht unten.
+- Für jede andere Zielklasse meldet der Loader beim Start „In Fabric kann … nicht verändert werden“ unter `HeldixLoader.problems()`. Anders als beim Java-Agent verwirft der Fabric-Weg halbe Änderungen nicht: Such erst alle Ziele und prüf sie, dann ändere.
 - Ressourcen wie Texturen, Shader und Sprachdateien lädt in Fabric die Fabric API. `HeldixLoader.platform()` gibt dort `"fabric"` zurück.
+
+Zielklassen, die Transformer in Fabric verändern können (Loader 2.4.0, Minecraft 26.3):
+
+- **Spiel und Optionen:** `net.minecraft.client.Minecraft`, `net.minecraft.client.Options`, `net.minecraft.client.resources.language.ClientLanguage`, `com.mojang.blaze3d.platform.FramerateLimitTracker`
+- **HUD und Zeichnen:** `net.minecraft.client.gui.Hud`, `net.minecraft.client.gui.Gui`, `net.minecraft.client.gui.GuiGraphicsExtractor`, `net.minecraft.client.renderer.GameRenderer`, `net.minecraft.client.gui.components.DebugScreenOverlay`
+- **Menüs:** `net.minecraft.client.gui.screens.Screen`, `TitleScreen`, `LoadingOverlay`, `LevelLoadingScreen`, `ConnectScreen` (alle in `net.minecraft.client.gui.screens`) und `net.minecraft.client.gui.components.AbstractSelectionList`
+- **Chat und Tab-Liste:** `net.minecraft.client.multiplayer.chat.ChatListener`, `net.minecraft.client.gui.components.ChatComponent`, `net.minecraft.client.gui.screens.ChatScreen`, `net.minecraft.client.gui.components.PlayerTabOverlay`
+- **Netzwerk:** `net.minecraft.client.multiplayer.ClientPacketListener`
+- **Kamera und Eingabe:** `net.minecraft.client.Camera`, `net.minecraft.client.MouseHandler`, `net.minecraft.client.player.KeyboardInput`
+- **Spieler und Entitäten:** `net.minecraft.client.player.AbstractClientPlayer`, `net.minecraft.world.entity.Entity`, `net.minecraft.client.renderer.entity.EntityRenderer`, `net.minecraft.client.renderer.entity.layers.CapeLayer`
+- **Gedroppte Items:** `net.minecraft.client.renderer.entity.ItemEntityRenderer`, `net.minecraft.client.renderer.entity.state.ItemEntityRenderState`
 
 ## Fehler und Fehlersuche
 
-- Mods mit falscher Minecraft-Version, fehlender Abhängigkeit oder doppelter ID überspringt der Loader und nennt den Grund. Du findest die Hinweise im Log, in `HeldixLoader.problems()` und im Spiel im Heldix-Menü unter **Einstellungen → Info** bei „Hinweise beim Start“.
-- Wirft eine Mod in `onInitialize()` einen Fehler, bricht das Spiel mit einem Crash-Report ab, in dem die Mod genannt ist.
+- Addons und Mods mit falscher Minecraft-Version, fehlender Abhängigkeit oder doppelter ID überspringt der Loader und nennt den Grund. Du findest die Hinweise im Log, in `HeldixLoader.problems()` und im Spiel im Heldix-Menü unter **Einstellungen → Info** bei „Hinweise beim Start“.
+- Wirft der `clientEntrypoint` eines Addons einen Fehler, läuft das Spiel weiter und nur das Addon ist aus; das Heldix-Menü zeigt den Grund rot an der Karte. Wirft eine ältere Heldix-Mod in `onInitialize()`, bricht das Spiel mit einem Crash-Report ab, in dem sie genannt ist.
 - Mit `-Dheldix.dumpClasses=<Ordner>` speichert der Loader alle veränderten Klassen; danach kannst du sie mit `javap -c` ansehen. Das Argument trägst du im Launcher unter **Einstellungen → Java → Zusätzliche JVM-Argumente** ein, am besten mit einem Ordner ohne Leerzeichen, z. B. `-Dheldix.dumpClasses=C:\heldix-dump`.
 
 ## Namen in Minecraft 26.x

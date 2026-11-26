@@ -1,0 +1,91 @@
+{
+  "format": 1,
+  "id": "zylinder",
+  "version": 1,
+  "slot": "head",
+  "name": "Zylinder",
+  "description": "Eleganter schwarzer Zylinder mit rotem Band",
+  "access": "all",
+  "model": {
+    "textureSize": [
+      64,
+      40
+    ],
+    "bones": [
+      {
+        "name": "hut",
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "cubes": [
+          {
+            "origin": [
+              -6,
+              0,
+              -5
+            ],
+            "size": [
+              12,
+              1,
+              10
+            ],
+            "uv": [
+              0,
+              29
+            ]
+          },
+          {
+            "origin": [
+              -5,
+              0,
+              -6
+            ],
+            "size": [
+              10,
+              1,
+              12
+            ],
+            "uv": [
+              0,
+              16
+            ]
+          },
+          {
+            "origin": [
+              -4,
+              1,
+              -4
+            ],
+            "size": [
+              8,
+              8,
+              8
+            ],
+            "uv": [
+              0,
+              0
+            ]
+          },
+          {
+            "origin": [
+              4,
+              2,
+              -1
+            ],
+            "size": [
+              1,
+              2,
+              2
+            ],
+            "uv": [
+              44,
+              29
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

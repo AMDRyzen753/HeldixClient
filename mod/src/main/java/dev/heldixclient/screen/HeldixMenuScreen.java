@@ -108,6 +108,26 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 	}
 
+	/** Reiter der Seite Cosmetics: je Slot einer, dazu Optionen */
+	private enum CosmeticTab {
+		HEAD("Kopf", "star", "head"),
+		BACK("Rücken", "cape", "back"),
+		AURA("Partikel", "sparkles", "aura"),
+		COMPANION("Begleiter", "user", "companion"),
+		OPTIONS("Optionen", "options", null);
+
+		final String label;
+		final String icon;
+		/** Slot beim Heldix-Dienst (null = Optionen) */
+		final String slot;
+
+		CosmeticTab(String label, String icon, String slot) {
+			this.label = label;
+			this.icon = icon;
+			this.slot = slot;
+		}
+	}
+
 	/** Reiter der Seite Wegpunkte */
 	private enum WaypointTab {
 		LIST("Wegpunkte", "pin"),
@@ -163,6 +183,14 @@ public class HeldixMenuScreen extends ShellScreen {
 	private String capeMessage;
 	private boolean capeMessageOk;
 	private long capeMessageAt;
+
+	/** Seite Cosmetics: Reiter, Kachel unter der Maus (Vorschau an der Figur), laufende Anfrage, Kleidung der Figur */
+	private CosmeticTab cosmeticTab = CosmeticTab.HEAD;
+	private Object cosmeticHover = NO_HOVER;
+	private Object cosmeticHoverShown = NO_HOVER;
+	/** "slot:id" (bzw. "slot:" zum Ablegen), solange die Anfrage beim Dienst läuft */
+	private String cosmeticPending;
+	private final dev.heldixclient.cosmetic.Cosmetics.Dress cosmeticDress = new dev.heldixclient.cosmetic.Cosmetics.Dress();
 
 	/** Eingabefeld im Kopf der Seiten Freunde (Spielername) und Wegpunkte (Name) */
 	private SearchField pageInput;
@@ -317,6 +345,53 @@ public class HeldixMenuScreen extends ShellScreen {
 		return tabs.stream().map(ShellTab::id).toList();
 	}
 
+	/**
+	 * Zeilen der Seite in Kurzform (für den Autotest): "Section:<Titel>", "Addon:<id>", "Mod:<id>", "Notice:<Text>",
+	 * sonst der Name der Zeilenart.
+	 */
+	public List<String> describeRows() {
+		layout();
+		List<String> result = new ArrayList<>();
+		for (Row row : rows) {
+			result.add(switch (row) {
+				case Section section -> "Section:" + section.title;
+				case AddonCard card -> "Addon:" + card.addon.id();
+				case HeldixModCard card -> "Mod:" + card.mod.id();
+				case Notice notice -> "Notice:" + notice.text;
+				default -> row.getClass().getSimpleName();
+			});
+		}
+		return result;
+	}
+
+	/** Mitte des Schalters eines Addons auf der Seite Installiert (wie zuletzt gezeichnet), null = nicht zu sehen */
+	public int[] addonSwitchCenter(String id) {
+		return settingCenters.get("addon:" + id);
+	}
+
+	/** Seite so weit scrollen, dass die Karte des Addons oben steht (für den Autotest) */
+	public void scrollToAddon(String id) {
+		layout();
+		for (Row row : rows) {
+			if (row instanceof AddonCard card && id.equals(card.addon.id())) {
+				scroll = Math.clamp(rowY(row) + scroll - bodyY - 4, 0, maxScroll());
+				settingCenters.remove("addon:" + id);
+				return;
+			}
+		}
+	}
+
+	/** ganz nach oben scrollen (für den Autotest) */
+	public void scrollToTop() {
+		scroll = 0;
+	}
+
+	/** ganz nach unten scrollen (für den Autotest) */
+	public void scrollToEnd() {
+		layout();
+		scroll = maxScroll();
+	}
+
 	/** Mitte des Eintrags Addons (älterer Name, gleich {@code tabCenter("ADDONS")}). */
 	public int[] addonsTabCenter() {
 		return tabCenter("ADDONS");
@@ -357,6 +432,41 @@ public class HeldixMenuScreen extends ShellScreen {
 			cell = grid.cell(index, bodyX, rowY(grid), bodyW);
 		}
 		return new int[] {cell[0] + cell[2] / 2, cell[1] + CapeGrid.TILE / 2};
+	}
+
+	/** Mitte der Kachel Nummer {@code index} auf der Seite Cosmetics (0 = "Ohne", dann die Cosmetics des Reiters). */
+	public int[] cosmeticCenter(int index) {
+		layout();
+		CosmeticGrid grid = first(CosmeticGrid.class);
+		int[] cell = grid.cell(index, bodyX, rowY(grid), bodyW);
+		if (cell[1] < bodyY || cell[1] + CosmeticGrid.TILE > bodyY + bodyH) {
+			scroll = Math.clamp(scroll + cell[1] - bodyY - (bodyH - CosmeticGrid.TILE) / 2.0, 0, maxScroll());
+			cell = grid.cell(index, bodyX, rowY(grid), bodyW);
+		}
+		return new int[] {cell[0] + cell[2] / 2, cell[1] + CosmeticGrid.TILE / 2};
+	}
+
+	/** Reiter der Seite Cosmetics wählen (für den Autotest): head, back, aura, companion oder null = Optionen */
+	public void showCosmeticTab(String slot) {
+		for (CosmeticTab tab : CosmeticTab.values()) {
+			if (java.util.Objects.equals(tab.slot, slot)) cosmeticTab = tab;
+		}
+		scroll = 0;
+	}
+
+	/** Offener Reiter der Seite Cosmetics: Slot oder "options" (für den Autotest) */
+	public String cosmeticTab() {
+		return cosmeticTab.slot != null ? cosmeticTab.slot : "options";
+	}
+
+	/** Kachel unter der Maus aus dem letzten Bild (ID, "" = Ohne, null = keine); für den Autotest */
+	public String cosmeticHovered() {
+		return cosmeticHoverShown instanceof dev.heldixclient.cosmetic.CosmeticCatalog.Item item ? item.id() : cosmeticHoverShown == NO_CAPE ? "" : null;
+	}
+
+	/** Läuft gerade eine Anfrage zum Anlegen/Ablegen? (für den Autotest) */
+	public boolean cosmeticPending() {
+		return cosmeticPending != null;
 	}
 
 	/**
@@ -676,6 +786,15 @@ public class HeldixMenuScreen extends ShellScreen {
 							}));
 				}
 			}
+			case COSMETICS -> {
+				for (CosmeticTab tab : CosmeticTab.values()) {
+					specs.add(new ShellTab.Spec("cosmetics:" + tab.name(), tab.label, tab.icon, null, false,
+							() -> cosmeticTab == tab, () -> {
+								cosmeticTab = tab;
+								scroll = 0;
+							}));
+				}
+			}
 			case WAYPOINTS -> {
 				for (WaypointTab tab : WaypointTab.values()) {
 					specs.add(new ShellTab.Spec("waypoints:" + tab.name(), tab.label, tab.icon,
@@ -825,6 +944,8 @@ public class HeldixMenuScreen extends ShellScreen {
 			}
 			case OVERVIEW -> "Alles auf einen Blick";
 			case CAPE -> "Dein Cape in der Third-Person-Ansicht (F5)";
+			case COSMETICS -> dev.heldixclient.cosmetic.Cosmetics.serviceProblem() == null ? "Hüte, Flügel, Partikel und Begleiter – für alle HeldixClient-Spieler"
+					: Social.state() == Social.State.OFFLINE_ACCOUNT ? "Nur mit Microsoft-Konto" : "Braucht den Heldix-Dienst";
 			case FRIENDS, MESSAGES, REQUESTS, PRIVACY -> switch (Social.state()) {
 				case ONLINE -> {
 					if (page == Shell.Page.MESSAGES) {
@@ -849,7 +970,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			case SHADER -> "Farbstile und Shader-Engine";
 			case PERFORMANCE -> "Mehr FPS, weniger Last";
 			case SETTINGS -> "Design, HUD und Tasten";
-			case ADDONS -> AddonManager.addons().size() + (AddonManager.addons().size() == 1 ? " Addon installiert" : " Addons installiert");
+			case ADDONS -> installedSummary();
 			case STORE -> switch (AddonStore.status()) {
 				case READY -> AddonStore.entries().size() == 1 ? "1 Addon im Store" : AddonStore.entries().size() + " Addons im Store";
 				case ERROR -> "Store nicht erreichbar";
@@ -879,6 +1000,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			case MODULES -> buildModuleRows(list);
 			case OVERVIEW -> buildOverviewRows(list);
 			case CAPE -> buildCapeRows(list);
+			case COSMETICS -> buildCosmeticRows(list);
 			case FRIENDS -> buildFriendRows(list);
 			case MESSAGES -> buildMessageRows(list);
 			case REQUESTS -> buildRequestRows(list);
@@ -925,8 +1047,17 @@ public class HeldixMenuScreen extends ShellScreen {
 				List<Object> builtin = new ArrayList<>();
 				builtin.add(NO_CAPE);
 				builtin.addAll(Capes.builtin());
+				if (capeMessage != null && !capeMessageOk && System.currentTimeMillis() - capeMessageAt < 8000) {
+					list.add(new Notice("warning", capeMessage, Ui.WARNING));
+				}
 				list.add(new Section("Heldix-Capes", Capes.builtin().size() + " Motive"));
 				list.add(new CapeGrid(builtin));
+				// weitere Capes aus dem Cosmetics-Katalog des Heldix-Dienstes (signiert, für alle sichtbar)
+				List<Capes.Cape> catalog = Capes.catalog();
+				if (!catalog.isEmpty()) {
+					list.add(new Section("Aus dem Katalog", catalog.size() + (catalog.size() == 1 ? " Cape" : " Capes")));
+					list.add(new CapeGrid(new ArrayList<>(catalog)));
+				}
 			}
 			case CUSTOM -> {
 				List<Capes.Cape> custom = Capes.custom();
@@ -976,6 +1107,77 @@ public class HeldixMenuScreen extends ShellScreen {
 				list.add(new Notice("info", who + "Unter Optionen → Skin-Anpassung muss „Umhang“ eingeschaltet sein.", Ui.ACCENT_TEXT));
 			}
 		}
+	}
+
+	/** Seite Cosmetics: je Slot Vorschau an der Figur und Kacheln aus dem Katalog; Optionen für die Anzeige */
+	private void buildCosmeticRows(List<Row> list) {
+		HeldixConfig.Data config = HeldixConfig.get();
+		if (cosmeticTab == CosmeticTab.OPTIONS) {
+			list.add(new Section("Anzeige", "für alle Cosmetics"));
+			list.add(new Group(List.of(
+					new SettingRow(configToggle("Cosmetics anderer zeigen", "Hüte, Flügel, Begleiter und Partikel anderer HeldixClient-Spieler",
+							() -> config.cosmeticsOthers, v -> config.cosmeticsOthers = v)),
+					new SettingRow(configToggle("Partikel anderer zeigen", "Auren anderer Spieler; deine eigenen siehst du immer",
+							() -> config.cosmeticParticlesOthers, v -> config.cosmeticParticlesOthers = v)),
+					new SettingRow(configToggle("Hut über Helm zeigen", "Mit Helm sitzt dein Hut darüber; aus: mit Helm wird er ausgeblendet",
+							() -> config.cosmeticHatOverHelmet, v -> config.cosmeticHatOverHelmet = v)))));
+			list.add(new Notice("info", "Andere HeldixClient-Spieler sehen deine Cosmetics, solange unter Freunde → Privatsphäre „Für andere erkennbar“ "
+					+ "an ist. Du selbst siehst sie in der Third-Person-Ansicht (F5) und im Inventar; mit F1 sind sie ausgeblendet.", Ui.ACCENT_TEXT));
+			return;
+		}
+		String slot = cosmeticTab.slot;
+		list.add(new CosmeticShowcase(slot));
+		addPageMessage(list);
+		String problem = dev.heldixclient.cosmetic.Cosmetics.serviceProblem();
+		if (problem != null) {
+			Notice notice = new Notice("warning", problem, Ui.WARNING);
+			if (Social.state() == Social.State.OFF) notice.action("Einschalten", () -> Social.setEnabled(true));
+			list.add(notice);
+		}
+		List<dev.heldixclient.cosmetic.CosmeticCatalog.Item> items = dev.heldixclient.cosmetic.CosmeticCatalog.items(slot);
+		switch (dev.heldixclient.cosmetic.CosmeticCatalog.status()) {
+			case LOADING -> {
+				if (items.isEmpty()) list.add(new Notice("refresh", "Lade den Cosmetics-Katalog …", Ui.ACCENT_TEXT));
+			}
+			case ERROR -> list.add(new Notice("warning", dev.heldixclient.cosmetic.CosmeticCatalog.error() != null ? dev.heldixclient.cosmetic.CosmeticCatalog.error()
+					: "Der Cosmetics-Katalog ist gerade nicht erreichbar.", Ui.DANGER).action("Erneut versuchen", () -> dev.heldixclient.cosmetic.CosmeticCatalog.refresh(true)));
+			default -> {
+			}
+		}
+		if (items.isEmpty()) {
+			if (dev.heldixclient.cosmetic.CosmeticCatalog.status() == dev.heldixclient.cosmetic.CosmeticCatalog.Status.READY) {
+				list.add(new EmptyState("sparkles", "Noch nichts im Katalog", "Für „" + dev.heldixclient.cosmetic.Cosmetics.slotName(slot) + "“ hat das HeldixClient-Team noch keine Cosmetics veröffentlicht."));
+			}
+			return;
+		}
+		list.add(new Section(dev.heldixclient.cosmetic.Cosmetics.slotName(slot), items.size() + (items.size() == 1 ? " Cosmetic" : " Cosmetics")));
+		List<Object> entries = new ArrayList<>();
+		entries.add(NO_CAPE);
+		entries.addAll(items);
+		list.add(new CosmeticGrid(slot, entries));
+		list.add(new Text("Fahr mit der Maus über eine Kachel, um sie an deiner Figur zu sehen; ein Klick legt sie an. "
+				+ "Deine Auswahl gilt auch im Launcher und auf der Webseite.", Ui.FAINT));
+	}
+
+	/** Cosmetic anlegen (item) oder ablegen (null) – über den Heldix-Dienst, mit Hinweis auf der Seite */
+	private void chooseCosmetic(String slot, dev.heldixclient.cosmetic.CosmeticCatalog.Item item) {
+		String id = item == null ? null : item.id();
+		if (java.util.Objects.equals(dev.heldixclient.cosmetic.Cosmetics.mine(slot), id) || cosmeticPending != null) return;
+		if (item != null && item.teamOnly() && !dev.heldixclient.cosmetic.Cosmetics.team()) {
+			pageMessage("„" + item.name() + "“ gibt es nur für das HeldixClient-Team.", false);
+			return;
+		}
+		String problem = dev.heldixclient.cosmetic.Cosmetics.serviceProblem();
+		if (problem != null) {
+			pageMessage(problem, false);
+			return;
+		}
+		cosmeticPending = slot + ":" + (id == null ? "" : id);
+		dev.heldixclient.cosmetic.Cosmetics.choose(slot, id).whenComplete((ok, error) -> minecraft.execute(() -> {
+			cosmeticPending = null;
+			if (error != null) pageMessage(errorText(error), false);
+			else pageMessage(item == null ? "Abgelegt – in diesem Bereich trägst du jetzt nichts." : "„" + item.name() + "“ angelegt.", true);
+		}));
 	}
 
 	/** Seite Übersicht: Spielfigur, dann Karten für Freunde, Wegpunkte, aktive Module und Tasten */
@@ -1363,18 +1565,54 @@ public class HeldixMenuScreen extends ShellScreen {
 		list.add(new Notice("info", "Die Grafik-API stellst du im Launcher um (Einstellungen → Leistung).", Ui.ACCENT_TEXT));
 	}
 
+	/** Bisherige Heldix-Mods aus mods/ (ohne HeldixClient selbst): erscheinen unter Mods &amp; Addons als Addons, nur zur Info */
+	private static List<ModInfo> heldixMods() {
+		return HeldixLoader.mods().stream().filter(mod -> !HeldixClient.MOD_ID.equals(mod.id())).toList();
+	}
+
+	/** Untertitel der Seite Installiert, z. B. „4 Addons · 1 Heldix-Mod · 12 Fabric-Mods“ */
+	private static String installedSummary() {
+		int addons = AddonManager.addons().size();
+		int mods = heldixMods().size();
+		int fabric = HeldixLoader.platformMods().size();
+		List<String> parts = new ArrayList<>();
+		parts.add(addons == 1 ? "1 Addon" : addons + " Addons");
+		if (mods > 0) parts.add(mods == 1 ? "1 Heldix-Mod" : mods + " Heldix-Mods");
+		if (fabric > 0) parts.add(fabric == 1 ? "1 Fabric-Mod" : fabric + " Fabric-Mods");
+		return String.join(" · ", parts) + " installiert";
+	}
+
+	/**
+	 * Seite Mods &amp; Addons → Installiert: Heldix-Addons (auch die, die in Minecraft eingreifen) mit Schalter, bisherige
+	 * Heldix-Mods aus mods/ und – in Fabric-Instanzen, nur zur Info – die Fabric-Mods.
+	 */
 	private void buildAddonRows(List<Row> list) {
-		List<LoadedAddon> addons = AddonManager.addons();
+		List<LoadedAddon> addons = new ArrayList<>(AddonManager.addons());
+		addons.sort(java.util.Comparator.comparing(a -> a.name().toLowerCase(Locale.ROOT)));
+		List<ModInfo> mods = heldixMods();
+		List<ModInfo> fabric = HeldixLoader.platformMods();
 		Map<String, String> changes = AddonStore.changes();
 		if (!changes.isEmpty()) list.add(new Notice("refresh", restartText(changes), Ui.WARNING));
-		if (addons.isEmpty()) {
-			list.add(new EmptyState("addons", "Keine Addons installiert", "Addons wie Spotify oder Uhrzeit & Spielzeit findest du im Addon-Store."));
-			list.add(new Notice("download", "Geprüfte Addons mit einem Klick installieren.", Ui.ACCENT_TEXT).action("Zum Addon-Store", () -> go(Shell.Page.STORE)));
-		} else {
-			list.add(new Section("Installiert", addons.size() + (addons.size() == 1 ? " Addon" : " Addons")));
-			for (LoadedAddon addon : addons) list.add(new AddonCard(addon));
+		List<String> switched = addons.stream().filter(LoadedAddon::restartNeeded).map(LoadedAddon::name).toList();
+		if (!switched.isEmpty()) {
+			list.add(new Notice("refresh", String.join(", ", switched) + " – an/aus wirkt nach dem Neustart des Spiels.", Ui.WARNING));
 		}
-		list.add(new Text("Heldix Loader " + HeldixLoader.version() + "  ·  Addon-API " + HeldixApi.API_VERSION, Ui.FAINT));
+		if (addons.isEmpty() && mods.isEmpty()) {
+			list.add(new EmptyState("addons", "Keine Addons installiert", "Addons wie Spotify oder Uhrzeit & Spielzeit findest du im Store."));
+			list.add(new Notice("download", "Geprüfte Addons mit einem Klick installieren.", Ui.ACCENT_TEXT).action("Zum Store", () -> go(Shell.Page.STORE)));
+		} else {
+			String count = addons.size() + (addons.size() == 1 ? " Addon" : " Addons") + (mods.isEmpty() ? "" : " · " + mods.size() + (mods.size() == 1 ? " Heldix-Mod" : " Heldix-Mods"));
+			list.add(new Section("Installiert", count));
+			for (LoadedAddon addon : addons) list.add(new AddonCard(addon));
+			for (ModInfo mod : mods) list.add(new HeldixModCard(mod));
+		}
+		if (!fabric.isEmpty()) {
+			list.add(new Section("Fabric-Mods", fabric.size() + " · nur zur Info"));
+			list.add(new Group(fabric.stream().<Row>map(mod -> new Info(mod.name(), mod.version())).toList()));
+			list.add(new Text("Fabric-Mods schaltest und aktualisierst du im Launcher unter Instanz → Mods & Addons.", Ui.FAINT));
+		}
+		list.add(new Text("Heldix Loader " + HeldixLoader.version() + " (" + ("fabric".equals(HeldixLoader.platform()) ? "in Fabric" : "eigenständig") + ")  ·  Addon-API "
+				+ HeldixApi.API_VERSION, Ui.FAINT));
 	}
 
 	/** Hinweis nach Änderungen im Store: wirken erst nach einem Neustart (Addons legen beim Start ihre Tasten an) */
@@ -2482,7 +2720,12 @@ public class HeldixMenuScreen extends ShellScreen {
 					Ui.outline(g, ix, iy, iw, ih, 0, 0x33000000);
 					name = cape.name();
 					if (hover && cape.custom()) Ui.requestTooltip(cape.description(), mouseX, mouseY);
-					if (cape.glows() && HeldixConfig.get().capeGlow) {
+					if (cape.teamOnly()) {
+						boolean locked = !dev.heldixclient.cosmetic.Cosmetics.team();
+						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
+						Ui.icon(g, locked ? "lock" : "shield", cx + 5, cy + 5, 10, locked ? Ui.WARNING : 0xFFFDE68A);
+						if (hover) Ui.requestTooltip(locked ? "Nur für das HeldixClient-Team" : "Nur fürs Team – du darfst es tragen", mouseX, mouseY);
+					} else if (cape.glows() && HeldixConfig.get().capeGlow) {
 						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
 						Ui.icon(g, "sparkles", cx + 5, cy + 5, 10, 0xFFFDE68A);
 					}
@@ -2506,7 +2749,201 @@ public class HeldixMenuScreen extends ShellScreen {
 				if (!Ui.inside(mouseX, mouseY, cell[0], cell[1], cell[2], TILE)) continue;
 				HeldixMenuScreen.this.click();
 				Object entry = capes.get(i);
+				if (entry instanceof Capes.Cape cape && cape.teamOnly() && !dev.heldixclient.cosmetic.Cosmetics.team()) {
+					capeMessage = "„" + cape.name() + "“ gibt es nur für das HeldixClient-Team.";
+					capeMessageOk = false;
+					capeMessageAt = System.currentTimeMillis();
+					return true;
+				}
 				Capes.select(entry instanceof Capes.Cape cape ? cape : null);
+				return true;
+			}
+			return false;
+		}
+	}
+
+	/** Seite Cosmetics: Figur mit der Auswahl (oder der Kachel unter der Maus), Name, Beschreibung und Hinweise */
+	private final class CosmeticShowcase implements Row {
+		private static final int H = 150;
+		private final String slot;
+
+		CosmeticShowcase(String slot) {
+			this.slot = slot;
+		}
+
+		@Override
+		public int height(int width) {
+			return H;
+		}
+
+		@Override
+		public int gapAfter() {
+			return 10;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			String chosen = dev.heldixclient.cosmetic.Cosmetics.mine(slot);
+			dev.heldixclient.cosmetic.CosmeticCatalog.Item selected = dev.heldixclient.cosmetic.CosmeticCatalog.item(chosen, slot);
+			boolean hovering = cosmeticHoverShown != NO_HOVER;
+			dev.heldixclient.cosmetic.CosmeticCatalog.Item item = hovering
+					? (cosmeticHoverShown instanceof dev.heldixclient.cosmetic.CosmeticCatalog.Item hovered ? hovered : null) : selected;
+			boolean preview = hovering && item != selected;
+
+			// Figur: eigene Auswahl in allen Slots, in diesem Slot das gezeigte Cosmetic
+			cosmeticDress.copyOwn();
+			cosmeticDress.set(slot, item == null ? null : item.id());
+			int pw = Math.clamp(w * 2 / 5, 104, slot.equals("companion") ? 190 : 150);
+			Ui.rect(g, x, y, pw, H, 12, 0x12FFFFFF);
+			Ui.outline(g, x, y, pw, H, 12, Ui.LINE);
+			Ui.rect(g, x + pw / 2f - 26, y + H - 17, 52, 7, 3.5f, 0x30000000);
+			float seconds = (System.nanoTime() - capeStart) / 1e9f;
+			float bodyRot = switch (slot) {
+				case "back" -> (float) Math.sin(seconds * 0.6) * 38f;
+				case "aura" -> 180f + seconds * 24f % 360f;
+				case "companion" -> 215f + (float) Math.sin(seconds * 0.5) * 15f;
+				default -> 180f + 28f + (float) Math.sin(seconds * 0.6) * 30f;
+			};
+			float zoom = slot.equals("companion") ? 0.72f : slot.equals("head") ? 0.92f : 0.9f;
+			float focus = slot.equals("companion") ? 1.2f : slot.equals("head") ? 1.05f : -1f;
+			Capes.drawFigure(g, Shell.skin(minecraft).get(), Capes.own(), cosmeticDress, x + 4, y + 6, x + pw - 4, y + H - 8, seconds, bodyRot, zoom, focus);
+
+			int tx = x + pw + 14;
+			int tw = w - pw - 14;
+			Ui.text(g, preview ? "VORSCHAU" : "DU TRÄGST", tx, y + 6, preview ? Ui.ACCENT_TEXT : Ui.FAINT, Ui.Font.SMALL);
+			String name = item != null ? item.name() : hovering ? "Ohne" : "Nichts gewählt";
+			Ui.text(g, Ui.ellipsize(name, tw, Ui.Font.TITLE), tx, y + 25, Ui.TEXT, Ui.Font.TITLE);
+			String description = item != null ? (item.description().isEmpty() ? dev.heldixclient.cosmetic.Cosmetics.slotName(slot) : item.description())
+					: "In „" + dev.heldixclient.cosmetic.Cosmetics.slotName(slot) + "“ trägst du nichts.";
+			int ly = y + 45;
+			List<FormattedCharSequence> lines = Ui.wrap(description, tw, Ui.Font.BODY);
+			for (int i = 0; i < Math.min(4, lines.size()); i++) {
+				g.text(minecraft.font, lines.get(i), tx, ly, Ui.MUTED, false);
+				ly += 11;
+			}
+			if (preview) {
+				boolean locked = item != null && item.teamOnly() && !dev.heldixclient.cosmetic.Cosmetics.team();
+				Ui.text(g, locked ? "Nur für das HeldixClient-Team" : "Klicken zum Anlegen", tx, ly + 3, locked ? Ui.WARNING : Ui.FAINT, Ui.Font.SMALL);
+			}
+
+			int px = tx;
+			int py = y + H - 20;
+			HeldixConfig.Data config = HeldixConfig.get();
+			List<String[]> pills = new ArrayList<>();
+			boolean shared = Social.online() && config.socialVisible;
+			if (item != null) {
+				pills.add(new String[] {"eye", shared ? "Andere Heldix-Spieler sehen es" : "Nur für dich sichtbar"});
+				if (item.teamOnly()) pills.add(new String[] {"lock", "Nur fürs Team"});
+				if (item.manifest().glow() != null) pills.add(new String[] {"sparkles", "Leuchtet"});
+				if (!item.manifest().animations().isEmpty() || item.manifest().particles() != null) pills.add(new String[] {"play", "Animiert"});
+			}
+			for (String[] p : pills) {
+				int pillW = Ui.width(p[1], Ui.Font.SMALL) + 24;
+				if (px + pillW > x + w) break;
+				Ui.rect(g, px, py, pillW, 16, 8, Ui.SURFACE);
+				Ui.outline(g, px, py, pillW, 16, 8, Ui.LINE);
+				Ui.icon(g, p[0], px + 6, py + 4, 8, Ui.MUTED);
+				Ui.text(g, p[1], px + 17, py + 5, Ui.MUTED, Ui.Font.SMALL);
+				px += pillW + 6;
+			}
+		}
+	}
+
+	/** Cosmetics eines Slots als Kacheln mit Vorschaubild; Klick legt an (über den Heldix-Dienst) */
+	private final class CosmeticGrid implements Row {
+		private static final int MIN_W = 64;
+		private static final int TILE = 90;
+		private final String slot;
+		private final List<Object> entries;
+
+		CosmeticGrid(String slot, List<Object> entries) {
+			this.slot = slot;
+			this.entries = entries;
+		}
+
+		private int columns(int w) {
+			return Math.clamp((w + GAP) / (MIN_W + GAP), 3, 8);
+		}
+
+		int[] cell(int index, int x, int y, int w) {
+			int c = columns(w);
+			int cw = (w - GAP * (c - 1)) / c;
+			return new int[] {x + (index % c) * (cw + GAP), y + (index / c) * (TILE + GAP), cw};
+		}
+
+		@Override
+		public int height(int width) {
+			int c = columns(width);
+			return (entries.size() + c - 1) / c * (TILE + GAP) - GAP;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			String chosen = dev.heldixclient.cosmetic.Cosmetics.mine(slot);
+			boolean team = dev.heldixclient.cosmetic.Cosmetics.team();
+			for (int i = 0; i < entries.size(); i++) {
+				Object entry = entries.get(i);
+				dev.heldixclient.cosmetic.CosmeticCatalog.Item item = entry instanceof dev.heldixclient.cosmetic.CosmeticCatalog.Item it ? it : null;
+				String id = item == null ? null : item.id();
+				int[] cell = cell(i, x, y, w);
+				int cx = cell[0];
+				int cy = cell[1];
+				int cw = cell[2];
+				boolean on = java.util.Objects.equals(chosen, id);
+				boolean locked = item != null && item.teamOnly() && !team;
+				boolean pending = cosmeticPending != null && cosmeticPending.equals(slot + ":" + (id == null ? "" : id));
+				boolean hover = Ui.inside(mouseX, mouseY, cx, cy, cw, TILE);
+				float t = animate("cosmetic:" + slot + ":" + id, on ? 1f : 0f);
+				float hv = animate("cosmetic-hover:" + slot + ":" + id, hover ? 1f : 0f);
+				if (hover) cosmeticHover = entry;
+
+				Ui.rect(g, cx, cy, cw, TILE, 10, Ui.lerp(Ui.lerp(Ui.SURFACE, Ui.SURFACE_HOVER, hv), Ui.ACCENT_SOFT, t));
+				Ui.outline(g, cx, cy, cw, TILE, 10, Ui.lerp(Ui.LINE, Ui.ACCENT_LINE, t));
+				float size = 54;
+				float ix = cx + (cw - size) / 2f;
+				float iy = cy + 7 - hv * 1.5f;
+				String name;
+				if (item != null) {
+					net.minecraft.resources.Identifier icon = item.icon();
+					if (icon != null) {
+						Ui.region(g, icon, ix, iy, size, size, 0, 0, dev.heldixclient.cosmetic.CosmeticIcons.SIZE, dev.heldixclient.cosmetic.CosmeticIcons.SIZE,
+								dev.heldixclient.cosmetic.CosmeticIcons.SIZE, dev.heldixclient.cosmetic.CosmeticIcons.SIZE, locked ? 0.45f : 1f);
+					}
+					name = item.name();
+					if (locked) {
+						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
+						Ui.icon(g, "lock", cx + 5, cy + 5, 10, Ui.WARNING);
+						if (hover) Ui.requestTooltip("Nur für das HeldixClient-Team", mouseX, mouseY);
+					} else if (item.teamOnly()) {
+						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
+						Ui.icon(g, "shield", cx + 5, cy + 5, 10, 0xFFFDE68A);
+						if (hover) Ui.requestTooltip("Nur fürs Team – du darfst es tragen", mouseX, mouseY);
+					} else if (item.manifest().glow() != null) {
+						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
+						Ui.icon(g, "sparkles", cx + 5, cy + 5, 10, 0xFFFDE68A);
+					}
+				} else {
+					Ui.outline(g, ix + 8, iy + 8, size - 16, size - 16, 6, Ui.LINE_STRONG);
+					Ui.icon(g, "close", ix + size / 2f - 6, iy + size / 2f - 6, 12, Ui.FAINT);
+					name = "Ohne";
+				}
+				Ui.textCentered(g, Ui.ellipsize(pending ? "Speichert …" : name, cw - 8, Ui.Font.SMALL), cx + cw / 2, cy + TILE - 18,
+						on ? Ui.TEXT : locked ? Ui.FAINT : Ui.MUTED, Ui.Font.SMALL);
+				if (t > 0.01f) {
+					Ui.circle(g, cx + cw - 10, cy + 10, 6, Ui.withAlpha(Ui.ACCENT, t));
+					Ui.icon(g, "check", cx + cw - 14, cy + 6, 8, Ui.withAlpha(0xFFFFFFFF, t));
+				}
+			}
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			for (int i = 0; i < entries.size(); i++) {
+				int[] cell = cell(i, x, y, w);
+				if (!Ui.inside(mouseX, mouseY, cell[0], cell[1], cell[2], TILE)) continue;
+				HeldixMenuScreen.this.click();
+				Object entry = entries.get(i);
+				chooseCosmetic(slot, entry instanceof dev.heldixclient.cosmetic.CosmeticCatalog.Item item ? item : null);
 				return true;
 			}
 			return false;
@@ -2526,29 +2963,136 @@ public class HeldixMenuScreen extends ShellScreen {
 			return ADDON_H;
 		}
 
+		/** Schalter rechts (nicht bei Addons, die der Store gerade entfernt) */
+		private boolean switchable() {
+			return !addon.pendingRemoval() && addon.id() != null;
+		}
+
 		@Override
 		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
 			boolean removing = addon.pendingRemoval();
-			boolean ok = addon.isActive() && !removing;
-			int color = removing ? Ui.WARNING : ok ? Ui.SUCCESS : Ui.DANGER;
+			boolean restart = !removing && addon.restartNeeded();
+			boolean disabled = addon.state() == LoadedAddon.State.DISABLED;
+			List<String> loaderProblems = addon.loaderProblems();
+			boolean problem = addon.state() == LoadedAddon.State.FAILED || (addon.isActive() && !loaderProblems.isEmpty());
+			int color = removing || restart ? Ui.WARNING : disabled ? Ui.FAINT : problem ? Ui.DANGER : Ui.SUCCESS;
 			Ui.rect(g, x, y, w, ADDON_H, 10, Ui.SURFACE);
 			Ui.outline(g, x, y, w, ADDON_H, 10, (color & 0xFFFFFF) | 0x44000000);
 			Ui.rect(g, x + 10, y + 10, 26, 26, 8, (color & 0xFFFFFF) | 0x33000000);
-			Ui.icon(g, ok ? addon.icon() : "warning", x + 16, y + 16, 14, color);
+			Ui.icon(g, problem && !restart ? "warning" : addon.icon(), x + 16, y + 16, 14, color);
 
-			String status = removing ? "Wird entfernt" : ok ? "Aktiv · " + addon.moduleCount() + (addon.moduleCount() == 1 ? " Modul" : " Module") : "Fehler";
+			int right = x + w - 10;
+			if (switchable()) {
+				boolean on = addon.switchedOn();
+				float t = animate(addon, on ? 1f : 0f);
+				Ui.toggle(g, right - 20, y + 18, t);
+				settingCenters.put("addon:" + addon.id(), new int[] {right - 11, y + 23});
+				if (Ui.inside(mouseX, mouseY, right - 24, y + 11, 28, 24)) {
+					Ui.requestTooltip(on ? (addon.minecraftAccess() ? "Ausschalten – wirkt nach dem Neustart" : "Ausschalten") : "Einschalten – wirkt nach dem Neustart", mouseX, mouseY);
+				}
+				right -= 28;
+			}
+			String status = removing ? "Wird entfernt"
+					: restart ? "Wirkt nach dem Neustart"
+					: disabled ? "Ausgeschaltet"
+					: addon.state() == LoadedAddon.State.FAILED ? (addon.loaderAddon() != null && !addon.loaderAddon().loaded() ? "Nicht geladen" : "Fehler")
+					: problem ? "Problem"
+					: addon.moduleCount() == 0 ? "Aktiv" : "Aktiv · " + addon.moduleCount() + (addon.moduleCount() == 1 ? " Modul" : " Module");
+			int statusW = Ui.width(status, Ui.Font.SMALL) + 14;
+			int statusX = right - statusW;
+			Ui.rect(g, statusX, y + 9, statusW, 14, 7, (color & 0xFFFFFF) | 0x2A000000);
+			Ui.text(g, status, statusX + 7, y + 12, color, Ui.Font.SMALL);
+
+			int textX = x + 46;
+			int room = statusX - textX - 8;
+			String title = addon.name();
+			int versionW = Ui.width(addon.version(), Ui.Font.SMALL) + 6;
+			int titleW = Math.min(Ui.width(title, Ui.Font.LABEL), Math.max(20, room - versionW));
+			Ui.text(g, Ui.ellipsize(title, titleW, Ui.Font.LABEL), textX, y + 11, disabled ? Ui.MUTED : Ui.TEXT, Ui.Font.LABEL);
+			Ui.text(g, Ui.ellipsize(addon.version(), Math.max(0, room - titleW - 6), Ui.Font.SMALL), textX + titleW + 6, y + 12, Ui.FAINT, Ui.Font.SMALL);
+			// zweite Zeile: Chip „Greift in Minecraft ein“, dann Beschreibung, Fehler oder Hinweis
+			int lineX = addon.minecraftAccess() ? textX + minecraftChip(g, MINECRAFT_CHIP, textX, y + 23) + 6 : textX;
+
+			String line;
+			int lineColor;
+			if (removing) {
+				line = "Im Addon-Store entfernt – verschwindet beim nächsten Start";
+				lineColor = Ui.WARNING;
+			} else if (restart) {
+				line = addon.switchedOn() ? "Wird beim nächsten Start geladen"
+						: "Wird beim nächsten Start ausgeschaltet – Eingriffe in Minecraft lassen sich nicht im laufenden Spiel abschalten";
+				lineColor = Ui.WARNING;
+			} else if (addon.state() == LoadedAddon.State.FAILED) {
+				line = addon.error();
+				lineColor = Ui.DANGER;
+			} else if (problem) {
+				line = loaderProblems.getFirst();
+				lineColor = Ui.DANGER;
+			} else {
+				line = addon.description();
+				lineColor = disabled ? Ui.FAINT : Ui.MUTED;
+			}
+			String shown = Ui.ellipsize(line == null ? "" : line, Math.max(0, right - lineX - 4), Ui.Font.SMALL);
+			Ui.text(g, shown, lineX, y + 26, lineColor, Ui.Font.SMALL);
+			if (line != null && !shown.equals(line) && Ui.inside(mouseX, mouseY, lineX, y + 24, right - lineX, 12)) Ui.requestTooltip(line, mouseX, mouseY);
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			if (!switchable() || !Ui.inside(mouseX, mouseY, x + w - 34, y + 11, 28, 24)) return false;
+			HeldixMenuScreen.this.click();
+			AddonManager.setEnabled(addon, !addon.switchedOn());
+			return true;
+		}
+	}
+
+	private static final String MINECRAFT_CHIP = "Greift in Minecraft ein";
+
+	/** Chip wie „Greift in Minecraft ein“; gibt die Breite zurück */
+	private static int minecraftChip(GuiGraphicsExtractor g, String text, int x, int y) {
+		int w = Ui.width(text, Ui.Font.SMALL) + 12;
+		Ui.rect(g, x, y, w, 13, 6.5f, Ui.ACCENT_SOFT);
+		Ui.text(g, text, x + 6, y + 3, Ui.ACCENT_TEXT, Ui.Font.SMALL);
+		return w;
+	}
+
+	/** Bisherige Heldix-Mod aus mods/ (heldix.mod.json): läuft wie bisher, hier nur zur Info – ohne Schalter */
+	private final class HeldixModCard implements Row {
+		private final ModInfo mod;
+
+		HeldixModCard(ModInfo mod) {
+			this.mod = mod;
+		}
+
+		@Override
+		public int height(int width) {
+			return ADDON_H;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			int color = Ui.SUCCESS;
+			Ui.rect(g, x, y, w, ADDON_H, 10, Ui.SURFACE);
+			Ui.outline(g, x, y, w, ADDON_H, 10, (color & 0xFFFFFF) | 0x44000000);
+			Ui.rect(g, x + 10, y + 10, 26, 26, 8, (color & 0xFFFFFF) | 0x33000000);
+			Ui.icon(g, "modules", x + 16, y + 16, 14, color);
+			String status = "Aktiv · Heldix-Mod";
 			int statusW = Ui.width(status, Ui.Font.SMALL) + 14;
 			int statusX = x + w - statusW - 10;
 			Ui.rect(g, statusX, y + 9, statusW, 14, 7, (color & 0xFFFFFF) | 0x2A000000);
 			Ui.text(g, status, statusX + 7, y + 12, color, Ui.Font.SMALL);
 
 			int textX = x + 46;
-			String title = addon.name();
-			Ui.text(g, Ui.ellipsize(title, statusX - textX - 40, Ui.Font.LABEL), textX, y + 11, Ui.TEXT, Ui.Font.LABEL);
-			int titleW = Math.min(Ui.width(title, Ui.Font.LABEL), statusX - textX - 40);
-			Ui.text(g, addon.version(), textX + titleW + 6, y + 12, Ui.FAINT, Ui.Font.SMALL);
-			String line = removing ? "Im Addon-Store entfernt – verschwindet beim nächsten Start" : ok ? addon.description() : addon.error();
-			Ui.text(g, Ui.ellipsize(line == null ? "" : line, w - 56, Ui.Font.SMALL), textX, y + 26, removing ? Ui.WARNING : ok ? Ui.MUTED : Ui.DANGER, Ui.Font.SMALL);
+			int room = statusX - textX - 8;
+			int versionW = Ui.width(mod.version(), Ui.Font.SMALL) + 6;
+			int titleW = Math.min(Ui.width(mod.name(), Ui.Font.LABEL), Math.max(20, room - versionW));
+			Ui.text(g, Ui.ellipsize(mod.name(), titleW, Ui.Font.LABEL), textX, y + 11, Ui.TEXT, Ui.Font.LABEL);
+			Ui.text(g, Ui.ellipsize(mod.version(), Math.max(0, room - titleW - 6), Ui.Font.SMALL), textX + titleW + 6, y + 12, Ui.FAINT, Ui.Font.SMALL);
+			int lineX = textX + minecraftChip(g, MINECRAFT_CHIP, textX, y + 23) + 6;
+			String line = "Heldix-Mod aus dem Ordner mods, nur zur Info" + (mod.description().isBlank() ? "" : " · " + mod.description());
+			String shown = Ui.ellipsize(line, Math.max(0, x + w - 10 - lineX), Ui.Font.SMALL);
+			Ui.text(g, shown, lineX, y + 26, Ui.MUTED, Ui.Font.SMALL);
+			if (!shown.equals(line) && Ui.inside(mouseX, mouseY, lineX, y + 24, x + w - 10 - lineX, 12)) Ui.requestTooltip(line, mouseX, mouseY);
 		}
 	}
 
@@ -2591,6 +3135,10 @@ public class HeldixMenuScreen extends ShellScreen {
 				lines.add(new StoreLine(null, 0));
 			}
 			String meta = "von " + String.join(", ", entry.authors()) + " · Addon-API " + entry.api() + " · " + sizeText(entry.size());
+			if (entry.minecraftAccess()) meta += " · Greift in Minecraft ein";
+			if (!entry.minecraft().isEmpty()) meta += " · Minecraft " + dev.heldixclient.loader.api.AddonManifest.versionList(entry.minecraft());
+			meta += entry.loaders().containsAll(List.of("heldix", "fabric")) ? " · Heldix- und Fabric-Instanzen"
+					: entry.loaders().contains("fabric") ? " · Nur Fabric-Instanzen" : " · Nur Heldix-Instanzen";
 			for (FormattedCharSequence part : Ui.wrap(meta, width, Ui.Font.SMALL)) lines.add(new StoreLine(part, Ui.FAINT));
 			return lines;
 		}
@@ -2705,9 +3253,11 @@ public class HeldixMenuScreen extends ShellScreen {
 				List<String> chips = new ArrayList<>();
 				if (update) chips.add("Update von " + installed());
 				chips.add(entry.origin());
+				if (entry.minecraftAccess()) chips.add("Greift in Minecraft ein");
 				if (entry.ratingText() != null) chips.add(entry.ratingText());
 				chips.add(entry.categoryLabel());
 				if (entry.problem() != null) chips.add(entry.problem());
+				else if (!entry.minecraft().isEmpty()) chips.add("Minecraft " + dev.heldixclient.loader.api.AddonManifest.versionList(entry.minecraft()));
 				else if (!entry.platforms().isEmpty() && !entry.platforms().containsAll(List.of("windows", "mac", "linux"))) chips.add("Nur " + platformNames(entry.platforms()));
 				chips.add(entry.downloads() == 1 ? "1 Download" : entry.downloads() + " Downloads");
 				chips.add(open() ? "Weniger" : "Details");
@@ -3744,6 +4294,8 @@ public class HeldixMenuScreen extends ShellScreen {
 		lastFrame = now;
 		capeHoverShown = capeHover;
 		capeHover = NO_HOVER;
+		cosmeticHoverShown = cosmeticHover;
+		cosmeticHover = NO_HOVER;
 		layout();
 
 		g.enableScissor(bodyX - 2, bodyY, bodyX + bodyW + 2, bodyY + bodyH);

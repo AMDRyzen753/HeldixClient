@@ -1,8 +1,10 @@
-<!--seite {"titel":"Konto","beschreibung":"Dein Konto beim Heldix-Dienst: Cape, Freunde, Nachrichten, Support, eigene Addons, Privatsphäre und deine Daten.","noindex":true}-->
+<!--seite {"titel":"Konto","beschreibung":"Dein Konto beim Heldix-Dienst: Cape und Cosmetics, Freunde, Nachrichten, Support, eigene Addons, Privatsphäre, Sicherheit und deine Daten.","noindex":true}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/konto.css">
 <script type="module" src="/konto.js"></script>
 </head>
 <body>
@@ -32,7 +34,7 @@
     <div class="gate-head">
       <div class="badge-lg">{{icon:user}}</div>
       <h1>Dein HeldixClient-Konto</h1>
-      <p class="lead">Hier verwaltest du dein Profil beim Heldix-Dienst: Cape, Freunde, Nachrichten, eigene Addons, Privatsphäre und deine Daten.</p>
+      <p class="lead">Hier verwaltest du dein Profil beim Heldix-Dienst: Cape und Cosmetics, Freunde, Nachrichten, eigene Addons, Privatsphäre, Sicherheit und deine Daten.</p>
     </div>
     <p class="notice" id="konto-gast-hinweis" role="alert" hidden></p>
     <h2 class="gate-sub">So meldest du dich an</h2>
@@ -61,42 +63,95 @@
     <p class="gate-foot">Noch kein HeldixClient? <a href="/#download">Hier herunterladen</a>.</p>
   </div>
 
-  <!-- Angemeldet -->
-  <div id="konto-app" hidden>
-    <div class="account-head">
-      <span id="konto-avatar"></span>
-      <div class="who">
-        <h1 id="konto-name">Konto</h1>
-        <p class="meta" id="konto-meta"></p>
-      </div>
-      <div class="account-actions">
-        <a class="button small ghost" id="konto-team" href="/team" hidden>{{icon:shield}}Team-Bereich</a>
-        <button class="button small ghost" type="button" id="konto-abmelden">Abmelden</button>
+  <!-- Angemeldet: Rahmen mit Seitenleiste (app-shell.js baut Leiste und Kopfzeile) -->
+  <div class="shell" id="konto-app" hidden>
+    <div class="shell-main">
+    <div class="shell-content">
+
+    <!-- Übersicht -->
+    <div class="panel" id="panel-uebersicht" role="tabpanel" aria-labelledby="tab-uebersicht" tabindex="0" hidden>
+      <section class="app-card ov-hero" aria-labelledby="uebersicht-gruss">
+        <div class="ov-hero-main">
+          <span class="ov-avatar" id="uebersicht-avatar"></span>
+          <div class="ov-hero-text">
+            <p class="ov-eyebrow" id="uebersicht-tageszeit">Willkommen</p>
+            <h2 id="uebersicht-gruss">Hallo!</h2>
+            <p class="ov-lead" id="uebersicht-zeile">Hier siehst du auf einen Blick, was in deinem Konto los ist.</p>
+          </div>
+        </div>
+        <div class="ov-actions" id="uebersicht-aktionen" role="group" aria-label="Schnellaktionen">
+          <a class="ov-action" href="#reiter=freunde" data-aktion="freund">{{icon:user-plus}}<span>Freund hinzufügen</span></a>
+          <a class="ov-action" href="#reiter=nachrichten" data-aktion="nachricht">{{icon:chat}}<span>Nachricht schreiben</span></a>
+          <a class="ov-action" href="#reiter=profil" data-aktion="cosmetics">{{icon:cape}}<span>Cosmetics wählen</span></a>
+          <a class="ov-action" href="#reiter=support" data-aktion="support">{{icon:info}}<span>Support-Anfrage</span></a>
+          <a class="ov-action" href="#reiter=addons" data-aktion="addon">{{icon:addons}}<span>Addon einreichen</span></a>
+        </div>
+      </section>
+
+      <div class="ov-status" id="uebersicht-status" role="list" aria-label="Stand deines Kontos"></div>
+
+      <div class="ov-columns">
+        <section class="app-card ov-activity" aria-labelledby="uebersicht-aktivitaet-titel">
+          <div class="ov-card-head">
+            <h2 id="uebersicht-aktivitaet-titel">Letzte Aktivität</h2>
+            <button class="button tiny ghost" type="button" id="aktivitaet-gelesen" hidden>{{icon:check}}Alles gelesen</button>
+          </div>
+          <div id="uebersicht-aktivitaet"></div>
+          <p class="hint ov-activity-hint">Neue Nachrichten, Anfragen, Antworten des Teams und Entscheidungen zu deinen Addons. Was du gesehen hast, merkt sich nur dieser Browser.</p>
+        </section>
+        <section class="app-card ov-all" aria-labelledby="uebersicht-bereiche-titel">
+          <h2 id="uebersicht-bereiche-titel">Alle Bereiche</h2>
+          <div id="uebersicht-kacheln"></div>
+        </section>
       </div>
     </div>
 
-    <div class="tabs" role="tablist" aria-label="Bereiche deines Kontos" id="konto-tabs">
-      <button class="tab" type="button" role="tab" id="tab-profil" data-tab="profil" aria-controls="panel-profil" aria-selected="true">{{icon:user}}Profil</button>
-      <button class="tab" type="button" role="tab" id="tab-freunde" data-tab="freunde" aria-controls="panel-freunde" aria-selected="false" tabindex="-1">{{icon:friends}}Freunde<span class="count" id="count-freunde" hidden></span></button>
-      <button class="tab" type="button" role="tab" id="tab-nachrichten" data-tab="nachrichten" aria-controls="panel-nachrichten" aria-selected="false" tabindex="-1">{{icon:chat}}Nachrichten<span class="count" id="count-nachrichten" hidden></span></button>
-      <button class="tab" type="button" role="tab" id="tab-support" data-tab="support" aria-controls="panel-support" aria-selected="false" tabindex="-1">{{icon:info}}Support<span class="count" id="count-support" hidden></span></button>
-      <button class="tab" type="button" role="tab" id="tab-addons" data-tab="addons" aria-controls="panel-addons" aria-selected="false" tabindex="-1">{{icon:addons}}Meine Addons</button>
-      <button class="tab" type="button" role="tab" id="tab-privatsphaere" data-tab="privatsphaere" aria-controls="panel-privatsphaere" aria-selected="false" tabindex="-1">{{icon:shield}}Privatsphäre</button>
-      <button class="tab" type="button" role="tab" id="tab-daten" data-tab="daten" aria-controls="panel-daten" aria-selected="false" tabindex="-1">{{icon:file}}Meine Daten</button>
-    </div>
-
-    <!-- Profil -->
-    <div class="panel" id="panel-profil" role="tabpanel" aria-labelledby="tab-profil" tabindex="0">
-      <div class="app-card">
+    <!-- Profil & Cosmetics -->
+    <div class="panel" id="panel-profil" role="tabpanel" aria-labelledby="tab-profil" tabindex="0" hidden>
+      <div class="app-card cos-card">
         <div class="card-head">
           <div>
-            <h2 id="cape-titel">Heldix-Cape</h2>
-            <p>Andere HeldixClient-Spieler sehen dein Cape im Spiel. Eigene Capes aus dem Ordner <em>heldix-capes</em> bleiben auf deinem PC und stehen deshalb nicht hier.</p>
+            <h2 id="cosmetics-titel">Cape &amp; Cosmetics</h2>
+            <p>Cape, Kopfschmuck, Flügel, Aura und Begleiter. Andere HeldixClient-Spieler sehen deine Auswahl im Spiel – ohne etwas zu installieren.</p>
           </div>
           <span class="saved" id="cape-gespeichert" aria-live="polite"></span>
         </div>
-        <p class="notice small-notice" id="cape-unsichtbar" hidden>„Für andere erkennbar“ ist aus – solange sieht niemand dein Cape.</p>
-        <div class="cape-grid" id="cape-grid" role="radiogroup" aria-labelledby="cape-titel"></div>
+        <p class="notice small-notice" id="cape-unsichtbar" hidden>„Für andere erkennbar“ ist aus – solange sieht niemand dein Cape und deine Cosmetics.</p>
+        <div class="cos-studio">
+          <div class="cos-viewer" id="cosmetics-vorschau" data-webgl="">
+            <canvas id="cosmetics-canvas" role="img" aria-label="3D-Vorschau deiner Figur mit Cape und Cosmetics. Ziehen zum Drehen."></canvas>
+            <div class="cos-fallback" id="cosmetics-ersatz" hidden>
+              <div class="cos-fallback-items" id="cosmetics-ersatz-bilder"></div>
+              <p id="cosmetics-ersatz-text">Die 3D-Vorschau braucht WebGL. Hier siehst du deine Auswahl als Bild.</p>
+            </div>
+            <p class="cos-viewer-hint" id="cosmetics-hinweis">Ziehen zum Drehen</p>
+            <div class="cos-viewer-controls">
+              <button class="button tiny ghost" type="button" id="cosmetics-drehen" aria-pressed="true">{{icon:refresh}}<span>Drehen</span></button>
+              <button class="button tiny ghost" type="button" id="cosmetics-skin" aria-pressed="false" hidden>{{icon:user}}<span>Mein Skin</span></button>
+            </div>
+          </div>
+          <div class="cos-picker">
+            <div class="cos-slots" role="tablist" aria-label="Plätze für Cosmetics" id="cosmetics-plaetze"></div>
+            <div class="cos-slot-panel" id="platzpanel-cape" role="tabpanel" aria-labelledby="platz-cape" tabindex="0">
+              <div class="cape-grid cos-grid" id="cape-grid" role="radiogroup" aria-label="Cape wählen"></div>
+            </div>
+            <div class="cos-slot-panel" id="platzpanel-head" role="tabpanel" aria-labelledby="platz-head" tabindex="0" hidden>
+              <div class="cos-grid" id="cosmetics-head" role="radiogroup" aria-label="Kopfschmuck wählen"></div>
+            </div>
+            <div class="cos-slot-panel" id="platzpanel-back" role="tabpanel" aria-labelledby="platz-back" tabindex="0" hidden>
+              <div class="cos-grid" id="cosmetics-back" role="radiogroup" aria-label="Rücken wählen"></div>
+            </div>
+            <div class="cos-slot-panel" id="platzpanel-aura" role="tabpanel" aria-labelledby="platz-aura" tabindex="0" hidden>
+              <div class="cos-grid" id="cosmetics-aura" role="radiogroup" aria-label="Aura wählen"></div>
+            </div>
+            <div class="cos-slot-panel" id="platzpanel-companion" role="tabpanel" aria-labelledby="platz-companion" tabindex="0" hidden>
+              <div class="cos-grid" id="cosmetics-companion" role="radiogroup" aria-label="Begleiter wählen"></div>
+            </div>
+            <div class="cos-detail" id="cosmetics-detail"></div>
+            <p class="notice small-notice" id="cosmetics-katalog-hinweis" role="status" hidden></p>
+          </div>
+        </div>
+        <p class="hint">Jedes Cosmetic kommt signiert vom HeldixClient-Team; diese Seite prüft die Signatur, bevor sie es zeigt. Deine Auswahl gilt sofort – im Spiel, im Launcher und hier. Eigene Capes aus dem Ordner <em>heldix-capes</em> bleiben auf deinem PC und stehen deshalb nicht hier.</p>
       </div>
       <div class="app-card">
         <div class="card-head">
@@ -258,13 +313,14 @@
           <div class="card-head">
             <div>
               <h2>Meine Addons</h2>
-              <p>Bring dein eigenes Heldix-Addon in den Addon-Store: JAR hochladen, Store-Angaben ausfüllen, einreichen. Das Team prüft den Code, signiert das Addon und stellt es als Community-Addon auf die Webseite, in den Launcher und ins Spiel.</p>
+              <p>Bring dein eigenes Addon in den Addon-Store: JAR hochladen, Store-Angaben ausfüllen, einreichen. Das Team prüft den Code, signiert das Addon und stellt es als Community-Addon auf die Webseite, in den Launcher und ins Spiel – unter „Mods &amp; Addons“.</p>
             </div>
             <button class="button small" type="button" id="addon-einreichen">{{icon:plus}}Addon einreichen</button>
           </div>
           <ul class="checks compact rules-list">
-            <li>{{icon:code}}<span><strong>Nur die Heldix-API:</strong> kein Zugriff auf Minecraft-Klassen, kein nachgeladener Code.</span></li>
-            <li>{{icon:shield}}<span><strong>Kein Schadcode:</strong> keine fremden Programme starten, keine Daten sammeln oder verschicken, ohne dass es in der Beschreibung steht.</span></li>
+            <li>{{icon:code}}<span><strong>Heldix-API zuerst:</strong> Was die Heldix-API kann, machst du mit ihr. Reicht sie nicht, darf dein Addon direkt in Minecraft eingreifen – angegeben in der <code>heldix.addon.json</code> (<code>clientEntrypoint</code> oder <code>transformers</code>, dazu <code>minecraft</code> mit den Versionen). Im Store steht dann „Greift in Minecraft ein“.</span></li>
+            <li>{{icon:shield}}<span><strong>Kein Schadcode:</strong> keine fremden Programme starten, keinen nativen oder nachgeladenen Code, keine Daten sammeln.</span></li>
+            <li>{{icon:connect}}<span><strong>Netzwerk und Dateien nur mit Angabe:</strong> Verbindungen ins Internet und Zugriffe auf Dateien nur, wenn sie in der Beschreibung stehen.</span></li>
             <li>{{icon:file}}<span><strong>Deine Rechte:</strong> Code, Bilder und Namen sind von dir, oder du darfst sie verwenden.</span></li>
             <li>{{icon:clock}}<span><strong>Die Prüfung dauert</strong> meist ein paar Tage. Das Team kann ablehnen – die Begründung steht dann hier, und du kannst nachbessern.</span></li>
           </ul>
@@ -383,8 +439,8 @@
           <div id="zusammenfassung"></div>
           <fieldset class="rules-confirm" id="regeln">
             <legend>Bitte bestätigen</legend>
-            <label class="check-row"><input type="checkbox" data-regel="api"><span>Mein Addon nutzt nur die Heldix-API – keine Minecraft-Klassen, kein nachgeladener Code.</span></label>
-            <label class="check-row"><input type="checkbox" data-regel="schadcode"><span>Es enthält keinen Schadcode und sammelt oder verschickt keine Daten, ohne dass es in der Beschreibung steht.</span></label>
+            <label class="check-row"><input type="checkbox" data-regel="api"><span>Mein Addon nutzt die Heldix-API, wo sie reicht. Greift es direkt in Minecraft ein, steht das in der heldix.addon.json – samt Minecraft-Versionen.</span></label>
+            <label class="check-row"><input type="checkbox" data-regel="schadcode"><span>Es enthält keinen Schadcode, startet keine Programme und sammelt keine Daten. Netzwerk- und Dateizugriffe stehen in der Beschreibung.</span></label>
             <label class="check-row"><input type="checkbox" data-regel="rechte"><span>Code, Bilder und Namen sind von mir, oder ich darf sie verwenden.</span></label>
           </fieldset>
           <p class="info-box small">{{icon:info}}<span>Während der Prüfung kannst du nichts ändern, aber jederzeit zurückziehen. Die Prüfung dauert meist ein paar Tage. Lehnt das Team ab, steht die Begründung unter Meine Addons, und du kannst nachbessern und erneut einreichen.</span></p>
@@ -424,13 +480,55 @@
       </div>
     </div>
 
+    <!-- Sicherheit -->
+    <div class="panel" id="panel-sicherheit" role="tabpanel" aria-labelledby="tab-sicherheit" tabindex="0" hidden>
+      <div class="app-card">
+        <div class="card-head sec-head">
+          <div>
+            <h2 id="sitzungen-titel">Angemeldete Browser <span class="muted" id="sitzungen-anzahl"></span></h2>
+            <p>Überall, wo du auf heldixclient.com angemeldet bist. Kennst du einen Eintrag nicht, melde ihn ab.</p>
+          </div>
+          <button class="button small ghost" type="button" id="sitzungen-andere" hidden><span class="sec-logout-icon" aria-hidden="true"></span>Überall abmelden (außer hier)</button>
+        </div>
+        <div id="sitzungen" aria-labelledby="sitzungen-titel"></div>
+        <ul class="sec-facts">
+          <li>{{icon:clock}}<span>Eine Anmeldung gilt höchstens <strong>30 Tage</strong> und endet nach <strong>7 Tagen</strong> ohne Nutzung.</span></li>
+          <li>{{icon:loader-heldix}}<span>Launcher und Spiel melden sich getrennt an und stehen nicht in dieser Liste. Dort meldest du dich im Launcher unter Konto ab.</span></li>
+        </ul>
+      </div>
+
+      <div class="app-card sec-2fa" id="zweifaktor" hidden>
+        <div class="card-head sec-head">
+          <div>
+            <h2 id="zweifaktor-titel">Zwei-Faktor-Anmeldung</h2>
+            <p>Für den Team-Bereich brauchst du zusätzlich einen 6-stelligen Code aus einer Authenticator-App. Ein Code bestätigt diesen Browser für 12 Stunden.</p>
+          </div>
+          <span class="chip" id="zweifaktor-status"></span>
+        </div>
+        <ul class="sec-checks" id="zweifaktor-liste"></ul>
+        <div class="card-actions" id="zweifaktor-aktionen"></div>
+        <p class="hint" id="zweifaktor-hilfe"></p>
+      </div>
+
+      <div class="app-card">
+        <h2>So bleibt dein Konto sicher</h2>
+        <ul class="checks compact sec-tips">
+          <li>{{icon:lock}}<span><strong>Es gibt kein Passwort.</strong> Angemeldet wirst du nur über einen Einmal-Link aus Launcher oder Spiel. Er gilt zwei Minuten und nur ein einziges Mal – gib ihn nie weiter.</span></li>
+          <li>{{icon:microsoft}}<span><strong>Dein Microsoft-Konto ist der Schlüssel.</strong> Wer es nutzt, kann sich auch hier anmelden. Schütze es mit einem starken Passwort und Zwei-Schritt-Bestätigung.</span></li>
+          <li>{{icon:monitor}}<span><strong>Fremder Computer?</strong> Melde dich ab, wenn du fertig bist – oben in der Kopfzeile oder hier in der Liste.</span></li>
+          <li>{{icon:shield}}<span><strong>Niemand vom Team fragt nach Codes oder Links.</strong> Melde verdächtige Nachrichten im Chat.</span></li>
+        </ul>
+        <p class="hint">Daten herunterladen oder alles löschen: <a href="#reiter=daten" data-goto="daten">Meine Daten</a>.</p>
+      </div>
+    </div>
+
     <!-- Meine Daten -->
     <div class="panel" id="panel-daten" role="tabpanel" aria-labelledby="tab-daten" tabindex="0" hidden>
       <div class="panel-grid">
         <div class="app-card">
           <h2>Was der Heldix-Dienst speichert</h2>
           <ul class="checks compact">
-            <li>{{icon:user}}<span>Minecraft-UUID, Spielername, Heldix-Cape und deine Einstellungen</span></li>
+            <li>{{icon:user}}<span>Minecraft-UUID, Spielername, Heldix-Cape, deine Cosmetics und deine Einstellungen</span></li>
             <li>{{icon:friends}}<span>Freundschaften und offene Anfragen</span></li>
             <li>{{icon:chat}}<span>Nachrichten an Freunde, höchstens 30 Tage</span></li>
             <li>{{icon:ban}}<span>Spieler, die du blockiert hast, und deine Meldungen (90 Tage)</span></li>
@@ -442,18 +540,13 @@
           <div class="card-actions">
             <button class="button small" type="button" id="export">{{icon:download}}Daten herunterladen (JSON)</button>
           </div>
-          <p class="hint">Eine Datei mit allem, was der Dienst über dich gespeichert hat – auch deine Support-Anfragen, Addon-Einreichungen, Bewertungen und Addon-Meldungen. Höchstens fünfmal pro Stunde.</p>
+          <p class="hint">Eine Datei mit allem, was der Dienst über dich gespeichert hat – auch deine Support-Anfragen, Addon-Einreichungen, Bewertungen, Addon-Meldungen und deine Cosmetics. Höchstens fünfmal pro Stunde.</p>
         </div>
         <div class="app-card">
-          <div class="card-head">
-            <div>
-              <h2>Angemeldete Browser</h2>
-              <p>Eine Anmeldung gilt höchstens 30 Tage und endet nach 7 Tagen ohne Nutzung. Launcher und Spiel melden sich getrennt an.</p>
-            </div>
-          </div>
-          <div id="sitzungen"></div>
+          <h2>Anmeldungen</h2>
+          <p class="muted small">Wo du gerade angemeldet bist, siehst du unter Sicherheit. Dort meldest du einzelne Browser ab – oder alle außer diesem.</p>
           <div class="card-actions">
-            <button class="button small ghost" type="button" id="sitzungen-andere" hidden>Alle anderen abmelden</button>
+            <a class="button small ghost" href="#reiter=sicherheit" data-goto="sicherheit">{{icon:shield}}Zu Sicherheit</a>
           </div>
         </div>
       </div>
@@ -465,6 +558,8 @@
           <button class="button small danger" type="button" id="loeschen">{{icon:trash}}Alle Daten löschen …</button>
         </div>
       </div>
+    </div>
+    </div>
     </div>
   </div>
 </main>

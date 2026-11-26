@@ -4741,6 +4741,296 @@ p.hint.center {
   color: var(--text);
 }
 
+/* ---------- Cosmetics (/cosmetics) ---------- */
+.cosmetic-slots {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 8px auto 0;
+  padding: 5px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(8, 11, 18, 0.55);
+}
+.cosmetic-slots [role="tab"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 14.5px/1 var(--font);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.cosmetic-slots [role="tab"] .icon {
+  width: 17px;
+  height: 17px;
+}
+.cosmetic-slots [role="tab"]:hover {
+  color: var(--text);
+  background: var(--panel-hover);
+}
+.cosmetic-slots [role="tab"][aria-selected="true"] {
+  background: rgba(59, 130, 246, 0.22);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.35);
+}
+.cosmetic-slots [role="tab"][aria-selected="true"] .icon {
+  color: var(--accent-text);
+}
+.cosmetic-slots [role="tab"]:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+.cosmetic-studio {
+  margin-top: 20px;
+}
+.viewer-flat {
+  position: absolute;
+  inset: 12% 12% 18%;
+  width: 76% !important;
+  height: 70% !important;
+  object-fit: contain;
+  image-rendering: pixelated;
+  cursor: default !important;
+}
+/* Ohne WebGL: Bild in der Mitte, Hinweis als Zeile darunter (statt über dem Bild) */
+.cosmetic-studio .viewer-fallback {
+  inset: auto 16px 16px;
+  display: block;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(7, 10, 18, 0.6);
+  border: 1px solid var(--line);
+  font-size: 13.5px;
+}
+.cosmetic-studio .viewer-fallback p {
+  margin: 0;
+}
+.cosmetic-picker {
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+}
+.cosmetic-pick {
+  position: relative;
+  align-content: start;
+  min-width: 0;
+}
+.cosmetic-pick .cape-pick-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cosmetic-art {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  background: radial-gradient(closest-side, rgba(59, 130, 246, 0.22), transparent);
+  image-rendering: pixelated;
+}
+.cosmetic-art.cape-thumb {
+  width: auto;
+  height: 64px;
+  aspect-ratio: 80 / 122;
+  border-radius: 7px;
+  background: none;
+}
+.cosmetic-art.broken {
+  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0 8px, transparent 8px 16px);
+}
+.cosmetic-pick .cape-art {
+  height: 64px;
+  width: auto;
+}
+.cosmetic-pick-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.16);
+  color: #fde68a;
+}
+.cosmetic-pick-badge .icon {
+  width: 13px;
+  height: 13px;
+}
+.cosmetic-pick:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+.cosmetic-picker-state {
+  grid-column: 1 / -1;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 26px 16px;
+  border-radius: 14px;
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
+  text-align: center;
+}
+.cosmetic-picker-state p {
+  margin: 0;
+  max-width: 34ch;
+}
+.cosmetic-picker-state > .icon {
+  width: 22px;
+  height: 22px;
+  color: var(--accent-text);
+}
+.cosmetic-chips {
+  height: auto;
+  margin-top: 12px;
+}
+.cosmetic-chips:empty {
+  display: none;
+}
+.cosmetic-remove {
+  margin-top: 14px;
+}
+.cosmetic-status {
+  margin: 0;
+  font-size: 14px;
+}
+.cosmetic-status[data-art="info"] {
+  border-color: rgba(147, 197, 253, 0.25);
+  background: rgba(59, 130, 246, 0.08);
+  color: #c9d2e0;
+}
+.cosmetic-outfit-box {
+  padding: 14px 18px;
+  border-radius: var(--radius);
+}
+.cosmetic-outfit-box .eyebrow {
+  margin: 0 0 8px;
+}
+.cosmetic-outfit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cosmetic-outfit li {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(7, 10, 18, 0.45);
+}
+.cosmetic-outfit li.muted {
+  border: 0;
+  background: none;
+}
+.outfit-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 6px 4px 6px 12px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: 600 13.5px/1.2 var(--font);
+  cursor: pointer;
+}
+.outfit-jump span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.outfit-slot {
+  color: var(--faint);
+  font-weight: 700;
+  font-size: 12px;
+}
+.outfit-remove {
+  margin-right: 3px;
+}
+.cosmetic-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 4px 28px;
+  padding-bottom: 18px;
+}
+.cosmetic-overview h3 {
+  margin: 4px 0 8px;
+  font-size: 15px;
+}
+.cosmetic-overview .chip {
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+
+/* ---------- Addon-Store: Eingriffe in Minecraft ---------- */
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(8, 11, 18, 0.5);
+  color: var(--muted);
+  font: 600 14px/1 var(--font);
+  cursor: pointer;
+}
+.filter-toggle .icon {
+  width: 16px;
+  height: 16px;
+}
+.filter-toggle:hover {
+  color: var(--text);
+}
+.filter-toggle[aria-pressed="true"] {
+  border-color: rgba(147, 197, 253, 0.4);
+  background: rgba(59, 130, 246, 0.2);
+  color: var(--text);
+}
+.filter-toggle[aria-pressed="true"] .icon {
+  color: var(--accent-text);
+}
+.chip.minecraft-access {
+  color: #fdba74;
+  background: rgba(251, 146, 60, 0.1);
+  border-color: rgba(251, 146, 60, 0.34);
+}
+.addon-access-box {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(251, 146, 60, 0.07);
+  border: 1px solid rgba(251, 146, 60, 0.28);
+  color: #fed7aa;
+  font-size: 14.5px;
+}
+.addon-access-box p {
+  margin: 0;
+}
+.addon-access-box .icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+}
+
 /* ---------- Hilfe-Center und Artikel ---------- */
 .help-search {
   max-width: 680px;
@@ -7115,5 +7405,32 @@ section.review-section {
   .report.highlight,
   .toast {
     animation: none;
+  }
+}
+
+/* Cosmetics und Store-Filter auf schmalen Bildschirmen */
+@media (max-width: 560px) {
+  .cosmetic-slots {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .cosmetic-slots [role="tab"] {
+    flex: 1 1 calc(33% - 6px);
+    justify-content: center;
+    padding: 0 8px;
+    font-size: 13.5px;
+    gap: 6px;
+  }
+  .cosmetic-picker {
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  }
+  .cosmetic-art,
+  .cosmetic-pick .cape-art {
+    width: 54px;
+    height: 54px;
+  }
+  .cosmetic-pick .cape-art,
+  .cosmetic-art.cape-thumb {
+    width: auto;
   }
 }

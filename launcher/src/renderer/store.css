@@ -1,5 +1,5 @@
 /* =========================================================
-   Addon-Store (store.ts): Karten wie im Instanz-Reiter „Heldix-Addons“, Details als Leiste rechts.
+   Addon-Store (store.ts): Karten mit Suche und Filtern, Details als Leiste rechts.
    Nur Klassen mit Präfix store-…; die Namen der Store-Karten aus instances.css (store-card, store-chip …) bleiben frei.
    ========================================================= */
 .store-head { margin-bottom: 16px; }
@@ -94,6 +94,7 @@
 .store-pills { display: flex; flex-wrap: wrap; gap: 5px; }
 .store-pill { padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--faint); font-size: 11px; line-height: 1.6; white-space: nowrap; }
 .store-pill.warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); color: var(--warn); }
+.store-pill.minecraft { border-color: rgba(251, 146, 60, 0.4); background: rgba(251, 146, 60, 0.08); color: #fdba74; font-weight: 600; }
 .store-item-status { display: flex; align-items: center; gap: 7px; min-width: 0; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; font-weight: 600; }
 .store-item-status > span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .store-item-status.update { color: var(--accent-text); }
@@ -166,6 +167,9 @@
 .store-lead { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.5; }
 .store-warn { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); background: color-mix(in srgb, var(--warn) 8%, transparent); color: var(--warn); font-size: 12.5px; line-height: 1.45; }
 .store-warn svg { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+.store-access { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid rgba(251, 146, 60, 0.35); background: rgba(251, 146, 60, 0.07); color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.store-access svg { width: 16px; height: 16px; flex: none; margin-top: 1px; color: #fdba74; }
+.store-access strong { color: #fdba74; font-weight: 700; }
 .store-section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .store-section-head { display: flex; align-items: baseline; gap: 10px; }
 .store-section-title { margin: 0; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }

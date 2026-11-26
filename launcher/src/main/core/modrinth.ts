@@ -1,10 +1,10 @@
-import { rm } from 'node:fs/promises';
+import { readdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
-import type { ModrinthSearchResult, PerformancePackResult } from '../../shared/api';
-import { contentDir, MODRINTH_INDEX, type ModrinthIndex } from './content';
+import type { ModrinthSearchResult, ModrinthUpdate, PerformancePackResult } from '../../shared/api';
+import { contentDir, MODRINTH_INDEX, type ModrinthIndex, type ModrinthIndexEntry } from './content';
 import { readJson, writeJson } from './fsutil';
-import { fetchJson, syncFiles, type ProgressFn } from './http';
-import { resolveFabricConflicts, type FabricModInfo } from './fabricmods';
+import { fetchJson, runPool, syncFiles, type ProgressFn } from './http';
+import { findConflicts, readFabricMods, resolveFabricConflicts, type FabricModInfo } from './fabricmods';
 
 const API = 'https://api.modrinth.com/v2';
 /** Fabric API wird vom Launcher selbst verwaltet und hier übersprungen */
@@ -181,4 +181,139 @@ export async function installModrinth(gameDir: string, minecraft: string, projec
   await installOne(projectId, false);
   await writeJson(indexFile, index);
   return installed;
+}
+
+// ---------- Updates für Mods von Modrinth ----------
+
+const UPDATE_CACHE_MS = 15 * 60_000;
+/** Versionslisten je Projekt und Minecraft-Version (für die Update-Prüfung) */
+const versionCache = new Map<string, { at: number; versions: ModrinthVersion[] }>();
+
+/**
+ * Versionen eines Projekts für Fabric und diese Minecraft-Version, neueste zuerst; dazu die, die der Launcher nehmen würde.
+ * cached: eine höchstens 15 Minuten alte Liste genügt.
+ */
+async function projectVersions(projectId: string, minecraft: string, cached = false): Promise<{ versions: ModrinthVersion[]; latest: ModrinthVersion | null }> {
+  const key = `${projectId}@${minecraft}`;
+  const hit = versionCache.get(key);
+  let versions: ModrinthVersion[];
+  if (cached && hit && Date.now() - hit.at < UPDATE_CACHE_MS) {
+    versions = hit.versions;
+  } else {
+    const query = new URLSearchParams({ loaders: JSON.stringify(['fabric']), game_versions: JSON.stringify([minecraft]) });
+    versions = await fetchJson<ModrinthVersion[]>(`${API}/project/${projectId}/version?${query}`);
+    versionCache.set(key, { at: Date.now(), versions });
+  }
+  return { versions, latest: versions.find((v) => v.version_type === 'release') ?? versions[0] ?? null };
+}
+
+/**
+ * Neuere Versionen der über den Launcher von Modrinth installierten Mods (dieselbe Wahl wie beim Installieren: neueste
+ * Vollversion, sonst neueste). Ältere „neueste“ Vollversionen (installiert ist eine neuere Beta) und Updates, die schon
+ * einmal nicht zu den übrigen Mods passten, zählen nicht. Fehler bei einzelnen Projekten werden übersprungen.
+ */
+export async function modrinthUpdates(gameDir: string, minecraft: string): Promise<ModrinthUpdate[]> {
+  const modsDir = contentDir(gameDir, 'mods');
+  const index = (await readJson<ModrinthIndex>(path.join(modsDir, MODRINTH_INDEX))) ?? {};
+  const files = new Set(await readdir(modsDir).catch(() => [] as string[]));
+  const entries = Object.entries(index).filter(([file, entry]) => (files.has(file) || files.has(`${file}.disabled`)) && /^[A-Za-z0-9]{1,32}$/.test(entry.projectId) && entry.projectId !== FABRIC_API_PROJECT);
+  const result: ModrinthUpdate[] = [];
+  await runPool(entries, 4, async ([file, entry]) => {
+    const { versions, latest } = await projectVersions(entry.projectId, minecraft, true).catch(() => ({ versions: [] as ModrinthVersion[], latest: null }));
+    if (!latest || latest.id === entry.versionId) return;
+    // passte schon einmal nicht – erst wieder anbieten, wenn sich die andere Mod geändert hat
+    if (latest.id === entry.heldUpdate && entry.heldBecause && files.has(entry.heldBecause)) return;
+    const installedAt = versions.findIndex((v) => v.id === entry.versionId);
+    if (installedAt !== -1 && installedAt < versions.indexOf(latest)) return;
+    result.push({ file: files.has(file) ? file : `${file}.disabled`, projectId: entry.projectId, title: entry.title, versionId: latest.id, version: latest.version_number });
+  });
+  return result.sort((a, b) => a.title.localeCompare(b.title, 'de'));
+}
+
+/**
+ * Aktualisiert eine Modrinth-Mod auf die neueste passende Version (samt neuer Pflicht-Abhängigkeiten). Verträgt sich die
+ * neue Version nicht mit einer anderen Modrinth-Mod (depends/breaks wie bei Fabric, z. B. Iris und Sodium), wird die andere
+ * mit aktualisiert, wenn es von ihr eine neuere Version gibt. Passt es dann immer noch nicht, bleibt alles beim Alten –
+ * und das Update wird erst wieder angeboten, wenn sich die andere Mod ändert. Ausgeschaltete Mods bleiben ausgeschaltet.
+ */
+export async function updateModrinthMod(gameDir: string, minecraft: string, file: string, onProgress?: ProgressFn): Promise<{ title: string; version: string; notes: string[] }> {
+  if (typeof file !== 'string' || path.basename(file) !== file || !/\.jar(\.disabled)?$/.test(file)) throw new Error(`Ungültiger Dateiname: ${file}`);
+  const modsDir = contentDir(gameDir, 'mods');
+  const indexFile = path.join(modsDir, MODRINTH_INDEX);
+  const index = (await readJson<ModrinthIndex>(indexFile)) ?? {};
+  const entry = index[file.replace(/\.disabled$/, '')];
+  if (!entry) throw new Error('Diese Mod ist nicht über Modrinth installiert – Updates gibt es nur für Mods von Modrinth.');
+  const { latest } = await projectVersions(entry.projectId, minecraft);
+  if (!latest || latest.id === entry.versionId) throw new Error(`${entry.title} ist schon aktuell.`);
+
+  interface Staged { base: string; file: string; entry: ModrinthIndexEntry; version: ModrinthVersion; name: string }
+  const staged: Staged[] = [];
+  // alte Datei als <name>.alt (ohne .jar am Ende: Fabric lädt sie während der Prüfung nicht mit), neue daneben laden
+  const stage = async (current: string, owner: ModrinthIndexEntry, version: ModrinthVersion): Promise<Staged> => {
+    const download = version.files.find((f) => f.primary) ?? version.files[0];
+    const name = download ? path.basename(download.filename) : '';
+    if (!download || !/\.jar$/.test(name)) throw new Error(`${owner.title} ${version.version_number} hat keine passende JAR-Datei.`);
+    const item = { base: current.replace(/\.disabled$/, ''), file: current, entry: owner, version, name };
+    await rename(path.join(modsDir, current), path.join(modsDir, `${item.base}.alt`));
+    staged.push(item);
+    await syncFiles([{ url: download.url, dest: path.join(modsDir, name), sha1: download.hashes.sha1, size: download.size }], { stage: owner.title, onProgress, verify: 'sha1' });
+    return item;
+  };
+  const rollback = async () => {
+    for (const item of [...staged].reverse()) {
+      await rm(path.join(modsDir, item.name), { force: true });
+      await rename(path.join(modsDir, `${item.base}.alt`), path.join(modsDir, item.file)).catch(() => undefined);
+    }
+  };
+
+  const disabled = file.endsWith('.disabled');
+  try {
+    const first = await stage(file, entry, latest);
+    // ausgeschaltete Mods lädt Fabric nicht – dann gibt es nichts zu prüfen
+    for (let round = 0; !disabled && round < 6; round++) {
+      const names = new Set(staged.map((s) => s.name));
+      const conflict = findConflicts(await readFabricMods(modsDir)).find((c) => names.has(c.mod.file) || names.has(c.other.file));
+      if (!conflict) break;
+      const other = names.has(conflict.mod.file) ? conflict.other : conflict.mod;
+      const partner = !names.has(other.file) ? index[other.file] : undefined;
+      const partnerLatest = partner ? (await projectVersions(partner.projectId, minecraft).catch(() => null))?.latest : null;
+      if (partner && partnerLatest && partnerLatest.id !== partner.versionId) {
+        await stage(other.file, partner, partnerLatest);
+        continue;
+      }
+      index[first.base] = { ...entry, heldUpdate: latest.id, heldBecause: other.file };
+      await writeJson(indexFile, index);
+      if (conflict.mod.file === first.name && conflict.kind === 'depends') {
+        throw new Error(`${entry.title} ${latest.version_number} braucht eine andere Version von ${other.name} (${conflict.rule}) – die bisherige Version bleibt installiert.`);
+      }
+      throw new Error(`${entry.title} ${latest.version_number} passt nicht zu ${other.name} ${other.version} – die bisherige Version bleibt installiert.`);
+    }
+    if (disabled) await rename(path.join(modsDir, first.name), path.join(modsDir, `${first.name}.disabled`));
+  } catch (error) {
+    await rollback();
+    throw error;
+  }
+  for (const item of staged) {
+    await rm(path.join(modsDir, `${item.base}.alt`), { force: true });
+    delete index[item.base];
+    index[item.name] = { projectId: item.entry.projectId, versionId: item.version.id, title: item.entry.title };
+  }
+  await writeJson(indexFile, index);
+
+  const notes: string[] = [];
+  const partners = staged.slice(1);
+  if (partners.length) notes.push(`Damit alles zusammenpasst, auch aktualisiert: ${partners.map((p) => `${p.entry.title} ${p.version.version_number}`).join(', ')}`);
+  // neue Pflicht-Abhängigkeiten nachinstallieren
+  const present = new Set(Object.values(index).map((e) => e.projectId));
+  for (const dependency of staged.flatMap((s) => s.version.dependencies)) {
+    if (dependency.dependency_type !== 'required' || !dependency.project_id || present.has(dependency.project_id) || dependency.project_id === FABRIC_API_PROJECT) continue;
+    present.add(dependency.project_id);
+    try {
+      const added = await installModrinth(gameDir, minecraft, dependency.project_id, onProgress);
+      if (added.length) notes.push(`Dazu installiert: ${added.join(', ')}`);
+    } catch (error) {
+      notes.push(`Abhängigkeit nicht installiert: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+  return { title: entry.title, version: latest.version_number, notes };
 }

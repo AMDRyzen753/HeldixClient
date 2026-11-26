@@ -8,6 +8,7 @@ import dev.heldixclient.loader.HeldixLoader;
 import dev.heldixclient.api.AddonConfig;
 import dev.heldixclient.api.AddonInfo;
 import dev.heldixclient.api.CommandHandler;
+import dev.heldixclient.api.DroppedItems;
 import dev.heldixclient.api.GameInfo;
 import dev.heldixclient.api.HeldixApi;
 import dev.heldixclient.api.HeldixEvents;
@@ -46,10 +47,14 @@ final class AddonContext implements HeldixApi {
 	private final Logger log;
 	private final HeldixLogger logger;
 	private final HeldixEvents events;
+	private final DroppedItems droppedItems;
+	private final dev.heldixclient.api.Cosmetics cosmetics;
 	private AddonConfigImpl config;
 
 	AddonContext(LoadedAddon addon) {
 		this.addon = addon;
+		this.droppedItems = AddonDroppedItems.forAddon(addon);
+		this.cosmetics = AddonCosmetics.forAddon(addon);
 		AddonMetadata meta = addon.metadata;
 		this.info = new AddonInfo(meta.id, meta.displayName(), meta.version, meta.description,
 				meta.authors != null ? List.copyOf(meta.authors) : List.of());
@@ -315,5 +320,17 @@ final class AddonContext implements HeldixApi {
 		log.info("Sendet Chatnachricht an den Server: {}", text);
 		mc.player.connection.sendChat(text);
 		return true;
+	}
+
+	// --- API 4 ------------------------------------------------------------------------------
+
+	@Override
+	public DroppedItems droppedItems() {
+		return droppedItems;
+	}
+
+	@Override
+	public dev.heldixclient.api.Cosmetics cosmetics() {
+		return cosmetics;
 	}
 }

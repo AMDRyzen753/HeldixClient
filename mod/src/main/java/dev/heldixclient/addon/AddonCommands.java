@@ -98,7 +98,7 @@ public final class AddonCommands {
 		}
 		if (!command.addon().isActive()) {
 			// nicht an den Server schicken – sonst landet „.np“ im öffentlichen Chat
-			system("Das Addon " + command.addon().name() + " ist abgeschaltet (siehe Heldix-Menü → Addons).");
+			system("Das Addon " + command.addon().name() + " ist abgeschaltet (siehe Heldix-Menü → Mods & Addons).");
 			return true;
 		}
 		List<String> args = rest.isEmpty() ? List.of() : List.of(rest.split("\\s+"));
@@ -137,7 +137,7 @@ public final class AddonCommands {
 	private static void help() {
 		List<Command> commands = active();
 		if (commands.isEmpty()) {
-			system("Keine Addon-Befehle. Addons gibt es im Heldix-Menü unter Addons → Addon-Store.");
+			system("Keine Addon-Befehle. Addons gibt es im Heldix-Menü unter Mods & Addons → Store.");
 			return;
 		}
 		system("Addon-Befehle (Tab ergänzt den Namen):");

@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "id": "funken",
+  "version": 1,
+  "slot": "aura",
+  "name": "Funken",
+  "description": "Goldene Funken, die um dich herum aufblitzen",
+  "access": "all",
+  "particles": {
+    "frames": 4,
+    "rate": 8,
+    "lifetime": 18,
+    "size": 0.18,
+    "motion": "spark",
+    "radius": 0.6,
+    "color": "#ffd166",
+    "fullbright": true
+  }
+}

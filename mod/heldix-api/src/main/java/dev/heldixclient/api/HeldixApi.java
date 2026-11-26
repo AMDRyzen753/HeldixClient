@@ -11,8 +11,10 @@ public interface HeldixApi {
 	 * Version 2: Tasten, Einblendungen, Modul-Einstellungen, Bilder und Heldix-Schrift im HUD.
 	 * Version 3: weitere Events, Spiel- und Spielerdaten, Scheduler, Chat-Befehle, Chat an den Server,
 	 * Regler/Farbe/Text als Einstellungen, neue Zeichenhilfen im HUD.
+	 * Version 4: Lage und Drehung der gedroppten Items in der Welt ({@link #droppedItems()}), Heldix-Cosmetics lesen,
+	 * lokal vorführen und kurz animieren ({@link #cosmetics()}).
 	 */
-	int API_VERSION = 3;
+	int API_VERSION = 4;
 
 	/** Informationen über das eigene Addon (aus heldix.addon.json). */
 	AddonInfo addon();
@@ -138,4 +140,25 @@ public interface HeldixApi {
 	 * @since 3
 	 */
 	boolean sendChatMessage(String message);
+
+	// --- ab API 4 ---------------------------------------------------------------------------
+
+	/**
+	 * Zeichnen der gedroppten Items in der Welt verändern (Items, die auf dem Boden liegen oder durch die Luft
+	 * fliegen), z. B. für „Item Physics“: Ein {@link DroppedItemRenderer} legt für jedes Item in jedem Bild Höhe und
+	 * Drehung fest, statt dass es schwebt und sich dreht. Rein optisch und nur auf dem eigenen Client – Hitbox,
+	 * Aufsammeln und Spielablauf bleiben gleich.
+	 *
+	 * @since 4
+	 */
+	DroppedItems droppedItems();
+
+	/**
+	 * Heldix-Cosmetics (Hüte, Flügel, Partikel, Begleiter, Capes aus dem Katalog des Teams): Katalog und Auswahl lesen,
+	 * ein Cosmetic nur für dich als Vorschau zeigen, kurze Effekte am eigenen Cosmetic auslösen und auf Änderungen der
+	 * eigenen Auswahl hören. Die Auswahl selbst ändert nur der Spieler (Heldix-Menü, Launcher, Webseite).
+	 *
+	 * @since 4
+	 */
+	Cosmetics cosmetics();
 }

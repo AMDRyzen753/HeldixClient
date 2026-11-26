@@ -108,6 +108,14 @@ public final class AutoTest implements HeldixModInitializer {
 		// die auf ein gezeichnetes Bild warten (Zoom, Freelook, HUD-Größe), liefen dann ins Leere.
 		t.run(mc -> HeldixConfig.get().backgroundFps = false);
 		t.waitTicks(20);
+		// Nur beim Entwickeln: HELDIX_AUTOTEST_ONLY=cosmetics führt nur die Cosmetics-Prüfungen in einer Testwelt aus
+		if ("cosmetics".equals(System.getenv("HELDIX_AUTOTEST_ONLY"))) {
+			createFlatWorld(t);
+			CosmeticTests.run(t);
+			t.run(mc -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));
+			t.waitFor("Welt verlassen", mc -> mc.level == null, 60);
+			return;
+		}
 		t.log(t.compute(mc -> "Fenster " + mc.getWindow().getScreenWidth() + "x" + mc.getWindow().getScreenHeight()
 				+ ", GUI " + mc.getWindow().getGuiScaledWidth() + "x" + mc.getWindow().getGuiScaledHeight()
 				+ ", Skalierung " + mc.getWindow().getGuiScale()));
@@ -116,7 +124,9 @@ public final class AutoTest implements HeldixModInitializer {
 		List<String> mods = HeldixLoader.mods().stream().map(ModInfo::id).toList();
 		List<String> problems = HeldixLoader.problems();
 		boolean fabric = "fabric".equals(HeldixLoader.platform());
-		t.log("Plattform " + HeldixLoader.platform() + ", Mods " + mods + ", Probleme " + problems);
+		// die absichtlich scheiternden Test-Addons nicht wörtlich ins Log (test:launch wertet Zeilen mit „konnte nicht verändert werden“ als Fehler)
+		t.log("Plattform " + HeldixLoader.platform() + ", Mods " + mods + ", Probleme " + problems.stream().filter(p -> !MinecraftAddonTests.expectedProblem(p)).toList()
+				+ " (+" + problems.stream().filter(MinecraftAddonTests::expectedProblem).count() + " erwartet von Test-Addons)");
 		t.check("Loader hat HeldixClient geladen", mods.contains(HeldixClient.MOD_ID));
 		t.check("Loader hat den Autotest geladen", mods.contains("heldix-autotest"));
 		if (fabric) {
@@ -124,7 +134,9 @@ public final class AutoTest implements HeldixModInitializer {
 		} else {
 			t.check("Fabric-Mod im mods-Ordner wird erkannt und übersprungen", problems.stream().anyMatch(p -> p.contains("Fabric-Mod")));
 		}
-		t.check("Keine fehlgeschlagenen Patches", problems.stream().noneMatch(p -> p.contains("Patch") || p.contains("nicht verändert")));
+		// ausgenommen das Test-Addon, dessen Transformer absichtlich scheitert (MinecraftAddonTests)
+		t.check("Keine fehlgeschlagenen Patches", problems.stream().filter(p -> !MinecraftAddonTests.expectedProblem(p))
+				.noneMatch(p -> p.contains("Patch") || p.contains("nicht verändert")));
 		String title = t.compute(mc -> {
 			try {
 				Method createTitle = Minecraft.class.getDeclaredMethod("createTitle");
@@ -168,11 +180,15 @@ public final class AutoTest implements HeldixModInitializer {
 				t.compute(mc -> ModuleManager.all().stream().anyMatch(m -> "uhrzeit:uhrzeit".equals(m.id()))));
 		// Spotify-Addon nutzt API 3: eigene Einstellungen, Tasten und Chat-Befehle
 		t.check("Spotify-Addon aktiv (API 3)", addons.contains("Spotify=ACTIVE"));
+		t.check("Item-Physics-Addon aktiv (API 4)", addons.contains("Item Physics=ACTIVE"));
 		t.check("Spotify-Modul mit eigenen Einstellungen", t.compute(mc -> ModuleManager.all().stream()
 				.filter(m -> "spotify:spotify".equals(m.id()))
 				.anyMatch(m -> m.settings().stream().anyMatch(s -> s.label().equals("Cover anzeigen")))));
 		t.check("Addon-Tasten in der Steuerung", t.compute(mc -> java.util.Arrays.stream(mc.options.keyMappings)
 				.anyMatch(k -> k.getName().equals("Spotify – Abspielen/Pause"))));
+		// Manifest Version 2 und Addons mit Zugriff auf Minecraft (mod/test-addons/minecraft)
+		MinecraftAddonTests.manifests(t);
+		MinecraftAddonTests.startup(t, fabric);
 
 		t.run(mc -> mc.reloadResourcePacks());
 		t.waitSoft(mc -> mc.gui.overlay() != null, 5);
@@ -234,16 +250,17 @@ public final class AutoTest implements HeldixModInitializer {
 		clickTest(t, "direkt geöffnet");
 		t.screenshot("heldix-03-heldix-menue");
 
-		// Unter-Menüs: Einstellungen → Reiter Info; Addons ist eine eigene Kategorie mit dem Addon-Store
+		// Unter-Menüs: Einstellungen → Reiter Info; Mods & Addons ist eine eigene Kategorie mit dem Store
 		openPage(t, "INFO");
 		t.check("Einstellungen haben die Reiter Allgemein und Info",
 				t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabIds()).equals(java.util.List.of("SETTINGS", "INFO")));
 		openPage(t, "ADDONS");
-		t.check("Addons haben die Reiter Installiert und Addon-Store",
+		t.check("Mods & Addons hat die Reiter Installiert und Store",
 				t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabIds()).equals(java.util.List.of("ADDONS", "STORE")));
 		t.moveMouse(350, 235);
 		t.waitTicks(5);
 		t.screenshot("heldix-03b-addons");
+		MinecraftAddonTests.menu(t, fabric);
 
 		// Weg 2: im Spiel mit der Rechten Umschalttaste
 		t.setScreen(() -> null);
@@ -321,11 +338,15 @@ public final class AutoTest implements HeldixModInitializer {
 		FeatureTests.social(t);
 		// Heldix-Symbol je Rolle: Tab-Liste (mit Fußzeile) und Namensschilder über Köpfen
 		BadgeTests.run(t);
+		// Heldix-Cosmetics: Katalog (signiert), Seite im Heldix-Menü, alle Slots, andere Spieler, Addon-API (mit --service)
+		CosmeticTests.run(t);
 		FeatureTests.addonStore(t);
 		// Heldix-API 3: Einstellungen (Regler, Farbe, Text), Spotify-Darstellungen, Daten, Scheduler, Befehle, Events
 		AddonApiTests.settings(t);
 		AddonApiTests.spotifyLayouts(t);
 		AddonApiTests.api(t);
+		// Heldix-API 4: gedroppte Items (Renderer anmelden, null, Fehler) und das Item-Physics-Addon
+		DroppedItemTests.run(t);
 
 		// Welt verlassen
 		t.run(mc -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));
@@ -381,6 +402,8 @@ public final class AutoTest implements HeldixModInitializer {
 		t.setScreen(() -> new OptionsScreen(titleScreen, Minecraft.getInstance().options));
 		t.waitTicks(10);
 		t.screenshot("heldix-09-optionen");
+		// an/aus im Spiel zuletzt: das Uhrzeit-Addon bleibt danach bis zum Spielende aus
+		MinecraftAddonTests.toggles(t);
 		t.setScreen(() -> titleScreen);
 	}
 

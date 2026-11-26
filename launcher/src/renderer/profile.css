@@ -177,6 +177,27 @@ input[type="text"].profile-skin-input { width: 100%; height: 28px; margin: 0 -4p
 .profile-cape-check svg { width: 11px; height: 11px; stroke-width: 3; }
 .profile-cape-busy { position: absolute; inset: 0; display: grid; place-items: center; border-radius: inherit; background: color-mix(in srgb, var(--bg) 55%, transparent); color: var(--accent-text); }
 .profile-cape-busy .profile-spinner { width: 20px; height: 20px; }
+/* nur für das HeldixClient-Team */
+.profile-cape-team { position: absolute; top: 6px; left: 6px; display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 6px 0 5px; border-radius: 6px; background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
+.profile-cape-team svg { width: 10px; height: 10px; stroke-width: 2.6; }
+
+/* ---------- Cosmetics (quadratische Vorschau, 3D aus cosmetic-scene.ts) ---------- */
+.profile-cape.square .profile-cape-art {
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+  background: radial-gradient(62% 62% at 50% 46%, var(--surface-2), transparent 78%), var(--surface);
+  box-shadow: none;
+}
+.profile-cape.square[aria-checked="true"] .profile-cape-art { background: radial-gradient(62% 62% at 50% 46%, var(--accent-soft), transparent 78%), var(--surface); }
+.profile-cosmetic-art { display: grid; place-items: center; width: 100%; height: 100%; }
+/* lange deutsche Namen („Heiligenschein“) möglichst in einer Zeile, sonst trennen */
+.profile-cape.square { padding-left: 4px; padding-right: 4px; }
+.profile-cape.square .profile-cape-name { font-size: 12px; hyphens: auto; }
+.profile-cosmetic-thumb { display: block; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.2s, transform 0.18s ease; }
+.profile-cosmetic-thumb.ready { opacity: 1; }
+.profile-cape.square:hover .profile-cosmetic-thumb { transform: scale(1.06); }
+.profile-cape-grid.locked .profile-cosmetic-art { opacity: 0.8; }
 
 /* ---------- schmale Fenster ---------- */
 @media (max-width: 1060px) {

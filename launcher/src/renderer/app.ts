@@ -1,4 +1,4 @@
-import type { AccountInfo, DiscordStatus, Friend, InstanceInfo, LogLine, QuickPlayList, QuickPlayTarget, Settings, SkinInfo, SocialOverview, UpdateState } from '../shared/api';
+import type { AccountInfo, DiscordStatus, Friend, InstanceInfo, LogLine, QuickPlayList, QuickPlayTarget, ServerStatus, Settings, SkinInfo, SocialOverview, UpdateState } from '../shared/api';
 import {
   $,
   api,
@@ -41,7 +41,7 @@ const VIEW_TITLES: Record<string, string> = {
   instances: 'Instanzen',
   store: 'Addon-Store',
   friends: 'Freunde',
-  profile: 'Skins & Capes',
+  profile: 'Skins & Cosmetics',
   settings: 'Einstellungen',
   console: 'Konsole',
 };
@@ -176,13 +176,15 @@ function renderStage(): void {
   tile.textContent = '';
   if (instance) tile.append(instanceTile(instance, 'small'));
   $('#picker-name').textContent = instance?.name ?? 'Keine Instanz';
-  $('#picker-meta').textContent = instance ? `Minecraft ${instance.minecraft} · ${loaderText(instance)}` : 'Lege deine erste Instanz an';
+  $('#picker-meta').textContent = instance ? `${instance.minecraft} · ${loaderText(instance)}` : 'Lege deine erste Instanz an';
+  $('#picker-button').title = instance ? `${instance.name} · Minecraft ${instance.minecraft} · ${loaderText(instance)}` : 'Instanz wählen';
 
   const tools = $('#picker-tools');
   tools.textContent = '';
   if (instance) {
-    if (instance.loader !== 'vanilla') tools.append(toolButton(ICONS.blocks, 'Mods', 'Mods verwalten', () => openInstanceTab(instance.id, 'mods')));
-    if (instance.heldixClient) tools.append(toolButton(ICONS.puzzle, 'Addons', 'Heldix-Addons der Instanz', () => openInstanceTab(instance.id, 'addons')));
+    if (instance.loader !== 'vanilla') {
+      tools.append(toolButton(ICONS.puzzle, 'Mods & Addons', instance.heldixClient ? 'Mods und Addons der Instanz' : 'Mods der Instanz', () => openInstanceTab(instance.id, 'content')));
+    }
     tools.append(
       toolButton(ICONS.sparkle, 'Shader', 'Shaderpacks der Instanz', () => openInstanceTab(instance.id, 'shaders')),
       toolButton(ICONS.folder, 'Ordner', 'Instanz-Ordner öffnen', () => void api.openFolder('instance', instance.id)),
@@ -357,11 +359,8 @@ function renderHomeFriends(): void {
     list.append(rowItem(placeholderIcon('plus'), 'Freunde hinzufügen', 'Über ihren Spielernamen', 'Freunde öffnen', () => showView('friends')));
     return;
   }
-  if (online.length === 0) {
-    list.append(h('div', { class: 'row-empty', text: 'Gerade ist niemand online.' }));
-    return;
-  }
   const busy = state.game.state === 'preparing' || state.game.state === 'running';
+  if (online.length === 0) list.append(h('div', { class: 'row-note', text: 'Gerade ist niemand online.' }));
   for (const friend of online.slice(0, 5)) {
     const open = () => {
       showView('friends');
@@ -374,7 +373,26 @@ function renderHomeFriends(): void {
     row.querySelector('.row-meta')?.classList.add('online');
     list.append(row);
   }
-  if (online.length > 5) list.append(h('div', { class: 'row-empty', text: `und ${online.length - 5} weitere online` }));
+  if (online.length > 5) {
+    list.append(h('div', { class: 'row-empty', text: `und ${online.length - 5} weitere online` }));
+    return;
+  }
+  // bis zu drei Einträge: offline Freunde (ungelesene Nachrichten zuerst), damit der Bereich nicht leer bleibt
+  const offline = social.friends.filter((friend) => !friend.online)
+    .sort((a, b) => b.unread - a.unread || a.name.localeCompare(b.name, 'de'))
+    .slice(0, Math.max(0, 3 - online.length));
+  if (offline.length > 0 && online.length > 0) list.append(h('div', { class: 'row-divider', text: 'Offline' }));
+  for (const friend of offline) {
+    const open = () => {
+      showView('friends');
+      openFriendChat(friend.uuid);
+    };
+    const row = rowItem(playerHead(friend.uuid, friend.name), friend.name, 'Offline', `Nachricht an ${friend.name}`, open,
+      { icon: UI_ICONS.chat, title: 'Nachricht schreiben', run: open },
+      friend.unread > 0 ? h('span', { class: 'row-badge', title: 'Ungelesene Nachrichten', text: String(friend.unread) }) : null);
+    row.classList.add('offline');
+    list.append(row);
+  }
 }
 $('#home-friends-all').addEventListener('click', () => showView('friends'));
 void api.getSocial().then((overview) => {
@@ -433,6 +451,22 @@ function displayNames(targets: QuickPlayTarget[]): Map<QuickPlayTarget, string> 
   return names;
 }
 
+/** „1.234 / 5.000 online · 23 ms“ bzw. „Nicht erreichbar“ unter einem Server */
+function showServerStatus(meta: HTMLElement, row: HTMLElement, address: string, status: ServerStatus): void {
+  meta.classList.remove('loading');
+  meta.classList.toggle('online', status.online);
+  meta.classList.toggle('offline', !status.online);
+  meta.textContent = '';
+  if (!status.online) {
+    meta.append(h('span', { class: 'server-dot' }), `Nicht erreichbar · ${address}`);
+    row.title = `${address} antwortet gerade nicht – trotzdem verbinden`;
+    return;
+  }
+  const players = status.players ? `${status.players.online.toLocaleString('de-DE')} / ${status.players.max.toLocaleString('de-DE')} online` : 'Online';
+  meta.append(h('span', { class: 'server-dot' }), players, status.latencyMs !== null ? h('span', { class: 'server-ping', text: ` · ${status.latencyMs} ms` }) : '');
+  row.title = [`Direkt auf ${address} verbinden`, status.motd, status.version ? `Version: ${status.version}` : null].filter(Boolean).join('\n');
+}
+
 function renderContinueList(instance: InstanceInfo, data: QuickPlayList): void {
   const section = $('#stage-continue');
   const list = $('#continue-list');
@@ -457,10 +491,26 @@ function renderContinueList(instance: InstanceInfo, data: QuickPlayList): void {
     const meta = target.kind === 'world'
       ? `Einzelspieler · ${shortRelative(target.lastPlayed)}`
       : `Server · ${(target.address ?? target.id).replace(/:25565$/, '')}`;
-    list.append(rowItem(icon, label.get(target) ?? target.name, meta,
+    const row = rowItem(icon, label.get(target) ?? target.name, meta,
       target.kind === 'world' ? `Direkt in „${target.name}“ starten` : `Direkt auf ${target.address ?? target.id} verbinden`,
-      start, { icon: ICONS.play, title: 'Starten', run: start }));
+      start, { icon: ICONS.play, title: 'Starten', run: start });
+    list.append(row);
+    if (target.kind === 'server' && typeof api.getServerStatus === 'function') {
+      // Status wie in Minecrafts Serverliste (eine Minute zwischengespeichert)
+      const address = target.address ?? target.id;
+      const metaEl = row.querySelector<HTMLElement>('.row-meta');
+      if (metaEl) {
+        metaEl.classList.add('loading');
+        const token = continueToken;
+        void api.getServerStatus(instance.id, address).then((status) => {
+          if (token === continueToken && metaEl.isConnected) showServerStatus(metaEl, row, address.replace(/:25565$/, ''), status);
+        }).catch(() => metaEl.classList.remove('loading'));
+      }
+    }
   }
+  const worlds = targets.filter((t) => t.kind === 'world').length;
+  const servers = targets.length - worlds;
+  $('#continue-sub').textContent = [worlds ? (worlds === 1 ? '1 Welt' : `${worlds} Welten`) : '', servers ? `${servers} Server` : ''].filter(Boolean).join(' · ') + ' · direkt starten';
 }
 
 async function renderContinue(instance: InstanceInfo | undefined): Promise<void> {
@@ -597,10 +647,23 @@ function setChip(text: string | null, busy = false): void {
   if (text) $('#titlebar-chip-text').textContent = text;
 }
 
-/** Zeile unter dem Spielen-Button: nur, wenn es etwas zu sagen gibt. */
+/** Ruhige Zeile unter dem Spielen-Knopf: zuletzt gespielt, Spielzeit, Mods und Addons der Instanz */
+function renderFacts(instance: InstanceInfo | undefined): void {
+  const box = $('#home-facts');
+  box.textContent = '';
+  if (!instance) return;
+  const fact = (icon: string, text: string, title = '') => h('span', { class: 'home-fact', title }, uiIcon(icon, ''), text);
+  box.append(fact('clock', instance.lastPlayed ? `Zuletzt ${shortRelative(instance.lastPlayed)}` : 'Noch nie gespielt', instance.lastPlayed ? formatDate(instance.lastPlayed) : ''));
+  if (instance.playTimeMs > 0) box.append(fact('hourglass', `${formatPlayTime(instance.playTimeMs)} gespielt`, 'Spielzeit in dieser Instanz'));
+  if (instance.loader !== 'vanilla') box.append(fact('cube', instance.modCount === 0 ? 'Keine Mods' : instance.modCount === 1 ? '1 Mod' : `${instance.modCount} Mods`));
+  if (instance.heldixClient) box.append(fact('addons', instance.addonCount === 0 ? 'Keine Addons' : instance.addonCount === 1 ? '1 Addon' : `${instance.addonCount} Addons`));
+}
+
+/** Zeile unter dem Spielen-Button: nur, wenn es etwas zu sagen gibt – sonst die Fakten zur Instanz. */
 function launchStatus(kind: 'ok' | 'busy' | 'error' | 'muted' | null, text = '', sub = ''): void {
   const box = $('#launch-status');
-  box.style.visibility = kind ? 'visible' : 'hidden';
+  box.hidden = !kind;
+  $('#home-facts').hidden = !!kind;
   $('#status-dot').className = `status-dot${kind && kind !== 'ok' ? ` ${kind}` : ''}`;
   $('#status-text').textContent = text;
   $('#status-sub').textContent = sub;
@@ -664,6 +727,7 @@ function renderStatus(): void {
     return;
   }
   launchStatus(null);
+  renderFacts(instance);
   homeSub.textContent = instance.lastPlayed ? `Bereit für die nächste Runde in ${instance.name}?` : `${instance.name} ist startklar.`;
 }
 
@@ -695,8 +759,69 @@ api.onProgress((progress) => {
   if (state.game.state === 'preparing') renderStatus();
 });
 
+// ---------- Hinweise auf der Startseite: letzter Absturz, Addon-Updates ----------
+let crashNotice: { id: string; title: string } | null = null;
+let addonUpdates = 0;
+let updatingAddons = false;
+const dismissedNotices = new Set<string>();
+
+function homeNotice(key: string, kind: 'warn' | 'accent', icon: string, title: string, sub: string, ...actions: HTMLElement[]): HTMLElement {
+  return h('div', { class: `home-notice ${kind}` },
+    h('span', { class: 'home-notice-icon' }, uiIcon(icon, '')),
+    h('span', { class: 'home-notice-text' }, h('strong', { text: title }), h('span', { text: sub })),
+    h('span', { class: 'home-notice-actions' }, ...actions),
+    h('button', { class: 'icon-button small', type: 'button', title: 'Ausblenden', onclick: () => {
+      dismissedNotices.add(key);
+      renderNotices();
+    } }, uiIcon('close', '')));
+}
+
+function renderNotices(): void {
+  const box = $('#home-notices');
+  box.textContent = '';
+  if (crashNotice && !dismissedNotices.has(`crash:${crashNotice.id}`)) {
+    const id = crashNotice.id;
+    box.append(homeNotice(`crash:${id}`, 'warn', 'warning', 'Minecraft ist beim letzten Mal abgestürzt', crashNotice.title,
+      h('button', { class: 'ghost small', type: 'button', onclick: () => void showCrash(id) }, 'Absturz-Hilfe')));
+  }
+  if (addonUpdates > 0 && !dismissedNotices.has(`addons:${addonUpdates}`)) {
+    const busy = updatingAddons || state.game.state === 'preparing';
+    box.append(homeNotice(`addons:${addonUpdates}`, 'accent', 'refresh',
+      addonUpdates === 1 ? '1 Addon-Update verfügbar' : `${addonUpdates} Addon-Updates verfügbar`,
+      state.game.state === 'running' ? 'Laufende Instanzen werden nach dem Beenden aktualisiert.' : 'Neue Versionen aus dem Addon-Store, geprüft und signiert.',
+      h('button', { class: 'ghost small', type: 'button', onclick: () => showView('store') }, 'Ansehen'),
+      h('button', { class: 'primary small', type: 'button', disabled: busy, onclick: () => void updateAddonsFromHome() }, updatingAddons ? 'Aktualisiert …' : 'Alle aktualisieren')));
+  }
+  box.hidden = box.childElementCount === 0;
+}
+
+async function updateAddonsFromHome(): Promise<void> {
+  if (updatingAddons) return;
+  updatingAddons = true;
+  renderNotices();
+  try {
+    const result = await api.updateAllAddons();
+    if (result.updated > 0) toast(result.updated === 1 ? '1 Addon aktualisiert.' : `${result.updated} Addons aktualisiert.`, 'success');
+    if (result.failed.length > 0) toast(`Nicht aktualisiert: ${result.failed.join(', ')}`, 'error');
+  } catch (error) {
+    toast(errorMessage(error), 'error');
+  } finally {
+    updatingAddons = false;
+    renderNotices();
+  }
+}
+
+// Zahl der Addon-Updates kommt vom Addon-Store (Abzeichen in der Navigation)
+document.addEventListener('heldix:store-updates', (event) => {
+  addonUpdates = Math.max(0, Number((event as CustomEvent<number>).detail) || 0);
+  renderNotices();
+});
+
 api.onGameState(async (game) => {
   state.game = game;
+  if (game.state === 'preparing') crashNotice = null;
+  if (game.state === 'exited' && game.crash) crashNotice = game.crash;
+  renderNotices();
   if (game.state === 'preparing') state.progress = null;
   if (game.state === 'running') runningSince ??= Date.now();
   else runningSince = null;

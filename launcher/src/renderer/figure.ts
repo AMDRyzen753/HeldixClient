@@ -1,7 +1,9 @@
-// 3D-Figur auf der Startseite: der Skin des aktiven Kontos, drehbar mit der Maus.
-// Nutzt skinview3d (MIT-Lizenz), geladen als fertige Browser-Version aus vendor/.
-import type { SkinInfo } from '../shared/api';
-import { $ } from './core.js';
+// 3D-Figur auf der Startseite: der Skin des aktiven Kontos mit den eigenen Cosmetics (Kopf, Rücken, Aura, Begleiter),
+// drehbar mit der Maus. Nutzt skinview3d (MIT-Lizenz), geladen als fertige Browser-Version aus vendor/; die Cosmetics
+// zeichnet cosmetic-scene.ts.
+import type { CosmeticItem, CosmeticModelSlot, SkinInfo } from '../shared/api';
+import { CosmeticRig, type RigViewer } from './cosmetic-scene.js';
+import { $, api } from './core.js';
 
 /** Nur die Teile von skinview3d, die hier gebraucht werden. */
 interface Animation {
@@ -44,8 +46,12 @@ declare global {
 }
 
 let viewer: SkinViewer | null = null;
+let rig: CosmeticRig | null = null;
 let shownSkin = '';
 let active = true;
+/** Konto, dessen Cosmetics gerade geladen sind ('' = keins) */
+let cosmeticsFor = '';
+let cosmeticsSeq = 0;
 
 function hint(text: string | null): void {
   const el = $('#figure-hint');
@@ -107,7 +113,35 @@ function create(): SkinViewer | null {
   document.addEventListener('visibilitychange', () => {
     created.renderPaused = document.hidden || !active;
   });
+  try {
+    rig = CosmeticRig.attach(created as unknown as RigViewer);
+    rig?.autoZoom(0.7);
+  } catch {
+    rig = null;
+  }
+  // Auswahl auf „Skins & Cosmetics“ geändert
+  api.onCosmeticsChanged(() => {
+    if (cosmeticsFor) void loadCosmetics(cosmeticsFor);
+  });
   return created;
+}
+
+/** Eigene Cosmetics an die Figur (ohne Dienst oder Konto: keine). Fehler bleiben still. */
+async function loadCosmetics(account: string): Promise<void> {
+  const seq = ++cosmeticsSeq;
+  cosmeticsFor = account;
+  if (!rig) return;
+  try {
+    const state = await api.getCosmetics();
+    if (seq !== cosmeticsSeq) return;
+    const worn = (slot: CosmeticModelSlot): CosmeticItem | null => {
+      const id = state.selection?.[slot];
+      return (id && state.items.find((i) => i.id === id && i.slot === slot)) || null;
+    };
+    await rig.showAll({ head: worn('head'), back: worn('back'), aura: worn('aura'), companion: worn('companion') });
+  } catch {
+    // Figur bleibt ohne Cosmetics
+  }
 }
 
 /** Zeigt den Skin des Kontos (oder einen Hinweis). */
@@ -121,8 +155,12 @@ export async function showFigure(skin: SkinInfo | null, name: string | null): Pr
   if (!skin) {
     if (shownSkin) viewer.loadSkin(null);
     shownSkin = '';
+    cosmeticsSeq++;
+    cosmeticsFor = '';
+    rig?.clear();
     hint(name ? 'Deine Figur erscheint nach dem ersten Spielstart.' : 'Melde dich an, um deine Figur zu sehen.');
   } else {
+    if ((name ?? '') !== cosmeticsFor) void loadCosmetics(name ?? '');
     hint(null);
     if (skin.dataUrl !== shownSkin) {
       shownSkin = skin.dataUrl;

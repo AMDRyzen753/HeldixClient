@@ -6,7 +6,10 @@ import { DatabaseSync } from 'node:sqlite';
 export interface UserRow {
   uuid: string;
   name: string;
+  /** eingebautes Cape oder Katalog-Cape (Slot cape); '' = keins */
   cape: string;
+  /** gewählte Cosmetics je Slot ('' = nichts) */
+  worn: WornCosmetics;
   visible: boolean;
   presence: boolean;
   showServer: boolean;
@@ -25,6 +28,11 @@ export interface FriendshipRow {
   user: UserRow;
   since: number;
 }
+
+/** Slots der Cosmetics außer dem Cape (das steht in `UserRow.cape`). */
+export const WORN_SLOTS = ['head', 'back', 'aura', 'companion'] as const;
+export type WornSlot = (typeof WORN_SLOTS)[number];
+export type WornCosmetics = Record<WornSlot, string>;
 
 export interface SettingsPatch {
   cape?: string;
@@ -206,6 +214,8 @@ export type SubmissionStatus = 'draft' | 'pending' | 'approved' | 'rejected' | '
 export interface SubmissionInspection {
   classes: number;
   uses: string[];
+  /** Hinweise aus `uses`, die zum Zugriff passen (bei Zugriff minecraft: „minecraft“); fehlt in älteren Einreichungen */
+  expected: string[];
 }
 
 /** Einreichung eines Addons durch einen Spieler. */
@@ -242,6 +252,12 @@ export interface SubmissionRow {
   /** Name und UUID des Team-Mitglieds, das geprüft hat */
   reviewer: string | null;
   reviewerUuid: string | null;
+  /** aus heldix.addon.json abgeleitet (null: noch keine JAR) */
+  access: 'api' | 'minecraft' | null;
+  /** Minecraft-Versionen aus heldix.addon.json (leer = jede) */
+  minecraft: string[];
+  /** wo das Addon läuft (leer: noch keine JAR) */
+  loaders: string[];
 }
 
 export type AddonReportStatus = 'open' | 'done';
@@ -271,6 +287,33 @@ export interface AddonVersionRow {
   publishedAt: number;
   /** Spielername des Team-Mitglieds; null = über die Server-Konsole */
   publishedBy: string | null;
+}
+
+/**
+ * Cosmetic im Katalog (nur die aktuelle Version), ohne den signierten Text. `name`, `description`, `access` und `date`
+ * stammen aus dem geprüften Manifest; `size` und `sha256` gelten für den Umschlag, wie der Dienst ihn ausliefert.
+ */
+export interface CosmeticInfoRow {
+  id: string;
+  slot: string;
+  version: number;
+  access: string;
+  hidden: boolean;
+  name: string;
+  description: string;
+  date: string;
+  size: number;
+  sha256: string;
+  createdAt: number;
+  publishedAt: number;
+  /** Spielername des Team-Mitglieds; null = über die Server-Konsole */
+  publishedBy: string | null;
+}
+
+/** Cosmetic mit dem signierten Manifest-Text und der Signatur (Base64). */
+export interface CosmeticRow extends CosmeticInfoRow {
+  manifest: string;
+  signature: string;
 }
 
 export interface NewsRow {
@@ -608,11 +651,56 @@ CREATE TABLE ticket_attachments (
 CREATE INDEX ticket_attachments_ticket ON ticket_attachments (ticket, id);
 CREATE INDEX ticket_attachments_uuid ON ticket_attachments (uuid, at);
 `,
+  // 7: Cosmetics-Katalog (signierte Manifeste des Teams) und die Auswahl der Spieler je Slot
+  `
+-- Nur die aktuelle Version je Cosmetic. name, description, access und date stammen aus dem geprüften Manifest (für die
+-- Liste, ohne jedes Mal das Manifest zu lesen); size und sha256 gelten für den ausgelieferten Umschlag. published_by:
+-- Spielername ohne Fremdschlüssel (bleibt wie bei Addon-Versionen). signature und manifest stehen zuletzt: Abfragen
+-- ohne sie lesen die großen Werte nicht.
+CREATE TABLE cosmetics (
+  id TEXT PRIMARY KEY,
+  slot TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  access TEXT NOT NULL,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  date TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  published_at INTEGER NOT NULL,
+  published_by TEXT,
+  signature TEXT NOT NULL,
+  manifest TEXT NOT NULL
+) STRICT;
+
+-- Auswahl je Slot ('' = nichts); das Cape bleibt in users.cape (eingebaute Capes und Katalog-Capes)
+ALTER TABLE users ADD COLUMN cosmetic_head TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN cosmetic_back TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN cosmetic_aura TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN cosmetic_companion TEXT NOT NULL DEFAULT '';
+-- Für Träger zählen und zurücksetzen (nur Spieler, die etwas gewählt haben)
+CREATE INDEX users_cosmetic_head ON users (cosmetic_head) WHERE cosmetic_head <> '';
+CREATE INDEX users_cosmetic_back ON users (cosmetic_back) WHERE cosmetic_back <> '';
+CREATE INDEX users_cosmetic_aura ON users (cosmetic_aura) WHERE cosmetic_aura <> '';
+CREATE INDEX users_cosmetic_companion ON users (cosmetic_companion) WHERE cosmetic_companion <> '';
+CREATE INDEX users_cape ON users (cape) WHERE cape <> '';
+`,
+  // 8: Addons dürfen in Minecraft eingreifen: Zugriff, Minecraft-Versionen und Loader einer Einreichung (aus der JAR)
+  `
+ALTER TABLE addon_submissions ADD COLUMN access TEXT;
+ALTER TABLE addon_submissions ADD COLUMN minecraft TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE addon_submissions ADD COLUMN loaders TEXT NOT NULL DEFAULT '[]';
+-- Bis hierher hochgeladene JARs brauchten einen entrypoint und nutzten damit nur die Heldix-API
+UPDATE addon_submissions SET access = 'api', loaders = '["heldix","fabric"]' WHERE addon_id IS NOT NULL;
+`,
 ];
 
 const SCHEMA_VERSION = MIGRATIONS.length;
 
-const USER_COLUMNS = 'u.uuid, u.name, u.cape, u.visible, u.presence, u.show_server, u.messages, u.created_at, u.last_seen';
+const USER_COLUMNS = `u.uuid, u.name, u.cape, u.visible, u.presence, u.show_server, u.messages, u.created_at, u.last_seen,
+  u.cosmetic_head, u.cosmetic_back, u.cosmetic_aura, u.cosmetic_companion`;
 const MESSAGE_COLUMNS = 'm.id, m.from_uuid, m.to_uuid, m.text, m.at, m.is_read';
 const REPORT_COLUMNS = 'id, reporter, reporter_name, reported, reported_name, reason, note, messages, at, status, done_at, done_by';
 const BAN_COLUMNS = 'uuid, name, reason, at, by_name';
@@ -625,9 +713,10 @@ const NEWS_COLUMNS = 'id, title, text, author_uuid, author_name, published, crea
 const ADDON_COLUMNS = 'id, hidden, downloads, created_at, owner, screenshots';
 const SUBMISSION_COLUMNS = `s.id, s.uuid, u.name AS submitter_name, s.status, s.addon_id, s.version, s.name, s.summary, s.description,
   s.category, s.icon, s.platforms, s.notes, s.authors, s.api, s.size, s.sha256, s.inspection, s.screenshots, s.manifest,
-  s.created_at, s.updated_at, s.submitted_at, s.reviewed_at, s.review_note, s.reviewer, s.reviewer_uuid`;
+  s.created_at, s.updated_at, s.submitted_at, s.reviewed_at, s.review_note, s.reviewer, s.reviewer_uuid, s.access, s.minecraft, s.loaders`;
 const ADDON_REPORT_COLUMNS = 'id, addon, reporter, reporter_name, reason, note, at, status, done_at, done_by';
 const ADDON_VERSION_COLUMNS = 'id, version, manifest, signature, file, size, sha256, published_at, published_by';
+const COSMETIC_COLUMNS = 'id, slot, version, access, hidden, name, description, date, size, sha256, created_at, published_at, published_by';
 /** Größer als jede vergebene Nachrichten-ID (für „von der neuesten an“). */
 const NEWEST = Number.MAX_SAFE_INTEGER;
 
@@ -646,6 +735,12 @@ function toUser(row: Row): UserRow {
     uuid: String(row.uuid),
     name: String(row.name),
     cape: String(row.cape),
+    worn: {
+      head: String(row.cosmetic_head ?? ''),
+      back: String(row.cosmetic_back ?? ''),
+      aura: String(row.cosmetic_aura ?? ''),
+      companion: String(row.cosmetic_companion ?? ''),
+    },
     visible: Number(row.visible) === 1,
     presence: Number(row.presence) === 1,
     showServer: Number(row.show_server) === 1,
@@ -781,6 +876,18 @@ function toAddon(row: Row): AddonRow {
 
 const SUBMISSION_STATUSES: readonly SubmissionStatus[] = ['draft', 'pending', 'approved', 'rejected', 'withdrawn'];
 
+/** Ergebnis der JAR-Prüfung; `expected` fehlt bei älteren Einreichungen (dann leer). */
+function inspectionOf(value: unknown): SubmissionInspection | null {
+  const parsed = parseJson<Record<string, unknown> | null>(
+    value,
+    (p) => typeof p === 'object' && p !== null && typeof (p as Record<string, unknown>).classes === 'number' && Array.isArray((p as Record<string, unknown>).uses),
+    null,
+  );
+  if (parsed === null) return null;
+  const strings = (list: unknown) => (Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []);
+  return { classes: parsed.classes as number, uses: strings(parsed.uses), expected: strings(parsed.expected) };
+}
+
 function toSubmission(row: Row): SubmissionRow {
   const status = String(row.status) as SubmissionStatus;
   return {
@@ -801,11 +908,7 @@ function toSubmission(row: Row): SubmissionRow {
     api: nullableNumber(row.api),
     size: nullableNumber(row.size),
     sha256: nullableString(row.sha256),
-    inspection: parseJson<SubmissionInspection | null>(
-      row.inspection,
-      (p) => typeof p === 'object' && p !== null && typeof (p as SubmissionInspection).classes === 'number' && Array.isArray((p as SubmissionInspection).uses),
-      null,
-    ),
+    inspection: inspectionOf(row.inspection),
     screenshots: screenshotList(row.screenshots),
     manifest: nullableString(row.manifest),
     createdAt: Number(row.created_at),
@@ -815,6 +918,9 @@ function toSubmission(row: Row): SubmissionRow {
     reviewNote: nullableString(row.review_note),
     reviewer: nullableString(row.reviewer),
     reviewerUuid: nullableString(row.reviewer_uuid),
+    access: row.access === 'minecraft' ? 'minecraft' : row.access === 'api' ? 'api' : null,
+    minecraft: stringList(row.minecraft),
+    loaders: stringList(row.loaders),
   };
 }
 
@@ -842,6 +948,24 @@ function toAddonVersion(row: Row): AddonVersionRow {
     file: String(row.file),
     size: Number(row.size),
     sha256: String(row.sha256),
+    publishedAt: Number(row.published_at),
+    publishedBy: nullableString(row.published_by),
+  };
+}
+
+function toCosmeticInfo(row: Row): CosmeticInfoRow {
+  return {
+    id: String(row.id),
+    slot: String(row.slot),
+    version: Number(row.version),
+    access: String(row.access),
+    hidden: Number(row.hidden) === 1,
+    name: String(row.name),
+    description: String(row.description),
+    date: String(row.date),
+    size: Number(row.size),
+    sha256: String(row.sha256),
+    createdAt: Number(row.created_at),
     publishedAt: Number(row.published_at),
     publishedBy: nullableString(row.published_by),
   };
@@ -1121,7 +1245,7 @@ function prepareStatements(db: DatabaseSync) {
       UPDATE addon_submissions SET status = ?, addon_id = ?, version = ?, name = ?, summary = ?, description = ?, category = ?,
         icon = ?, platforms = ?, notes = ?, authors = ?, api = ?, size = ?, sha256 = ?, inspection = ?, screenshots = ?,
         manifest = ?, updated_at = ?, submitted_at = ?, reviewed_at = ?, review_note = ?, reviewer = ?,
-        reviewer_uuid = ?
+        reviewer_uuid = ?, access = ?, minecraft = ?, loaders = ?
       WHERE id = ?`),
     getSubmission: db.prepare(`SELECT ${SUBMISSION_COLUMNS} FROM addon_submissions s JOIN users u ON u.uuid = s.uuid WHERE s.id = ?`),
     submissionsOf: db.prepare(`
@@ -1154,6 +1278,41 @@ function prepareStatements(db: DatabaseSync) {
     addonVersionByFile: db.prepare(`SELECT ${ADDON_VERSION_COLUMNS} FROM addon_versions WHERE file = ?`),
     deleteAddonVersion: db.prepare('DELETE FROM addon_versions WHERE id = ? AND version = ?'),
     countAddonVersions: db.prepare('SELECT count(*) AS n FROM addon_versions WHERE id = ?'),
+
+    // Cosmetics
+    cosmeticInfos: db.prepare(`SELECT ${COSMETIC_COLUMNS} FROM cosmetics ORDER BY id`),
+    getCosmeticInfo: db.prepare(`SELECT ${COSMETIC_COLUMNS} FROM cosmetics WHERE id = ?`),
+    getCosmetic: db.prepare(`SELECT ${COSMETIC_COLUMNS}, signature, manifest FROM cosmetics WHERE id = ?`),
+    // Neue Version: alles außer hidden und created_at
+    upsertCosmetic: db.prepare(`
+      INSERT INTO cosmetics (id, slot, version, access, name, description, date, size, sha256, created_at, published_at, published_by, signature, manifest)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (id) DO UPDATE SET
+        slot = excluded.slot, version = excluded.version, access = excluded.access, name = excluded.name,
+        description = excluded.description, date = excluded.date, size = excluded.size, sha256 = excluded.sha256,
+        published_at = excluded.published_at, published_by = excluded.published_by, signature = excluded.signature,
+        manifest = excluded.manifest`),
+    setCosmeticHidden: db.prepare('UPDATE cosmetics SET hidden = ? WHERE id = ? AND hidden <> ?'),
+    deleteCosmetic: db.prepare('DELETE FROM cosmetics WHERE id = ?'),
+    countVisibleCosmetics: db.prepare('SELECT count(*) AS n FROM cosmetics WHERE hidden = 0'),
+    // Träger je gewählter ID und Slot (beim Cape auch eingebaute IDs; die fallen beim Abgleich weg)
+    cosmeticWearers: db.prepare(`
+      SELECT 'head' AS slot, cosmetic_head AS id, count(*) AS n FROM users WHERE cosmetic_head <> '' GROUP BY cosmetic_head
+      UNION ALL SELECT 'back', cosmetic_back, count(*) FROM users WHERE cosmetic_back <> '' GROUP BY cosmetic_back
+      UNION ALL SELECT 'aura', cosmetic_aura, count(*) FROM users WHERE cosmetic_aura <> '' GROUP BY cosmetic_aura
+      UNION ALL SELECT 'companion', cosmetic_companion, count(*) FROM users WHERE cosmetic_companion <> '' GROUP BY cosmetic_companion
+      UNION ALL SELECT 'cape', cape, count(*) FROM users WHERE cape <> '' GROUP BY cape`),
+    setWornHead: db.prepare('UPDATE users SET cosmetic_head = ? WHERE uuid = ?'),
+    setWornBack: db.prepare('UPDATE users SET cosmetic_back = ? WHERE uuid = ?'),
+    setWornAura: db.prepare('UPDATE users SET cosmetic_aura = ? WHERE uuid = ?'),
+    setWornCompanion: db.prepare('UPDATE users SET cosmetic_companion = ? WHERE uuid = ?'),
+    setWornCape: db.prepare('UPDATE users SET cape = ? WHERE uuid = ?'),
+    resetWornHead: db.prepare("UPDATE users SET cosmetic_head = '' WHERE cosmetic_head = ?"),
+    resetWornBack: db.prepare("UPDATE users SET cosmetic_back = '' WHERE cosmetic_back = ?"),
+    resetWornAura: db.prepare("UPDATE users SET cosmetic_aura = '' WHERE cosmetic_aura = ?"),
+    resetWornCompanion: db.prepare("UPDATE users SET cosmetic_companion = '' WHERE cosmetic_companion = ?"),
+    resetWornCape: db.prepare("UPDATE users SET cape = '' WHERE cape = ?"),
+    teamMembersIn: db.prepare('SELECT uuid FROM team WHERE uuid IN (SELECT value FROM json_each(?))'),
 
     // Status
     countUsers: db.prepare('SELECT count(*) AS n FROM users'),
@@ -2147,6 +2306,9 @@ export class Store {
       s.reviewNote,
       s.reviewer,
       s.reviewerUuid,
+      s.access,
+      JSON.stringify(s.minecraft),
+      JSON.stringify(s.loaders),
       s.id,
     );
   }
@@ -2218,5 +2380,117 @@ export class Store {
   visibleAddonOwnersIn(uuids: string[]): string[] {
     if (uuids.length === 0) return [];
     return (this.sql.visibleAddonOwnersIn.all(JSON.stringify(uuids)) as Row[]).map((row) => String(row.owner));
+  }
+
+  // ---------- Cosmetics ----------
+
+  /** Alle Cosmetics (auch ausgeblendete), ohne Manifest und Signatur. */
+  cosmeticInfos(): CosmeticInfoRow[] {
+    return (this.sql.cosmeticInfos.all() as Row[]).map(toCosmeticInfo);
+  }
+
+  getCosmeticInfo(id: string): CosmeticInfoRow | undefined {
+    const row = this.sql.getCosmeticInfo.get(id) as Row | undefined;
+    return row ? toCosmeticInfo(row) : undefined;
+  }
+
+  getCosmetic(id: string): CosmeticRow | undefined {
+    const row = this.sql.getCosmetic.get(id) as Row | undefined;
+    return row ? { ...toCosmeticInfo(row), signature: String(row.signature), manifest: String(row.manifest) } : undefined;
+  }
+
+  /** Neues Cosmetic (sichtbar) oder neue Version; `hidden` und `createdAt` bleiben bei einer neuen Version. */
+  upsertCosmetic(row: Omit<CosmeticRow, 'hidden'>): void {
+    this.sql.upsertCosmetic.run(
+      row.id,
+      row.slot,
+      row.version,
+      row.access,
+      row.name,
+      row.description,
+      row.date,
+      row.size,
+      row.sha256,
+      row.createdAt,
+      row.publishedAt,
+      row.publishedBy,
+      row.signature,
+      row.manifest,
+    );
+  }
+
+  /** Ausblenden bzw. wieder zeigen. true, wenn sich etwas geändert hat. */
+  setCosmeticHidden(id: string, hidden: boolean): boolean {
+    const value = hidden ? 1 : 0;
+    return Number(this.sql.setCosmeticHidden.run(value, id, value).changes) > 0;
+  }
+
+  /**
+   * Löscht ein Cosmetic und setzt die Auswahl seiner Träger (im Slot des Cosmetics) zurück, in einer Transaktion.
+   * `resetCape: false` lässt `users.cape` in Ruhe (die ID ist inzwischen ein eingebautes Cape). Liefert die Zahl der
+   * zurückgesetzten Spieler, oder null, wenn es das Cosmetic nicht gab.
+   */
+  deleteCosmetic(id: string, resetCape = true): number | null {
+    return this.transaction(() => {
+      const info = this.getCosmeticInfo(id);
+      if (!info) return null;
+      let reset = 0;
+      if (info.slot === 'cape') {
+        if (resetCape) reset = Number(this.sql.resetWornCape.run(id).changes);
+      } else if ((WORN_SLOTS as readonly string[]).includes(info.slot)) {
+        reset = Number(this.resetStatement(info.slot as WornSlot).run(id).changes);
+      }
+      this.sql.deleteCosmetic.run(id);
+      return reset;
+    });
+  }
+
+  private resetStatement(slot: WornSlot) {
+    switch (slot) {
+      case 'head':
+        return this.sql.resetWornHead;
+      case 'back':
+        return this.sql.resetWornBack;
+      case 'aura':
+        return this.sql.resetWornAura;
+      case 'companion':
+        return this.sql.resetWornCompanion;
+    }
+  }
+
+  /** Setzt die Auswahl eines Spielers in einem Slot ('' = ablegen; beim Cape auch eingebaute IDs). */
+  setWorn(uuid: string, slot: WornSlot | 'cape', id: string): void {
+    const statement = slot === 'cape' ? this.sql.setWornCape : this.setStatement(slot);
+    statement.run(id, uuid);
+  }
+
+  private setStatement(slot: WornSlot) {
+    switch (slot) {
+      case 'head':
+        return this.sql.setWornHead;
+      case 'back':
+        return this.sql.setWornBack;
+      case 'aura':
+        return this.sql.setWornAura;
+      case 'companion':
+        return this.sql.setWornCompanion;
+    }
+  }
+
+  /** Anzahl der Spieler je `<slot>:<id>`, die das gewählt haben (Cape: auch eingebaute IDs). */
+  cosmeticWearers(): Map<string, number> {
+    const map = new Map<string, number>();
+    for (const row of this.sql.cosmeticWearers.all() as Row[]) map.set(`${String(row.slot)}:${String(row.id)}`, Number(row.n));
+    return map;
+  }
+
+  countVisibleCosmetics(): number {
+    return Number((this.sql.countVisibleCosmetics.get() as Row).n);
+  }
+
+  /** Wer unter `uuids` im Team ist (jede Rolle, mit oder ohne öffentliches Profil). */
+  teamMembersIn(uuids: string[]): Set<string> {
+    if (uuids.length === 0) return new Set();
+    return new Set((this.sql.teamMembersIn.all(JSON.stringify(uuids)) as Row[]).map((row) => String(row.uuid)));
   }
 }

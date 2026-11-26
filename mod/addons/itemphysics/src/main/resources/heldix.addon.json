@@ -1,0 +1,9 @@
+{
+	"id": "itemphysics",
+	"name": "Item Physics",
+	"version": "${version}",
+	"description": "Gedroppte Items fallen, überschlagen sich und liegen dann flach und still auf dem Boden, statt zu schweben und sich zu drehen.",
+	"authors": ["Kxyuzu"],
+	"entrypoint": "dev.heldixclient.addons.itemphysics.ItemPhysicsAddon",
+	"api": 4
+}

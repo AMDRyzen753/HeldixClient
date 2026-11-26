@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { ADDON_SIGNATURE_PREFIX, verifyAddonSignature } from '../src/addons';
+import { ADDON_SIGNATURE_PREFIX, checkAddonManifest, verifyAddonSignature } from '../src/addons';
 import { Store } from '../src/db';
 import { SESSION_COOKIE } from '../src/web';
 import { api, devPlayer, rawRequest, rawUpload, sleep, startService, waitFor, type Player, type TestService } from './helpers';
@@ -88,6 +88,7 @@ async function upload(service: TestService, cookie: string | null, file: string,
 }
 
 const ENTRY_KEYS = [
+  'access',
   'api',
   'author',
   'authors',
@@ -98,7 +99,9 @@ const ENTRY_KEYS = [
   'file',
   'icon',
   'id',
+  'loaders',
   'manifest',
+  'minecraft',
   'name',
   'notes',
   'official',
@@ -284,7 +287,7 @@ describe('Addon-Store', () => {
       [addon.id, addon.name, addon.hidden, addon.downloads, addon.latest, addon.versions.length],
       ['uhrzeit', 'Uhrzeit', false, 0, '1.0.0', 1],
     );
-    assert.deepEqual(Object.keys(addon.versions[0]).sort(), ['api', 'date', 'file', 'notes', 'publishedAt', 'publishedBy', 'sha256', 'size', 'version']);
+    assert.deepEqual(Object.keys(addon.versions[0]).sort(), ['access', 'api', 'date', 'file', 'loaders', 'minecraft', 'notes', 'publishedAt', 'publishedBy', 'sha256', 'size', 'version']);
     assert.deepEqual(
       [addon.versions[0].file, addon.versions[0].size, addon.versions[0].sha256, addon.versions[0].publishedBy],
       [fileName('uhrzeit', '1.0.0'), uhr1.length, sha256(uhr1), 'Chefin'],
@@ -368,6 +371,26 @@ describe('Addon-Store', () => {
       [{ official: false }, /Team-Addons brauchen/],
       [{ official: undefined }, /Team-Addons brauchen/],
       [{ author: undefined }, /Team-Addons brauchen/],
+      // Format 2: Zugriff, Minecraft-Versionen, Loader
+      [{ access: 'mod' }, /„access“ muss api oder minecraft sein/],
+      [{ access: null }, /„access“ muss api oder minecraft sein/],
+      [{ access: 'minecraft' }, /„minecraft“ darf nicht leer sein, wenn das Addon in Minecraft eingreift/],
+      [{ access: 'minecraft', minecraft: [] }, /„minecraft“ darf nicht leer sein/],
+      [{ minecraft: '26.3' }, /„minecraft“ muss eine Liste mit höchstens 50 Minecraft-Versionen sein/],
+      [{ minecraft: null }, /„minecraft“ muss eine Liste/],
+      [{ minecraft: ['26.3', '26.3'] }, /„minecraft“ muss eine Liste/],
+      [{ minecraft: ['>=26.2'] }, /„minecraft“ muss eine Liste/],
+      [{ minecraft: ['26.2 || 26.3'] }, /„minecraft“ muss eine Liste/],
+      [{ minecraft: ['*'] }, /„minecraft“ muss eine Liste/],
+      [{ minecraft: [''] }, /„minecraft“ muss eine Liste/],
+      [{ minecraft: [26.3] }, /„minecraft“ muss eine Liste/],
+      [{ minecraft: ['x'.repeat(33)] }, /„minecraft“ muss eine Liste/],
+      [{ minecraft: Array.from({ length: 51 }, (_, i) => `26.${i}`) }, /„minecraft“ muss eine Liste/],
+      [{ loaders: [] }, /„loaders“ muss eine nicht leere Liste aus heldix und fabric sein/],
+      [{ loaders: ['forge'] }, /„loaders“/],
+      [{ loaders: ['heldix', 'heldix'] }, /„loaders“/],
+      [{ loaders: 'heldix' }, /„loaders“/],
+      [{ loaders: null }, /„loaders“/],
     ];
     for (const [extra, expected] of rejected) {
       const res = await put(signAddon(keys.privateKey, fields('feldtest', '1.0.0', data, extra)));
@@ -385,6 +408,10 @@ describe('Addon-Store', () => {
       { date: '2026-11-25T18:30:00.123+01:00', size: 50 * MIB },
       { version: '1.0.0-beta.1', file: fileName('feldtest', '1.0.0-beta.1') },
       { notes: Array(20).fill('😀'.repeat(300)) },
+      { access: 'api', minecraft: [], loaders: ['heldix', 'fabric'] },
+      { access: 'minecraft', minecraft: ['26.3'], loaders: ['heldix'] },
+      { access: 'minecraft', minecraft: ['1.21.11', '26.2', '26.x', '26.3-rc.1'] },
+      { minecraft: Array.from({ length: 50 }, (_, i) => `26.${i}`), loaders: ['fabric'] },
     ];
     for (const extra of accepted) {
       const res = await put(signAddon(keys.privateKey, fields('feldtest', '1.0.0', data, extra)));
@@ -457,6 +484,10 @@ describe('Addon-Store', () => {
       assert.equal(type, 'heldix-addon');
       assert.deepEqual(
         {
+          // Manifeste ohne die Felder von Format 2 gelten als API-Addon für jede Version und beide Loader
+          access: 'api',
+          minecraft: [],
+          loaders: ['heldix', 'fabric'],
           ...rest,
           downloads: entry.downloads,
           publishedAt: entry.publishedAt,
@@ -482,7 +513,7 @@ describe('Addon-Store', () => {
     assert.deepEqual(Object.keys(detail.body).sort(), ['addon', 'versions']);
     assert.deepEqual(
       detail.body.versions.map((v: Record<string, unknown>) => {
-        assert.deepEqual(Object.keys(v).sort(), ['api', 'date', 'file', 'notes', 'publishedAt', 'sha256', 'size', 'version']);
+        assert.deepEqual(Object.keys(v).sort(), ['access', 'api', 'date', 'file', 'loaders', 'minecraft', 'notes', 'publishedAt', 'sha256', 'size', 'version']);
         return [v.version, v.file, v.size, v.sha256, v.api, v.notes, v.date];
       }),
       [
@@ -809,5 +840,49 @@ test('Standardordner <Daten>/addons und höchstens N Addon-Downloads pro IP (hie
     await waitFor(async () => (await api(service.url, 'GET', '/v1/addons/uhrzeit')).body.addon.downloads === 2);
   } finally {
     await service.close();
+  }
+});
+
+test('Manifest Format 2: Standardwerte für alte Manifeste, Eingriff in Minecraft im Store, Detail und Team-Übersicht', async () => {
+  // Ohne Dienst: Standardwerte
+  const data = randomBytes(100);
+  const old = checkAddonManifest(fields('alt', '1.0.0', data));
+  assert.ok(typeof old === 'object');
+  assert.deepEqual([old.access, old.minecraft, old.loaders], ['api', [], ['heldix', 'fabric']]);
+  const deep = checkAddonManifest(fields('tief', '1.0.0', data, { access: 'minecraft', minecraft: ['26.3'] }));
+  assert.ok(typeof deep === 'object');
+  assert.deepEqual([deep.access, deep.minecraft, deep.loaders], ['minecraft', ['26.3'], ['heldix']], 'ohne loaders: nur Heldix-Instanzen');
+  const both = checkAddonManifest(fields('tief', '1.0.0', data, { access: 'minecraft', minecraft: ['26.2', '26.3'], loaders: ['heldix', 'fabric'] }));
+  assert.ok(typeof both === 'object');
+  assert.deepEqual(both.loaders, ['heldix', 'fabric']);
+
+  // Über den Dienst: veröffentlicht mit genau diesen Feldern
+  const clock = new Clock();
+  const keys = generateKeyPairSync('ed25519');
+  const addonsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'heldix-dienst-addons-v2-'));
+  const service = await startService({
+    dev: true,
+    website: WEBSITE,
+    totpNow: clock.read,
+    addonsDir,
+    updateKey: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+  });
+  try {
+    const { cookie } = await teamLogin(service, await devPlayer(service.url, 'Chefin'), 'admin', clock);
+    const jar = randomBytes(2000);
+    assert.equal((await upload(service, cookie, fileName('sicht', '1.0.0'), jar)).status, 200);
+    const manifest = fields('sicht', '1.0.0', jar, { access: 'minecraft', minecraft: ['26.2', '26.3'], loaders: ['heldix'] });
+    const res = await webApi(service, 'PUT', '/v1/team/addons/manifest', { cookie, body: signAddon(keys.privateKey, manifest) });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const team = res.body.addons.find((a: { id: string }) => a.id === 'sicht');
+    assert.deepEqual([team.access, team.minecraft, team.loaders], ['minecraft', ['26.2', '26.3'], ['heldix']]);
+    assert.deepEqual([team.versions[0].access, team.versions[0].minecraft, team.versions[0].loaders], ['minecraft', ['26.2', '26.3'], ['heldix']]);
+    const [listed] = (await api(service.url, 'GET', '/v1/addons')).body.addons;
+    assert.deepEqual([listed.id, listed.access, listed.minecraft, listed.loaders], ['sicht', 'minecraft', ['26.2', '26.3'], ['heldix']]);
+    const detail = (await api(service.url, 'GET', '/v1/addons/sicht')).body;
+    assert.deepEqual([detail.addon.access, detail.versions[0].access, detail.versions[0].minecraft, detail.versions[0].loaders], ['minecraft', 'minecraft', ['26.2', '26.3'], ['heldix']]);
+  } finally {
+    await service.close();
+    fs.rmSync(addonsDir, { recursive: true, force: true });
   }
 });

@@ -3,6 +3,8 @@
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/team.css">
 <script type="module" src="/team.js"></script>
 </head>
 <body>
@@ -37,107 +39,97 @@
     </div>
   </div>
 
-  <!-- Keine Rolle -->
-  <div class="gate" id="team-kein-zugang" hidden>
-    <div class="gate-head">
-      <div class="badge-lg warn">{{icon:lock}}</div>
-      <h1>Kein Zugang</h1>
-      <p class="lead">Der Team-Bereich ist nur für Moderatoren und Admins des Heldix-Dienstes. Dein Konto <strong id="kein-zugang-name"></strong> gehört nicht zum Team.</p>
-      <p><a class="button ghost" href="/konto">Zurück zum Konto</a></p>
-    </div>
-  </div>
+  <!-- Angemeldet: Rahmen mit Seitenleiste (app-shell.js baut Leiste und Kopfzeile). Im Rahmen liegen auch
+       „Kein Zugang“ und die Zwei-Faktor-Abfrage, damit „Mein Konto“ immer erreichbar bleibt. -->
+  <div class="shell" id="team-shell" hidden>
+    <div class="shell-main">
+    <div class="shell-content">
+      <!-- Keine Rolle -->
+      <div class="gate" id="team-kein-zugang" hidden>
+        <div class="gate-head">
+          <div class="badge-lg warn">{{icon:lock}}</div>
+          <h2>Kein Zugang</h2>
+          <p class="lead">Der Team-Bereich ist nur für Moderatoren und Admins des Heldix-Dienstes. Dein Konto <strong id="kein-zugang-name"></strong> gehört nicht zum Team.</p>
+          <p><a class="button ghost" href="/konto">Zurück zum Konto</a></p>
+        </div>
+      </div>
 
-  <!-- 2FA einrichten -->
-  <div class="gate" id="team-2fa-einrichten" hidden>
-    <div class="gate-head">
-      <div class="badge-lg">{{icon:lock}}</div>
-      <h1>Zwei-Faktor-Anmeldung einrichten</h1>
-      <p class="lead">Wer Meldungen liest und Spieler sperren kann, braucht einen zweiten Schutz. Dafür nutzt du eine Authenticator-App auf deinem Handy, die alle 30 Sekunden einen 6-stelligen Code zeigt.</p>
-    </div>
-    <div class="app-card setup">
-      <ol class="setup-steps">
-        <li>
-          <h2>Schlüssel erzeugen</h2>
-          <p class="muted">Jede Authenticator-App funktioniert, zum Beispiel Aegis, 2FAS, Google Authenticator oder Microsoft Authenticator.</p>
-          <p><button class="button small" type="button" id="setup-start">{{icon:lock}}Schlüssel erzeugen</button></p>
-          <p class="form-error" id="setup-start-fehler" role="alert" hidden></p>
-        </li>
-        <li id="setup-schluessel" class="step-disabled">
-          <h2>In der App eintragen</h2>
-          <div id="setup-schluessel-inhalt" hidden>
-            <p class="muted">Auf dem Handy: Link antippen, die App öffnet sich. Am PC: in der App „Schlüssel eingeben“ wählen, als Konto <strong>HeldixClient</strong> und diesen Schlüssel eintragen (zeitbasiert).</p>
-            <div class="secret-box">
-              <code class="secret" id="setup-secret" aria-label="Geheimer Schlüssel"></code>
-              <button class="button tiny ghost" type="button" id="setup-kopieren">{{icon:copy}}Kopieren</button>
-            </div>
-            <p class="card-actions"><a class="button small ghost" id="setup-link" href="#">{{icon:external}}In Authenticator-App öffnen</a></p>
-            <p class="hint">Den Schlüssel nicht weitergeben und keinen Screenshot davon teilen. Wer ihn hat, kann Codes erzeugen.</p>
-          </div>
-        </li>
-        <li id="setup-code" class="step-disabled">
+      <!-- 2FA einrichten -->
+      <div class="gate" id="team-2fa-einrichten" hidden>
+        <div class="gate-head">
+          <div class="badge-lg">{{icon:lock}}</div>
+          <h2>Zwei-Faktor-Anmeldung einrichten</h2>
+          <p class="lead">Wer Meldungen liest und Spieler sperren kann, braucht einen zweiten Schutz. Dafür nutzt du eine Authenticator-App auf deinem Handy, die alle 30 Sekunden einen 6-stelligen Code zeigt.</p>
+        </div>
+        <div class="app-card setup">
+          <ol class="setup-steps">
+            <li>
+              <h3>Schlüssel erzeugen</h3>
+              <p class="muted">Jede Authenticator-App funktioniert, zum Beispiel Aegis, 2FAS, Google Authenticator oder Microsoft Authenticator.</p>
+              <p><button class="button small" type="button" id="setup-start">{{icon:lock}}Schlüssel erzeugen</button></p>
+              <p class="form-error" id="setup-start-fehler" role="alert" hidden></p>
+            </li>
+            <li id="setup-schluessel" class="step-disabled">
+              <h3>In der App eintragen</h3>
+              <div id="setup-schluessel-inhalt" hidden>
+                <p class="muted">Auf dem Handy: Link antippen, die App öffnet sich. Am PC: in der App „Schlüssel eingeben“ wählen, als Konto <strong>HeldixClient</strong> und diesen Schlüssel eintragen (zeitbasiert).</p>
+                <div class="secret-box">
+                  <code class="secret" id="setup-secret" aria-label="Geheimer Schlüssel"></code>
+                  <button class="button tiny ghost" type="button" id="setup-kopieren">{{icon:copy}}Kopieren</button>
+                </div>
+                <p class="card-actions"><a class="button small ghost" id="setup-link" href="#">{{icon:external}}In Authenticator-App öffnen</a></p>
+                <p class="hint">Den Schlüssel nicht weitergeben und keinen Screenshot davon teilen. Wer ihn hat, kann Codes erzeugen.</p>
+              </div>
+            </li>
+            <li id="setup-code" class="step-disabled">
+              <h3>Code bestätigen</h3>
+              <form class="code-form" id="setup-form" novalidate>
+                <label class="field">
+                  <span>6-stelliger Code aus der App</span>
+                  <input class="input otp" id="setup-code-input" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="7" placeholder="123456" disabled>
+                </label>
+                <button class="button small" type="submit" id="setup-aktivieren" disabled>{{icon:check}}Aktivieren</button>
+              </form>
+              <p class="form-error" id="setup-fehler" role="alert" hidden></p>
+            </li>
+          </ol>
+        </div>
+      </div>
+
+      <!-- 2FA bestätigen -->
+      <div class="gate narrow" id="team-2fa-pruefen" hidden>
+        <div class="gate-head">
+          <div class="badge-lg">{{icon:lock}}</div>
           <h2>Code bestätigen</h2>
-          <form class="code-form" id="setup-form" novalidate>
+          <p class="lead">Gib den 6-stelligen Code aus deiner Authenticator-App ein. Die Bestätigung gilt 12 Stunden für diesen Browser.</p>
+        </div>
+        <div class="app-card">
+          <form class="code-form" id="verify-form" novalidate>
             <label class="field">
-              <span>6-stelliger Code aus der App</span>
-              <input class="input otp" id="setup-code-input" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="7" placeholder="123456" disabled>
+              <span>Code</span>
+              <input class="input otp" id="verify-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="7" placeholder="123456">
             </label>
-            <button class="button small" type="submit" id="setup-aktivieren" disabled>{{icon:check}}Aktivieren</button>
+            <button class="button small" type="submit">{{icon:check}}Bestätigen</button>
           </form>
-          <p class="form-error" id="setup-fehler" role="alert" hidden></p>
-        </li>
-      </ol>
-    </div>
-  </div>
-
-  <!-- 2FA bestätigen -->
-  <div class="gate narrow" id="team-2fa-pruefen" hidden>
-    <div class="gate-head">
-      <div class="badge-lg">{{icon:lock}}</div>
-      <h1>Code bestätigen</h1>
-      <p class="lead">Gib den 6-stelligen Code aus deiner Authenticator-App ein. Die Bestätigung gilt 12 Stunden für diesen Browser.</p>
-    </div>
-    <div class="app-card">
-      <form class="code-form" id="verify-form" novalidate>
-        <label class="field">
-          <span>Code</span>
-          <input class="input otp" id="verify-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="7" placeholder="123456">
-        </label>
-        <button class="button small" type="submit">{{icon:check}}Bestätigen</button>
-      </form>
-      <p class="form-error" id="verify-fehler" role="alert" hidden></p>
-      <p class="hint">Kein Zugriff mehr auf die App? Ein Admin kann deine Zwei-Faktor-Anmeldung zurücksetzen.</p>
-    </div>
-  </div>
-
-  <!-- Team-Bereich -->
-  <div id="team-app" hidden>
-    <div class="account-head">
-      <span class="badge-md">{{icon:shield}}</span>
-      <div class="who">
-        <h1>Team-Bereich</h1>
-        <p class="meta" id="team-meta"></p>
+          <p class="form-error" id="verify-fehler" role="alert" hidden></p>
+          <p class="hint">Kein Zugriff mehr auf die App? Ein Admin kann deine Zwei-Faktor-Anmeldung zurücksetzen.</p>
+        </div>
       </div>
-      <div class="account-actions">
-        <a class="button small ghost" href="/konto">{{icon:user}}Mein Konto</a>
-        <button class="button small ghost" type="button" id="team-abmelden">Abmelden</button>
-      </div>
-    </div>
 
-    <div class="tabs" role="tablist" aria-label="Bereiche des Teams" id="team-tabs">
-      <button class="tab" type="button" role="tab" id="tab-meldungen" data-tab="meldungen" aria-controls="panel-meldungen" aria-selected="true">{{icon:flag}}Meldungen<span class="count" id="count-meldungen" hidden></span></button>
-      <button class="tab" type="button" role="tab" id="tab-support" data-tab="support" aria-controls="panel-support" aria-selected="false" tabindex="-1">{{icon:info}}Support<span class="count" id="count-support" hidden></span></button>
-      <button class="tab" type="button" role="tab" id="tab-spieler" data-tab="spieler" aria-controls="panel-spieler" aria-selected="false" tabindex="-1">{{icon:search}}Spieler</button>
-      <button class="tab" type="button" role="tab" id="tab-sperren" data-tab="sperren" aria-controls="panel-sperren" aria-selected="false" tabindex="-1">{{icon:ban}}Sperren</button>
-      <button class="tab" type="button" role="tab" id="tab-neuigkeiten" data-tab="neuigkeiten" aria-controls="panel-neuigkeiten" aria-selected="false" tabindex="-1">{{icon:news}}Neuigkeiten</button>
-      <button class="tab" type="button" role="tab" id="tab-updates" data-tab="updates" data-admin aria-controls="panel-updates" aria-selected="false" tabindex="-1" hidden>{{icon:download}}Updates</button>
-      <button class="tab" type="button" role="tab" id="tab-addons" data-tab="addons" aria-controls="panel-addons" aria-selected="false" tabindex="-1">{{icon:addons}}Addons<span class="count" id="count-addons" hidden></span></button>
-      <button class="tab" type="button" role="tab" id="tab-team" data-tab="team" data-admin aria-controls="panel-team" aria-selected="false" tabindex="-1" hidden>{{icon:friends}}Team</button>
-      <button class="tab" type="button" role="tab" id="tab-protokoll" data-tab="protokoll" data-admin aria-controls="panel-protokoll" aria-selected="false" tabindex="-1" hidden>{{icon:clock}}Protokoll</button>
-      <button class="tab" type="button" role="tab" id="tab-profil" data-tab="profil" aria-controls="panel-profil" aria-selected="false" tabindex="-1">{{icon:user}}Mein Teamprofil</button>
+    <!-- Team-Bereich (erst nach bestätigter Zwei-Faktor-Anmeldung) -->
+    <div id="team-app" hidden>
+
+    <!-- Übersicht (team-overview.js): was ansteht, neueste Einträge, Zahlen des Dienstes; darunter alle Bereiche -->
+    <div class="panel" id="panel-uebersicht" role="tabpanel" aria-labelledby="tab-uebersicht" tabindex="0" hidden>
+      <div id="team-dashboard" class="dash"></div>
+      <section class="dash-areas" aria-labelledby="uebersicht-bereiche-titel">
+        <h2 class="dash-section-title" id="uebersicht-bereiche-titel">Alle Bereiche</h2>
+        <div id="uebersicht-kacheln"></div>
+      </section>
     </div>
 
     <!-- Meldungen -->
-    <div class="panel" id="panel-meldungen" role="tabpanel" aria-labelledby="tab-meldungen" tabindex="0">
+    <div class="panel" id="panel-meldungen" role="tabpanel" aria-labelledby="tab-meldungen" tabindex="0" hidden>
       <div class="toolbar">
         <div class="segmented" role="group" aria-label="Meldungen filtern" id="meldungen-filter">
           <button type="button" data-status="open" aria-pressed="true">Offen</button>
@@ -417,6 +409,49 @@
       </div>
     </div>
 
+    <!-- Cosmetics (nur Admins, team-cosmetics.js) -->
+    <div class="panel" id="panel-cosmetics" role="tabpanel" aria-labelledby="tab-cosmetics" tabindex="0" hidden>
+      <p class="notice small-notice key-notice" id="cosmetic-schluessel-fehlt" role="alert" hidden>Im Heldix-Dienst ist kein Update-Schlüssel eingerichtet (<code>HELDIX_DIENST_UPDATE_KEY</code>). Ohne ihn lässt sich kein Cosmetic veröffentlichen, und die Seite kann die Signatur nicht vorab prüfen.</p>
+      <div class="panel-grid cosmetic-top">
+        <div class="app-card" id="cosmetic-upload">
+          <h2>Cosmetic veröffentlichen</h2>
+          <p class="muted small">Die Datei <code>&lt;id&gt;-&lt;version&gt;.cosmetic.json</code> aus <code>launcher/release/cosmetics/</code> wählen. Die Seite prüft Signatur und Regeln selbst und zeigt eine Vorschau – erst danach geht etwas zum Dienst.</p>
+          <div class="file-row">
+            <label class="button small ghost file-button">{{icon:file}}Datei wählen …<input type="file" id="cosmetic-datei" accept=".json,application/json" class="visually-hidden"></label>
+            <span class="file-name muted" id="cosmetic-datei-name">Keine Datei gewählt</span>
+          </div>
+          <div class="cosmetic-check" id="cosmetic-pruefung" aria-live="polite"></div>
+          <p class="form-error" id="cosmetic-fehler" role="alert" hidden></p>
+          <div class="card-actions" id="cosmetic-aktionen" hidden>
+            <button class="button small" type="button" id="cosmetic-veroeffentlichen">{{icon:check}}Veröffentlichen</button>
+            <button class="button small ghost" type="button" id="cosmetic-verwerfen">Auswahl verwerfen</button>
+          </div>
+        </div>
+        <div class="app-card">
+          <h2>So kommt ein Cosmetic in den Katalog</h2>
+          <ol class="steps small-steps">
+            <li><span>Quellen liegen in <code>cosmetics/&lt;id&gt;/</code>: <code>cosmetic.json</code> (Slot, Name, Modell, Animationen …) und <code>texture.png</code>, dazu wahlweise <code>glow.png</code>.</span></li>
+            <li><span>Auf dem Entwickler-PC im Ordner <code>launcher</code> <code>npm run cosmetic -- &lt;id&gt;</code> ausführen. Das prüft alles, bettet die Bilder ein und signiert mit dem privaten Update-Schlüssel.</span></li>
+            <li><span>Hier die Datei aus <code>launcher/release/cosmetics/</code> wählen, Vorschau und Prüfung ansehen, veröffentlichen. Alle HeldixClient-Spieler sehen es ohne Installation.</span></li>
+          </ol>
+          <p class="info-box small">{{icon:shield}}<span>Cosmetics sind reine Daten, kein Code. Der Dienst prüft die Signatur über <code>heldix-cosmetic</code> + Manifest mit dem öffentlichen Update-Schlüssel, alle Grenzen von Format 1 und dass die Version höher ist. Ohne gültige Signatur kommt nichts in den Katalog.</span></p>
+        </div>
+      </div>
+      <div class="app-card">
+        <div class="card-head">
+          <div>
+            <h2>Katalog <span class="muted" id="cosmetic-anzahl"></span></h2>
+            <p>Ausgeblendet sieht es niemand mehr; wer es gewählt hat, behält die Auswahl, bis du es wieder einblendest. Löschen setzt die Auswahl der Träger zurück.</p>
+          </div>
+          <button class="button tiny ghost" type="button" id="cosmetics-neu">{{icon:refresh}}Aktualisieren</button>
+        </div>
+        <div class="toolbar cosmetic-toolbar">
+          <div class="segmented" role="group" aria-label="Nach Slot filtern" id="cosmetic-filter"></div>
+        </div>
+        <div id="cosmetic-liste"></div>
+      </div>
+    </div>
+
     <!-- Team -->
     <div class="panel" id="panel-team" role="tabpanel" aria-labelledby="tab-team" tabindex="0" hidden>
       <div class="app-card">
@@ -499,6 +534,9 @@
           <div class="team-grid single" id="profil-vorschau"></div>
         </div>
       </div>
+    </div>
+    </div>
+    </div>
     </div>
   </div>
 </main>

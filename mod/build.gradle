@@ -44,6 +44,35 @@ tasks.register('brokenTestAddon', Jar) {
 	from('test-addons/kaputt')
 }
 
+// Prüfstand (wird nicht ausgeliefert): wendet DroppedItemPatches auf die echten Klassen aus der Minecraft-JAR an,
+// schreibt sie mit Frame-Berechnung neu und prüft sie mit dem ASM-Verifier; dazu die Rechnungen des Item-Physics-Addons.
+// Läuft mit jedem build (also auch bei npm run mod), einzeln: gradlew checkTransforms
+sourceSets {
+	transformCheck {
+		compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+		runtimeClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+	}
+}
+
+dependencies {
+	transformCheckImplementation "org.ow2.asm:asm-util:${project.asm_version}"
+	transformCheckImplementation project(':addons:itemphysics')
+}
+
+tasks.register('checkTransforms', JavaExec) {
+	group = 'verification'
+	description = 'Prüft die Eingriffe für gedroppte Items an den echten Minecraft-Klassen (ASM-Verifier)'
+	classpath = sourceSets.transformCheck.runtimeClasspath
+	mainClass = 'dev.heldixclient.transform.TransformCheck'
+	args layout.buildDirectory.dir('transform-check').get().asFile.path
+	jvmArgs '-Dstdout.encoding=UTF-8'
+}
+
+check {
+	dependsOn('checkTransforms')
+}
+
 build {
-	dependsOn(':heldix-loader:build', ':heldix-api:build', ':addons:uhrzeit:build', ':addons:spotify:build', ':autotest:build', 'brokenTestAddon')
+	dependsOn(':heldix-loader:build', ':heldix-api:build', ':addons:uhrzeit:build', ':addons:spotify:build', ':addons:itemphysics:build',
+			':autotest:build', 'brokenTestAddon', ':test-addons:minecraft:build')
 }

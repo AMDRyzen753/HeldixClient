@@ -1,4 +1,4 @@
-// Datenbank: Datenbanken älterer Versionen (Schema 1 bis 5) werden beim Start sauber angehoben.
+// Datenbank: Datenbanken älterer Versionen (Schema 1 bis 7) werden beim Start sauber angehoben.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -209,6 +209,109 @@ CREATE TABLE addon_versions (
 ) STRICT, WITHOUT ROWID;
 `;
 
+/** Genau die Stufe 6 (Addons von Spielern, Bewertungen, Meldungen zu Addons, Anhänge), wie sie Version 1.5.x angelegt hat. */
+const MIGRATION_V6 = `
+ALTER TABLE addons ADD COLUMN owner TEXT;
+ALTER TABLE addons ADD COLUMN screenshots TEXT NOT NULL DEFAULT '[]';
+CREATE INDEX addons_owner ON addons (owner);
+CREATE TABLE addon_submissions (
+  id TEXT PRIMARY KEY,
+  uuid TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  addon_id TEXT,
+  version TEXT,
+  name TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT 'sonstiges',
+  icon TEXT NOT NULL DEFAULT 'addons',
+  platforms TEXT NOT NULL DEFAULT '[]',
+  notes TEXT NOT NULL DEFAULT '[]',
+  authors TEXT NOT NULL DEFAULT '[]',
+  api INTEGER,
+  size INTEGER,
+  sha256 TEXT,
+  inspection TEXT,
+  screenshots TEXT NOT NULL DEFAULT '[]',
+  manifest TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  submitted_at INTEGER,
+  reviewed_at INTEGER,
+  review_note TEXT,
+  reviewer TEXT,
+  reviewer_uuid TEXT
+) STRICT, WITHOUT ROWID;
+CREATE INDEX addon_submissions_uuid ON addon_submissions (uuid, created_at);
+CREATE INDEX addon_submissions_status ON addon_submissions (status, submitted_at);
+CREATE INDEX addon_submissions_addon ON addon_submissions (addon_id, status);
+CREATE TABLE addon_ratings (
+  addon TEXT NOT NULL REFERENCES addons (id) ON DELETE CASCADE,
+  uuid TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  stars INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (addon, uuid)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX addon_ratings_uuid ON addon_ratings (uuid);
+CREATE TABLE addon_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  addon TEXT NOT NULL,
+  reporter TEXT NOT NULL,
+  reporter_name TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  note TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  done_at INTEGER,
+  done_by TEXT
+) STRICT;
+CREATE INDEX addon_reports_status ON addon_reports (status, id);
+CREATE INDEX addon_reports_reporter ON addon_reports (reporter, addon, status);
+CREATE INDEX addon_reports_at ON addon_reports (at);
+CREATE TABLE ticket_attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket INTEGER NOT NULL REFERENCES tickets (id) ON DELETE CASCADE,
+  uuid TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  data BLOB NOT NULL,
+  at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX ticket_attachments_ticket ON ticket_attachments (ticket, id);
+CREATE INDEX ticket_attachments_uuid ON ticket_attachments (uuid, at);
+`;
+
+/** Genau die Stufe 7 (Cosmetics-Katalog, Auswahl je Slot), wie sie Version 1.6.0 angelegt hat. */
+const MIGRATION_V7 = `
+CREATE TABLE cosmetics (
+  id TEXT PRIMARY KEY,
+  slot TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  access TEXT NOT NULL,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  date TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  published_at INTEGER NOT NULL,
+  published_by TEXT,
+  signature TEXT NOT NULL,
+  manifest TEXT NOT NULL
+) STRICT;
+
+ALTER TABLE users ADD COLUMN cosmetic_head TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN cosmetic_back TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN cosmetic_aura TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN cosmetic_companion TEXT NOT NULL DEFAULT '';
+CREATE INDEX users_cosmetic_head ON users (cosmetic_head) WHERE cosmetic_head <> '';
+CREATE INDEX users_cosmetic_back ON users (cosmetic_back) WHERE cosmetic_back <> '';
+CREATE INDEX users_cosmetic_aura ON users (cosmetic_aura) WHERE cosmetic_aura <> '';
+CREATE INDEX users_cosmetic_companion ON users (cosmetic_companion) WHERE cosmetic_companion <> '';
+CREATE INDEX users_cape ON users (cape) WHERE cape <> '';
+`;
+
 const ANNA = 'a'.repeat(32);
 const BEN = 'b'.repeat(32);
 
@@ -247,7 +350,7 @@ test('Schema 1 → aktuell: Daten bleiben, neue Einstellung „messages“ ist a
     }
 
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 6);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 8);
     check.close();
 
     // Ein zweiter Start ändert nichts mehr; der Dienst läuft auf der angehobenen Datenbank.
@@ -310,7 +413,7 @@ test('Schema 2 → 3 (Version 1.0.0 auf dem Server): Meldungen bekommen einen St
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 6);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 8);
     check.close();
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -360,7 +463,7 @@ test('Schema 3 → 4 (Version 1.1.0 auf dem Server): Team behält 2FA, Teamprofi
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 6);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 8);
     check.close();
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -424,7 +527,7 @@ test('Schema 4 → 5 (Version 1.3.0 auf dem Server): alle Daten bleiben, der Add
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 6);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 8);
     check.close();
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -489,8 +592,8 @@ test('Schema 5 → 6 (Version 1.4.0 auf dem Server): Addons, Versionen und Zähl
       // Neue Tabellen sind benutzbar.
       const sub = store.insertSubmission('s'.repeat(16), BEN, { name: 'X', summary: '', description: '', category: 'hud', icon: 'addons', platforms: [], notes: [] }, now);
       assert.deepEqual([sub.status, sub.submitterName, sub.screenshots, sub.inspection], ['draft', 'Ben', [], null]);
-      store.saveSubmission({ ...sub, status: 'pending', addonId: 'neu', inspection: { classes: 2, uses: ['netzwerk'] }, submittedAt: now });
-      assert.deepEqual(store.getSubmission(sub.id)!.inspection, { classes: 2, uses: ['netzwerk'] });
+      store.saveSubmission({ ...sub, status: 'pending', addonId: 'neu', inspection: { classes: 2, uses: ['netzwerk'], expected: [] }, submittedAt: now });
+      assert.deepEqual(store.getSubmission(sub.id)!.inspection, { classes: 2, uses: ['netzwerk'], expected: [] });
       assert.equal(store.countPendingSubmissions(), 1);
       store.setAddonRating('uhrzeit', BEN, 4, now);
       assert.deepEqual(store.addonRatingSummary('uhrzeit'), { average: 4, count: 1 });
@@ -510,7 +613,7 @@ test('Schema 5 → 6 (Version 1.4.0 auf dem Server): Addons, Versionen und Zähl
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 6);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 8);
     check.close();
 
     // Der Dienst zeigt das alte Addon weiter, als offiziell gewertet ist es nicht (ohne „official“ gilt false).
@@ -524,6 +627,148 @@ test('Schema 5 → 6 (Version 1.4.0 auf dem Server): Addons, Versionen und Zähl
     } finally {
       await service.close();
     }
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('Schema 6 → 7 (Version 1.5.x auf dem Server): Spieler, Capes und Addons bleiben, Cosmetics sind leer und benutzbar', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'heldix-dienst-migration-'));
+  try {
+    const old = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
+    old.exec('PRAGMA journal_mode = WAL;');
+    old.exec(SCHEMA_V1);
+    old.exec(MIGRATION_V2);
+    old.exec(MIGRATION_V3);
+    old.exec(MIGRATION_V4);
+    old.exec(MIGRATION_V5);
+    old.exec(MIGRATION_V6);
+    const now = Date.now();
+    const user = old.prepare(
+      'INSERT INTO users (uuid, name, name_lower, name_verified_at, cape, visible, presence, show_server, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    );
+    user.run(ANNA, 'Anna', 'anna', now, 'glut', 1, 1, 1, now, now);
+    user.run(BEN, 'Ben', 'ben', now, '', 0, 1, 1, now, now);
+    old.prepare("INSERT INTO team (uuid, role, added_at, totp_secret) VALUES (?, 'admin', ?, 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ')").run(ANNA, now);
+    old.prepare("INSERT INTO addons (id, hidden, downloads, created_at, owner) VALUES ('uhrzeit', 0, 9, ?, ?)").run(now, BEN);
+    old.exec('PRAGMA user_version = 6');
+    old.close();
+
+    const store = new Store(dataDir);
+    try {
+      const anna = store.getUser(ANNA)!;
+      assert.deepEqual([anna.cape, anna.visible, anna.worn], ['glut', true, { head: '', back: '', aura: '', companion: '' }]);
+      assert.deepEqual(store.getUser(BEN)!.worn, { head: '', back: '', aura: '', companion: '' });
+      assert.equal(store.getTeamMember(ANNA)!.role, 'admin');
+      assert.deepEqual(store.listAddons().map((a) => [a.id, a.downloads, a.owner]), [['uhrzeit', 9, BEN]]);
+      // Neue Tabelle und Spalten sind benutzbar: veröffentlichen, wählen, zählen, ausblenden, löschen setzt zurück
+      assert.deepEqual(store.cosmeticInfos(), []);
+      assert.equal(store.countVisibleCosmetics(), 0);
+      const row = {
+        id: 'krone',
+        slot: 'head',
+        version: 1,
+        access: 'all',
+        name: 'Krone',
+        description: '',
+        date: '2026-11-26',
+        size: 10,
+        sha256: '0'.repeat(64),
+        createdAt: now,
+        publishedAt: now,
+        publishedBy: 'Anna',
+        signature: 'c2ln',
+        manifest: '{}',
+      };
+      store.upsertCosmetic(row);
+      store.setWorn(BEN, 'head', 'krone');
+      store.setWorn(ANNA, 'cape', 'sternenregen');
+      assert.equal(store.getUser(BEN)!.worn.head, 'krone');
+      assert.equal(store.getUser(ANNA)!.cape, 'sternenregen');
+      assert.equal(store.cosmeticWearers().get('head:krone'), 1);
+      assert.equal(store.setCosmeticHidden('krone', true), true);
+      assert.equal(store.setCosmeticHidden('krone', true), false);
+      assert.equal(store.countVisibleCosmetics(), 0);
+      // Neue Version: hidden und createdAt bleiben
+      store.upsertCosmetic({ ...row, version: 2, createdAt: now + 1000, publishedAt: now + 1000 });
+      assert.deepEqual(
+        [store.getCosmetic('krone')!.version, store.getCosmetic('krone')!.hidden, store.getCosmetic('krone')!.createdAt],
+        [2, true, now],
+      );
+      assert.deepEqual([...store.teamMembersIn([ANNA, BEN])], [ANNA]);
+      assert.equal(store.deleteCosmetic('krone'), 1);
+      assert.equal(store.getUser(BEN)!.worn.head, '');
+      assert.equal(store.deleteCosmetic('krone'), null);
+    } finally {
+      store.close();
+    }
+    const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 8);
+    check.close();
+
+    // Der Dienst läuft darauf: Katalog leer, das eingebaute Cape bleibt
+    const service = await startService({ dev: true, dataDir });
+    try {
+      assert.deepEqual((await api(service.url, 'GET', '/v1/cosmetics')).body, { cosmetics: [] });
+      const login = await api(service.url, 'POST', '/v1/auth/dev', { body: { name: 'Ben', uuid: BEN } });
+      assert.deepEqual((await api(service.url, 'GET', '/v1/me/cosmetics', { token: login.body.token })).body, {
+        head: null,
+        back: null,
+        aura: null,
+        companion: null,
+        cape: null,
+        team: false,
+      });
+    } finally {
+      await service.close();
+    }
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('Schema 7 → 8 (Version 1.6.0 auf dem Server): Einreichungen mit JAR gelten als API-Addon, Zugriff und Versionen sind speicherbar', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'heldix-dienst-migration-'));
+  try {
+    const old = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
+    old.exec('PRAGMA journal_mode = WAL;');
+    for (const step of [SCHEMA_V1, MIGRATION_V2, MIGRATION_V3, MIGRATION_V4, MIGRATION_V5, MIGRATION_V6, MIGRATION_V7]) old.exec(step);
+    const now = Date.now();
+    old.prepare('INSERT INTO users (uuid, name, name_lower, name_verified_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)').run(BEN, 'Ben', 'ben', now, now, now);
+    const insert = old.prepare(
+      "INSERT INTO addon_submissions (id, uuid, status, addon_id, version, inspection, manifest, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    // Mit JAR (eingereicht, Manifest ohne die neuen Felder) und ein Entwurf ohne JAR
+    insert.run('m'.repeat(16), BEN, 'pending', 'wetter', '1.0.0', JSON.stringify({ classes: 2, uses: ['minecraft'] }), '{"type":"heldix-addon"}', now, now);
+    insert.run('e'.repeat(16), BEN, 'draft', null, null, null, null, now, now);
+    old.exec('PRAGMA user_version = 7');
+    old.close();
+
+    const store = new Store(dataDir);
+    try {
+      const withJar = store.getSubmission('m'.repeat(16))!;
+      assert.deepEqual([withJar.access, withJar.minecraft, withJar.loaders, withJar.manifest], ['api', [], ['heldix', 'fabric'], '{"type":"heldix-addon"}']);
+      assert.deepEqual(withJar.inspection, { classes: 2, uses: ['minecraft'], expected: [] }, 'ältere Prüfung ohne „expected“');
+      const empty = store.getSubmission('e'.repeat(16))!;
+      assert.deepEqual([empty.access, empty.minecraft, empty.loaders], [null, [], []]);
+      store.saveSubmission({
+        ...empty,
+        addonId: 'sicht',
+        access: 'minecraft',
+        minecraft: ['26.2', '26.3'],
+        loaders: ['heldix'],
+        inspection: { classes: 1, uses: ['minecraft'], expected: ['minecraft'] },
+      });
+      const saved = store.getSubmission('e'.repeat(16))!;
+      assert.deepEqual([saved.access, saved.minecraft, saved.loaders, saved.inspection], ['minecraft', ['26.2', '26.3'], ['heldix'], { classes: 1, uses: ['minecraft'], expected: ['minecraft'] }]);
+      // Cosmetics aus Stufe 7 bleiben benutzbar
+      assert.deepEqual(store.cosmeticInfos(), []);
+    } finally {
+      store.close();
+    }
+    const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 8);
+    check.close();
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }

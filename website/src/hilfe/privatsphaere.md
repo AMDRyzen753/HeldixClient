@@ -8,7 +8,7 @@ stichworte: privatsphäre, datenschutz, sichtbarkeit, online-status, unsichtbar,
 Du entscheidest selbst, was andere HeldixClient-Spieler von dir sehen. Alle Schalter findest du im Heldix-Menü ([[Rechte Umschalttaste]]) unter **Freunde → Privatsphäre**. Anfangs sind alle an.
 
 ## Sichtbarkeit
-- **Für andere erkennbar:** Das Heldix-Symbol vor deinem Namen (in der Tab-Liste und über deinem Kopf) und dein Heldix-Cape sind für andere HeldixClient-Spieler sichtbar.
+- **Für andere erkennbar:** Das Heldix-Symbol vor deinem Namen (in der Tab-Liste und über deinem Kopf), dein Heldix-Cape und deine [Cosmetics](/hilfe/cosmetics) sind für andere HeldixClient-Spieler sichtbar.
 - **Online-Status für Freunde:** Freunde sehen, ob du online bist und ob du im Menü oder in einer Welt bist.
 - **Server für Freunde sichtbar:** Freunde sehen, auf welchem Server du spielst, und können [beitreten](/hilfe/freunde). Angezeigt werden nur öffentliche Server-Adressen – nie IP-Adressen oder Server im Heimnetz.
 - **Nachrichten von Freunden:** Freunde können dir schreiben. Ist der Schalter aus, kann dir niemand Nachrichten schicken. Du selbst kannst weiter schreiben, und vorhandene Nachrichten bleiben.

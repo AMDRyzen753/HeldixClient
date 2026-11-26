@@ -116,6 +116,39 @@ public final class Hooks {
 		}
 	}
 
+	private static boolean cosmeticErrorLogged;
+
+	/** CapeLayer.submit (Anfang): Cosmetics an Kopf und Rücken des posierten Spielermodells */
+	public static void cosmeticLayer(net.minecraft.client.renderer.entity.layers.CapeLayer layer, com.mojang.blaze3d.vertex.PoseStack pose,
+			net.minecraft.client.renderer.SubmitNodeCollector collector, int light, net.minecraft.client.renderer.entity.state.AvatarRenderState state) {
+		long start = System.nanoTime();
+		try {
+			dev.heldixclient.cosmetic.CosmeticRenderer.layer(layer, pose, collector, light, state);
+		} catch (RuntimeException e) {
+			cosmeticError(e);
+		}
+		dev.heldixclient.cosmetic.CosmeticRenderer.submitNanos += System.nanoTime() - start;
+	}
+
+	/** EntityRenderer.submit (Anfang): Begleiter und Aura von Spielern */
+	public static void cosmeticEntity(net.minecraft.client.renderer.entity.state.EntityRenderState state, com.mojang.blaze3d.vertex.PoseStack pose,
+			net.minecraft.client.renderer.SubmitNodeCollector collector, net.minecraft.client.renderer.state.level.CameraRenderState camera) {
+		if (!(state instanceof net.minecraft.client.renderer.entity.state.AvatarRenderState)) return;
+		long start = System.nanoTime();
+		try {
+			dev.heldixclient.cosmetic.CosmeticRenderer.entity(state, pose, collector, camera);
+		} catch (RuntimeException e) {
+			cosmeticError(e);
+		}
+		dev.heldixclient.cosmetic.CosmeticRenderer.submitNanos += System.nanoTime() - start;
+	}
+
+	private static void cosmeticError(RuntimeException e) {
+		if (cosmeticErrorLogged) return;
+		cosmeticErrorLogged = true;
+		HeldixClient.LOGGER.error("Cosmetics konnten nicht gezeichnet werden", e);
+	}
+
 	public static int framerateLimit(int limit) {
 		return Performance.framerateLimit(limit);
 	}

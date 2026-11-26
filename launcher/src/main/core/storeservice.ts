@@ -213,7 +213,7 @@ export class AddonStoreService {
       if (!instance || this.options.busy(instance.id)) continue;
       try {
         await applyPendingRemovals(instance.dir);
-        await installStoreAddon(instance.dir, this.options.serviceUrl, this.options.publicKey, update.addonId, entries);
+        await installStoreAddon(instance.dir, this.options.serviceUrl, this.options.publicKey, update.addonId, entries, instance);
         done.push(update);
         this.options.log?.(`Addon aktualisiert: ${update.name} ${update.version} in „${instance.name}“`);
       } catch (error) {

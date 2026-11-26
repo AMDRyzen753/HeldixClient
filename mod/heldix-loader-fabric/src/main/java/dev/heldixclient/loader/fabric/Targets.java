@@ -5,6 +5,9 @@ import java.util.List;
 /**
  * Minecraft-Klassen, die die Heldix-Transformer in Fabric verändern dürfen (Ziele von {@code mixin.TransformTargets}).
  * Eigene Klasse, weil Mixin-Klassen nicht direkt geladen werden dürfen.
+ *
+ * <p>Gilt auch für Addons mit Zugriff auf Minecraft (heldix-addons/): Sie laufen in Fabric nur, wenn alle Ziele ihrer
+ * Transformer hier stehen (sonst „Läuft nur in Heldix-Instanzen“). Die Liste steht für Addon-Entwickler in docs/addons.md.
  */
 public final class Targets {
 	// Heldix Loader (BuiltinPatches)
@@ -36,6 +39,9 @@ public final class Targets {
 	public static final String ENTITY_RENDERER = "net.minecraft.client.renderer.entity.EntityRenderer";
 	public static final String LEVEL_LOADING_SCREEN = "net.minecraft.client.gui.screens.LevelLoadingScreen";
 	public static final String CONNECT_SCREEN = "net.minecraft.client.gui.screens.ConnectScreen";
+	// HeldixClient (DroppedItemPatches, Addon-API 4: gedroppte Items)
+	public static final String ITEM_ENTITY_RENDERER = "net.minecraft.client.renderer.entity.ItemEntityRenderer";
+	public static final String ITEM_ENTITY_RENDER_STATE = "net.minecraft.client.renderer.entity.state.ItemEntityRenderState";
 
 	public static final List<String> ALL = List.of(
 			MINECRAFT,
@@ -64,7 +70,9 @@ public final class Targets {
 			PLAYER_TAB_OVERLAY,
 			ENTITY_RENDERER,
 			LEVEL_LOADING_SCREEN,
-			CONNECT_SCREEN);
+			CONNECT_SCREEN,
+			ITEM_ENTITY_RENDERER,
+			ITEM_ENTITY_RENDER_STATE);
 
 	private Targets() {
 	}

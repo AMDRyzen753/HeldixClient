@@ -10,9 +10,11 @@ import { AddonFeedback } from './addon-feedback';
 import { ADDON_MANIFEST_BODY_LIMIT, Addons, MAX_ADDON_SIZE } from './addons';
 import { Challenges, hashToken, hasJoined, isLoopback, newToken, parseBearer } from './auth';
 import { Blocks } from './blocks';
+import { Cosmetics, ENVELOPE_CACHE_CONTROL, IMMUTABLE_CACHE_CONTROL, LIST_CACHE_CONTROL, type WornChoice } from './cosmetics';
+import { COSMETIC_LIMITS } from './cosmetics-format';
 import { Store, type SettingsPatch, type TeamMemberRow, type TeamRole, type UserRow, type WebSessionRow } from './db';
 import { Friends } from './friends';
-import { HttpError, readJsonObject, rejectUpgrade, sendError, sendJson } from './http';
+import { HttpError, readJsonObject, rejectUpgrade, sendCachedJson, sendError, sendJson } from './http';
 import { RateLimiter, Slots } from './limits';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Messages } from './messages';
 import { Realtime } from './realtime';
@@ -90,6 +92,8 @@ export interface ServiceOptions {
   addonDownloadRateLimit?: number;
   /** Screenshots von Addons pro IP und Zeitraum (rateWindowMs). */
   addonScreenshotRateLimit?: number;
+  /** Umschläge von Cosmetics (`/v1/cosmetics/<id>`) pro IP und Zeitraum (rateWindowMs). */
+  cosmeticRateLimit?: number;
   /** Kommt so lange nichts beim Client an, wird ein Download abgebrochen. */
   downloadIdleTimeoutMs?: number;
   /** Addons von Spielern: Uploads (JAR, Screenshots) pro Spieler und Zeitraum, gleichzeitige Uploads insgesamt. */
@@ -190,6 +194,8 @@ function isPublicPath(path: string): boolean {
     // Bewerten und Melden gehen nur angemeldet: ohne CORS.
     (path.startsWith('/v1/addons/') && !/\/(?:rating|reports)$/.test(path)) ||
     path.startsWith('/v1/addon-authors/') ||
+    path === '/v1/cosmetics' ||
+    path.startsWith('/v1/cosmetics/') ||
     path === '/v1/news' ||
     path === '/v1/status'
   );
@@ -270,6 +276,7 @@ export function createService(options: ServiceOptions): Service {
   const downloadLimiter = new RateLimiter(options.downloadRateLimit ?? 30, rateWindowMs);
   const addonDownloadLimiter = new RateLimiter(options.addonDownloadRateLimit ?? 60, rateWindowMs);
   const screenshotLimiter = new RateLimiter(options.addonScreenshotRateLimit ?? 300, rateWindowMs);
+  const cosmeticLimiter = new RateLimiter(options.cosmeticRateLimit ?? 300, rateWindowMs);
   const addonUploadLimiter = new RateLimiter(options.addonUploadRateLimit ?? 30, options.addonUploadWindowMs ?? 60 * 60_000);
   const ratingLimiter = new RateLimiter(options.addonRatingRateLimit ?? 30, rateWindowMs);
   const skinLimiter = new RateLimiter(options.skinRateLimit ?? 300, rateWindowMs);
@@ -312,6 +319,7 @@ export function createService(options: ServiceOptions): Service {
   };
   const updates = new Updates(updatesDir, log, recordVersion);
   const addons = new Addons(store, addonsDir, log);
+  const cosmetics = new Cosmetics(store, capes, log);
   const addonFeedback = new AddonFeedback(
     store,
     addons,
@@ -342,7 +350,7 @@ export function createService(options: ServiceOptions): Service {
     totpLimiter,
     totpNow: options.totpNow ?? Date.now,
   });
-  const team = new Team(store, realtime, updates, addons, {
+  const team = new Team(store, realtime, updates, addons, cosmetics, {
     updateKey,
     maxUploadBytes: options.maxUploadBytes ?? MAX_SETUP_SIZE,
     maxAddonUploadBytes: Math.min(options.maxAddonUploadBytes ?? MAX_ADDON_SIZE, MAX_ADDON_SIZE),
@@ -456,7 +464,7 @@ export function createService(options: ServiceOptions): Service {
     return {
       uuid: user.uuid,
       name: user.name,
-      cape: capes.has(user.cape) ? user.cape : '',
+      cape: cosmetics.effectiveCape(user),
       visible: user.visible,
       presence: user.presence,
       showServer: user.showServer,
@@ -517,11 +525,8 @@ export function createService(options: ServiceOptions): Service {
   async function updateMe(ctx: Context) {
     const input = await body(ctx);
     const patch: SettingsPatch = {};
-    if (Object.hasOwn(input, 'cape')) {
-      const cape = input.cape;
-      if (typeof cape !== 'string' || (cape !== '' && !capes.has(cape))) throw new HttpError(400, 'Unbekanntes Cape.');
-      patch.cape = cape;
-    }
+    // Eingebautes Cape oder wählbares Katalog-Cape (Slot cape); "" = keins.
+    if (Object.hasOwn(input, 'cape')) patch.cape = cosmetics.checkCape(ctx.user, input.cape);
     for (const key of ['visible', 'presence', 'showServer', 'messages'] as const) {
       if (!Object.hasOwn(input, key)) continue;
       const value = input[key];
@@ -555,6 +560,7 @@ export function createService(options: ServiceOptions): Service {
       {
         ...exportData(store, user, me(user)),
         support: support.exportFor(user),
+        cosmetics: cosmetics.exportFor(user),
         addonStore: {
           submissions: submissions.exportFor(user),
           ...addonFeedback.exportFor(user),
@@ -695,6 +701,7 @@ export function createService(options: ServiceOptions): Service {
         players: playerCount.value,
         launcher: published?.version ?? null,
         addons: addons.visibleCount(),
+        cosmetics: cosmetics.visibleCount(),
         since: startedAt,
       },
       { 'Cache-Control': 'max-age=30' },
@@ -718,11 +725,15 @@ export function createService(options: ServiceOptions): Service {
     // Rolle fürs Heldix-Symbol: Team nur mit öffentlichem Teamprofil, sonst Entwickler eines sichtbaren Community-Addons.
     const roles = found.length > 0 ? team.publicRolesOf(found) : new Map<string, TeamRole>();
     const developers = found.length > 0 ? addons.developersAmong(found.filter((uuid) => !roles.has(uuid))) : new Set<string>();
-    const players: Record<string, { cape: string; badge: PlayerBadge }> = {};
+    // Cape (eingebaut oder aus dem Katalog) und die übrigen Cosmetics, wie andere sie sehen.
+    const worn = cosmetics.forLookup(visible);
+    const players: Record<string, { cape: string; badge: PlayerBadge; cosmetics: WornChoice }> = {};
     for (const user of visible) {
+      const look = worn.get(user.uuid)!;
       players[user.uuid] = {
-        cape: capes.has(user.cape) ? user.cape : '',
+        cape: look.cape,
         badge: roles.get(user.uuid) ?? (developers.has(user.uuid) ? 'developer' : null),
+        cosmetics: look.cosmetics,
       };
     }
     return { players };
@@ -859,6 +870,26 @@ export function createService(options: ServiceOptions): Service {
   async function addonFile(ctx: Context) {
     rateLimit(addonDownloadLimiter, clientIp(ctx.req), 'Zu viele Downloads. Bitte kurz warten.');
     await addons.serve(ctx.req, ctx.res, ctx.params[0] ?? '', ctx.params[1] ?? '', downloadIdleTimeoutMs);
+    return RESPONDED;
+  }
+
+  // ---------- Cosmetics (öffentlich) ----------
+
+  /** `GET /v1/cosmetics`: der Katalog (ohne ausgeblendete), mit ETag. */
+  function cosmeticList(ctx: Context) {
+    sendCachedJson(ctx.req, ctx.res, cosmetics.list(), LIST_CACHE_CONTROL);
+    return RESPONDED;
+  }
+
+  /**
+   * `GET /v1/cosmetics/<id>`: der Umschlag der aktuellen Version. Mit `?v=<sha256>` der aktuellen Version darf er für
+   * immer im Cache bleiben (die Adresse nennt den Inhalt); sonst `no-cache` mit ETag.
+   */
+  function cosmeticEnvelope(ctx: Context) {
+    rateLimit(cosmeticLimiter, clientIp(ctx.req), 'Zu viele Cosmetics auf einmal. Bitte kurz warten.');
+    const envelope = cosmetics.envelope(ctx.params[0] ?? '');
+    const pinned = textQuery(ctx, 'v') === envelope.sha256;
+    sendCachedJson(ctx.req, ctx.res, envelope, pinned ? IMMUTABLE_CACHE_CONTROL : ENVELOPE_CACHE_CONTROL);
     return RESPONDED;
   }
 
@@ -1013,6 +1044,31 @@ export function createService(options: ServiceOptions): Service {
       role: 'admin',
       handler: (ctx) => team.deleteAddonVersion(actor(ctx), ctx.params[0] ?? '', ctx.params[1] ?? ''),
     },
+    // Cosmetics-Katalog: wie Addons nur für Admins (veröffentlichen = signierter Umschlag aus npm run cosmetic).
+    { method: 'GET', pattern: /^\/v1\/team\/cosmetics$/, kind: 'team', role: 'admin', handler: () => team.cosmeticsOverview() },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/team\/cosmetics$/,
+      kind: 'team',
+      role: 'admin',
+      // Texturen als data-URL machen den Umschlag größer als BODY_LIMIT erlaubt.
+      handler: async (ctx) => team.publishCosmetic(actor(ctx), await readJsonObject(ctx.req, COSMETIC_LIMITS.envelopeBytes)),
+    },
+    { method: 'GET', pattern: /^\/v1\/team\/cosmetics\/([^/]+)$/, kind: 'team', role: 'admin', handler: (ctx) => cosmetics.teamDetail(ctx.params[0] ?? '') },
+    {
+      method: 'PATCH',
+      pattern: /^\/v1\/team\/cosmetics\/([^/]+)$/,
+      kind: 'team',
+      role: 'admin',
+      handler: async (ctx) => team.setCosmeticHidden(actor(ctx), ctx.params[0] ?? '', await body(ctx)),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/team\/cosmetics\/([^/]+)$/,
+      kind: 'team',
+      role: 'admin',
+      handler: (ctx) => team.deleteCosmetic(actor(ctx), ctx.params[0] ?? ''),
+    },
     // Einreichungen von Spielern: ansehen und ablehnen (jede Rolle), freigeben = signieren (nur Admin).
     {
       method: 'GET',
@@ -1147,6 +1203,9 @@ export function createService(options: ServiceOptions): Service {
     { method: 'POST', pattern: /^\/v1\/reports$/, kind: 'user', handler: report },
     { method: 'GET', pattern: /^\/v1\/reports\/mine$/, kind: 'user', handler: (ctx) => myReports(store, ctx.user) },
     { method: 'GET', pattern: /^\/v1\/me\/export$/, kind: 'user', handler: exportMe },
+    // Cosmetics wählen (Bearer-Token oder Cookie)
+    { method: 'GET', pattern: /^\/v1\/me\/cosmetics$/, kind: 'user', handler: (ctx) => cosmetics.mine(ctx.user) },
+    { method: 'PUT', pattern: /^\/v1\/me\/cosmetics$/, kind: 'user', handler: async (ctx) => cosmetics.choose(ctx.user, await body(ctx)) },
     // Anmeldung auf der Webseite
     { method: 'POST', pattern: /^\/v1\/web\/link$/, kind: 'bearer', handler: link },
     { method: 'POST', pattern: /^\/v1\/web\/session$/, kind: 'auth', handler: createWebSession },
@@ -1224,6 +1283,9 @@ export function createService(options: ServiceOptions): Service {
     { method: 'GET', pattern: /^\/v1\/addons\/([^/]+)\/screenshots\/([^/]+)$/, kind: 'public', handler: addonScreenshot },
     { method: 'HEAD', pattern: /^\/v1\/addons\/([^/]+)\/screenshots\/([^/]+)$/, kind: 'public', handler: addonScreenshot },
     { method: 'GET', pattern: /^\/v1\/addon-authors\/([^/]+)$/, kind: 'public', handler: addonAuthor },
+    // Cosmetics-Katalog (ohne Anmeldung)
+    { method: 'GET', pattern: /^\/v1\/cosmetics$/, kind: 'public', handler: cosmeticList },
+    { method: 'GET', pattern: /^\/v1\/cosmetics\/([^/]+)$/, kind: 'public', handler: cosmeticEnvelope },
     // Bewerten und Melden (angemeldet: Bearer-Token oder Cookie)
     { method: 'GET', pattern: /^\/v1\/addons\/([^/]+)\/rating$/, kind: 'user', handler: (ctx) => addonFeedback.rating(ctx.user, ctx.params[0] ?? '') },
     {
@@ -1407,6 +1469,7 @@ export function createService(options: ServiceOptions): Service {
     downloadLimiter.sweep(now);
     addonDownloadLimiter.sweep(now);
     screenshotLimiter.sweep(now);
+    cosmeticLimiter.sweep(now);
     addonUploadLimiter.sweep(now);
     ratingLimiter.sweep(now);
     linkLimiter.sweep(now);

@@ -1,7 +1,7 @@
 {
   "name": "heldixclient-launcher",
   "productName": "HeldixClient",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "description": "Minecraft-Launcher mit eigenem Mod-Loader (Heldix Loader), Client-Mod und Addon-System",
   "license": "MIT",
   "author": "HeldixClient contributors",
@@ -28,11 +28,18 @@
     "update-key": "npm run build && node dist/scripts/release.js --init",
     "release": "npm run dist && node dist/scripts/release.js",
     "addon": "npm run build && node dist/scripts/addon-release.js",
+    "cosmetic": "npm run build && node dist/scripts/cosmetic-release.js",
+    "cosmetic:preview": "npm run build && node dist/scripts/cosmetic-preview.js",
+    "cosmetics-art": "node scripts/render-cosmetics.mjs",
+    "test:cosmetics": "npm run build && node dist/scripts/test-cosmetics.js",
+    "test:cosmetics-client": "npm run build && node dist/scripts/test-cosmetics-client.js",
     "test:update": "npm run build && node dist/scripts/test-update.js",
     "test:crash": "npm run build && node dist/scripts/test-crash.js",
+    "test:serverstatus": "npm run build && node dist/scripts/test-serverstatus.js",
     "test:social": "npm run build && node dist/scripts/test-social.js",
     "test:profile": "npm run build && node dist/scripts/test-profile.js",
     "test:store": "npm run build && node dist/scripts/test-store.js",
+    "test:content": "npm run build && node dist/scripts/test-content.js",
     "dist:mac": "npm run mod && npm run build && electron-builder --mac"
   },
   "build": {

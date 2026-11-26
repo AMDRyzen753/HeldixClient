@@ -1,0 +1,10 @@
+{
+	"id": "mcaus",
+	"name": "Ausgeschaltetes Test-Addon",
+	"version": "1.0.0",
+	"description": "Nur für den Autotest: liegt als .jar.disabled da und darf nicht geladen werden.",
+	"authors": ["HeldixClient"],
+	"clientEntrypoint": "gibt.es.nicht.Start",
+	"transformers": ["gibt.es.nicht.Transformer"],
+	"minecraft": ["${minecraft_version}"]
+}

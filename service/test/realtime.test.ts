@@ -341,11 +341,11 @@ describe('Spieler nachschlagen', () => {
       const uuids = [sichtbar.uuid, versteckt.uuid, offline.uuid, 'f'.repeat(32), sichtbar.uuid];
       let res = await api(service.url, 'POST', '/v1/players/lookup', { token: offline.token, body: { uuids } });
       assert.equal(res.status, 200);
-      assert.deepEqual(res.body, { players: { [sichtbar.uuid]: { cape: 'galaxie', badge: null } } });
+      assert.deepEqual(res.body, { players: { [sichtbar.uuid]: { cape: 'galaxie', badge: null, cosmetics: { head: null, back: null, aura: null, companion: null } } } });
 
       // Wer selbst verbunden und sichtbar ist, steht mit drin.
       res = await api(service.url, 'POST', '/v1/players/lookup', { token: sichtbar.token, body: { uuids: [sichtbar.uuid] } });
-      assert.deepEqual(res.body, { players: { [sichtbar.uuid]: { cape: 'galaxie', badge: null } } });
+      assert.deepEqual(res.body, { players: { [sichtbar.uuid]: { cape: 'galaxie', badge: null, cosmetics: { head: null, back: null, aura: null, companion: null } } } });
 
       // Nach dem Trennen nicht mehr (der Dienst bemerkt das Trennen kurz nach dem Client).
       await clients[0]!.close();
@@ -358,7 +358,7 @@ describe('Spieler nachschlagen', () => {
       // Kein Cape: "".
       await api(service.url, 'PUT', '/v1/me', { token: versteckt.token, body: { visible: true, cape: '' } });
       res = await api(service.url, 'POST', '/v1/players/lookup', { token: offline.token, body: { uuids } });
-      assert.deepEqual(res.body, { players: { [versteckt.uuid]: { cape: '', badge: null } } });
+      assert.deepEqual(res.body, { players: { [versteckt.uuid]: { cape: '', badge: null, cosmetics: { head: null, back: null, aura: null, companion: null } } } });
     } finally {
       for (const client of clients) await client.close();
       await service.close();
@@ -453,7 +453,7 @@ describe('Spieler nachschlagen', () => {
       assert.equal(Object.hasOwn(await badges(), admin.uuid), false);
       // Wer selbst nachschlägt, sieht die eigene Rolle (für das eigene Symbol in der Tab-Liste)
       const own = await api(service.url, 'POST', '/v1/players/lookup', { token: leiseMod.token, body: { uuids: [leiseMod.uuid] } });
-      assert.deepEqual(own.body, { players: { [leiseMod.uuid]: { cape: '', badge: 'moderator' } } });
+      assert.deepEqual(own.body, { players: { [leiseMod.uuid]: { cape: '', badge: 'moderator', cosmetics: { head: null, back: null, aura: null, companion: null } } } });
     } finally {
       for (const client of clients) await client.close();
       await service.close();

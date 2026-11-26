@@ -42,7 +42,7 @@
     <button class="nav-item" data-view="friends" data-label="Freunde"><svg data-icon="friends"></svg><span>Freunde</span>
       <span class="nav-badge" id="friends-badge" hidden></span>
     </button>
-    <button class="nav-item" data-view="profile" data-label="Skins &amp; Capes"><svg data-icon="cape"></svg><span>Skins &amp; Capes</span></button>
+    <button class="nav-item" data-view="profile" data-label="Skins &amp; Cosmetics"><svg data-icon="cape"></svg><span>Skins &amp; Cosmetics</span></button>
     <div class="nav-section">Launcher</div>
     <button class="nav-item" data-view="settings" data-label="Einstellungen"><svg data-icon="settings"></svg><span>Einstellungen</span></button>
     <button class="nav-item" data-view="console" data-label="Konsole">
@@ -140,11 +140,13 @@
               </div>
             </div>
 
-            <div class="home-status" id="launch-status">
+            <div class="home-status" id="launch-status" hidden>
               <span class="status-dot" id="status-dot"></span>
               <span class="status-text" id="status-text"></span>
               <span class="status-sub" id="status-sub"></span>
             </div>
+            <!-- ruhig: kurze Fakten zur Instanz (zuletzt gespielt, Spielzeit, Mods, Addons) -->
+            <div class="home-facts" id="home-facts"></div>
 
             <div class="picker-tools" id="picker-tools"></div>
           </div>
@@ -159,42 +161,52 @@
           <div class="home-progress" id="stage-progress"><span></span></div>
         </div>
 
+        <!-- Hinweise: Addon-Updates, letzter Absturz (nur wenn es etwas gibt) -->
+        <div class="home-notices" id="home-notices" hidden></div>
+
         <div class="home-grid">
           <div class="home-col">
-          <section class="panel" id="stage-continue" hidden>
-            <div class="panel-head">
-              <div class="panel-icon"><svg data-icon="play"></svg></div>
-              <div class="panel-title"><h3>Weiterspielen</h3><span>Direkt in Welten und auf Server</span></div>
-            </div>
-            <div class="row-list" id="continue-list"></div>
-          </section>
+            <section class="panel" id="stage-continue" hidden>
+              <div class="panel-head">
+                <div class="panel-icon"><svg data-icon="play"></svg></div>
+                <div class="panel-title"><h3>Weiterspielen</h3><span id="continue-sub">Direkt in Welten und auf Server</span></div>
+              </div>
+              <div class="row-list" id="continue-list"></div>
+            </section>
 
-          <section class="panel" id="home-instances-panel">
-            <div class="panel-head">
-              <div class="panel-icon"><svg data-icon="modules"></svg></div>
-              <div class="panel-title"><h3>Instanzen</h3><span id="home-instances-sub">Zuletzt gespielt</span></div>
-              <button class="ghost small" id="home-instances-all" type="button">Alle</button>
-            </div>
-            <div class="row-list" id="home-instances"></div>
-          </section>
+            <section class="panel" id="home-instances-panel">
+              <div class="panel-head">
+                <div class="panel-icon"><svg data-icon="modules"></svg></div>
+                <div class="panel-title"><h3>Instanzen</h3><span id="home-instances-sub">Zuletzt gespielt</span></div>
+                <button class="ghost small" id="home-instances-all" type="button">Alle</button>
+              </div>
+              <div class="row-list" id="home-instances"></div>
+            </section>
           </div>
 
-          <section class="panel" id="home-friends-panel" hidden>
-            <div class="panel-head">
-              <div class="panel-icon"><svg data-icon="friends"></svg></div>
-              <div class="panel-title"><h3>Freunde</h3><span id="home-friends-sub">Heldix-Dienst</span></div>
-              <button class="ghost small" id="home-friends-all" type="button">Alle</button>
-            </div>
-            <div class="row-list" id="home-friends"></div>
-          </section>
+          <div class="home-col">
+            <section class="panel" id="home-friends-panel" hidden>
+              <div class="panel-head">
+                <div class="panel-icon"><svg data-icon="friends"></svg></div>
+                <div class="panel-title"><h3>Freunde</h3><span id="home-friends-sub">Heldix-Dienst</span></div>
+                <button class="ghost small" id="home-friends-all" type="button">Alle</button>
+              </div>
+              <div class="row-list" id="home-friends"></div>
+            </section>
 
-          <section class="panel" id="news-panel" hidden>
-            <div class="panel-head">
-              <div class="panel-icon"><svg data-icon="news"></svg></div>
-              <div class="panel-title"><h3>Neuigkeiten</h3><span>Minecraft Patch Notes</span></div>
-            </div>
-            <div class="row-list" id="news-list"></div>
-          </section>
+            <section class="panel" id="news-panel" hidden>
+              <div class="panel-head">
+                <div class="panel-icon"><svg data-icon="news"></svg></div>
+                <div class="panel-title"><h3>Neuigkeiten</h3><span id="news-sub">Minecraft Patch Notes</span></div>
+                <div class="chip-toggle news-filter" id="news-filter" role="group" aria-label="Neuigkeiten filtern" hidden>
+                  <button type="button" class="active" data-filter="all">Alle</button>
+                  <button type="button" data-filter="heldix">HeldixClient</button>
+                  <button type="button" data-filter="minecraft">Minecraft</button>
+                </div>
+              </div>
+              <div class="row-list" id="news-list"></div>
+            </section>
+          </div>
         </div>
       </div>
     </section>
@@ -249,8 +261,7 @@
           </div>
 
           <div class="tabs" id="detail-tabs">
-            <button data-tab="mods" class="active">Mods</button>
-            <button data-tab="addons">Heldix-Addons</button>
+            <button data-tab="content" class="active">Mods &amp; Addons</button>
             <button data-tab="shaders">Shader</button>
             <button data-tab="settings">Einstellungen</button>
           </div>
@@ -259,15 +270,24 @@
             <div class="content-toolbar">
               <div class="search-field">
                 <svg data-icon="search"></svg>
-                <input type="text" id="content-filter" placeholder="Installierte durchsuchen …" spellcheck="false">
+                <input type="text" id="content-filter" placeholder="Mods &amp; Addons durchsuchen …" spellcheck="false">
+              </div>
+              <button class="ghost content-push" id="content-add-file" title="JAR-Dateien hinzufügen – der Launcher sortiert Fabric-Mods und Heldix-Addons selbst ein"><svg data-icon="file" class="btn-icon"></svg>Datei hinzufügen</button>
+              <button class="ghost" id="content-perf" hidden><svg data-icon="performance" class="btn-icon"></svg>Leistungs-Paket</button>
+              <button class="primary" id="content-browse"><svg data-icon="plus" class="btn-icon"></svg>Hinzufügen</button>
+            </div>
+            <div class="content-subbar">
+              <div class="chip-toggle" id="content-filters" role="group" aria-label="Anzeigen">
+                <button type="button" data-filter="all" class="active">Alle</button>
+                <button type="button" data-filter="mods">Mods</button>
+                <button type="button" data-filter="addons">Addons</button>
+                <button type="button" data-filter="updates">Updates</button>
+                <button type="button" data-filter="disabled">Ausgeschaltet</button>
               </div>
               <span class="content-count" id="content-count"></span>
-              <button class="ghost" id="content-add-file"><svg data-icon="file" class="btn-icon"></svg>Datei hinzufügen</button>
-              <button class="ghost" id="content-perf" hidden><svg data-icon="performance" class="btn-icon"></svg>Leistungs-Paket</button>
-              <button class="primary" id="content-browse"><svg data-icon="compass" class="btn-icon"></svg>Mods entdecken</button>
+              <button class="link-button" id="content-update-all" type="button" hidden>Alle aktualisieren</button>
             </div>
             <p class="content-hint" id="content-hint"></p>
-            <div class="bundled-addons" id="bundled-addons" hidden></div>
             <div class="content-list" id="content-list"></div>
             <div class="drop-overlay"><div>JAR-Dateien hier ablegen</div></div>
           </div>
@@ -338,7 +358,7 @@
       <div class="page friends-page" id="friends-root"></div>
     </section>
 
-    <!-- ============ Skins & Capes (profile.ts) ============ -->
+    <!-- ============ Skins & Cosmetics (profile.ts) ============ -->
     <section class="view" id="view-profile">
       <div class="page" id="profile-root"></div>
     </section>
@@ -662,15 +682,19 @@
     </div>
   </div>
 
-  <!-- ============ Dialog: Mods entdecken (Modrinth) ============ -->
+  <!-- ============ Dialog: Hinzufügen (Addon-Store, Modrinth) und Shaderpacks entdecken ============ -->
   <div class="modal-backdrop" id="modrinth-modal" hidden>
     <div class="modal wide">
       <div class="modal-head">
         <div>
-          <h3 class="modal-title" id="mr-title">Mods entdecken</h3>
+          <h3 class="modal-title" id="mr-title">Mods &amp; Addons hinzufügen</h3>
           <p class="modal-sub" id="mr-sub"></p>
         </div>
         <button class="icon-button" id="mr-close" title="Schließen"><svg data-icon="close" class="icon"></svg></button>
+      </div>
+      <div class="chip-toggle segmented mr-sources" id="mr-sources" role="group" aria-label="Quelle" hidden>
+        <button type="button" data-source="store"><svg data-icon="addons" class="btn-icon"></svg>Addon-Store</button>
+        <button type="button" data-source="mods"><svg data-icon="compass" class="btn-icon"></svg>Modrinth</button>
       </div>
       <div class="search-field large">
         <svg data-icon="search"></svg>
@@ -685,7 +709,7 @@
   <div class="popover account-popover" id="account-popover" hidden>
     <div class="account-current" id="account-current"></div>
     <div class="popover-links" id="account-links" hidden>
-      <button class="ghost small" id="account-skins" type="button"><svg data-icon="cape" class="btn-icon"></svg>Skins &amp; Capes</button>
+      <button class="ghost small" id="account-skins" type="button"><svg data-icon="cape" class="btn-icon"></svg>Skins &amp; Cosmetics</button>
       <button class="ghost small" id="account-friends" type="button"><svg data-icon="friends" class="btn-icon"></svg>Freunde</button>
       <button class="ghost small" id="open-web-account" type="button" title="Profil, Freunde und Nachrichten auf heldixclient.com – ohne Passwort"><svg data-icon="external" class="btn-icon"></svg>Web-Konto</button>
     </div>

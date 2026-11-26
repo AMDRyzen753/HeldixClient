@@ -13,13 +13,21 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * Wendet beim Laden einer Klasse alle zuständigen Transformer an – in Reihenfolge:
  * erst die des Loaders, dann die der Mods. Schlägt einer fehl, bleibt nur sein Teil weg.
  */
 final class TransformerChain implements ClassFileTransformer {
-	private record Entry(ClassTransformer transformer, String source) {
+	/** onProblem: Fehler zusätzlich dort melden (z. B. am Addon, dem der Transformer gehört), sonst null */
+	private record Entry(ClassTransformer transformer, String source, Consumer<String> onProblem) {
+		void failed(String className, Throwable t) {
+			String reason = className.replace('/', '.') + " konnte nicht verändert werden – " + t;
+			LoaderCore.problem(source + ": " + reason);
+			LoaderCore.LOG.error("Transformer von {} ist an {} gescheitert", source, className, t);
+			if (onProblem != null) onProblem.accept(reason);
+		}
 	}
 
 	private final Map<String, List<Entry>> byTarget = new ConcurrentHashMap<>();
@@ -30,8 +38,12 @@ final class TransformerChain implements ClassFileTransformer {
 	}
 
 	void add(ClassTransformer transformer, String source) {
+		add(transformer, source, null);
+	}
+
+	void add(ClassTransformer transformer, String source, Consumer<String> onProblem) {
 		for (String target : transformer.targets()) {
-			byTarget.computeIfAbsent(target, k -> new ArrayList<>()).add(new Entry(transformer, source));
+			byTarget.computeIfAbsent(target, k -> new ArrayList<>()).add(new Entry(transformer, source, onProblem));
 		}
 	}
 
@@ -50,8 +62,7 @@ final class TransformerChain implements ClassFileTransformer {
 			try {
 				entry.transformer().transform(className, node);
 			} catch (Throwable t) {
-				LoaderCore.problem(entry.source() + ": " + className.replace('/', '.') + " konnte nicht verändert werden – " + t);
-				LoaderCore.LOG.error("Transformer von {} ist an {} gescheitert", entry.source(), className, t);
+				entry.failed(className, t);
 			}
 		}
 	}
@@ -74,8 +85,7 @@ final class TransformerChain implements ClassFileTransformer {
 				current = writer.toByteArray();
 				changed = true;
 			} catch (Throwable t) {
-				LoaderCore.problem(entry.source() + ": " + className.replace('/', '.') + " konnte nicht verändert werden – " + t);
-				LoaderCore.LOG.error("Transformer von {} ist an {} gescheitert", entry.source(), className, t);
+				entry.failed(className, t);
 			}
 		}
 		if (changed && dumpDir != null) dump(className, current);

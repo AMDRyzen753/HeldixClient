@@ -11,7 +11,9 @@ import { publicGet } from './public-cards.js';
 
 export const ADDON_ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 /** Höchste Heldix-API-Stufe, die der aktuelle HeldixClient lädt (HeldixApi.API_VERSION). */
-export const API_STUFE = 3;
+export const API_STUFE = 4;
+/** Ab welcher HeldixClient-Version es eine API-Stufe gibt (Stufen 1 und 2 laden alle Versionen mit Addons). */
+export const API_STUFE_AB = { 3: '0.13.1', 4: '0.13.2' };
 export const UUID_RE = /^[0-9a-f]{32}$/;
 /** So zeigt der Dienst den Einreicher, wenn er seine Daten gelöscht hat. */
 export const DELETED_PLAYER = 'Gelöschter Spieler';
@@ -27,6 +29,71 @@ export const KATEGORIEN = {
 
 export const SYSTEM_NAMEN = { windows: 'Windows', mac: 'Mac', linux: 'Linux' };
 export const ALLE_SYSTEME = Object.keys(SYSTEM_NAMEN);
+
+/**
+ * Manifest v2: Zugriff (`access`), Minecraft-Versionen (`minecraft`) und Loader (`loaders`). Alte Manifeste ohne diese
+ * Felder gelten als api, [] (jede Version) und heldix + fabric; ein Addon mit Minecraft-Zugriff läuft ohne Angabe nur
+ * im Heldix Loader. Ein ungültiges Feld lässt das ganze Addon wegfallen (wie im Launcher). Texte wie im Launcher.
+ */
+export const ADDON_ACCESS = ['api', 'minecraft'];
+export const ADDON_LOADERS = ['heldix', 'fabric'];
+export const MINECRAFT_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z._+*-]{0,31}$/;
+export const MAX_MINECRAFT_VERSIONS = 50;
+export const MINECRAFT_ACCESS = 'Greift in Minecraft ein';
+export const MINECRAFT_ACCESS_HINT = 'Verändert Minecraft direkt, nicht nur über die Heldix-API – vom HeldixClient-Team geprüft. An und Aus wirkt erst nach dem Neustart.';
+
+/** „26.3“, „26.2 und 26.3“, ab fünf: „26.0, 26.1, 26.2 und 3 weitere“ (wie im Launcher). */
+export function minecraftVersionList(list) {
+  if (list.length > 4) return `${list.slice(0, 3).join(', ')} und ${list.length - 3} weitere`;
+  return list.length > 1 ? `${list.slice(0, -1).join(', ')} und ${list.at(-1)}` : (list[0] ?? '');
+}
+
+/** „Minecraft 26.3“ bzw. „Minecraft 26.2 und 26.3“ – oder null, wenn das Addon in jeder Version läuft. */
+export const minecraftLimit = (addon) => (addon.minecraft?.length ? `Minecraft ${minecraftVersionList(addon.minecraft)}` : null);
+
+/** „Nur für Minecraft 26.3“ (Grund, wenn eine Instanz nicht passt). */
+export const minecraftReason = (list) => `Nur für Minecraft ${minecraftVersionList(list)}`;
+
+/** „Nur Heldix-Instanzen“ / „Nur Fabric-Instanzen“ – oder null, wenn das Addon in beiden läuft. */
+export function loaderLimit(addon) {
+  const loaders = addon.loaders?.length ? addon.loaders : ADDON_LOADERS;
+  if (loaders.includes('heldix') && loaders.includes('fabric')) return null;
+  return loaders.includes('heldix') ? 'Nur Heldix-Instanzen' : 'Nur Fabric-Instanzen';
+}
+
+/** Ausgeschrieben für die Details: „Heldix Loader und Fabric mit HeldixClient“, „Nur mit Heldix Loader“ … */
+export function loaderText(addon) {
+  const limit = loaderLimit(addon);
+  if (!limit) return 'Heldix Loader und Fabric mit HeldixClient';
+  return limit === 'Nur Heldix-Instanzen' ? 'Nur mit Heldix Loader' : 'Nur Fabric mit HeldixClient';
+}
+
+/** Felder aus Manifest v2 prüfen → { access, minecraft, loaders } (fehlende mit Standardwerten) oder null (ungültig). */
+export function addonAccessFields(source) {
+  if (source.access !== undefined && source.access !== null && !ADDON_ACCESS.includes(source.access)) return null;
+  const access = source.access === 'minecraft' ? 'minecraft' : 'api';
+  const minecraft = source.minecraft === undefined || source.minecraft === null ? [] : source.minecraft;
+  if (!Array.isArray(minecraft) || minecraft.length > MAX_MINECRAFT_VERSIONS || minecraft.some((v) => typeof v !== 'string' || !MINECRAFT_VERSION_RE.test(v)) || new Set(minecraft).size !== minecraft.length) return null;
+  if (access === 'minecraft' && minecraft.length === 0) return null;
+  const loaders = source.loaders === undefined || source.loaders === null ? (access === 'api' ? [...ADDON_LOADERS] : ['heldix']) : source.loaders;
+  if (!Array.isArray(loaders) || loaders.length === 0 || loaders.some((l) => !ADDON_LOADERS.includes(l)) || new Set(loaders).size !== loaders.length) return null;
+  return { access, minecraft: [...minecraft], loaders: ADDON_LOADERS.filter((l) => loaders.includes(l)) };
+}
+
+/**
+ * Chips für Karten und Details: „Greift in Minecraft ein“, „Minecraft 26.3“, „Nur Heldix-Instanzen“ (nur, was zutrifft).
+ * compact: nur der Zugriff-Chip.
+ */
+export function accessChips(addon, { compact = false } = {}) {
+  const chips = [];
+  if (addon.access === 'minecraft') chips.push(h('span', { class: 'chip minecraft-access', title: MINECRAFT_ACCESS_HINT }, icon('code'), MINECRAFT_ACCESS));
+  if (compact) return chips;
+  const versions = minecraftLimit(addon);
+  if (versions) chips.push(h('span', { class: 'chip minecraft-versions', title: 'Läuft nur in diesen Minecraft-Versionen' }, versions));
+  const loader = loaderLimit(addon);
+  if (loader) chips.push(h('span', { class: 'chip loader-limit', title: loader === 'Nur Heldix-Instanzen' ? 'Läuft nur in Instanzen mit dem Heldix Loader' : 'Läuft nur in Fabric-Instanzen mit HeldixClient' }, loader));
+  return chips;
+}
 
 /** Gründe für eine Addon-Meldung (wie im Dienst). */
 export const ADDON_REPORT_REASONS = [
@@ -45,7 +112,7 @@ export const addonReasonLabel = (reason) => ADDON_REPORT_REASONS.find(([id]) => 
 export const INSPECTION = {
   prozesse: { level: 'danger', label: 'Startet Programme', detail: 'ProcessBuilder oder Runtime – kann Programme auf dem PC ausführen.' },
   nativ: { level: 'danger', label: 'Nativer Code', detail: 'System.loadLibrary oder java.lang.foreign – lädt Code außerhalb von Java.' },
-  minecraft: { level: 'danger', label: 'Minecraft-Klassen', detail: 'Greift direkt auf net.minecraft zu. Addons dürfen nur die Heldix-API nutzen.' },
+  minecraft: { level: 'danger', label: 'Minecraft-Klassen', detail: 'Greift direkt auf net.minecraft zu, gibt es aber nicht an. Eingriffe in Minecraft sind nur mit „Greift in Minecraft ein“ erlaubt (clientEntrypoint oder transformers in heldix.addon.json).' },
   netzwerk: { level: 'warn', label: 'Netzwerk', detail: 'java.net – kann Verbindungen ins Internet aufbauen.' },
   dateien: { level: 'warn', label: 'Dateien', detail: 'java.io.File oder java.nio.file – kann Dateien lesen und schreiben.' },
   reflection: { level: 'warn', label: 'Reflection', detail: 'java.lang.reflect – kann an der Heldix-API vorbei auf fremden Code zugreifen.' },
@@ -109,6 +176,8 @@ export function normalizeAddon(entry) {
   const platforms = [...new Set(list(source.platforms, 3, 10).filter((system) => ALLE_SYSTEME.includes(system)))];
   const date = typeof source.date === 'string' && Number.isFinite(Date.parse(source.date)) ? Date.parse(source.date) : null;
   const official = signed.official === true;
+  const access = addonAccessFields(source);
+  if (!access) return null;
   const shots = Number.isInteger(entry.screenshots) ? Math.min(4, Math.max(0, entry.screenshots)) : 0;
   return {
     id: entry.id,
@@ -118,6 +187,9 @@ export function normalizeAddon(entry) {
     description: text(source.description, 4000),
     authors: list(source.authors, 5, 40),
     api: Number.isInteger(source.api) ? source.api : null,
+    access: access.access,
+    minecraft: access.minecraft,
+    loaders: access.loaders,
     icon: typeof source.icon === 'string' && /^[a-z0-9-]{1,30}$/.test(source.icon) ? source.icon : 'addons',
     category: Object.hasOwn(KATEGORIEN, source.category) ? source.category : 'sonstiges',
     platforms: platforms.length === ALLE_SYSTEME.length ? [] : platforms,

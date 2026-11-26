@@ -174,7 +174,7 @@ export async function resolveFabricConflicts(modsDir: string, optional: (mod: Fa
     }
     const keep = victim === conflict.mod ? conflict.other : conflict.mod;
     await rename(path.join(modsDir, victim.file), path.join(modsDir, `${victim.file}.disabled`));
-    notes.push(`${victim.name} ausgeschaltet: passt nicht zu ${keep.name} ${keep.version}. Wieder einschalten geht in den Mods der Instanz, sobald es neue Versionen gibt.`);
+    notes.push(`${victim.name} ausgeschaltet: passt nicht zu ${keep.name} ${keep.version}. Wieder einschalten geht unter „Mods & Addons“ der Instanz, sobald es neue Versionen gibt.`);
   }
   return notes;
 }

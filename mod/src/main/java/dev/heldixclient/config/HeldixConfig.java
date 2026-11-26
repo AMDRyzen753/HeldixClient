@@ -87,6 +87,14 @@ public final class HeldixConfig {
 		public boolean socialNotifications = true;
 		/** Heldix-Capes anderer Spieler zeigen */
 		public boolean socialCapes = true;
+		/** Cosmetics anderer HeldixClient-Spieler zeigen (Hüte, Flügel, Begleiter, Partikel) */
+		public boolean cosmeticsOthers = true;
+		/** Partikel (Aura) anderer Spieler zeigen */
+		public boolean cosmeticParticlesOthers = true;
+		/** Hüte und Kopf-Cosmetics über einem Helm zeigen (aus: mit Helm ausblenden) */
+		public boolean cosmeticHatOverHelmet = true;
+		/** zuletzt bekannte eigene Auswahl an Cosmetics (Slot → ID), vom Heldix-Dienst; gilt sofort nach dem Start */
+		public Map<String, String> cosmetics = new LinkedHashMap<>();
 		/** Heldix-Symbol (mit Rolle) vor Namen in der Tab-Liste, dazu die Zeile „HeldixClient: … Spieler hier“ */
 		public boolean badgeTabList = true;
 		/** Heldix-Symbol (mit Rolle) im Namensschild über den Köpfen anderer Spieler */

@@ -5,10 +5,16 @@
 // Schlüsseldatei, die Seite prüft sie gegen den öffentlichen Schlüssel des Dienstes, rechnet die SHA-256 der JAR
 // selbst nach, vergleicht das Manifest mit der Einreichung und signiert genau den Manifest-Text, den der Dienst
 // geliefert hat. Gesendet wird nur die Signatur.
+//
+// Mods & Addons sind ein System: Einreichungen dürfen direkt in Minecraft eingreifen („access“: "minecraft", dazu
+// „minecraft“-Versionen und „loaders“). Dann sind Minecraft-Klassen in der JAR erwartet (nicht rot), die übrigen
+// Hinweise bleiben, und die Checkliste fragt nach den Eingriffen. Ohne diese Felder gilt „api“ (alte Manifeste).
 import { api, avatar, bindCounter, busy, emptyState, formatBytes, formatDateTime, h, icon, loadingState, openDialog, relativeTime, rerender, setupTabs, showError, timeEl, toast, uid } from './app-common.js';
 import {
   ADDON_ID_RE,
+  INSPECTION,
   KATEGORIEN,
+  accessChips,
   addonIcon,
   addonReasonLabel,
   hasIcon,
@@ -32,6 +38,11 @@ const STATUS = {
 };
 const MAX_REJECT = 1000;
 const RED = ['prozesse', 'nativ', 'minecraft'];
+/** Wo ein Addon läuft (Store-Manifest „loaders“). */
+const LOADERS = { heldix: 'Heldix-Instanzen', fabric: 'Fabric-Instanzen' };
+/** Minecraft-Version im Manifest, z. B. 26.3, 1.21.11 oder 26.x (wie im Dienst und im Launcher). */
+const MC_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z._+*-]{0,31}$/;
+const MC_VERSIONS_MAX = 50;
 const $ = (id) => document.getElementById(id);
 const shortSha = (hash) => (typeof hash === 'string' && hash.length > 20 ? `${hash.slice(0, 12)}…${hash.slice(-6)}` : (hash ?? '–'));
 
@@ -42,6 +53,81 @@ function chip(text, kind = '') {
 function statusChip(status) {
   const [label, kind] = STATUS[status] ?? [status, ''];
   return chip(label, kind);
+}
+
+/**
+ * Zugriff eines Addons (Mods & Addons, ein System; Dienst ab 1.6.1): „access“ (api | minecraft), „minecraft“
+ * (Versionen, leer = jede) und „loaders“ (heldix, fabric) aus Einreichung, Eintrag oder Store-Manifest – die erste
+ * Quelle, die „access“ nennt. Ohne Angabe (alte Manifeste, Einreichung ohne JAR: access null) gilt „api“; fehlen die
+ * Loader, gelten die des Dienstes: API-Addons überall, Eingriffe in Minecraft nur im Heldix Loader.
+ * known: ob eine Quelle „access“ überhaupt nennt (dann vergleicht der Freigabe-Dialog Manifest und Einreichung).
+ */
+export function normalizeAccess(...sources) {
+  const source = sources.find((value) => value && typeof value === 'object' && typeof value.access === 'string') ?? null;
+  const access = source?.access === 'minecraft' ? 'minecraft' : 'api';
+  const minecraft = Array.isArray(source?.minecraft) ? [...new Set(source.minecraft.filter((version) => typeof version === 'string' && MC_VERSION_RE.test(version)))].slice(0, MC_VERSIONS_MAX) : [];
+  const loaders = Array.isArray(source?.loaders) ? Object.keys(LOADERS).filter((loader) => source.loaders.includes(loader)) : [];
+  return { access, minecraft, loaders: loaders.length ? loaders : access === 'api' ? ['heldix', 'fabric'] : ['heldix'], known: Boolean(source) };
+}
+
+export const minecraftText = (info) => (info.minecraft.length ? info.minecraft.join(', ') : info.access === 'minecraft' ? 'nicht angegeben' : 'jede');
+export const loaderText = (info) => info.loaders.map((loader) => LOADERS[loader]).join(' und ');
+
+/** Manifest-Text → Objekt (oder null). */
+function parseManifest(text) {
+  if (typeof text !== 'string') return null;
+  try {
+    const value = JSON.parse(text);
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Erwartete Prüf-Hinweise einer Einreichung: „inspection.expected“ vom Dienst (ab 1.6.1, Teilmenge von „uses“), sonst
+ * bei Zugriff minecraft die Minecraft-Klassen. Erwartete Hinweise sind neutral (nicht rot/gelb), alle anderen wie
+ * bisher.
+ */
+function expectedUses(sub) {
+  const uses = sub.inspection?.uses ?? [];
+  const expected = sub.expected ?? (sub.access.access === 'minecraft' ? ['minecraft'] : []);
+  return uses.filter((use) => expected.includes(use));
+}
+
+const EXPECTED_TEXT = {
+  minecraft: 'erwartet: Das Addon gibt an, direkt in Minecraft einzugreifen. Ansehen, ob die Eingriffe nötig sind (die Heldix-API reicht dafür nicht).',
+};
+
+/** Prüf-Hinweise ohne die erwarteten (für die Listen von addon-common.js). */
+function withoutExpected(sub) {
+  const expected = expectedUses(sub);
+  if (!sub.inspection || !expected.length) return { rest: sub.inspection, expected };
+  return { rest: { ...sub.inspection, uses: sub.inspection.uses.filter((use) => !expected.includes(use)) }, expected };
+}
+
+/** Liste der Prüf-Hinweise; erwartete obenan und neutral. */
+function reviewInspectionList(sub) {
+  const { rest, expected } = withoutExpected(sub);
+  const list = inspectionList(rest);
+  if (!list.matches('ul')) return list;
+  if (expected.length) list.querySelector('.inspect-item.ok')?.remove(); // „Nichts Auffälliges“ passt nicht daneben
+  const items = expected.map((use) =>
+    h('li', { class: 'inspect-item expected', dataset: { use } }, icon(use === 'minecraft' ? 'cube' : 'info'), h('span', null, h('strong', { text: INSPECTION[use]?.label ?? use }), h('span', { class: 'inspect-detail', text: ` – ${EXPECTED_TEXT[use] ?? 'erwartet: passt zum angegebenen Zugriff.'}` }))),
+  );
+  if (sub.access.access === 'minecraft' && sub.inspection && !(sub.inspection.uses ?? []).includes('minecraft')) {
+    items.push(h('li', { class: 'inspect-item expected', dataset: { use: 'minecraft' } }, icon('cube'), h('span', null, h('strong', { text: 'Minecraft-Klassen' }), h('span', { class: 'inspect-detail', text: ' – das Addon gibt Minecraft-Zugriff an, in der JAR wurde aber kein Zugriff gefunden.' }))));
+  }
+  list.prepend(...items);
+  return list;
+}
+
+function reviewInspectionChips(sub) {
+  const { rest, expected } = withoutExpected(sub);
+  const chips = inspectionChips(rest);
+  if (!expected.length) return chips;
+  // „unauffällig“ nur, wenn außer den erwarteten Hinweisen nichts gefunden wurde
+  return chips.map((element) => (element.classList.contains('success') ? h('span', { class: 'chip success' }, icon('check'), 'sonst unauffällig') : element));
 }
 
 function normalizeSubmission(value) {
@@ -67,6 +153,10 @@ function normalizeSubmission(value) {
     sha256: typeof value.sha256 === 'string' && /^[0-9a-f]{64}$/.test(value.sha256) ? value.sha256 : null,
     screenshots: Number.isInteger(value.screenshots) ? Math.min(4, Math.max(0, value.screenshots)) : 0,
     inspection: normalizeInspection(value.inspection),
+    // Erwartete Hinweise (Dienst ab 1.6.1): fehlt die Liste, leitet expectedUses sie aus dem Zugriff ab
+    expected: Array.isArray(value.inspection?.expected) ? value.inspection.expected.filter((use) => typeof use === 'string') : null,
+    // Mods & Addons (Dienst ab 1.6.1): access, minecraft, loaders; ältere Einreichungen: aus dem Manifest bzw. „api“
+    access: normalizeAccess(value),
     submittedAt: value.submittedAt ?? null,
     reviewedAt: value.reviewedAt ?? null,
     reviewNote: text('reviewNote', 1000),
@@ -84,8 +174,17 @@ async function sha256Hex(buffer) {
  * teamCall: Anfrage mit Team-Zugang (401/2FA führen zur passenden Ansicht). handleAccessError: dieselbe Behandlung
  * für Fehler aus eigenen Aufrufen. isAdmin(): Rolle. openPlayer(uuid): Spieler-Details. getTeamAddons(): Daten aus
  * GET /v1/team/addons (nur Admins, mit publicKey). loadTeamAddons(): neu laden. setAddonHidden(id, hidden).
+ * setBadge(count, label): Zähler am Bereich „Addons“ (Seitenleiste). onData({ submissions, reports }): nach jedem
+ * Laden der offenen Einreichungen bzw. Addon-Meldungen (Übersicht, Aktivität, Suche – ohne eigene Anfragen).
+ * onNavigate(params | null): Unterreiter gewechselt oder Einreichung geöffnet/geschlossen – Werte für die Adresse
+ * ({ einreichung } bzw. { unterreiter }), damit Links und Neuladen genau dorthin führen.
  */
-export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlayer, getTeamAddons, loadTeamAddons, setAddonHidden }) {
+export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlayer, getTeamAddons, loadTeamAddons, setAddonHidden, setBadge, onData, onNavigate }) {
+  const latest = { submissions: null, reports: null, reportsForbidden: false };
+  const emitData = () => {
+    latest.reportsForbidden = state.reportsForbidden;
+    onData?.({ ...latest });
+  };
   const state = {
     sub: 'einreichungen',
     filter: 'pending',
@@ -111,6 +210,8 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
 
   const subtabs = setupTabs($('addon-unterreiter'), (name) => {
     state.sub = name;
+    if (name !== 'einreichungen') onNavigate?.({ unterreiter: name });
+    else onNavigate?.(state.selected ? { einreichung: state.selected.submission.id } : null);
     if (name === 'einreichungen') loadSubmissions().catch(showError);
     if (name === 'meldungen') loadReports().catch(showError);
     if (name === 'veroeffentlicht') loadTeamAddons().catch(showError);
@@ -133,15 +234,24 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
     setCount('count-einreichungen', counts.submissions, `${counts.submissions} zu prüfen`);
     setCount('count-addon-meldungen', counts.reports, `${counts.reports} offen`);
     const total = counts.submissions + counts.reports;
-    setCount('count-addons', total, `${counts.submissions} Einreichungen zu prüfen, ${counts.reports} offene Addon-Meldungen`);
+    const label = `${counts.submissions} Einreichungen zu prüfen, ${counts.reports} offene Addon-Meldungen`;
+    // Zähler am Bereich „Addons“ in der Seitenleiste (Shell), sonst direkt am Element
+    if (setBadge) setBadge(total, label);
+    else setCount('count-addons', total, label);
   }
 
   async function refreshCounts() {
     const [subs, reports] = await Promise.all([softCall('GET', '/v1/team/addon-submissions?status=pending'), state.reportsForbidden ? null : softCall('GET', '/v1/team/addon-reports?status=open')]);
-    if (subs) counts.submissions = Array.isArray(subs.submissions) ? subs.submissions.length : 0;
-    if (reports) counts.reports = Array.isArray(reports.reports) ? reports.reports.length : 0;
-    else if (!state.reportsForbidden && reports === null) hideReports();
+    if (subs) {
+      latest.submissions = (Array.isArray(subs.submissions) ? subs.submissions : []).map(normalizeSubmission).filter(Boolean);
+      counts.submissions = latest.submissions.length;
+    }
+    if (reports) {
+      latest.reports = (Array.isArray(reports.reports) ? reports.reports : []).filter((report) => report && (typeof report.id === 'number' || typeof report.id === 'string')).map(normalizeReport);
+      counts.reports = latest.reports.length;
+    } else if (!state.reportsForbidden && reports === null) hideReports();
     renderCounts();
+    emitData();
   }
 
   function hideReports() {
@@ -185,7 +295,9 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
     state.submissions = (Array.isArray(data?.submissions) ? data.submissions : []).map(normalizeSubmission).filter(Boolean);
     if (filter === 'pending') {
       counts.submissions = state.submissions.length;
+      latest.submissions = state.submissions;
       renderCounts();
+      emitData();
     }
     renderList();
     if (keep && state.selected && !state.submissions.some((sub) => sub.id === state.selected.submission.id) && filter === 'pending') {
@@ -214,7 +326,7 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
                 { class: 'row-main' },
                 h('span', { class: 'row-title' }, h('span', { text: sub.name || sub.addonId }), h('span', { class: 'chip', text: sub.version }), state.filter === 'all' ? statusChip(sub.status) : null),
                 h('span', { class: 'row-sub', text: `${sub.addonId} · von ${sub.submitter.name} · ${relativeTime(sub.submittedAt)}${existingAddon(sub.addonId) ? ' · Update' : ' · neues Addon'}` }),
-                h('span', { class: 'chips-row' }, inspectionChips(sub.inspection)),
+                h('span', { class: 'chips-row' }, accessChips(sub.access, { compact: true }), reviewInspectionChips(sub)),
               ),
               icon('chevron-right'),
             ),
@@ -234,6 +346,7 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
       state.selected = { submission: state.submissions.find((sub) => sub.id === id) ?? normalizeSubmission({ id }), manifest: null, loading: true };
       state.checklist = new Set();
       renderList();
+      onNavigate?.({ einreichung: id });
       detail.replaceChildren(loadingState('Einreichung wird geladen …'));
       if (!window.matchMedia('(min-width: 901px)').matches) detail.scrollIntoView({ block: 'start' });
     }
@@ -242,6 +355,8 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
       if (state.selected?.submission.id !== id) return;
       const submission = normalizeSubmission(data?.submission ?? data);
       const manifest = typeof data?.manifest === 'string' ? data.manifest : typeof data?.submission?.manifest === 'string' ? data.submission.manifest : null;
+      // Zugriff: Angaben der Einreichung, sonst die aus dem Manifest, das signiert würde
+      if (submission && !submission.access.known) submission.access = normalizeAccess(parseManifest(manifest));
       state.selected = { submission, manifest, loading: false };
       renderDetail({ focus: !quiet });
     } catch (error) {
@@ -253,6 +368,7 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
   function closeDetail() {
     const id = state.selected?.submission.id;
     state.selected = null;
+    onNavigate?.(state.sub === 'einreichungen' ? null : { unterreiter: state.sub });
     $('einreichung-detail').replaceChildren(h('div', { class: 'empty placeholder' }, icon('addons'), h('p', { text: 'Wähle links eine Einreichung, um Code-Hinweise, Store-Angaben und Screenshots zu prüfen.' })));
     renderList();
     const item = [...document.querySelectorAll('#einreichungen-liste [data-focus-key]')].find((element) => element.dataset.focusKey === `einreichung:${id}`);
@@ -268,7 +384,9 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
     if (!selected?.submission) return;
     const sub = selected.submission;
     const existing = sub.addonId ? existingAddon(sub.addonId) : null;
-    const red = (sub.inspection?.uses ?? []).filter((use) => RED.includes(use));
+    const red = redUses(sub);
+    const expected = expectedUses(sub);
+    const other = (sub.inspection?.uses ?? []).filter((use) => !expected.includes(use));
     const pending = sub.status === 'pending';
     const images = Array.from({ length: sub.screenshots }, (_, index) => ({ src: `/api/v1/team/addon-submissions/${encodeURIComponent(sub.id)}/screenshots/${index + 1}`, alt: `${sub.name} – Screenshot ${index + 1}` }));
     const titleId = uid('einreichung');
@@ -288,6 +406,7 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
             { class: 'row-meta review-meta' },
             statusChip(sub.status),
             existing ? chip(`Update von ${existing.version ?? '?'}`, 'accent') : chip('Neues Addon', 'accent'),
+            accessChips(sub.access),
             existing?.hidden ? chip('Addon ist ausgeblendet', 'warning') : null,
             h('span', { class: 'player-inline' }, avatar(sub.submitter.name, sub.submitter.uuid, { size: 'xs' }), sub.submitter.uuid ? h('button', { type: 'button', class: 'link-button', onClick: () => openPlayer(sub.submitter.uuid) }, sub.submitter.name) : h('span', { text: sub.submitter.name })),
             h('span', null, 'eingereicht ', timeEl(sub.submittedAt, relativeTime(sub.submittedAt))),
@@ -297,10 +416,17 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
       sub.status !== 'pending' ? reviewResult(sub) : null,
       h(
         'section',
-        { class: `inspect-box${red.length ? ' danger' : sub.inspection?.uses.length ? ' warn' : ' ok'}`, 'aria-labelledby': `${titleId}-pruefung` },
+        { class: `inspect-box${red.length ? ' danger' : other.length ? ' warn' : ' ok'}`, 'aria-labelledby': `${titleId}-pruefung` },
         h('h3', { id: `${titleId}-pruefung` }, icon(red.length ? 'warning' : 'shield'), 'Prüf-Hinweise aus der JAR'),
-        inspectionList(sub.inspection),
-        h('p', { class: 'hint', text: `${sub.inspection?.classes ?? '?'} Klassendateien durchsucht. Die Hinweise kommen aus einer groben Suche nach Konstanten – sie ersetzen nicht den Blick in den Code. Rot heißt: darf ein Addon praktisch nie (nur die Heldix-API ist erlaubt).` }),
+        reviewInspectionList(sub),
+        h('p', {
+          class: 'hint',
+          text: `${sub.inspection?.classes ?? '?'} Klassendateien durchsucht. Die Hinweise kommen aus einer groben Suche nach Konstanten – sie ersetzen nicht den Blick in den Code. ${
+            sub.access.access === 'minecraft'
+              ? 'Dieses Addon greift laut Angabe direkt in Minecraft ein – das ist erlaubt, wenn die Heldix-API nicht reicht. Rot heißt hier: Programme starten oder nativer Code.'
+              : 'Rot heißt: darf ein Addon praktisch nie (nur die Heldix-API ist erlaubt).'
+          }`,
+        }),
         h(
           'div',
           { class: 'card-actions' },
@@ -322,6 +448,9 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
           fact('Icon', h('span', { class: 'icon-fact' }, addonIcon(sub.icon, 'addon-icon tiny'), h('code', { class: 'mono', text: sub.icon }), hasIcon(sub.icon) ? null : chip('unbekannt → Puzzleteil', 'warning'))),
           fact('Systeme', platformText(sub.platforms)),
           fact('API-Stufe', sub.api === null ? '–' : String(sub.api)),
+          fact('Zugriff', sub.access.access === 'minecraft' ? 'Greift direkt in Minecraft ein' : 'Nur Heldix-API'),
+          fact('Minecraft', minecraftText(sub.access)),
+          fact('Läuft in', loaderText(sub.access)),
           fact(sub.authors.length === 1 ? 'Autor' : 'Autoren', sub.authors.join(', ') || '–'),
           fact('SHA-256', h('code', { class: 'mono hash-full', text: sub.sha256 ?? '–' })),
         ),
@@ -376,14 +505,24 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
 
   // --- Checkliste, Schlüssel, Freigeben/Ablehnen
 
+  /** Rote Prüf-Hinweise; Minecraft-Klassen sind bei Addons mit Zugriff „minecraft“ erwartet. */
+  function redUses(sub) {
+    const expected = expectedUses(sub);
+    return (sub.inspection?.uses ?? []).filter((use) => RED.includes(use) && !expected.includes(use));
+  }
+
   function checklistItems(sub) {
-    const red = (sub.inspection?.uses ?? []).filter((use) => RED.includes(use));
+    const red = redUses(sub);
+    const minecraft = sub.access.access === 'minecraft';
     return [
       ['code', 'Ich habe die JAR heruntergeladen und den Code angesehen.'],
-      ['api', 'Das Addon nutzt nur die Heldix-API – keine Minecraft-Klassen, kein nachgeladener Code.'],
+      minecraft
+        ? ['api', 'Kein nachgeladener Code und kein Schadcode; Netzwerk und Dateien nur, wenn die Beschreibung sie nennt.']
+        : ['api', 'Das Addon nutzt nur die Heldix-API – keine Minecraft-Klassen, kein nachgeladener Code.'],
+      minecraft ? ['minecraft', 'Eingriffe in Minecraft angesehen und nötig'] : null,
       ['hinweise', red.length ? 'Die rot markierten Prüf-Hinweise habe ich geprüft und sie sind harmlos erklärt.' : 'Die Prüf-Hinweise habe ich geprüft und sie passen zu dem, was das Addon tun soll.'],
       ['inhalt', 'Name, Texte, Icon und Screenshots sind in Ordnung – nichts Anstößiges, keine fremden Marken.'],
-    ];
+    ].filter(Boolean);
   }
 
   function reviewActions(sub) {
@@ -513,6 +652,19 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
     checks.push([idOk ? 'ok' : 'fail', idOk ? `ID, Version und Datei passen (${m.file})` : 'ID, Version oder Dateiname im Manifest weichen von der Einreichung ab']);
     const storeOk = same(m.name, sub.name) && same(m.summary, sub.summary) && same(m.description ?? '', sub.description) && same(m.category, sub.category) && same(m.icon, sub.icon) && same(m.platforms ?? [], sub.platforms) && same(m.notes ?? [], sub.notes);
     checks.push([storeOk ? 'ok' : 'fail', storeOk ? 'Store-Angaben im Manifest = geprüfte Angaben' : 'Die Store-Angaben im Manifest weichen von dem ab, was du geprüft hast – Seite neu laden']);
+    // Mods & Addons: Zugriff im Manifest = geprüfter Zugriff (nur, wenn eins von beiden ihn nennt)
+    const signedAccess = normalizeAccess(m);
+    if (signedAccess.known || sub.access.known) {
+      const accessOk = signedAccess.access === sub.access.access && same(signedAccess.minecraft, sub.access.minecraft) && same(signedAccess.loaders, sub.access.loaders);
+      checks.push([
+        accessOk ? 'ok' : 'fail',
+        accessOk
+          ? signedAccess.access === 'minecraft'
+            ? `Zugriff im Manifest: greift in Minecraft ein (Minecraft ${minecraftText(signedAccess)}, ${loaderText(signedAccess)})`
+            : 'Zugriff im Manifest: nur Heldix-API'
+          : 'Zugriff, Minecraft-Versionen oder Loader im Manifest weichen von der Einreichung ab',
+      ]);
+    }
     const sizeOk = m.size === jar.size && m.size === sub.size;
     checks.push([sizeOk ? 'ok' : 'fail', sizeOk ? `Größe passt (${formatBytes(jar.size)})` : `Größe passt nicht: Manifest ${formatBytes(m.size)}, JAR ${formatBytes(jar.size)}`]);
     const shaOk = m.sha256 === jar.sha256 && m.sha256 === sub.sha256;
@@ -627,7 +779,9 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
       : [];
     if (filter === 'open') {
       counts.reports = state.reports.length;
+      latest.reports = state.reports;
       renderCounts();
+      emitData();
     }
     renderReports();
   }
@@ -662,7 +816,7 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
     const reporter = report.reporter ?? {};
     return h(
       'article',
-      { class: 'app-card report addon-report', id: `addon-meldung-${report.id}`, dataset: { id: String(report.id), addon: String(report.addonId ?? '') } },
+      { class: 'app-card report addon-report', id: `addon-meldung-${report.id}`, dataset: { id: String(report.id), addon: String(report.addonId ?? ''), status: done ? 'done' : 'open' } },
       h(
         'div',
         { class: 'report-head' },
@@ -747,13 +901,22 @@ export function initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlaye
   $('addon-meldungen-neu').addEventListener('click', (event) => busy(event.currentTarget, () => loadReports()).catch(showError));
 
   return {
-    /** Reiter „Addons“ geöffnet: Unterreiter wählen und laden. */
-    show() {
+    /**
+     * Reiter „Addons“ geöffnet: Unterreiter wählen und laden. Optional sub (einreichungen | veroeffentlicht |
+     * meldungen) und submission (ID: diese Einreichung gleich öffnen) – aus Links, Suche und Aktivität.
+     */
+    show({ sub = null, submission = null } = {}) {
+      if (submission) sub = 'einreichungen';
+      if (sub && subtabs.has(sub)) state.sub = sub;
       if (!subtabs.has(state.sub)) state.sub = 'einreichungen';
       subtabs.select(state.sub);
       refreshCounts().catch(() => {});
+      if (submission) openSubmission(String(submission)).catch(() => {});
     },
+    current: () => state.sub,
     refreshCounts,
+    /** Zuletzt geladene offene Einreichungen und Addon-Meldungen (null = noch nicht geladen). */
+    latest: () => ({ ...latest, reportsForbidden: state.reportsForbidden }),
     /** Nach dem Laden von GET /v1/team/addons (publicKey, ausgeblendete Addons). */
     teamAddonsChanged() {
       renderKeyBox();

@@ -41,6 +41,9 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 	private static final String CAPE_LAYER = "net/minecraft/client/renderer/entity/layers/CapeLayer";
 	private static final String COLLECTOR = "net/minecraft/client/renderer/SubmitNodeCollector";
 	private static final String SUBMIT_MODEL = "(Lnet/minecraft/client/model/Model;Ljava/lang/Object;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/rendertype/RenderType;III)V";
+	private static final String AVATAR_STATE = "Lnet/minecraft/client/renderer/entity/state/AvatarRenderState;";
+	private static final String ENTITY_SUBMIT = "(Lnet/minecraft/client/renderer/entity/state/EntityRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;L"
+			+ "net/minecraft/client/renderer/SubmitNodeCollector;Lnet/minecraft/client/renderer/state/level/CameraRenderState;)V";
 
 	private static final String HUD = "net/minecraft/client/gui/Hud";
 	private static final String ENTITY = "net/minecraft/world/entity/Entity";
@@ -102,12 +105,15 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 				Patches.beforeReturns(getSkin, () -> Code.begin().loadThis()
 						.invokeStatic(HOOKS, "playerSkin", "(" + PLAYER_SKIN + "L" + CLIENT_PLAYER + ";)" + PLAYER_SKIN));
 			}
-			// Cape: leuchtende Teile der Heldix-Capes als zweiter Durchgang
+			// Cape: leuchtende Teile der Heldix-Capes als zweiter Durchgang; am Anfang die Cosmetics an Kopf und Rücken
+			// (das Spielermodell ist dort schon für diesen Spieler ausgerichtet)
 			case CAPE_LAYER -> {
 				MethodNode submit = Patches.method(node, "submit", "(Lcom/mojang/blaze3d/vertex/PoseStack;L" + COLLECTOR
-						+ ";ILnet/minecraft/client/renderer/entity/state/AvatarRenderState;FF)V");
+						+ ";I" + AVATAR_STATE + "FF)V");
 				Patches.replaceCalls(submit, COLLECTOR, "submitModel", SUBMIT_MODEL,
 						i -> Code.begin().invokeStatic(HOOKS, "capeModel", "(L" + COLLECTOR + ";" + SUBMIT_MODEL.substring(1)));
+				Patches.head(submit, Code.begin().loadThis().loadArgs(submit, 0, 1, 2, 3)
+						.invokeStatic(HOOKS, "cosmeticLayer", "(L" + CAPE_LAYER + ";Lcom/mojang/blaze3d/vertex/PoseStack;L" + COLLECTOR + ";I" + AVATAR_STATE + ")V"));
 			}
 			case HUD -> hud(node);
 			// Ladebildschirme (Welt laden, verbinden): Tipp-Karte mit Spielfigur
@@ -155,10 +161,13 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 			// Namensschild über dem Kopf: Heldix-Symbol vor dem Namen. getNameTag wird nur gefragt, wenn Minecraft das
 			// Schild überhaupt zeigt (nicht unsichtbar, nicht vom Server über Teams ausgeblendet); mit F1 lässt der Hook
 			// das Symbol weg. Schleichen macht Minecraft das ganze Schild blass, das Symbol eingeschlossen.
+			// Cosmetics: Begleiter und Aura am Anfang von submit (für Spieler nach dem Modell, in Weltlage am Spieler)
 			case ENTITY_RENDERER -> {
 				MethodNode nameTag = Patches.method(node, "getNameTag", "(L" + ENTITY + ";)" + COMPONENT);
+				MethodNode submit = Patches.method(node, "submit", ENTITY_SUBMIT);
 				Patches.beforeReturns(nameTag, () -> Code.begin().loadArg(nameTag, 0)
 						.invokeStatic(HOOKS, "nameTag", "(" + COMPONENT + "L" + ENTITY + ";)" + COMPONENT));
+				Patches.head(submit, Code.begin().loadArgs(submit, 0, 1, 2, 3).invokeStatic(HOOKS, "cosmeticEntity", ENTITY_SUBMIT));
 			}
 			default -> {
 			}

@@ -15,7 +15,7 @@ Links steht die Seitenleiste mit den Bereichen. Hat ein Bereich mehrere Seiten, 
 - **Module:** alle Module als Kacheln – siehe [Module im Überblick](/hilfe/module)
 - **Grafik:** Reiter **Shader** und **Leistung** – siehe [Heldix-Shader](/hilfe/heldix-shader) und [Mehr FPS](/hilfe/mehr-fps)
 - **Wegpunkte:** die Wegpunkte der aktuellen Welt – siehe [Wegpunkte](/hilfe/wegpunkte)
-- **Cape:** dein Cape – siehe [Capes](/hilfe/capes)
+- **Cape:** dein Cape – siehe [Capes](/hilfe/capes) und [Cosmetics](/hilfe/cosmetics)
 - **Freunde:** Reiter Freunde, Nachrichten, Anfragen und Privatsphäre – siehe [Freunde hinzufügen](/hilfe/freunde)
 - **Einstellungen:** Reiter Allgemein, Addons und Info
 - **Optionen:** die normalen Optionen von Minecraft

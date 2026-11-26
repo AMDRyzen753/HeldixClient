@@ -26,7 +26,7 @@ Minecraft speichert bei einem Absturz einen Crash-Report im Spielordner der Inst
 - **Logs:** unter **Instanzen → Instanz → Einstellungen → Ordner → Logs**. Die neueste Datei heißt `latest.log`.
 
 ## Ursache eingrenzen
-- **Gerade eine Mod installiert?** Schalte sie unter **Mods** aus und starte erneut. Funktioniert es dann, liegt es an dieser Mod oder ihrer Version.
+- **Gerade eine Mod installiert?** Schalte sie unter **Mods & Addons** aus und starte erneut. Funktioniert es dann, liegt es an dieser Mod oder ihrer Version.
 - **Absturz direkt beim Start in einer Heldix-Instanz?** Stell testweise die Grafik-API auf **OpenGL** (Launcher → Einstellungen → Leistung). Siehe [Grafikfehler und Treiber](/hilfe/grafikprobleme).
 - **Absturz nach längerem Spielen oder mit vielen Mods?** Gib der Instanz mehr Arbeitsspeicher (Instanz → Einstellungen → Arbeitsspeicher), aber nicht mehr als 8 GB.
 - **Eigene JVM-Argumente oder eigener Java-Pfad?** Leere testweise beide Felder unter **Einstellungen → Java**.

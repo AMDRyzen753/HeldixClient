@@ -1,13 +1,29 @@
-// Skins & Capes (#view-profile, Inhalt in #profile-root). Daten: api.getProfile() und die Skin-/Cape-Methoden.
+// Skins & Cosmetics (#view-profile, Inhalt in #profile-root). Daten: api.getProfile(), api.getCosmetics() und die
+// Skin-/Cape-/Cosmetic-Methoden.
 //
-// Links eine große 3D-Figur (skinview3d wie auf der Startseite, siehe figure.ts) mit Skin und Cape. Fahren über einen
-// Skin oder ein Cape zeigt es sofort an der Figur (Vorschau); erst „Anwenden“ bzw. ein Klick auf ein Cape ändert etwas.
-// Rechts die Reiter „Skins“ (eigene Sammlung im Datenordner) und „Capes“ (Minecraft-Capes des Kontos, Heldix-Capes).
+// Links eine große 3D-Figur (skinview3d wie auf der Startseite, siehe figure.ts) mit Skin, Cape und Cosmetics. Fahren
+// über einen Skin, ein Cape oder ein Cosmetic zeigt es sofort an der Figur (Vorschau); erst „Anwenden“ bzw. ein Klick
+// auf ein Cape oder Cosmetic ändert etwas. Rechts die Reiter „Skins“ (eigene Sammlung im Datenordner), „Capes“
+// (Heldix-Capes – eingebaute und aus dem Katalog –, Minecraft-Capes des Kontos) und „Cosmetics“ (Kopf, Rücken, Aura,
+// Begleiter aus dem Katalog des Heldix-Dienstes; Modelle zeichnet cosmetic-scene.ts).
 //
 // Heldix-Capes: capes/<id>.png enthält alle Bilder der Animation untereinander (je 512 × 256 = 8 × Cape-Vorlage 64 × 32),
 // capes/<id>_glow.png die Leuchtebene (je 256 × 128). Wie auf der Webseite (website/src/capes.js) wird das aktuelle Bild
-// auf ein Canvas geschnitten, die Leuchtebene darübergelegt und das Ergebnis an die Figur gegeben.
-import type { HeldixCape, MojangCape, ProfileState, SavedSkin, SkinVariant } from '../shared/api';
+// auf ein Canvas geschnitten, die Leuchtebene darübergelegt und das Ergebnis an die Figur gegeben. Capes aus dem Katalog
+// (signiert, 64/128/256 breit) laufen genauso, nur kommt das Bild als data:-URL und die Leuchtebene liegt darüber
+// (wie die Vorschau der Cosmetics) statt addiert zu werden.
+import type {
+  CosmeticItem,
+  CosmeticModelSlot,
+  CosmeticSlotName,
+  CosmeticsState,
+  HeldixCape,
+  MojangCape,
+  ProfileState,
+  SavedSkin,
+  SkinVariant,
+} from '../shared/api';
+import { CosmeticRig, CosmeticThumbnails, type RigViewer } from './cosmetic-scene.js';
 import { api, confirmDialog, errorMessage, h, state, toast, uiIcon } from './core.js';
 
 // ---------- skinview3d (nur die Teile, die hier gebraucht werden) ----------
@@ -60,9 +76,19 @@ const BACK_ANGLE = Math.PI - 0.55;
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 // ---------- Zustand ----------
-type Tab = 'skins' | 'capes';
-type CapeChoice = { kind: 'none' } | { kind: 'mojang'; id: string } | { kind: 'heldix'; id: string };
+type Tab = 'skins' | 'capes' | 'cosmetics';
+/** heldix = eingebautes Heldix-Cape, catalog = Cape aus dem Cosmetics-Katalog */
+type CapeChoice = { kind: 'none' } | { kind: 'mojang'; id: string } | { kind: 'heldix'; id: string } | { kind: 'catalog'; id: string };
 const NO_CAPE: CapeChoice = { kind: 'none' };
+/** Vorschau eines Cosmetics beim Überfahren (id null = Slot leer) */
+type CosmeticHover = { slot: CosmeticModelSlot; id: string | null };
+const MODEL_SLOTS: readonly CosmeticModelSlot[] = ['head', 'back', 'aura', 'companion'];
+const SLOT_INFO: Record<CosmeticModelSlot, { title: string; text: string; none: string; removed: string }> = {
+  head: { title: 'Kopf', text: 'Hüte, Kronen und mehr – sitzt auf deinem Kopf und bewegt sich mit.', none: 'Nichts', removed: 'Kopfschmuck abgelegt.' },
+  back: { title: 'Rücken', text: 'Flügel und mehr – passt auch zu Cape und Elytra.', none: 'Nichts', removed: 'Rückenteil abgelegt.' },
+  aura: { title: 'Aura', text: 'Partikel, die um dich herum schweben.', none: 'Keine Aura', removed: 'Aura abgelegt.' },
+  companion: { title: 'Begleiter', text: 'Ein kleiner Begleiter, der neben dir schwebt.', none: 'Kein Begleiter', removed: 'Begleiter abgelegt.' },
+};
 
 const page = {
   profile: null as ProfileState | null,
@@ -82,6 +108,11 @@ const page = {
   pinnedSkin: null as string | null,
   hoverSkin: null as string | null,
   hoverCape: null as CapeChoice | null,
+  hoverCosmetic: null as CosmeticHover | null,
+  /** Katalog und eigene Auswahl (null = noch nicht geladen) */
+  cosmetics: null as CosmeticsState | null,
+  cosmeticsLoading: false,
+  cosmeticsSeq: 0,
   elytra: false,
   motion: !reduceMotion.matches,
   active: false,
@@ -95,6 +126,7 @@ interface Ui {
   scroll: HTMLElement;
   tabSkins: HTMLButtonElement;
   tabCapes: HTMLButtonElement;
+  tabCosmetics: HTMLButtonElement;
   skinCount: HTMLElement;
   actions: HTMLElement;
   addButton: HTMLButtonElement;
@@ -132,8 +164,26 @@ function choiceKey(choice: CapeChoice): string {
   return choice.kind === 'none' ? 'none' : `${choice.kind}:${choice.id}`;
 }
 
-function catalogCape(id: string): HeldixCape | undefined {
+/** eingebautes Heldix-Cape (capes/<id>.png) */
+function builtinCape(id: string): HeldixCape | undefined {
   return page.profile?.heldixCapes.find((c) => c.id === id && SAFE_ID.test(c.id));
+}
+
+/** Cosmetic aus dem Katalog (geprüft); slot = nur in diesem Slot */
+function cosmeticItem(id: string | null | undefined, slot?: CosmeticSlotName): CosmeticItem | undefined {
+  if (!id) return undefined;
+  return page.cosmetics?.items.find((i) => i.id === id && (!slot || i.slot === slot));
+}
+
+/** Cape aus dem Katalog */
+function catalogCapeItem(id: string | null | undefined): CosmeticItem | undefined {
+  const item = cosmeticItem(id, 'cape');
+  return item?.cape ? item : undefined;
+}
+
+/** Cosmetic nur fürs Team, und das Konto ist sicher nicht im Team */
+function teamLocked(item: CosmeticItem): boolean {
+  return item.teamOnly && page.cosmetics?.team === false;
 }
 
 function sortedLibrary(p: ProfileState): SavedSkin[] {
@@ -176,25 +226,66 @@ interface CapeImages {
   glow: HTMLImageElement | null;
 }
 
-function loadCapeImages(cape: HeldixCape): Promise<CapeImages> {
-  return Promise.all([
-    loadImage(`capes/${cape.id}.png`, false),
-    cape.glow ? loadImage(`capes/${cape.id}_glow.png`, false).catch(() => null) : Promise.resolve(null),
-  ]).then(([image, glow]) => ({ image, glow }));
+/** Ein Heldix-Cape: eingebaut (capes/<id>.png) oder aus dem Katalog (data:-URL, 64, 128 oder 256 breit) */
+interface CapeDef {
+  /** "heldix:<id>" bzw. "catalog:<id>:<sha256>" */
+  key: string;
+  frames: number;
+  fps: number;
+  /** Leuchtebene addieren (eingebaut, wie auf der Webseite) oder darüberlegen (Katalog, wie die Cosmetics-Vorschau) */
+  glowMode: 'lighter' | 'source-over';
+  load(): Promise<CapeImages>;
+}
+
+function builtinDef(cape: HeldixCape): CapeDef {
+  return {
+    key: `heldix:${cape.id}`,
+    frames: cape.frames,
+    fps: cape.fps,
+    glowMode: 'lighter',
+    load: () =>
+      Promise.all([
+        loadImage(`capes/${cape.id}.png`, false),
+        cape.glow ? loadImage(`capes/${cape.id}_glow.png`, false).catch(() => null) : Promise.resolve(null),
+      ]).then(([image, glow]) => ({ image, glow })),
+  };
+}
+
+function catalogDef(item: CosmeticItem): CapeDef {
+  return {
+    key: `catalog:${item.id}:${item.sha256}`,
+    frames: item.cape?.frames ?? 1,
+    fps: item.cape?.fps ?? 10,
+    glowMode: 'source-over',
+    load: () =>
+      Promise.all([loadImage(item.texture, false), item.glow ? loadImage(item.glow, false).catch(() => null) : Promise.resolve(null)]).then(([image, glow]) => ({ image, glow })),
+  };
+}
+
+function capeDef(choice: CapeChoice): CapeDef | undefined {
+  if (choice.kind === 'heldix') {
+    const cape = builtinCape(choice.id);
+    return cape ? builtinDef(cape) : undefined;
+  }
+  if (choice.kind === 'catalog') {
+    const item = catalogCapeItem(choice.id);
+    return item ? catalogDef(item) : undefined;
+  }
+  return undefined;
 }
 
 /** Ganze Cape-Bilder für die Figur (groß: höchstens drei behalten) */
 const heldixCache = new Map<string, Promise<CapeImages>>();
 
-function heldixImages(cape: HeldixCape): Promise<CapeImages> {
-  let promise = heldixCache.get(cape.id);
+function heldixImages(cape: CapeDef): Promise<CapeImages> {
+  let promise = heldixCache.get(cape.key);
   if (promise) {
-    heldixCache.delete(cape.id);
+    heldixCache.delete(cape.key);
   } else {
-    promise = loadCapeImages(cape);
-    promise.catch(() => heldixCache.delete(cape.id));
+    promise = cape.load();
+    promise.catch(() => heldixCache.delete(cape.key));
   }
-  heldixCache.set(cape.id, promise);
+  heldixCache.set(cape.key, promise);
   while (heldixCache.size > 3) {
     const oldest = heldixCache.keys().next().value;
     if (oldest === undefined) break;
@@ -304,16 +395,18 @@ function paintMojangCape(canvas: HTMLCanvasElement, cape: MojangCape): void {
 /** je Cape alle Bilder der Außenseite untereinander (klein, damit die großen Bilder nicht im Speicher bleiben) */
 const strips = new Map<string, HTMLCanvasElement>();
 let stripsRunning = false;
-const thumbs: { canvas: HTMLCanvasElement; cape: HeldixCape; frame: number }[] = [];
+const thumbs: { canvas: HTMLCanvasElement; cape: CapeDef; frame: number }[] = [];
 let thumbRaf = 0;
 
-function buildStrip(cape: HeldixCape, { image, glow }: CapeImages): HTMLCanvasElement {
+function buildStrip(cape: CapeDef, { image, glow }: CapeImages): HTMLCanvasElement {
   const frames = Math.max(1, cape.frames);
   const strip = document.createElement('canvas');
   strip.width = THUMB_W;
   strip.height = THUMB_H * frames;
   const context = strip.getContext('2d');
   if (!context) return strip;
+  // Katalog-Capes sind kleiner (64–256 breit): Pixel scharf vergrößern
+  context.imageSmoothingEnabled = false;
   const frameHeight = image.naturalHeight / frames;
   const s = image.naturalWidth / 64;
   const glowHeight = glow ? glow.naturalHeight / frames : 0;
@@ -322,7 +415,7 @@ function buildStrip(cape: HeldixCape, { image, glow }: CapeImages): HTMLCanvasEl
     context.globalCompositeOperation = 'source-over';
     context.drawImage(image, s, f * frameHeight + s, 10 * s, 16 * s, 0, f * THUMB_H, THUMB_W, THUMB_H);
     if (glow) {
-      context.globalCompositeOperation = 'lighter';
+      context.globalCompositeOperation = cape.glowMode;
       context.drawImage(glow, gs, f * glowHeight + gs, 10 * gs, 16 * gs, 0, f * THUMB_H, THUMB_W, THUMB_H);
     }
   }
@@ -331,7 +424,7 @@ function buildStrip(cape: HeldixCape, { image, glow }: CapeImages): HTMLCanvasEl
 }
 
 function drawThumb(thumb: (typeof thumbs)[number], frame: number): void {
-  const strip = strips.get(thumb.cape.id);
+  const strip = strips.get(thumb.cape.key);
   const context = thumb.canvas.getContext('2d');
   if (!strip || !context) return;
   thumb.frame = frame;
@@ -340,18 +433,25 @@ function drawThumb(thumb: (typeof thumbs)[number], frame: number): void {
   thumb.canvas.classList.add('ready');
 }
 
+/** alle Heldix-Capes der Seite: eingebaute, dann die aus dem Katalog */
+function allCapeDefs(): CapeDef[] {
+  const builtin = (page.profile?.heldixCapes ?? []).filter((c) => SAFE_ID.test(c.id)).map(builtinDef);
+  const catalog = (page.cosmetics?.items ?? []).filter((i) => i.slot === 'cape' && i.cape).map(catalogDef);
+  return [...builtin, ...catalog];
+}
+
 async function ensureStrips(): Promise<void> {
   if (stripsRunning || !page.profile) return;
   stripsRunning = true;
   try {
     // nacheinander, damit nie alle großen Bilder gleichzeitig im Speicher sind
-    for (const cape of page.profile?.heldixCapes ?? []) {
-      if (strips.has(cape.id) || !SAFE_ID.test(cape.id)) continue;
+    for (const cape of allCapeDefs()) {
+      if (strips.has(cape.key)) continue;
       try {
-        const cached = heldixCache.get(cape.id);
-        const images = cached ? await cached : await loadCapeImages(cape);
-        strips.set(cape.id, buildStrip(cape, images));
-        for (const thumb of thumbs) if (thumb.cape.id === cape.id) drawThumb(thumb, 0);
+        const cached = heldixCache.get(cape.key);
+        const images = cached ? await cached : await cape.load();
+        strips.set(cape.key, buildStrip(cape, images));
+        for (const thumb of thumbs) if (thumb.cape.key === cape.key) drawThumb(thumb, 0);
       } catch {
         // Vorschaubild bleibt leer
       }
@@ -388,11 +488,14 @@ let resumeTimer = 0;
 let syncSeq = 0;
 let shownSkin = '';
 let shownCape = '';
+/** Cosmetics an der Figur und 3D-Vorschaubilder (null = ohne three.js) */
+let rig: CosmeticRig | null = null;
+let thumbnails: CosmeticThumbnails | null = null;
 
 const frameCanvas = document.createElement('canvas');
 frameCanvas.width = FRAME_W;
 frameCanvas.height = FRAME_H;
-const model = { cape: null as HeldixCape | null, images: null as CapeImages | null, frame: 0, timer: 0 };
+const model = { cape: null as CapeDef | null, images: null as CapeImages | null, frame: 0, timer: 0 };
 
 function viewerLib(): ViewerLib | undefined {
   return (window as unknown as { skinview3d?: ViewerLib }).skinview3d;
@@ -431,6 +534,15 @@ function ensureViewer(): void {
       if (host.clientWidth > 0 && host.clientHeight > 0) created.setSize(host.clientWidth, host.clientHeight);
     }).observe(host);
     viewer = created;
+    try {
+      rig = CosmeticRig.attach(created as unknown as RigViewer);
+      rig?.autoZoom(0.76);
+      rig?.setMotion(page.motion);
+      thumbnails = rig ? new CosmeticThumbnails(created as unknown as RigViewer) : null;
+    } catch {
+      rig = null;
+      thumbnails = null;
+    }
   } catch {
     viewer = null;
     ui.canvas.hidden = true;
@@ -488,12 +600,14 @@ function drawModelFrame(): void {
   if (!cape || !images || !context) return;
   const frames = Math.max(1, cape.frames);
   const sourceHeight = images.image.naturalHeight / frames;
+  // Katalog-Capes (64–256 breit) scharf auf 512 × 256 vergrößern
+  context.imageSmoothingEnabled = false;
   context.globalCompositeOperation = 'source-over';
   context.clearRect(0, 0, FRAME_W, FRAME_H);
   context.drawImage(images.image, 0, frame * sourceHeight, images.image.naturalWidth, sourceHeight, 0, 0, FRAME_W, FRAME_H);
   if (images.glow) {
     const glowHeight = images.glow.naturalHeight / frames;
-    context.globalCompositeOperation = 'lighter';
+    context.globalCompositeOperation = cape.glowMode;
     context.drawImage(images.glow, 0, frame * glowHeight, images.glow.naturalWidth, glowHeight, 0, 0, FRAME_W, FRAME_H);
     context.globalCompositeOperation = 'source-over';
   }
@@ -550,6 +664,7 @@ function updateRunning(): void {
   else stopModelTimer();
   if (running && page.motion && page.tab === 'capes' && thumbs.length) startThumbs();
   else stopThumbs();
+  rig?.setMotion(page.motion);
 }
 
 interface PreviewSkin {
@@ -573,12 +688,32 @@ function previewSkin(): PreviewSkin | null {
   return null;
 }
 
-/** So sieht man sich in HeldixClient: das Heldix-Cape ersetzt dort das Minecraft-Cape */
+/** So sieht man sich in HeldixClient: das Heldix-Cape (eingebaut oder aus dem Katalog) ersetzt dort das Minecraft-Cape */
 function currentCape(p: ProfileState | null = page.profile): CapeChoice {
   if (!p) return NO_CAPE;
   if (p.heldixCape && p.heldixCapes.some((c) => c.id === p.heldixCape)) return { kind: 'heldix', id: p.heldixCape };
+  if (p.heldixCape && catalogCapeItem(p.heldixCape)) return { kind: 'catalog', id: p.heldixCape };
   const mojang = p.mojangCapes.find((c) => c.active);
   return mojang ? { kind: 'mojang', id: mojang.id } : NO_CAPE;
+}
+
+/** getragenes Cosmetic eines Slots (aus der eigenen Auswahl, nur wenn es im Katalog ist) */
+function wornCosmetic(slot: CosmeticModelSlot): CosmeticItem | null {
+  return cosmeticItem(page.cosmetics?.selection?.[slot], slot) ?? null;
+}
+
+/** Cosmetics an der Figur: die eigenen, ein überfahrenes ersetzt das seines Slots */
+function previewCosmetics(): Record<CosmeticModelSlot, CosmeticItem | null> {
+  const result = { head: wornCosmetic('head'), back: wornCosmetic('back'), aura: wornCosmetic('aura'), companion: wornCosmetic('companion') };
+  const hover = page.hoverCosmetic;
+  if (hover) result[hover.slot] = cosmeticItem(hover.id, hover.slot) ?? null;
+  return result;
+}
+
+/** Zeigt die Figur gerade ein anderes Cosmetic als getragen? */
+function previewingCosmetic(): boolean {
+  const hover = page.hoverCosmetic;
+  return !!hover && (hover.id ?? null) !== (wornCosmetic(hover.slot)?.id ?? null);
 }
 
 function previewCape(): CapeChoice {
@@ -591,8 +726,12 @@ function capeName(choice: CapeChoice): { label: string; detail: string } {
     return { label: `${cape?.alias ?? 'Cape'} · Minecraft-Cape`, detail: 'Für alle Spieler sichtbar' };
   }
   if (choice.kind === 'heldix') {
-    const cape = catalogCape(choice.id);
+    const cape = builtinCape(choice.id);
     return { label: `${cape?.name ?? choice.id} · Heldix-Cape`, detail: cape?.description ?? '' };
+  }
+  if (choice.kind === 'catalog') {
+    const item = catalogCapeItem(choice.id);
+    return { label: `${item?.name ?? choice.id} · Heldix-Cape`, detail: item?.description ?? '' };
   }
   return { label: 'Ohne Cape', detail: '' };
 }
@@ -605,6 +744,8 @@ async function syncViewer(): Promise<void> {
     return;
   }
   const cape = skin ? previewCape() : NO_CAPE;
+  // Cosmetics nur mit Figur (ohne Skin ist die Figur unsichtbar)
+  if (rig) void rig.showAll(skin ? previewCosmetics() : {});
   try {
     const skinKey = skin ? `${skin.variant}|${skin.dataUrl}` : '';
     if (skinKey !== shownSkin) {
@@ -619,8 +760,8 @@ async function syncViewer(): Promise<void> {
     }
     const capeKey = choiceKey(cape);
     if (capeKey === shownCape) return;
-    if (cape.kind === 'heldix') {
-      const definition = catalogCape(cape.id);
+    if (cape.kind === 'heldix' || cape.kind === 'catalog') {
+      const definition = capeDef(cape);
       if (!definition) return;
       ui?.stageView.classList.add('loading');
       const images = await heldixImages(definition);
@@ -660,16 +801,28 @@ function drawFallback(skin: PreviewSkin | null): void {
 // ---------- Vorschau beim Überfahren ----------
 let hoverTimer = 0;
 
-function setHover(skin: string | null, cape: CapeChoice | null): void {
+function setHover(skin: string | null, cape: CapeChoice | null, cosmetic: CosmeticHover | null = null): void {
   window.clearTimeout(hoverTimer);
   hoverTimer = window.setTimeout(() => {
     const key = (choice: CapeChoice | null) => (choice ? choiceKey(choice) : '');
-    if (page.hoverSkin === skin && key(page.hoverCape) === key(cape)) return;
+    const cosmeticKey = (c: CosmeticHover | null) => (c ? `${c.slot}:${c.id ?? ''}` : '');
+    if (page.hoverSkin === skin && key(page.hoverCape) === key(cape) && cosmeticKey(page.hoverCosmetic) === cosmeticKey(cosmetic)) return;
     page.hoverSkin = skin;
     page.hoverCape = cape;
+    page.hoverCosmetic = cosmetic;
+    // Rückenteile von hinten zeigen, alles andere von vorn
+    if (cosmetic) face(cosmetic.slot === 'back' ? 'back' : 'front');
     renderStage();
     void syncViewer();
-  }, skin || cape ? 40 : 110);
+  }, skin || cape || cosmetic ? 40 : 110);
+}
+
+/** Figur mit dieser Seite zur Kamera drehen – nur, wenn sie gerade (auch durch das Drehen von selbst) woanders hinzeigt */
+function face(side: 'front' | 'back'): void {
+  if (!viewer) return;
+  const goal = side === 'back' ? BACK_ANGLE : FRONT_ANGLE;
+  const current = viewer.playerWrapper.rotation.y - viewer.controls.getAzimuthalAngle();
+  if (Math.abs(Math.atan2(Math.sin(goal - current), Math.cos(goal - current))) > 0.9) turnTo(goal);
 }
 
 function togglePin(id: string): void {
@@ -691,10 +844,13 @@ async function load(options: { silent?: boolean; refresh?: boolean; reset?: bool
   page.accountKey = activeAccountKey();
   if (options.reset) {
     page.profile = null;
+    page.cosmetics = null;
     page.pinnedSkin = null;
     page.hoverSkin = null;
     page.hoverCape = null;
+    page.hoverCosmetic = null;
   }
+  void loadCosmetics(options.refresh === true);
   if (!options.silent || !page.profile) {
     page.loading = true;
     page.failure = null;
@@ -717,6 +873,31 @@ async function load(options: { silent?: boolean; refresh?: boolean; reset?: bool
       render();
     }
   }
+}
+
+/** Cosmetics-Katalog und eigene Auswahl (unabhängig von Mojang: Fehler stehen in cosmetics.error) */
+async function loadCosmetics(refresh = false): Promise<void> {
+  const seq = ++page.cosmeticsSeq;
+  page.cosmeticsLoading = true;
+  try {
+    const cosmetics = await api.getCosmetics(refresh);
+    if (seq !== page.cosmeticsSeq) return;
+    setCosmetics(cosmetics);
+  } catch (error) {
+    if (seq !== page.cosmeticsSeq) return;
+    if (!page.cosmetics) page.cosmetics = { items: [], selection: null, canChoose: false, team: null, error: errorMessage(error) };
+  } finally {
+    if (seq === page.cosmeticsSeq) {
+      page.cosmeticsLoading = false;
+      render();
+    }
+  }
+}
+
+function setCosmetics(cosmetics: CosmeticsState): void {
+  page.cosmetics = cosmetics;
+  const hover = page.hoverCosmetic;
+  if (hover?.id && !cosmeticItem(hover.id, hover.slot)) page.hoverCosmetic = null;
 }
 
 function setProfile(profile: ProfileState): void {
@@ -762,6 +943,7 @@ function setActive(active: boolean): void {
     window.clearTimeout(hoverTimer);
     page.hoverSkin = null;
     page.hoverCape = null;
+    page.hoverCosmetic = null;
   }
   updateRunning();
 }
@@ -827,9 +1009,33 @@ async function selectHeldixCape(cape: HeldixCape | null): Promise<void> {
   render();
   try {
     setProfile(await api.setHeldixCape(cape?.id ?? null));
+    // dasselbe Feld beim Dienst wie der Slot cape der Cosmetics
+    const cosmetics = page.cosmetics;
+    if (cosmetics?.selection) page.cosmetics = { ...cosmetics, selection: { ...cosmetics.selection, cape: page.profile?.heldixCape ?? null } };
     toast(cape ? `Heldix-Cape „${cape.name}“ angelegt.` : 'Heldix-Cape abgelegt.', 'success');
   } catch (error) {
     toast(errorMessage(error), 'error');
+  } finally {
+    page.busy = null;
+    render();
+  }
+}
+
+/** Cosmetic anlegen (item) oder den Slot leeren (null); slot cape = Cape aus dem Katalog */
+async function selectCosmetic(slot: CosmeticSlotName, item: CosmeticItem | null): Promise<void> {
+  if (page.busy || !page.cosmetics?.canChoose) return;
+  page.busy = `cosmetic:${slot}:${item?.id ?? 'none'}`;
+  render();
+  try {
+    const cosmetics = await api.setCosmetic(slot, item?.id ?? null);
+    setCosmetics(cosmetics);
+    if (slot === 'cape' && page.profile) page.profile = { ...page.profile, heldixCape: cosmetics.selection?.cape ?? null };
+    if (slot === 'cape') toast(item ? `Heldix-Cape „${item.name}“ angelegt.` : 'Heldix-Cape abgelegt.', 'success');
+    else toast(item ? `„${item.name}“ angelegt.` : SLOT_INFO[slot].removed, 'success');
+  } catch (error) {
+    toast(errorMessage(error), 'error');
+    // z. B. „nur fürs Team“: der Launcher weiß es jetzt und sperrt die Kachel
+    void loadCosmetics();
   } finally {
     page.busy = null;
     render();
@@ -1008,10 +1214,10 @@ function renderHead(): void {
 function renderBar(): void {
   if (!ui) return;
   const p = page.profile;
-  ui.tabSkins.classList.toggle('active', page.tab === 'skins');
-  ui.tabCapes.classList.toggle('active', page.tab === 'capes');
-  ui.tabSkins.setAttribute('aria-selected', String(page.tab === 'skins'));
-  ui.tabCapes.setAttribute('aria-selected', String(page.tab === 'capes'));
+  for (const [tab, button] of [['skins', ui.tabSkins], ['capes', ui.tabCapes], ['cosmetics', ui.tabCosmetics]] as const) {
+    button.classList.toggle('active', page.tab === tab);
+    button.setAttribute('aria-selected', String(page.tab === tab));
+  }
   ui.skinCount.textContent = p ? String(p.library.length) : '';
   ui.skinCount.hidden = !p;
   ui.actions.hidden = page.tab !== 'skins' || !p;
@@ -1035,7 +1241,7 @@ function renderBody(): void {
   else if (!p) nodes.push(failureView(page.failure));
   else {
     nodes.push(...notices(p));
-    nodes.push(page.tab === 'skins' ? skinsView(p) : capesView(p));
+    nodes.push(page.tab === 'skins' ? skinsView(p) : page.tab === 'capes' ? capesView(p) : cosmeticsView());
   }
   ui.scroll.replaceChildren(...nodes);
   ui.scroll.scrollTop = scrollTop;
@@ -1048,11 +1254,18 @@ function renderStage(): void {
   const skin = previewSkin();
   const cape = skin ? previewCape() : NO_CAPE;
   // Vorschau durch einen angeklickten Skin (nicht nur durch Überfahren): lässt sich am Schild beenden
-  const pinned = !!page.pinnedSkin && !page.hoverSkin && !page.hoverCape;
-  const previewing = !!skin && (!skin.current || choiceKey(cape) !== choiceKey(currentCape()));
+  const pinned = !!page.pinnedSkin && !page.hoverSkin && !page.hoverCape && !page.hoverCosmetic;
+  const previewing = !!skin && (!skin.current || choiceKey(cape) !== choiceKey(currentCape()) || previewingCosmetic());
 
   ui.stageName.textContent = skin?.name ?? (!p ? '' : p.account ? 'Kein Skin' : 'Keine Figur');
-  const { label, detail } = capeName(cape);
+  let { label, detail } = capeName(cape);
+  const hover = page.hoverCosmetic;
+  if (hover) {
+    // überfahrenes Cosmetic statt des Capes nennen
+    const item = cosmeticItem(hover.id, hover.slot);
+    label = item ? `${item.name} · ${SLOT_INFO[hover.slot].title}` : `${SLOT_INFO[hover.slot].title}: ${SLOT_INFO[hover.slot].none}`;
+    detail = item?.description ?? '';
+  }
   ui.stageSub.textContent = skin ? label : '';
   ui.stageSub.title = detail;
 
@@ -1086,14 +1299,14 @@ function renderStage(): void {
 
 function loadingView(): HTMLElement {
   return h('div', { class: 'profile-loading', 'aria-busy': 'true' },
-    h('div', { class: 'profile-loading-line' }, spinner(), 'Skins und Capes werden geladen …'),
+    h('div', { class: 'profile-loading-line' }, spinner(), 'Skins, Capes und Cosmetics werden geladen …'),
     h('div', { class: 'profile-skin-grid' }, ...[0, 1, 2].map(() => h('div', { class: 'profile-skeleton' }))));
 }
 
 function failureView(message: string | null): HTMLElement {
   return h('div', { class: 'content-empty profile-failure' },
     uiIcon('warning', 'empty-icon'),
-    h('div', { class: 'content-empty-title', text: 'Skins & Capes ließen sich nicht laden' }),
+    h('div', { class: 'content-empty-title', text: 'Skins & Cosmetics ließen sich nicht laden' }),
     h('div', { text: message ?? 'Unbekannter Fehler.' }),
     h('button', { class: 'ghost', type: 'button', onclick: () => void load({ refresh: true }) }, uiIcon('refresh', 'btn-icon'), 'Erneut versuchen'));
 }
@@ -1219,12 +1432,19 @@ function skinCard(skin: SavedSkin, p: ProfileState): HTMLElement {
 
 // ----- Reiter „Capes“ -----
 interface TileOptions {
-  choice: CapeChoice;
+  /** Vorschau beim Überfahren: ein Cape … */
+  choice?: CapeChoice;
+  /** … oder ein Cosmetic */
+  cosmetic?: CosmeticHover;
   label: string;
   art: Node;
+  /** quadratisches Vorschaubild (Cosmetics) statt Cape-Format */
+  square?: boolean;
   checked: boolean;
   /** nicht wählbar (Vorschau beim Überfahren geht trotzdem) */
   locked: boolean;
+  /** nur für das HeldixClient-Team */
+  team?: boolean;
   busyKey: string;
   title: string;
   select: () => void;
@@ -1233,8 +1453,10 @@ interface TileOptions {
 function capeTile(o: TileOptions): HTMLElement {
   const busy = page.busy === o.busyKey;
   const blocked = o.locked || (!!page.busy && !busy);
+  const enter = () => setHover(null, o.choice ?? null, o.cosmetic ?? null);
+  const leave = () => setHover(null, null, null);
   return h('button', {
-    class: `profile-cape${busy ? ' busy' : ''}`,
+    class: `profile-cape${busy ? ' busy' : ''}${o.square ? ' square' : ''}`,
     type: 'button',
     role: 'radio',
     'aria-checked': String(o.checked),
@@ -1243,15 +1465,23 @@ function capeTile(o: TileOptions): HTMLElement {
     onclick: () => {
       if (!blocked && !busy && !o.checked) o.select();
     },
-    onmouseenter: () => setHover(null, o.choice),
-    onmouseleave: () => setHover(null, null),
-    onfocus: () => setHover(null, o.choice),
-    onblur: () => setHover(null, null),
+    onmouseenter: enter,
+    onmouseleave: leave,
+    onfocus: enter,
+    onblur: leave,
   },
   h('span', { class: 'profile-cape-art' }, o.art),
   h('span', { class: 'profile-cape-name', text: o.label }),
+  o.team ? h('span', { class: 'profile-cape-team', title: 'Nur für das HeldixClient-Team' }, uiIcon('shield'), 'Team') : null,
   o.checked ? h('span', { class: 'profile-cape-check' }, uiIcon('check')) : null,
   busy ? h('span', { class: 'profile-cape-busy' }, spinner()) : null);
+}
+
+/** Titel einer Katalog-Kachel (gesperrt: warum) */
+function cosmeticTitle(item: CosmeticItem, lockedBy: string | null): string {
+  const text = item.description ? `${item.name}: ${item.description}` : item.name;
+  if (lockedBy) return `${item.name} – ${lockedBy}`;
+  return item.teamOnly ? `${text} (nur für das HeldixClient-Team)` : text;
 }
 
 function noneArt(): HTMLElement {
@@ -1311,18 +1541,20 @@ function capesView(p: ProfileState): HTMLElement {
     sectionHead('Heldix-Capes', 'Andere HeldixClient-Spieler sehen dein Heldix-Cape im Spiel. Dort ersetzt es dein Minecraft-Cape.'));
   if (lockedRow) heldix.append(lockedRow);
   const catalog = p.heldixCapes.filter((c) => SAFE_ID.test(c.id));
-  if (!catalog.length) {
+  // Capes aus dem Cosmetics-Katalog (signiert, vom Team veröffentlicht) neben den eingebauten
+  const extra = (page.cosmetics?.items ?? []).filter((i) => i.slot === 'cape' && i.cape);
+  if (!catalog.length && !extra.length) {
     heldix.append(h('p', { class: 'profile-locked' }, uiIcon('info'), h('span', { text: 'Keine Heldix-Capes gefunden.' })));
   } else {
-    const selected = p.heldixCape && catalog.some((c) => c.id === p.heldixCape) ? p.heldixCape : null;
+    const selected = p.heldixCape && (catalog.some((c) => c.id === p.heldixCape) || extra.some((i) => i.id === p.heldixCape)) ? p.heldixCape : null;
     const lockTitle = microsoft ? 'Heldix-Dienst nicht erreichbar' : 'Nur mit Microsoft-Konto und Heldix-Dienst';
     const tiles = [
       capeTile({ choice: NO_CAPE, label: 'Kein Heldix-Cape', art: noneArt(), checked: !selected, locked: heldixLocked, busyKey: 'heldix:none', title: heldixLocked ? lockTitle : 'Kein Heldix-Cape tragen', select: () => void selectHeldixCape(null) }),
       ...catalog.map((cape) => {
         const canvas = h('canvas', { width: String(THUMB_W), height: String(THUMB_H) });
-        const thumb = { canvas, cape, frame: -1 };
+        const thumb = { canvas, cape: builtinDef(cape), frame: -1 };
         thumbs.push(thumb);
-        if (strips.has(cape.id)) drawThumb(thumb, 0);
+        if (strips.has(thumb.cape.key)) drawThumb(thumb, 0);
         return capeTile({
           choice: { kind: 'heldix', id: cape.id },
           label: cape.name,
@@ -1334,11 +1566,112 @@ function capesView(p: ProfileState): HTMLElement {
           select: () => void selectHeldixCape(cape),
         });
       }),
+      ...extra.map((item) => {
+        const canvas = h('canvas', { width: String(THUMB_W), height: String(THUMB_H) });
+        const thumb = { canvas, cape: catalogDef(item), frame: -1 };
+        thumbs.push(thumb);
+        if (strips.has(thumb.cape.key)) drawThumb(thumb, 0);
+        const chooseLocked = heldixLocked || !page.cosmetics?.canChoose;
+        const lockedBy = chooseLocked ? lockTitle : teamLocked(item) ? 'nur für das HeldixClient-Team' : null;
+        return capeTile({
+          choice: { kind: 'catalog', id: item.id },
+          label: item.name,
+          art: canvas,
+          checked: item.id === selected,
+          locked: !!lockedBy,
+          team: item.teamOnly,
+          busyKey: `cosmetic:cape:${item.id}`,
+          title: cosmeticTitle(item, lockedBy),
+          select: () => void selectCosmetic('cape', item),
+        });
+      }),
     ];
     heldix.append(h('div', { class: `profile-cape-grid${heldixLocked ? ' locked' : ''}`, role: 'radiogroup', 'aria-label': 'Heldix-Cape' }, ...tiles));
   }
 
   panel.append(heldix, mojang);
+  return panel;
+}
+
+// ----- Reiter „Cosmetics“ -----
+/** 3D-Vorschaubild (bzw. Partikelbilder) einer Katalog-Kachel; kommt nach, sobald gezeichnet */
+function cosmeticArt(item: CosmeticItem): HTMLElement {
+  const image = h('img', { class: 'profile-cosmetic-thumb', alt: '', draggable: 'false' });
+  const art = h('span', { class: 'profile-cosmetic-art' }, image);
+  if (thumbnails) {
+    void thumbnails.get(item, 144).then((url) => {
+      if (url) {
+        image.src = url;
+        image.classList.add('ready');
+      } else art.replaceChildren(uiIcon('sparkles', 'profile-cape-missing'));
+    });
+  } else art.replaceChildren(uiIcon('sparkles', 'profile-cape-missing'));
+  return art;
+}
+
+function cosmeticsView(): HTMLElement {
+  const panel = h('div', { class: 'profile-panel' });
+  const cosmetics = page.cosmetics;
+  if (!cosmetics) {
+    panel.append(h('div', { class: 'profile-loading-line' }, spinner(), 'Cosmetics werden geladen …'));
+    return panel;
+  }
+  panel.append(h('p', { class: 'profile-info' }, uiIcon('info'),
+    h('span', { text: 'Alle HeldixClient-Spieler sehen deine Cosmetics im Spiel – ohne etwas zu installieren. Fahr über ein Cosmetic, um es an deiner Figur anzuprobieren.' })));
+  const locked = !cosmetics.canChoose;
+  const reason = cosmetics.error ?? 'Nur mit Microsoft-Konto und Heldix-Dienst';
+  if (locked) {
+    panel.append(h('p', { class: 'profile-locked' }, uiIcon('lock'),
+      h('span', { text: cosmetics.items.length ? `${reason} Vorschau geht trotzdem.` : reason }),
+      cosmetics.error && /erreichbar|antwortet/.test(cosmetics.error) ? retryButton() : null));
+  } else if (cosmetics.error) {
+    panel.append(h('p', { class: 'profile-locked' }, uiIcon('info'), h('span', { text: cosmetics.error }), retryButton()));
+  }
+  if (!cosmetics.items.some((i) => i.slot !== 'cape')) {
+    if (!cosmetics.error) panel.append(h('div', { class: 'content-empty' }, uiIcon('sparkles', 'empty-icon'),
+      h('div', { class: 'content-empty-title', text: 'Noch keine Cosmetics' }),
+      h('div', { text: 'Sobald das Team welche veröffentlicht, findest du sie hier.' })));
+    return panel;
+  }
+  const lockTitle = locked ? reason : null;
+  for (const slot of MODEL_SLOTS) {
+    const items = cosmetics.items.filter((i) => i.slot === slot);
+    if (!items.length) continue;
+    const info = SLOT_INFO[slot];
+    const worn = wornCosmetic(slot);
+    const tiles = [
+      capeTile({
+        cosmetic: { slot, id: null },
+        label: info.none,
+        art: noneArt(),
+        square: true,
+        // Auswahl unbekannt (ohne Dienst): nichts als gewählt zeigen
+        checked: cosmetics.selection !== null && !worn,
+        locked,
+        busyKey: `cosmetic:${slot}:none`,
+        title: lockTitle ?? `${info.title}: ${info.none}`,
+        select: () => void selectCosmetic(slot, null),
+      }),
+      ...items.map((item) => {
+        const lockedBy = lockTitle ?? (teamLocked(item) ? 'nur für das HeldixClient-Team' : null);
+        return capeTile({
+          cosmetic: { slot, id: item.id },
+          label: item.name,
+          art: cosmeticArt(item),
+          square: true,
+          checked: worn?.id === item.id,
+          locked: !!lockedBy,
+          team: item.teamOnly,
+          busyKey: `cosmetic:${slot}:${item.id}`,
+          title: cosmeticTitle(item, lockedBy),
+          select: () => void selectCosmetic(slot, item),
+        });
+      }),
+    ];
+    panel.append(h('section', { class: 'profile-section', 'data-slot': slot },
+      sectionHead(info.title, info.text),
+      h('div', { class: `profile-cape-grid${locked ? ' locked' : ''}`, role: 'radiogroup', 'aria-label': info.title }, ...tiles)));
+  }
   return panel;
 }
 
@@ -1348,6 +1681,7 @@ function setTab(tab: Tab): void {
   window.clearTimeout(hoverTimer);
   page.hoverSkin = null;
   page.hoverCape = null;
+  page.hoverCosmetic = null;
   renderBar();
   renderBody();
   ui.scroll.scrollTop = 0;
@@ -1360,7 +1694,7 @@ function setTab(tab: Tab): void {
 // ---------- Aufbau ----------
 function build(root: HTMLElement): Ui {
   const sub = h('p', { class: 'page-sub' });
-  const head = h('div', { class: 'page-head' }, h('h2', { class: 'page-title', text: 'Skins & Capes' }), sub);
+  const head = h('div', { class: 'page-head' }, h('h2', { class: 'page-title', text: 'Skins & Cosmetics' }), sub);
 
   const canvas = h('canvas', { class: 'profile-canvas', 'aria-label': '3D-Vorschau deiner Figur, zum Drehen ziehen' });
   const fallback = h('canvas', { class: 'profile-fallback', width: '16', height: '32', hidden: true });
@@ -1373,7 +1707,7 @@ function build(root: HTMLElement): Ui {
     renderStage();
     updateRunning();
     // Standbild statt Animation: erstes Bild zeigen
-    for (const thumb of thumbs) if (strips.has(thumb.cape.id)) drawThumb(thumb, page.motion ? thumb.frame : 0);
+    for (const thumb of thumbs) if (strips.has(thumb.cape.key)) drawThumb(thumb, page.motion ? thumb.frame : 0);
   });
   const stageView = h('div', { class: 'profile-stage-view' }, canvas, fallback, hint, tag, motion);
   const stageName = h('div', { class: 'profile-stage-name' });
@@ -1391,18 +1725,19 @@ function build(root: HTMLElement): Ui {
   const skinCount = h('span', { class: 'profile-count' });
   const tabSkins = h('button', { type: 'button', role: 'tab', class: 'active', onclick: () => setTab('skins') }, 'Skins', skinCount);
   const tabCapes = h('button', { type: 'button', role: 'tab', onclick: () => setTab('capes') }, 'Capes');
+  const tabCosmetics = h('button', { type: 'button', role: 'tab', onclick: () => setTab('cosmetics') }, 'Cosmetics');
   const resetButton = h('button', { class: 'ghost', type: 'button', onclick: () => void resetSkin() });
   const addButton = h('button', { class: 'primary', type: 'button', title: 'PNG-Datei auswählen (64 × 64 oder 64 × 32 Pixel)', onclick: () => void importSkins() },
     uiIcon('plus', 'btn-icon'), 'Skin hinzufügen');
   const actions = h('div', { class: 'profile-bar-actions' }, resetButton, addButton);
   const scroll = h('div', { class: 'profile-scroll' });
   const main = h('div', { class: 'profile-main' },
-    h('div', { class: 'profile-bar' }, h('div', { class: 'tabs', role: 'tablist' }, tabSkins, tabCapes), actions),
+    h('div', { class: 'profile-bar' }, h('div', { class: 'tabs', role: 'tablist' }, tabSkins, tabCapes, tabCosmetics), actions),
     scroll,
     h('div', { class: 'drop-overlay' }, h('div', { text: 'PNG-Skins hier ablegen' })));
 
   root.replaceChildren(head, h('div', { class: 'profile-layout' }, stage, main));
-  return { root, sub, main, scroll, tabSkins, tabCapes, skinCount, actions, addButton, resetButton, stageView, canvas, fallback, hint, tag, motion, stageName, stageSub, elytra };
+  return { root, sub, main, scroll, tabSkins, tabCapes, tabCosmetics, skinCount, actions, addButton, resetButton, stageView, canvas, fallback, hint, tag, motion, stageName, stageSub, elytra };
 }
 
 /** einmal beim Start */

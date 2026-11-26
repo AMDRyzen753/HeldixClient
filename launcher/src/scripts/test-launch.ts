@@ -85,10 +85,10 @@ async function main(): Promise<void> {
     const addonsDir = path.join(gameDir, 'heldix-addons');
     await mkdir(addonsDir, { recursive: true });
     // Reste aus dem Addon-Store-Test (vorgemerkte Löschungen, Ersatz-JARs) würden den frischen Build überschreiben
-    for (const leftover of (await readdir(addonsDir)).filter((f) => f === '.entfernen' || f.endsWith('.neu') || f.endsWith('.part'))) {
+    for (const leftover of (await readdir(addonsDir)).filter((f) => f === '.entfernen' || f === '.ausschalten' || f.endsWith('.neu') || f.endsWith('.part'))) {
       await rm(path.join(addonsDir, leftover), { force: true });
     }
-    for (const id of ['uhrzeit', 'spotify']) {
+    for (const id of ['uhrzeit', 'spotify', 'itemphysics']) {
       const libs = path.join(modRepo, 'addons', id, 'build', 'libs');
       const built = await Promise.all((await readdir(libs).catch(() => [] as string[]))
         .filter((f) => f.startsWith(`heldix-addon-${id}-`) && f.endsWith('.jar'))
@@ -123,7 +123,16 @@ async function main(): Promise<void> {
     if (!autotestJar) throw new Error('mod/autotest ist nicht gebaut – erst "npm run mod" ausführen');
     for (const old of (await readdir(modsDir)).filter((f) => f.startsWith('heldix-autotest-'))) await rm(path.join(modsDir, old));
     await copyFile(path.join(autotestLibs, autotestJar), path.join(modsDir, autotestJar));
-    await copyFile(path.join(modRepo, 'build', 'test-addons', 'heldix-addon-kaputt.jar'), path.join(addonsDir, 'heldix-addon-kaputt.jar'));
+    // Test-Addons aus mod/build/test-addons: kaputt (falsche API) und die mit Zugriff auf Minecraft (mod/test-addons/minecraft,
+    // darunter eine abgeschaltete .jar.disabled); an/aus aus einem früheren Lauf zählt nicht
+    await rm(path.join(addonsDir, '.ausschalten'), { force: true });
+    const fixtures = path.join(modRepo, 'build', 'test-addons');
+    for (const file of (await readdir(fixtures)).filter((f) => /^heldix-addon-.+\.jar(\.disabled)?$/.test(f))) {
+      const base = file.replace(/\.disabled$/, '');
+      await rm(path.join(addonsDir, base), { force: true });
+      await rm(path.join(addonsDir, `${base}.disabled`), { force: true });
+      await copyFile(path.join(fixtures, file), path.join(addonsDir, file));
+    }
     if (loader === 'heldix') {
       const dummy = new AdmZip();
       dummy.addFile('fabric.mod.json', Buffer.from(JSON.stringify({ schemaVersion: 1, id: 'fabric-attrappe', version: '1.0.0' })));

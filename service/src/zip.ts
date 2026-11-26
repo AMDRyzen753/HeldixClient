@@ -3,6 +3,14 @@
 // Einträge, verschlüsselte Einträge, ZIP64 und Pfade mit „..“ ab; alles andere als ein sauberes Archiv wird abgelehnt.
 import { setImmediate as yieldToLoop } from 'node:timers/promises';
 import { crc32, inflateRawSync } from 'node:zlib';
+import {
+  defaultLoaders,
+  isLoaderList,
+  MAX_MINECRAFT_VERSIONS,
+  MINECRAFT_VERSION_RE,
+  type AddonAccess,
+  type AddonLoader,
+} from './addons';
 import { codePointLength, hasForbiddenChars } from './validate';
 
 /** Höchstens so viele Einträge (auch große Addons haben einige hundert). */
@@ -216,19 +224,37 @@ const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
 const CLASS_NAME_RE = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
 
 export const METADATA_FILE = 'heldix.addon.json';
+/** Beschreibung einer älteren Heldix-Mod (Heldix Loader): Wer sie mitbringt, greift in Minecraft ein. */
+export const MOD_METADATA_FILE = 'heldix.mod.json';
+/** Höchstens so viele Transformer je Addon (wie im Launcher). */
+const MAX_TRANSFORMERS = 50;
 
 /** Was die Prüfung einer Addon-JAR ergibt. */
 export interface AddonJarInfo {
   id: string;
   version: string;
   api: number;
-  entrypoint: string;
+  /** HeldixAddon (Heldix-API); seit Format 2 freiwillig */
+  entrypoint: string | null;
+  /** HeldixModInitializer (Heldix-Loader-API), läuft beim Spielstart */
+  clientEntrypoint: string | null;
+  /** ClassTransformer (Heldix-Loader-API) */
+  transformers: string[];
+  /** Minecraft-Versionen (leer = jede; Pflicht bei Zugriff minecraft) */
+  minecraft: string[];
+  /** Mindestversion des Heldix Loaders, z. B. ">=2.4.0" (nur geprüft, nicht im Manifest) */
+  loader: string | null;
+  /** abgeleitet: minecraft, sobald clientEntrypoint oder transformers da sind oder die JAR heldix.mod.json enthält, sonst api */
+  access: AddonAccess;
+  /** aus „loaders“ in heldix.addon.json, sonst defaultLoaders(access) */
+  loaders: AddonLoader[];
   name: string;
   /** Kurzbeschreibung (description aus heldix.addon.json), kann leer sein */
   description: string;
   /** Autoren aus heldix.addon.json (0–5) */
   authors: string[];
-  inspection: { classes: number; uses: InspectionUse[] };
+  /** `expected`: Hinweise, die zum Zugriff passen (bei Zugriff minecraft: „minecraft“) */
+  inspection: { classes: number; uses: InspectionUse[]; expected: InspectionUse[] };
 }
 
 /** Ein Byte-Order-Mark am Anfang (manche Editoren) stört JSON.parse. */
@@ -246,8 +272,24 @@ function metaText(value: unknown, field: string, min: number, max: number): stri
   return text;
 }
 
-/** Prüft den Inhalt von heldix.addon.json (wie der Store ihn braucht). */
-function checkMetadata(data: Buffer): Omit<AddonJarInfo, 'inspection'> {
+/** Ein Klassenname (z. B. dev.beispiel.MeinAddon) oder null, wenn das Feld fehlt. */
+function className(value: unknown, field: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string' || value.length > 300 || !CLASS_NAME_RE.test(value)) {
+    throw new ZipProblem(`„${field}“ in ${METADATA_FILE} ist kein Klassenname (z. B. dev.beispiel.MeinAddon).`);
+  }
+  return value;
+}
+
+/** Ein Text oder eine Liste von Texten (wie im Launcher), ohne Doppelte; null, wenn es keins von beiden ist. */
+function textList(value: unknown): unknown[] | null {
+  if (value === undefined || value === null) return [];
+  const list = typeof value === 'string' ? [value] : value;
+  return Array.isArray(list) ? [...new Set(list)] : null;
+}
+
+/** Prüft den Inhalt von heldix.addon.json (Format 2, abwärtskompatibel; wie der Store ihn braucht). */
+function checkMetadata(data: Buffer, withModDescriptor: boolean): Omit<AddonJarInfo, 'inspection'> {
   let meta: unknown;
   try {
     meta = JSON.parse(stripBom(data.toString('utf8')));
@@ -265,9 +307,38 @@ function checkMetadata(data: Buffer): Omit<AddonJarInfo, 'inspection'> {
   if (typeof m.api !== 'number' || !Number.isInteger(m.api) || m.api < 1 || m.api > 99) {
     throw new ZipProblem(`„api“ in ${METADATA_FILE} muss eine ganze Zahl von 1 bis 99 sein.`);
   }
-  if (typeof m.entrypoint !== 'string' || m.entrypoint.length > 300 || !CLASS_NAME_RE.test(m.entrypoint)) {
-    throw new ZipProblem(`„entrypoint“ in ${METADATA_FILE} fehlt oder ist kein Klassenname (z. B. dev.beispiel.MeinAddon).`);
+  const entrypoint = className(m.entrypoint, 'entrypoint');
+  const clientEntrypoint = className(m.clientEntrypoint, 'clientEntrypoint');
+  const transformers = textList(m.transformers);
+  if (transformers === null || transformers.length > MAX_TRANSFORMERS || !transformers.every((t) => typeof t === 'string' && t.length <= 300 && CLASS_NAME_RE.test(t))) {
+    throw new ZipProblem(`„transformers“ in ${METADATA_FILE} muss eine Liste mit höchstens ${MAX_TRANSFORMERS} Klassennamen sein.`);
   }
+  if (entrypoint === null && clientEntrypoint === null && transformers.length === 0) {
+    throw new ZipProblem(
+      `In ${METADATA_FILE} fehlt ein Einstiegspunkt: „entrypoint“ (Heldix-API), „clientEntrypoint“ oder „transformers“ (Eingriff in Minecraft).`,
+    );
+  }
+  // Nie „api“ für etwas, das in Minecraft eingreift: clientEntrypoint, Transformer oder eine mitgebrachte heldix.mod.json
+  const access: AddonAccess = clientEntrypoint !== null || transformers.length > 0 || withModDescriptor ? 'minecraft' : 'api';
+  const minecraft = textList(m.minecraft);
+  if (minecraft === null || minecraft.length > MAX_MINECRAFT_VERSIONS || !minecraft.every((v) => typeof v === 'string' && MINECRAFT_VERSION_RE.test(v))) {
+    throw new ZipProblem(
+      `„minecraft“ in ${METADATA_FILE} muss eine Liste mit höchstens ${MAX_MINECRAFT_VERSIONS} Minecraft-Versionen sein, jede einzeln (z. B. ["26.2", "26.3"] oder "26.x"; keine Regeln wie ">=26.2" oder "26.2 || 26.3").`,
+    );
+  }
+  if (access === 'minecraft' && minecraft.length === 0) {
+    throw new ZipProblem(
+      withModDescriptor && clientEntrypoint === null && transformers.length === 0
+        ? `Die JAR enthält ${MOD_METADATA_FILE} (Heldix-Mod) und greift damit in Minecraft ein, ${METADATA_FILE} nennt aber keine Minecraft-Version („minecraft“ fehlt).`
+        : `Das Addon greift in Minecraft ein (clientEntrypoint oder transformers), ${METADATA_FILE} nennt aber keine Minecraft-Version („minecraft“ fehlt).`,
+    );
+  }
+  let loader: string | null = null;
+  if (m.loader !== undefined && m.loader !== null) loader = metaText(m.loader, 'loader', 1, 100);
+  if (m.loaders !== undefined && !isLoaderList(m.loaders)) {
+    throw new ZipProblem(`„loaders“ in ${METADATA_FILE} muss eine nicht leere Liste aus "heldix" und "fabric" sein (ohne Doppelte).`);
+  }
+  const loaders = m.loaders === undefined ? defaultLoaders(access) : [...(m.loaders as AddonLoader[])];
   const name = metaText(m.name, 'name', 1, 40);
   const description = metaText(m.description, 'description', 0, 200);
   let authors: string[] = [];
@@ -275,26 +346,59 @@ function checkMetadata(data: Buffer): Omit<AddonJarInfo, 'inspection'> {
     if (!Array.isArray(m.authors) || m.authors.length > 5) throw new ZipProblem(`„authors“ in ${METADATA_FILE} muss eine Liste mit höchstens 5 Namen sein.`);
     authors = m.authors.map((author, i) => metaText(author, `authors (Eintrag ${i + 1})`, 1, 40));
   }
-  return { id: m.id, version: m.version, api: m.api, entrypoint: m.entrypoint, name, description, authors };
+  return {
+    id: m.id,
+    version: m.version,
+    api: m.api,
+    entrypoint,
+    clientEntrypoint,
+    transformers: transformers as string[],
+    minecraft: minecraft as string[],
+    loader,
+    access,
+    loaders,
+    name,
+    description,
+    authors,
+  };
 }
 
 /**
- * Prüft eine Addon-JAR: ZIP-Struktur, heldix.addon.json (id, version, api, entrypoint, name, description, authors),
- * die Einstiegsklasse ist vorhanden, und zählt die Klassendateien samt groben Hinweisen (Bytes nach Konstanten
- * durchsucht, nichts ausgeführt). Gibt zwischendurch die Ereignisschleife frei. Wirft `ZipProblem`.
+ * Prüft eine Addon-JAR: ZIP-Struktur, heldix.addon.json (id, version, api, Einstiegspunkte, minecraft, loader, loaders,
+ * name, description, authors), alle genannten Klassen sind vorhanden, und zählt die Klassendateien samt groben Hinweisen
+ * (Bytes nach Konstanten durchsucht, nichts ausgeführt). Bei Zugriff minecraft ist der Hinweis „minecraft“ erwartet.
+ * Gibt zwischendurch die Ereignisschleife frei. Wirft `ZipProblem`.
  */
 export async function inspectAddonJar(buf: Buffer): Promise<AddonJarInfo> {
   const entries = readZip(buf);
   const metaEntry = entries.find((e) => e.name === METADATA_FILE);
-  if (!metaEntry || metaEntry.directory) throw new ZipProblem(`In der JAR fehlt ${METADATA_FILE}.`);
+  const modEntry = entries.find((e) => e.name === MOD_METADATA_FILE && !e.directory);
+  if (!metaEntry || metaEntry.directory) {
+    throw new ZipProblem(
+      modEntry
+        ? `In der JAR fehlt ${METADATA_FILE}. Heldix-Mods (${MOD_METADATA_FILE}) brauchen für den Store eine ${METADATA_FILE} mit „clientEntrypoint“ oder „transformers“ und „minecraft“.`
+        : `In der JAR fehlt ${METADATA_FILE}.`,
+    );
+  }
   if (metaEntry.size > MAX_METADATA_BYTES) throw new ZipProblem(`${METADATA_FILE} ist zu groß (höchstens ${MAX_METADATA_BYTES / 1024} KB).`);
   if (metaEntry.size > MAX_METADATA_RATIO * Math.max(1, metaEntry.compressedSize)) {
     throw new ZipProblem(`${METADATA_FILE} ist verdächtig stark komprimiert (über ${MAX_METADATA_RATIO}:1) – das sieht nach einer Zip-Bombe aus.`);
   }
-  const meta = checkMetadata(readEntry(buf, metaEntry, MAX_METADATA_BYTES));
-  const entrypointFile = `${meta.entrypoint.replace(/\./g, '/')}.class`;
-  if (!entries.some((e) => e.name === entrypointFile)) {
-    throw new ZipProblem(`Die Einstiegsklasse ${meta.entrypoint} (aus ${METADATA_FILE}) fehlt in der JAR.`);
+  const meta = checkMetadata(readEntry(buf, metaEntry, MAX_METADATA_BYTES), modEntry !== undefined);
+  const files = new Set(entries.filter((e) => !e.directory).map((e) => e.name));
+  const named: [string, string][] = [
+    ...(meta.entrypoint === null ? [] : [[meta.entrypoint, 'entrypoint'] as [string, string]]),
+    ...(meta.clientEntrypoint === null ? [] : [[meta.clientEntrypoint, 'clientEntrypoint'] as [string, string]]),
+    ...meta.transformers.map((t) => [t, 'transformers'] as [string, string]),
+  ];
+  for (const [cls, field] of named) {
+    if (!files.has(`${cls.replace(/\./g, '/')}.class`)) {
+      throw new ZipProblem(
+        field === 'entrypoint'
+          ? `Die Einstiegsklasse ${cls} (aus ${METADATA_FILE}) fehlt in der JAR.`
+          : `Die Klasse ${cls} (aus „${field}“ in ${METADATA_FILE}) fehlt in der JAR.`,
+      );
+    }
   }
 
   const found = new Set<InspectionUse>();
@@ -313,5 +417,8 @@ export async function inspectAddonJar(buf: Buffer): Promise<AddonJarInfo> {
       await yieldToLoop();
     }
   }
-  return { ...meta, inspection: { classes, uses: INSPECTION_USES.filter((use) => found.has(use)) } };
+  const uses = INSPECTION_USES.filter((use) => found.has(use));
+  // Wer in Minecraft eingreift, nutzt Minecraft-Klassen: erwartet, kein Warnzeichen. Die übrigen Hinweise bleiben.
+  const expected = uses.filter((use) => use === 'minecraft' && meta.access === 'minecraft');
+  return { ...meta, inspection: { classes, uses, expected } };
 }

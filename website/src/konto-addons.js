@@ -6,13 +6,20 @@
 //   4. Regeln bestätigen → „Zur Prüfung einreichen“ (POST …/submit)
 // Der Konto-Bereich hat keine Echtzeit-Verbindung: Solange der Reiter offen ist, fragt die Seite alle 15 Sekunden
 // nach und meldet, wenn das Team eine Einreichung freigegeben oder abgelehnt hat.
+// Addons dürfen auch direkt in Minecraft eingreifen (clientEntrypoint/transformers in der heldix.addon.json): Der
+// Dienst nennt dann access „minecraft“, die Minecraft-Versionen und Loader, und die Prüf-Hinweise, die dazu passen,
+// stehen in inspection.expected – die zeigt die Seite neutral statt rot.
 // Texte vom Server landen nur als Text im Dokument.
 import { ApiError, api, busy, confirmAction, emptyState, formatBytes, formatDate, h, icon, loadingState, poller, relativeTime, rerender, showError, toast, upload } from './app-common.js';
 import {
   ADDON_ID_RE,
   ALLE_SYSTEME,
   API_STUFE,
+  INSPECTION,
   KATEGORIEN,
+  MINECRAFT_ACCESS,
+  accessChips,
+  addonAccessFields,
   addonIcon,
   formatCount,
   hasIcon,
@@ -25,6 +32,8 @@ import {
   plainText,
   platformLimit,
   platformText,
+  loaderText,
+  minecraftVersionList,
   ratingSummary,
 } from './addon-common.js';
 import { openLightbox } from './lightbox.js';
@@ -46,11 +55,70 @@ const $ = (id) => document.getElementById(id);
 const length = (value) => [...value].length;
 const shortSha = (hash) => (typeof hash === 'string' && hash.length > 20 ? `${hash.slice(0, 12)}…${hash.slice(-6)}` : (hash ?? '–'));
 
+/** Zugriff einer Einreichung: { access, minecraft, loaders } – vor der JAR (access null) alles leer. */
+function accessOfSubmission(value) {
+  const empty = { access: null, minecraft: [], loaders: [] };
+  if (value.access === null || (value.access === undefined && !value.sha256)) return empty;
+  return addonAccessFields(value) ?? empty;
+}
+
+/** Prüf-Hinweise, die zum angegebenen Zugriff passen (inspection.expected, sonst bei „minecraft“ die Minecraft-Klassen). */
+function expectedUses(sub) {
+  const uses = sub.inspection?.uses ?? [];
+  const expected = sub.expected ?? (sub.access === 'minecraft' ? ['minecraft'] : []);
+  return uses.filter((use) => expected.includes(use));
+}
+
+/** Prüf-Hinweise ohne die erwarteten (für die Listen aus addon-common.js). */
+function unexpectedInspection(sub) {
+  const expected = expectedUses(sub);
+  if (!sub.inspection || !expected.length) return sub.inspection;
+  return { ...sub.inspection, uses: sub.inspection.uses.filter((use) => !expected.includes(use)) };
+}
+
+/** Rote Hinweise, die nicht zum angegebenen Zugriff passen. */
+const hasRedHints = (sub) => Boolean(unexpectedInspection(sub)?.uses.some((use) => INSPECTION[use]?.level === 'danger'));
+
+/** Liste der Prüf-Hinweise: erwartete neutral obenan, der Rest wie gewohnt. */
+function submissionInspectionList(sub) {
+  const expected = expectedUses(sub);
+  const list = inspectionList(unexpectedInspection(sub));
+  if (!expected.length || !list.matches('ul')) return list;
+  list.querySelector('.inspect-item.ok')?.remove();
+  list.prepend(
+    ...expected.map((use) =>
+      h(
+        'li',
+        { class: 'inspect-item expected', dataset: { use } },
+        icon(use === 'minecraft' ? 'cube' : 'info'),
+        h('span', null, h('strong', { text: INSPECTION[use]?.label ?? use }), h('span', { class: 'inspect-detail', text: use === 'minecraft' ? ' – erwartet: Dein Addon gibt an, direkt in Minecraft einzugreifen. Das Team sieht sich an, ob das nötig ist.' : ' – erwartet: passt zum angegebenen Zugriff.' })),
+      ),
+    ),
+  );
+  if (list.children.length === expected.length) list.append(h('li', { class: 'inspect-item ok' }, icon('check'), h('span', null, h('strong', { text: 'Sonst nichts Auffälliges' }))));
+  return list;
+}
+
+function submissionInspectionChips(sub) {
+  const chips = inspectionChips(unexpectedInspection(sub));
+  if (!expectedUses(sub).length) return chips;
+  return chips.map((element) => (element.classList.contains('success') ? h('span', { class: 'chip success' }, icon('check'), 'sonst unauffällig') : element));
+}
+
+/** Kurztext zum Zugriff (Zusammenfassung, Schritt 1). */
+function accessSummary(sub) {
+  if (sub.access !== 'minecraft') return 'Nutzt nur die Heldix-API – läuft in jeder Minecraft-Version mit HeldixClient';
+  const parts = [MINECRAFT_ACCESS, sub.minecraft.length ? `Minecraft ${minecraftVersionList(sub.minecraft)}` : null, loaderText(sub)];
+  return parts.filter(Boolean).join(' · ');
+}
+
 /** Einreichung vom Dienst in eine sichere Form bringen (fehlende Felder bekommen Standardwerte). */
 function normalizeSubmission(value) {
   if (!value || typeof value !== 'object' || (typeof value.id !== 'string' && typeof value.id !== 'number')) return null;
   const textOf = (field, max) => (typeof value[field] === 'string' ? value[field].slice(0, max) : '');
   return {
+    ...accessOfSubmission(value),
+    expected: Array.isArray(value.inspection?.expected) ? value.inspection.expected.filter((use) => typeof use === 'string') : null,
     id: String(value.id),
     status: Object.hasOwn(STATUS, value.status) ? value.status : 'draft',
     addonId: typeof value.addonId === 'string' && ADDON_ID_RE.test(value.addonId) ? value.addonId : null,
@@ -83,9 +151,9 @@ function statusChip(status) {
 
 /**
  * call: Anfrage mit Sitzung (wie im Konto, 401 meldet ab). onUnauthorized: für Uploads (XMLHttpRequest),
- * die nicht über call laufen.
+ * die nicht über call laufen. onChange({ submissions, addons }): nach jedem Laden (Übersicht und Aktivität im Konto).
  */
-export function initMyAddons({ call, onUnauthorized }) {
+export function initMyAddons({ call, onUnauthorized, onChange }) {
   const state = {
     submissions: null,
     addons: null,
@@ -95,6 +163,7 @@ export function initMyAddons({ call, onUnauthorized }) {
     shotLoads: new Set(), // „id/n“, die gerade nachgeladen werden
     wizard: null, // { sub, forAddon, step, job, busy }
     iconsBuilt: false,
+    loadedAt: 0, // letzter Stand vom Dienst (für refreshInBackground)
   };
   const refresher = poller(() => refresh(), POLL_MS);
 
@@ -124,6 +193,8 @@ export function initMyAddons({ call, onUnauthorized }) {
     state.submissions = submissions;
     state.addons = addons;
     render();
+    state.loadedAt = Date.now();
+    onChange?.({ submissions, addons });
   }
 
   function render() {
@@ -174,9 +245,9 @@ export function initMyAddons({ call, onUnauthorized }) {
       h(
         'div',
         { class: 'row-main' },
-        h('div', { class: 'row-title' }, h('span', { text: title }), statusChip(sub.status), sub.version ? h('span', { class: 'chip', text: `Version ${sub.version}` }) : null),
+        h('div', { class: 'row-title' }, h('span', { text: title }), statusChip(sub.status), sub.version ? h('span', { class: 'chip', text: `Version ${sub.version}` }) : null, accessChips(sub, { compact: true })),
         h('div', { class: 'row-sub', text: [sub.addonId ? sub.addonId : 'noch ohne JAR', when].join(' · ') }),
-        sub.inspection && (sub.status === 'draft' || sub.status === 'pending') ? h('div', { class: 'chips-row' }, inspectionChips(sub.inspection)) : null,
+        sub.inspection && (sub.status === 'draft' || sub.status === 'pending') ? h('div', { class: 'chips-row' }, submissionInspectionChips(sub)) : null,
         sub.status === 'rejected' && sub.reviewNote ? h('blockquote', { class: 'quote review-quote' }, h('span', { class: 'quote-label', text: 'Begründung des Teams: ' }), sub.reviewNote) : null,
         sub.status === 'pending' ? h('p', { class: 'row-meta', text: 'Das Team prüft den Code. Du bekommst hier Bescheid, sobald es entschieden hat.' }) : null,
       ),
@@ -192,7 +263,7 @@ export function initMyAddons({ call, onUnauthorized }) {
       h(
         'div',
         { class: 'row-main' },
-        h('div', { class: 'row-title' }, h('span', { text: addon.name }), h('span', { class: 'chip', text: `Version ${addon.version}` }), originBadge(addon), addon.hidden ? h('span', { class: 'chip warning', text: 'ausgeblendet' }) : null),
+        h('div', { class: 'row-title' }, h('span', { text: addon.name }), h('span', { class: 'chip', text: `Version ${addon.version}` }), originBadge(addon), accessChips(addon, { compact: true }), addon.hidden ? h('span', { class: 'chip warning', text: 'ausgeblendet' }) : null),
         h('div', { class: 'row-sub' }, formatCount(addon.downloads), ' · ', ratingSummary(addon.rating, { long: true })),
         addon.hidden ? h('p', { class: 'row-meta', text: 'Das Team hat das Addon aus dem Store genommen. Wer es installiert hat, behält es. Fragen dazu beantwortet das Team über eine Support-Anfrage.' }) : null,
       ),
@@ -529,7 +600,8 @@ export function initMyAddons({ call, onUnauthorized }) {
     const warnings = [];
     if (wizard.forAddon && sub.addonId !== wizard.forAddon.id) warnings.push(`Die JAR hat die ID „${sub.addonId}“, nicht „${wizard.forAddon.id}“. So entsteht ein eigenes, neues Addon – keine neue Version von ${wizard.forAddon.name}.`);
     if (sub.api !== null && sub.api > API_STUFE) warnings.push(`Das Addon braucht die Heldix-API-Stufe ${sub.api}. HeldixClient lädt derzeit bis Stufe ${API_STUFE} – so kann es niemand nutzen.`);
-    const red = sub.inspection?.uses.some((use) => ['prozesse', 'nativ', 'minecraft'].includes(use));
+    const red = hasRedHints(sub);
+    if (sub.access === 'minecraft' && !sub.minecraft.length) warnings.push('Dein Addon greift in Minecraft ein, nennt in der heldix.addon.json aber keine Minecraft-Versionen („minecraft“). Ohne sie lädt es niemand.');
     box.replaceChildren(
       h('h4', { text: 'Erkannt in der JAR' }),
       h(
@@ -543,6 +615,12 @@ export function initMyAddons({ call, onUnauthorized }) {
         h('dd', { text: sub.name || '–' }),
         h('dt', { text: 'API-Stufe' }),
         h('dd', { text: sub.api === null ? '–' : String(sub.api) }),
+        h('dt', { text: 'Zugriff' }),
+        h('dd', { class: 'access-fact' }, sub.access === 'minecraft' ? accessChips(sub, { compact: true }) : 'Nur Heldix-API'),
+        h('dt', { text: 'Minecraft' }),
+        h('dd', { text: sub.minecraft.length ? minecraftVersionList(sub.minecraft) : sub.access === 'minecraft' ? '–' : 'jede Version' }),
+        h('dt', { text: 'Läuft mit' }),
+        h('dd', { text: loaderText(sub) }),
         h('dt', { text: sub.authors.length === 1 ? 'Autor' : 'Autoren' }),
         h('dd', { text: sub.authors.join(', ') || '–' }),
         h('dt', { text: 'Größe' }),
@@ -554,13 +632,15 @@ export function initMyAddons({ call, onUnauthorized }) {
       ),
       ...warnings.map((text) => h('p', { class: 'addon-warning' }, icon('warning'), h('span', { text }))),
       h('h4', { text: 'Prüf-Hinweise' }),
-      inspectionList(sub.inspection),
+      submissionInspectionList(sub),
       h(
         'p',
         { class: 'hint' },
         red
-          ? 'Rot markierte Zugriffe darf ein Addon praktisch nie – mit ihnen lehnt das Team fast immer ab. Addons nutzen nur die Heldix-API.'
-          : 'Die Hinweise kommen aus einer groben Suche in den Klassendateien. Das Team sieht sie auch und fragt bei Bedarf nach.',
+          ? 'Rot markierte Zugriffe darf ein Addon praktisch nie – mit ihnen lehnt das Team fast immer ab. Greift dein Addon in Minecraft ein, gib das in der heldix.addon.json an (clientEntrypoint oder transformers, dazu „minecraft“ mit den Versionen).'
+          : sub.access === 'minecraft'
+            ? 'Dein Addon greift direkt in Minecraft ein. Das ist erlaubt, wenn die Heldix-API dafür nicht reicht – das Team sieht sich die Eingriffe genau an. An und Aus wirkt bei solchen Addons erst nach dem Neustart.'
+            : 'Die Hinweise kommen aus einer groben Suche in den Klassendateien. Das Team sieht sie auch und fragt bei Bedarf nach.',
       ),
     );
   }
@@ -774,7 +854,8 @@ export function initMyAddons({ call, onUnauthorized }) {
     const limit = platformLimit(sub.platforms);
     const checks = [
       ['ok', `JAR ${sub.addonId} ${sub.version} (${formatBytes(sub.size)})`],
-      [sub.inspection?.uses.some((use) => ['prozesse', 'nativ', 'minecraft'].includes(use)) ? 'fail' : sub.inspection?.uses.length ? 'warn' : 'ok', sub.inspection?.uses.length ? 'Prüf-Hinweise: Das Team sieht sich diese Zugriffe genauer an' : 'Prüf-Hinweise: nichts Auffälliges'],
+      [sub.access === 'minecraft' ? 'info' : 'ok', `Zugriff: ${accessSummary(sub)}`],
+      [hasRedHints(sub) ? 'fail' : unexpectedInspection(sub)?.uses.length ? 'warn' : 'ok', unexpectedInspection(sub)?.uses.length ? 'Prüf-Hinweise: Das Team sieht sich diese Zugriffe genauer an' : expectedUses(sub).length ? 'Prüf-Hinweise: nur die erwarteten Eingriffe in Minecraft' : 'Prüf-Hinweise: nichts Auffälliges'],
       [sub.screenshots ? 'ok' : 'info', sub.screenshots ? `${sub.screenshots} ${sub.screenshots === 1 ? 'Screenshot' : 'Screenshots'}` : 'Keine Screenshots (freiwillig)'],
       [sub.notes.length ? 'ok' : 'info', sub.notes.length ? `Was ist neu: ${sub.notes.length} ${sub.notes.length === 1 ? 'Punkt' : 'Punkte'}` : 'Ohne „Was ist neu?“'],
       ['ok', `Systeme: ${platformText(sub.platforms)}`],
@@ -786,7 +867,7 @@ export function initMyAddons({ call, onUnauthorized }) {
         { class: 'addon-card preview-card' },
         h('div', { class: 'addon-card-head' }, addonIcon(sub.icon), h('div', { class: 'addon-card-title' }, h('h3', { text: sub.name }), h('p', { class: 'addon-card-meta', text: [`Version ${sub.version}`, sub.authors.length ? `von ${sub.authors.join(', ')}` : null].filter(Boolean).join(' · ') }))),
         sub.summary ? h('p', { class: 'addon-summary', text: sub.summary }) : null,
-        h('div', { class: 'addon-card-foot' }, h('span', { class: 'addon-chips' }, originBadge({ official: false }), h('span', { class: 'chip accent', text: KATEGORIEN[sub.category] }), limit ? h('span', { class: 'chip warning', text: limit }) : null)),
+        h('div', { class: 'addon-card-foot' }, h('span', { class: 'addon-chips' }, originBadge({ official: false }), h('span', { class: 'chip accent', text: KATEGORIEN[sub.category] }), accessChips(sub), limit ? h('span', { class: 'chip warning', text: limit }) : null)),
       ),
       sub.description ? h('details', { class: 'preview-text' }, h('summary', null, 'Beschreibung ansehen', icon('chevron-down')), h('div', { class: 'addon-text' }, plainText(sub.description))) : '',
       h('ul', { class: 'check-list' }, checks.map(([kind, text]) => h('li', { class: kind }, icon(kind === 'ok' ? 'check' : kind === 'fail' ? 'warning' : kind === 'warn' ? 'warning' : 'info'), h('span', { text })))),
@@ -892,10 +973,21 @@ export function initMyAddons({ call, onUnauthorized }) {
       state.wizard?.job?.abort();
       state.wizard = null;
       state.known = null;
+      state.loadedAt = 0;
       $('assistent').hidden = true;
       $('addons-uebersicht').hidden = false;
     },
     /** Assistent für eine neue Version (z. B. aus einem Link). */
     hasWizard: () => Boolean(state.wizard),
+    /**
+     * Einmal laden, wenn der Reiter zu ist (Übersicht, Aktivität). Höchstens alle maxAgeMs – solange „Meine Addons“
+     * offen ist, fragt der Reiter ohnehin alle 15 Sekunden nach.
+     */
+    refreshInBackground(maxAgeMs = 0) {
+      if (state.wizard?.busy || Date.now() - (state.loadedAt ?? 0) < maxAgeMs) return Promise.resolve();
+      return refresh();
+    },
+    /** Assistent öffnen (Schnellaktion „Addon einreichen“). */
+    openWizard: () => openWizard(),
   };
 }

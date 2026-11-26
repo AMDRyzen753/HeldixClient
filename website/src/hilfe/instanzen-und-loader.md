@@ -29,7 +29,7 @@ Die Minecraft-Dateien lädt der Launcher beim ersten Start der Instanz.
 
 ## Instanz verwalten
 Klicke unter **Instanzen** auf eine Instanz. Dort findest du:
-- die Reiter **Mods**, **Heldix-Addons**, **Shader** und **Einstellungen**
+- die Reiter **Mods & Addons**, **Shader** und **Einstellungen**
 - **Ordner**: öffnet den Spielordner der Instanz
 - **Spielen**: startet genau diese Instanz
 

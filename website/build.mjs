@@ -11,6 +11,9 @@
 // - Module aus den Quellen der Mod (module/impl/*.java, Icons aus Module.java, Module der Store-Addons aus
 //   mod/addons/<id>) + Texte aus src/data/module.json; Capes aus capes.json der Mod (Texturen werden mitkopiert)
 // - Addon-Store (/addons): der Inhalt kommt zur Laufzeit vom Dienst, die Seite bekommt dafür das ganze Icon-Set
+// - Cosmetics (/cosmetics): Katalog zur Laufzeit vom Dienst; /update-key.js bringt den öffentlichen Update-Schlüssel
+//   aus launcher/src/main/update-public-key.ts mit (Prüfung der Signaturen im Browser), /capes/capes.json die
+//   eingebauten Capes
 // - 3D-Ansicht: skinview3d (MIT) samt Lizenztexten, dazu ein selbst gezeichneter Standard-Skin
 // - Bilder (docs/images), Logo, Hintergrund und die Schrift Inter (aus der Mod) werden mitkopiert
 // - sitemap.xml und robots.txt
@@ -354,6 +357,19 @@ function readCapes() {
   return JSON.parse(readFileSync(file, 'utf8')).capes;
 }
 
+/**
+ * Öffentlicher Update-Schlüssel (PEM) aus launcher/src/main/update-public-key.ts – damit prüft die Seite die Signatur
+ * der Cosmetics im Browser. Fehlt die Datei oder ist kein Schlüssel eingetragen: null (dann zeigt die Seite keine).
+ */
+function readUpdatePublicKey() {
+  const file = path.join(root, 'launcher', 'src', 'main', 'update-public-key.ts');
+  if (!existsSync(file)) return null;
+  const match = /UPDATE_PUBLIC_KEY[^=]*=\s*("(?:[^"\\]|\\.)*")/.exec(readFileSync(file, 'utf8'));
+  if (!match) return null;
+  const pem = JSON.parse(match[1]);
+  return /^-----BEGIN PUBLIC KEY-----\n[A-Za-z0-9+/=\n]+-----END PUBLIC KEY-----\n?$/.test(pem) ? pem : null;
+}
+
 // ---------------------------------------------------------------------------------------------------------
 // Bauen
 // ---------------------------------------------------------------------------------------------------------
@@ -417,9 +433,9 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
   // --- Hilfe und Entwickler
   const HILFE_KATEGORIEN = [
     ['erste-schritte', 'Erste Schritte', 'Installieren, anmelden, losspielen', 'play'],
-    ['launcher', 'Launcher & Instanzen', 'Loader, Mods, Shaderpacks, Updates', 'loader-heldix'],
+    ['launcher', 'Launcher & Instanzen', 'Loader, Mods & Addons, Shaderpacks, Updates', 'loader-heldix'],
     ['grafik', 'Grafik & Leistung', 'Vulkan, OpenGL, FPS-Boost, Shader', 'performance'],
-    ['spiel', 'Im Spiel', 'Heldix-Menü, Module, HUD, Capes', 'modules'],
+    ['spiel', 'Im Spiel', 'Heldix-Menü, Module, HUD, Capes & Cosmetics', 'modules'],
     ['freunde', 'Freunde & Konto', 'Freunde, Nachrichten, Privatsphäre, Web-Konto', 'friends'],
     ['probleme', 'Probleme lösen', 'Startprobleme, Abstürze, Anmeldung', 'warning'],
   ];
@@ -609,6 +625,17 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
     copyFileSync(path.join(capeDir, `${cape.id}.png`), path.join(outDir, 'capes', `${cape.id}.png`));
     if (cape.glow && existsSync(path.join(capeDir, `${cape.id}_glow.png`))) copyFileSync(path.join(capeDir, `${cape.id}_glow.png`), path.join(outDir, 'capes', `${cape.id}_glow.png`));
   }
+  // Liste der eingebauten Capes für Seiten, die sie erst zur Laufzeit brauchen (cosmetics-common.js: loadBuiltinCapes)
+  writeFileSync(
+    path.join(outDir, 'capes', 'capes.json'),
+    JSON.stringify({ capes: capes.map((cape) => ({ id: cape.id, name: cape.name, description: cape.description, frames: Number(cape.frames) || 1, fps: Number(cape.fps) || 10, glow: Boolean(cape.glow) })) }),
+  );
+  // Öffentlicher Update-Schlüssel für die Prüfung der Cosmetics im Browser (cosmetics-common.js)
+  const updateKey = readUpdatePublicKey();
+  writeFileSync(
+    path.join(outDir, 'update-key.js'),
+    `// Gebaut von website/build.mjs aus launcher/src/main/update-public-key.ts – nicht von Hand ändern.\n// Öffentlicher Ed25519-Schlüssel, mit dem das HeldixClient-Team Cosmetics (und Addons, Updates) signiert; null = keiner.\nexport const UPDATE_PUBLIC_KEY = ${JSON.stringify(updateKey)};\n`,
+  );
   // 3D-Ansicht (skinview3d mit three.js, MIT-Lizenz) samt Lizenztexten
   const modules3d = path.join(root, 'launcher', 'node_modules');
   copyFileSync(path.join(modules3d, 'skinview3d', 'bundles', 'skinview3d.bundle.js'), path.join(outDir, 'vendor', 'skinview3d.bundle.js'));

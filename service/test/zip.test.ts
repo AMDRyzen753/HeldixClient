@@ -126,10 +126,16 @@ describe('Addon-JAR prüfen', () => {
       version: '1.2.3-beta.1',
       api: 2,
       entrypoint: 'dev.beispiel.wetter.Haupt',
+      clientEntrypoint: null,
+      transformers: [],
+      minecraft: [],
+      loader: null,
+      access: 'api',
+      loaders: ['heldix', 'fabric'],
       name: 'Wetter',
       description: 'Zeigt das Wetter.',
       authors: ['Anna', 'Ben'],
-      inspection: { classes: 2, uses: [] },
+      inspection: { classes: 2, uses: [], expected: [] },
     });
     // Ohne description und authors; mit BOM am Anfang
     const bare = addonJar('leer', '1.0.0', { rawMeta: `${String.fromCharCode(0xfeff)}{"id":"leer","name":"Leer","version":"1.0.0","entrypoint":"dev.beispiel.leer.Haupt","api":1}` });
@@ -154,15 +160,105 @@ describe('Addon-JAR prüfen', () => {
     ];
     for (const [constants, uses] of cases) {
       const jar = addonJar('hinweis', '1.0.0', { extra: [entry('dev/beispiel/hinweis/Teil.class', classFile(...constants))] });
-      assert.deepEqual((await inspectAddonJar(jar)).inspection, { classes: 2, uses }, constants.join(', '));
+      assert.deepEqual((await inspectAddonJar(jar)).inspection, { classes: 2, uses, expected: [] }, constants.join(', '));
     }
     // Gespeichert (nicht komprimiert) zählt genauso; nur .class-Dateien werden durchsucht, native Bibliotheken zählen als „nativ“.
     const stored = addonJar('hinweis', '1.0.0', {
       extra: [entry('dev/beispiel/hinweis/Netz.class', classFile('java/net/URI'), 0), entry('text.txt', 'java/lang/ProcessBuilder')],
     });
-    assert.deepEqual((await inspectAddonJar(stored)).inspection, { classes: 2, uses: ['netzwerk'] });
+    assert.deepEqual((await inspectAddonJar(stored)).inspection, { classes: 2, uses: ['netzwerk'], expected: [] });
     const native = addonJar('hinweis', '1.0.0', { extra: [entry('natives/win/hilfe.DLL', randomBytes(100)), entry('lib/libx.so', randomBytes(10))] });
-    assert.deepEqual((await inspectAddonJar(native)).inspection, { classes: 1, uses: ['nativ'] });
+    assert.deepEqual((await inspectAddonJar(native)).inspection, { classes: 1, uses: ['nativ'], expected: [] });
+  });
+
+  test('heldix.addon.json Format 2: Eingriff in Minecraft (clientEntrypoint, transformers), minecraft, loader, loaders', async () => {
+    const cls = (name: string, ...constants: string[]) => entry(`${name.replace(/\./g, '/')}.class`, classFile(...constants));
+    // Nur clientEntrypoint: Zugriff minecraft, läuft (ohne Angabe) nur im Heldix Loader; Minecraft-Klassen sind erwartet
+    const start = await inspectAddonJar(
+      addonJar('sicht', '1.0.0', {
+        meta: { entrypoint: undefined, clientEntrypoint: 'dev.x.Start', minecraft: ['26.3'], loader: '>=2.4.0' },
+        extra: [cls('dev.x.Start', 'net/minecraft/client/Camera', 'java/lang/ProcessBuilder')],
+      }),
+    );
+    assert.deepEqual(
+      [start.entrypoint, start.clientEntrypoint, start.transformers, start.minecraft, start.loader, start.access, start.loaders],
+      [null, 'dev.x.Start', [], ['26.3'], '>=2.4.0', 'minecraft', ['heldix']],
+    );
+    assert.deepEqual(start.inspection, { classes: 1, uses: ['prozesse', 'minecraft'], expected: ['minecraft'] });
+    // entrypoint und Transformer (als einzelner Text, wie im Launcher erlaubt), minecraft als Text; Doppelte fallen weg
+    const both = await inspectAddonJar(
+      addonJar('beides', '2.0.0', {
+        meta: { transformers: ['dev.x.Trafo', 'dev.x.Trafo'], minecraft: '26.3', loaders: ['heldix', 'fabric'] },
+        extra: [cls('dev.x.Trafo', 'net/minecraft/client/Camera')],
+      }),
+    );
+    assert.deepEqual(
+      [both.entrypoint, both.transformers, both.minecraft, both.access, both.loaders],
+      ['dev.beispiel.beides.Haupt', ['dev.x.Trafo'], ['26.3'], 'minecraft', ['heldix', 'fabric']],
+    );
+    assert.deepEqual(both.inspection.expected, ['minecraft']);
+    const single = await inspectAddonJar(addonJar('einzeln', '1.0.0', { meta: { entrypoint: undefined, transformers: 'dev.x.T', minecraft: ['26.2', '26.3', '26.x'] }, extra: [cls('dev.x.T')] }));
+    assert.deepEqual([single.transformers, single.minecraft, single.access], [['dev.x.T'], ['26.2', '26.3', '26.x'], 'minecraft']);
+    // Nur Heldix-API, aber mit Minecraft-Versionen und eigenen Loadern; Minecraft-Klassen bleiben dann ein Hinweis
+    const api = await inspectAddonJar(
+      addonJar('nurapi', '1.0.0', { meta: { minecraft: ['26.2', '26.3', '26.2'], loaders: ['heldix'] }, extra: [cls('dev.x.Teil', 'net/minecraft/x', 'java/net/URL')] }),
+    );
+    assert.deepEqual([api.access, api.minecraft, api.loaders, api.clientEntrypoint, api.transformers], ['api', ['26.2', '26.3'], ['heldix'], null, []]);
+    assert.deepEqual(api.inspection, { classes: 2, uses: ['netzwerk', 'minecraft'], expected: [] });
+
+    // Fehler
+    const bad: [Record<string, unknown>, RegExp][] = [
+      [{ entrypoint: undefined }, /fehlt ein Einstiegspunkt: „entrypoint“ \(Heldix-API\), „clientEntrypoint“ oder „transformers“/],
+      [{ entrypoint: null, transformers: [] }, /fehlt ein Einstiegspunkt/],
+      [{ entrypoint: undefined, clientEntrypoint: 'dev.x.Start' }, /greift in Minecraft ein .*nennt aber keine Minecraft-Version/],
+      [{ transformers: ['dev.x.T'], minecraft: [] }, /nennt aber keine Minecraft-Version/],
+      [{ clientEntrypoint: 'nicht gültig', minecraft: ['26.3'] }, /„clientEntrypoint“ in heldix\.addon\.json ist kein Klassenname/],
+      [{ clientEntrypoint: 5, minecraft: ['26.3'] }, /„clientEntrypoint“/],
+      [{ transformers: [5], minecraft: ['26.3'] }, /„transformers“ in heldix\.addon\.json muss eine Liste mit höchstens 50 Klassennamen sein/],
+      [{ transformers: {}, minecraft: ['26.3'] }, /„transformers“/],
+      [{ transformers: Array.from({ length: 51 }, (_, i) => `dev.x.T${i}`), minecraft: ['26.3'] }, /„transformers“/],
+      [{ minecraft: '>=26.2' }, /„minecraft“ in heldix\.addon\.json muss eine Liste mit höchstens 50 Minecraft-Versionen sein/],
+      [{ minecraft: ['26.2 || 26.3'] }, /„minecraft“/],
+      [{ minecraft: ['*'] }, /„minecraft“/],
+      [{ minecraft: [26.3] }, /„minecraft“/],
+      [{ minecraft: Array.from({ length: 51 }, (_, i) => `26.${i}`) }, /„minecraft“/],
+      [{ loaders: [] }, /„loaders“ in heldix\.addon\.json muss eine nicht leere Liste aus "heldix" und "fabric" sein/],
+      [{ loaders: ['forge'] }, /„loaders“/],
+      [{ loaders: ['heldix', 'heldix'] }, /„loaders“/],
+      [{ loaders: 'heldix' }, /„loaders“/],
+      [{ loader: '' }, /„loader“ in heldix\.addon\.json darf nicht leer sein/],
+      [{ loader: 7 }, /„loader“/],
+    ];
+    for (const [meta, pattern] of bad) await inspectRejects(addonJar('v2', '1.0.0', { meta, extra: [cls('dev.x.T'), cls('dev.x.Start')] }), pattern);
+    // Jede genannte Klasse muss in der JAR liegen
+    await inspectRejects(
+      addonJar('fehlt', '1.0.0', { meta: { entrypoint: undefined, clientEntrypoint: 'dev.x.Start', minecraft: ['26.3'] } }),
+      /Die Klasse dev\.x\.Start \(aus „clientEntrypoint“ in heldix\.addon\.json\) fehlt in der JAR/,
+    );
+    await inspectRejects(
+      addonJar('fehlt', '1.0.0', { meta: { transformers: ['dev.x.T', 'dev.x.Weg'], minecraft: ['26.3'] }, extra: [cls('dev.x.T')] }),
+      /Die Klasse dev\.x\.Weg \(aus „transformers“ in heldix\.addon\.json\) fehlt in der JAR/,
+    );
+    // 50 Versionen gehen noch
+    const many = await inspectAddonJar(addonJar('viele', '1.0.0', { meta: { minecraft: Array.from({ length: 50 }, (_, i) => `26.${i}`) } }));
+    assert.equal(many.minecraft.length, 50);
+
+    // Eine mitgebrachte heldix.mod.json (ältere Heldix-Mod) heißt: greift in Minecraft ein, auch ohne clientEntrypoint
+    const modJson = entry('heldix.mod.json', JSON.stringify({ id: 'altmod', name: 'Alt', version: '1.0.0', minecraft: '26.3', entrypoint: 'dev.x.Start' }));
+    const legacy = await inspectAddonJar(addonJar('altmod', '1.0.0', { meta: { minecraft: ['26.3'] }, extra: [modJson] }));
+    assert.deepEqual([legacy.access, legacy.minecraft, legacy.loaders, legacy.clientEntrypoint], ['minecraft', ['26.3'], ['heldix'], null]);
+    await inspectRejects(
+      addonJar('altmod', '1.0.0', { extra: [modJson] }),
+      /enthält heldix\.mod\.json \(Heldix-Mod\) und greift damit in Minecraft ein, heldix\.addon\.json nennt aber keine Minecraft-Version/,
+    );
+    // Nur heldix.mod.json: Für den Store fehlt heldix.addon.json
+    await inspectRejects(buildZip([modJson, entry('dev/x/Start.class', classFile())]), /fehlt heldix\.addon\.json\. Heldix-Mods \(heldix\.mod\.json\) brauchen für den Store/);
+
+    // Ein Ordner mit dem Namen der Klasse zählt nicht
+    await inspectRejects(
+      addonJar('ordner', '1.0.0', { meta: { entrypoint: undefined, transformers: ['dev.x.T'], minecraft: ['26.3'] }, extra: [entry('dev/x/T.class/', '', 0)] }),
+      /Die Klasse dev\.x\.T/,
+    );
   });
 
   test('heldix.addon.json: fehlt, kaputt, falsche Felder, Einstiegsklasse fehlt', async () => {

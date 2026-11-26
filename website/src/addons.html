@@ -1,4 +1,4 @@
-<!--seite {"titel": "Addon-Store", "beschreibung": "Heldix-Addons für HeldixClient: zusätzliche Module und HUD-Anzeigen vom Team und aus der Community, vom Team geprüft und signiert. Mit Bewertungen und Screenshots. Installieren im Launcher, im Spiel oder per Download.", "bild": "/images/spiel-heldix-menue.png"}-->
+<!--seite {"titel": "Addon-Store", "beschreibung": "Heldix-Addons für HeldixClient: zusätzliche Module, HUD-Anzeigen und Änderungen am Spiel vom Team und aus der Community, vom Team geprüft und signiert. Mit Bewertungen und Screenshots. Installieren im Launcher, im Spiel oder per Download.", "bild": "/images/spiel-heldix-menue.png"}-->
 <!doctype html>
 <html lang="de">
 <head>
@@ -14,10 +14,10 @@
     <a class="back-link" id="store-zurueck" href="/addons" hidden>{{icon:chevron-left}}Alle Addons</a>
     <span class="eyebrow" id="store-eyebrow">Addon-Store</span>
     <h1 id="store-titel">Mehr Module mit <span class="gradient">Heldix-Addons</span></h1>
-    <p class="lead" id="store-lead">Addons erweitern HeldixClient um eigene Module und HUD-Anzeigen – vom Team und aus der Community. Jedes Addon prüft und signiert das Team, bevor es hier erscheint.</p>
+    <p class="lead" id="store-lead">Addons erweitern HeldixClient um eigene Module, HUD-Anzeigen und Änderungen am Spiel – vom Team und aus der Community. Jedes Addon prüft und signiert das Team, bevor es hier erscheint.</p>
   </div>
 
-  <noscript><p class="notice">Der Addon-Store braucht JavaScript. Ohne Browser geht es im Launcher: Instanzen → Instanz → Heldix-Addons → Addon-Store.</p></noscript>
+  <noscript><p class="notice">Der Addon-Store braucht JavaScript. Ohne Browser geht es im Launcher: Instanzen → Instanz → Mods &amp; Addons → Hinzufügen → Addon-Store.</p></noscript>
 
   <div class="module-tools glass store-tools" role="search" id="store-werkzeuge" hidden>
     <label class="search-field">
@@ -27,6 +27,7 @@
     </label>
     <div class="segmented" role="group" aria-label="Kategorie" id="addon-kategorien"></div>
     <div class="segmented" role="group" aria-label="Herkunft" id="addon-herkunft" hidden></div>
+    <button class="filter-toggle" type="button" id="addon-nur-api" aria-pressed="false" title="Nur Addons, die ausschließlich die Heldix-API nutzen und nicht direkt in Minecraft eingreifen" hidden>{{icon:shield}}Nur API-Addons <span class="count-soft"></span></button>
     <label class="sort-field">
       <span>Sortieren</span>
       <select class="input select tiny-select" id="addon-sortierung">
@@ -83,12 +84,12 @@
       <article class="install-way">
         <span class="badge">{{icon:loader-heldix}}</span>
         <h3>Im Launcher</h3>
-        <p><strong>Instanzen</strong> → Instanz wählen → Reiter <strong>Heldix-Addons</strong> → <strong>Addon-Store</strong> → <strong>Installieren</strong>. Neue Versionen bekommst du dort mit <strong>Aktualisieren</strong>.</p>
+        <p><strong>Instanzen</strong> → Instanz wählen → Reiter <strong>Mods &amp; Addons</strong> → <strong>Hinzufügen</strong> → <strong>Addon-Store</strong> → <strong>Installieren</strong>. Der Launcher zeigt dabei, ob das Addon zur Minecraft-Version und zum Loader der Instanz passt. Neue Versionen bekommst du mit <strong>Aktualisieren</strong>.</p>
       </article>
       <article class="install-way">
         <span class="badge">{{icon:modules}}</span>
         <h3>Im Spiel</h3>
-        <p>Heldix-Menü (rechte <kbd>Umschalt</kbd>-Taste) → <strong>Einstellungen</strong> → <strong>Addons</strong> → Reiter <strong>Store</strong> → <strong>Installieren</strong>. Das Addon lädt beim nächsten Spielstart.</p>
+        <p>Heldix-Menü (rechte <kbd>Umschalt</kbd>-Taste) → <strong>Mods &amp; Addons</strong> → Reiter <strong>Store</strong> → <strong>Installieren</strong>. Das Addon lädt beim nächsten Spielstart.</p>
       </article>
       <article class="install-way">
         <span class="badge">{{icon:folder}}</span>
@@ -123,11 +124,15 @@
       </details>
       <details>
         <summary>Was bedeutet „API-Stufe“?{{icon:chevron-down}}</summary>
-        <p>Die Stufe der Heldix-API, die ein Addon braucht. HeldixClient lädt derzeit Addons bis Stufe 3. Braucht ein Addon mehr, aktualisiere den Launcher – HeldixClient kommt mit ihm.</p>
+        <p>Die Stufe der Heldix-API, die ein Addon braucht. HeldixClient lädt derzeit Addons bis Stufe 4 (Stufe 3 ab Version 0.13.1, Stufe 4 ab 0.13.2). Braucht ein Addon mehr, aktualisiere den Launcher – HeldixClient kommt mit ihm.</p>
+      </details>
+      <details>
+        <summary>Was heißt „Greift in Minecraft ein“?{{icon:chevron-down}}</summary>
+        <p>Die meisten Addons nutzen nur die Heldix-API. Manche ändern Minecraft aber direkt – etwa wie Gegenstände auf dem Boden liegen. Solche Addons tragen den Hinweis <strong>Greift in Minecraft ein</strong> und nennen die Minecraft-Versionen, für die sie gebaut sind. Das Team sieht sich ihre Eingriffe beim Prüfen besonders genau an. Sie laufen meist nur in <strong>Heldix-Instanzen</strong> (mit dem Heldix Loader), und An oder Aus wirkt erst nach dem Neustart des Spiels. Willst du nur Addons ohne solche Eingriffe sehen, wähle <strong>Nur API-Addons</strong>.</p>
       </details>
       <details>
         <summary>Läuft ein Addon nach einem Minecraft-Update weiter?{{icon:chevron-down}}</summary>
-        <p>Ja. Addons nutzen nur die Heldix-API, deshalb läuft dieselbe Datei weiter, solange es HeldixClient für die Minecraft-Version gibt. Hat ein Addon einen Fehler, schaltet HeldixClient nur das Addon ab – das Spiel läuft weiter.</p>
+        <p>Addons, die nur die Heldix-API nutzen: ja – dieselbe Datei läuft weiter, solange es HeldixClient für die Minecraft-Version gibt. Addons, die in Minecraft eingreifen, laufen nur in den Versionen, die sie nennen; für neue Versionen braucht es ein Update des Addons. Hat ein Addon einen Fehler, schaltet HeldixClient nur das Addon ab – das Spiel läuft weiter.</p>
       </details>
       <details>
         <summary>Was zählt der Download-Zähler?{{icon:chevron-down}}</summary>

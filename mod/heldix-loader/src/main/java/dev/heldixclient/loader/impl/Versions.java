@@ -5,11 +5,11 @@ package dev.heldixclient.loader.impl;
  * {@code *}, {@code 1.2.3}, {@code 26.x}, {@code >=2.0.0}, {@code >1.0 <2.0} (alle müssen passen)
  * und {@code 26.2 || 26.3} (eine der Alternativen).
  */
-final class Versions {
+public final class Versions {
 	private Versions() {
 	}
 
-	static boolean matches(String version, String range) {
+	public static boolean matches(String version, String range) {
 		if (range == null || range.isBlank()) return true;
 		for (String alternative : range.split("\\|\\|")) {
 			if (allMatch(version, alternative.trim())) return true;
@@ -49,7 +49,7 @@ final class Versions {
 	}
 
 	/** Vergleicht Versionen teilweise numerisch: 1.10 > 1.9, 26.3 == 26.3.0. */
-	static int compare(String a, String b) {
+	public static int compare(String a, String b) {
 		String[] left = core(a).split("[.\\-]");
 		String[] right = core(b).split("[.\\-]");
 		for (int i = 0; i < Math.max(left.length, right.length); i++) {

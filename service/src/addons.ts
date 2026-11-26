@@ -29,6 +29,45 @@ export const ADDON_CATEGORIES = ['hud', 'musik', 'chat', 'werkzeuge', 'sonstiges
 export type AddonCategory = (typeof ADDON_CATEGORIES)[number];
 export const ADDON_PLATFORMS = ['windows', 'mac', 'linux'] as const;
 export type AddonPlatform = (typeof ADDON_PLATFORMS)[number];
+/** Zugriff: nur die Heldix-API, oder (mit clientEntrypoint/transformers) direkt in Minecraft. */
+export const ADDON_ACCESS = ['api', 'minecraft'] as const;
+export type AddonAccess = (typeof ADDON_ACCESS)[number];
+/** Wo ein Addon läuft: Heldix-Instanzen (Heldix Loader) und/oder Fabric-Instanzen. */
+export const ADDON_LOADERS = ['heldix', 'fabric'] as const;
+export type AddonLoader = (typeof ADDON_LOADERS)[number];
+/** Eine Minecraft-Version im Manifest, z. B. 26.3, 1.21.11 oder 26.x (wie im Launcher). */
+export const MINECRAFT_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z._+*-]{0,31}$/;
+/** Höchstens so viele Minecraft-Versionen in „minecraft“ (wie im Launcher). */
+export const MAX_MINECRAFT_VERSIONS = 50;
+
+/** Loader, wenn das Manifest (oder heldix.addon.json) keine nennt: API-Addons überall, Eingriffe in Minecraft nur im Heldix Loader. */
+export function defaultLoaders(access: AddonAccess): AddonLoader[] {
+  return access === 'api' ? [...ADDON_LOADERS] : ['heldix'];
+}
+
+/** „minecraft“: Liste aus 0–16 Versionen nach MINECRAFT_VERSION_RE, ohne Doppelte. */
+export function isMinecraftList(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= MAX_MINECRAFT_VERSIONS &&
+    value.every((v) => typeof v === 'string' && MINECRAFT_VERSION_RE.test(v)) &&
+    new Set(value).size === value.length
+  );
+}
+
+/** „loaders“: nicht leere Liste aus heldix und fabric, ohne Doppelte. */
+export function isLoaderList(value: unknown): value is AddonLoader[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((v) => typeof v === 'string' && (ADDON_LOADERS as readonly string[]).includes(v)) &&
+    new Set(value).size === value.length
+  );
+}
+
+export const MINECRAFT_LIST_PROBLEM = `„minecraft“ muss eine Liste mit höchstens ${MAX_MINECRAFT_VERSIONS} Minecraft-Versionen sein (z. B. 26.3, 1.21.11 oder 26.x; ohne Doppelte)`;
+export const MINECRAFT_MISSING = '„minecraft“ darf nicht leer sein, wenn das Addon in Minecraft eingreift („access“: minecraft)';
+export const LOADERS_PROBLEM = '„loaders“ muss eine nicht leere Liste aus heldix und fabric sein (ohne Doppelte)';
 
 /** ID wie in `heldix.addon.json`. */
 export const ADDON_ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
@@ -90,6 +129,12 @@ export interface AddonManifest {
   official: boolean;
   /** Einreicher bei Community-Addons, null bei offiziellen (und älteren Manifesten) */
   author: AddonAuthor | null;
+  /** fehlt es (Manifeste vor Version 1.6.1), gilt api */
+  access: AddonAccess;
+  /** Minecraft-Versionen; leer = jede (nur bei api). Fehlt es, gilt [] */
+  minecraft: string[];
+  /** fehlt es, gilt defaultLoaders(access) */
+  loaders: AddonLoader[];
 }
 
 /** Die Bytes, über die die Signatur läuft: UTF-8 von `"heldix-addon\n" + manifest`. */
@@ -200,6 +245,14 @@ export function checkAddonManifest(value: unknown): AddonManifest | string {
   if (typeof author === 'string') return author;
   const official = m.official === true;
   if (official && author !== null) return 'Offizielle Addons haben keinen „author“ (null)';
+  // Manifest v2 (ab 1.6.1): Zugriff, Minecraft-Versionen und Loader; ältere Manifeste: api, [], heldix und fabric
+  if (m.access !== undefined && !(ADDON_ACCESS as readonly unknown[]).includes(m.access)) return '„access“ muss api oder minecraft sein';
+  const access: AddonAccess = m.access === 'minecraft' ? 'minecraft' : 'api';
+  if (m.minecraft !== undefined && !isMinecraftList(m.minecraft)) return MINECRAFT_LIST_PROBLEM;
+  const minecraft = m.minecraft === undefined ? [] : [...(m.minecraft as string[])];
+  if (access === 'minecraft' && minecraft.length === 0) return MINECRAFT_MISSING;
+  if (m.loaders !== undefined && !isLoaderList(m.loaders)) return LOADERS_PROBLEM;
+  const loaders = m.loaders === undefined ? defaultLoaders(access) : [...(m.loaders as AddonLoader[])];
   return {
     type: 'heldix-addon',
     id: m.id,
@@ -219,6 +272,9 @@ export function checkAddonManifest(value: unknown): AddonManifest | string {
     notes: [...(m.notes as string[])],
     official,
     author,
+    access,
+    minecraft,
+    loaders,
   };
 }
 
@@ -369,6 +425,9 @@ export class Addons {
       notes: m.notes,
       official: m.official,
       author: this.authorOf(addon, m),
+      access: m.access,
+      minecraft: m.minecraft,
+      loaders: m.loaders,
       downloads: addon.downloads,
       publishedAt: row.publishedAt,
       rating: ratingView(rating),
@@ -406,6 +465,9 @@ export class Addons {
         date: manifest.date,
         notes: manifest.notes,
         api: manifest.api,
+        access: manifest.access,
+        minecraft: manifest.minecraft,
+        loaders: manifest.loaders,
         size: row.size,
         sha256: row.sha256,
         file: row.file,
@@ -518,6 +580,9 @@ export class Addons {
           latest: rows[0]?.version ?? null,
           official: addon.owner === null,
           owner: this.ownerView(addon, latest),
+          access: latest?.access ?? 'api',
+          minecraft: latest?.minecraft ?? [],
+          loaders: latest?.loaders ?? defaultLoaders('api'),
           screenshots: addon.screenshots.length,
           versions: rows.map((row, i) => ({
             version: row.version,
@@ -527,6 +592,9 @@ export class Addons {
             date: manifests[i]?.date ?? '',
             notes: manifests[i]?.notes ?? [],
             api: manifests[i]?.api ?? null,
+            access: manifests[i]?.access ?? null,
+            minecraft: manifests[i]?.minecraft ?? [],
+            loaders: manifests[i]?.loaders ?? [],
             publishedAt: row.publishedAt,
             publishedBy: row.publishedBy,
           })),

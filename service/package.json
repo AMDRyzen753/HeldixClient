@@ -1,7 +1,7 @@
 {
   "name": "heldix-dienst",
-  "version": "1.5.1",
-  "description": "Heldix-Dienst: Capes für alle, Heldix-Symbol und Freunde für HeldixClient",
+  "version": "1.6.1",
+  "description": "Heldix-Dienst: Capes und Cosmetics für alle, Heldix-Symbol und Freunde für HeldixClient",
   "license": "MIT",
   "author": "HeldixClient contributors",
   "private": true,

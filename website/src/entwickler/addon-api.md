@@ -1,10 +1,12 @@
 ---
 titel: Addon-API im Detail
-beschreibung: Module, HUD-Elemente, Einstellungen, Tasten, Einblendungen und Ereignisse – mit echten Beispielen aus den Addons Spotify und Uhrzeit & Spielzeit.
+beschreibung: Module, HUD-Elemente, Einstellungen, Tasten, Einblendungen, Ereignisse und gedroppte Items – mit echten Beispielen aus den Addons Spotify, Uhrzeit & Spielzeit und Item Physics.
 reihenfolge: 2
-stichworte: api, heldixapi, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate
+stichworte: api, heldixapi, cosmetics, cosmeticinfo, preview, animate, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate, api 4, droppeditems, droppeditemrenderer, droppeditem, droppeditempose, item physics, gedroppte items
 ---
-Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **3** (Stand HeldixClient 0.13.1). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Heldix-Addons schreiben](/entwickler/addons).
+Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **4** (Stand HeldixClient 0.13.2). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3` und alles unter [Ab API 4](#ab-api-4) den Eintrag `"api": 4`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Addons entwickeln](/entwickler/addons).
+
+> **Hinweis:** Die Heldix-API reicht für die meisten Addons und läuft über Minecraft-Updates hinweg. Was sie nicht kann, darf ein Addon auch direkt in Minecraft ändern – mit Transformern des Heldix Loaders, siehe [Weg 2: Eingriff in Minecraft](/entwickler/addons#weg-2-eingriff-in-minecraft). Mit der API-Stufe hat das nichts zu tun.
 
 ## Das Objekt HeldixApi
 
@@ -20,6 +22,7 @@ In `onEnable(HeldixApi api)` bekommst du ein Objekt, über das alles läuft:
 - `config()` – einfache, dauerhaft gespeicherte Einstellungen.
 - ab API 2: `registerKey(...)`, `notify(...)` und `dataDirectory()`.
 - ab API 3: `game()`, `playerState()`, `scheduler()`, `registerCommand(...)` und `sendChatMessage(...)` – siehe [Ab API 3](#ab-api-3).
+- ab API 4: `droppedItems()` – Lage und Drehung der gedroppten Items in der Welt – und `cosmetics()` – der Cosmetics-Katalog, siehe [Ab API 4](#ab-api-4).
 
 ## Ereignisse
 
@@ -346,9 +349,91 @@ canvas.scrollingText("Ein sehr langer Titel, der nicht passt", 20, 4, 80, Heldix
 
 Alle Einzelheiten stehen in den Javadoc-Kommentaren der API-Klassen; Funktionen der Stufe 3 sind mit `@since 3` gekennzeichnet.
 
+## Ab API 4
+
+Mit `"api": 4` (ab HeldixClient 0.13.2) kommen zwei Bausteine dazu: gedroppte Items und Cosmetics. Ein Addon bestimmt damit, wie gedroppte Items in der Welt liegen: in welcher Höhe und mit welcher Drehung, statt dass sie wie in Minecraft schweben und sich drehen. Die Eingriffe in Minecraft dafür macht HeldixClient selbst – dein Addon nutzt weiter nur die Heldix-API und läuft in Heldix- **und** Fabric-Instanzen. Fertige Addons für API 1 bis 3 laufen unverändert weiter.
+
+### Renderer für gedroppte Items
+
+- `api.droppedItems()` liefert ein `DroppedItems`.
+- `droppedItems().addRenderer(item -> …)` meldet einen `DroppedItemRenderer` an und gibt eine `Registration` zurück. Es zeichnet immer nur der zuletzt angemeldete, noch aktive Renderer – auch über Addons hinweg. `cancel()` stellt das normale Zeichnen wieder her (bzw. den vorigen Renderer).
+- `droppedItems().isSupported()` ist `false`, wenn HeldixClient das Zeichnen in dieser Minecraft-Version nicht verändern kann. Renderer wirken dann nicht, das Addon läuft aber weiter.
+- `DroppedItemRenderer.pose(item)` läuft im Haupt-Thread einmal pro Item und Bild und liefert eine `DroppedItemPose` – oder `null`, dann zeichnet Minecraft dieses Item wie gewohnt.
+
+### DroppedItem
+
+`DroppedItem` ist nur zum Lesen da und gilt nur während `pose`. Merk dir das Objekt nicht über das Bild hinaus.
+
+- `entityId()`, `itemId()` (z. B. `minecraft:diamond`), `stackSize()` und `count()` – wie viele Modelle Minecraft zeichnet (1 bis 5).
+- `ageTicks()` – Alter in Ticks, mit Bruchteil des laufenden Ticks.
+- `onGround()`, `inWater()`, `speed()` und `verticalSpeed()` – Tempo in Blöcken pro Tick.
+- `flat()` – das Modell ist höchstens 1/16 Block dick (etwa Diamanten oder Schwerter).
+- `bobOffset()` – ein fester, zufälliger Wert je Item von 0 bis 2π, gut für eine feste Ausrichtung.
+- `minX()` bis `maxZ()` – die Box des Modells.
+- `memory()` – acht Zahlen je Item, die über die Bilder erhalten bleiben (anfangs 0).
+
+### DroppedItemPose
+
+`new DroppedItemPose(lift, yaw, pitch, roll)` bzw. `DroppedItemPose.of(lift, yaw, pitch)`: Die Mitte des Modells liegt `lift` Blöcke über der Position des Items, dann dreht es sich um die Hochachse (`yaw`), die Querachse (`pitch`, 90 = flach) und die Längsachse (`roll`) – Winkel in Grad. `DroppedItemPose.liftOnly(…)` und `rotationOnly(…)` ändern nur einen Teil, der andere bleibt wie in Minecraft.
+
+```java
+// Items liegen flach und still am Boden; in der Luft schweben sie wie gewohnt
+Registration flach = api.droppedItems().addRenderer(item -> {
+    if (!item.onGround()) return null;                       // null = wie Minecraft
+    float yaw = (float) Math.toDegrees(item.bobOffset());     // feste, zufällige Ausrichtung
+    float pitch = item.flat() ? 90 : 0;                      // flache Items hinlegen, Blöcke aufrecht
+    // tiefste Ecke auf den Boden: flach liegend zählt die Dicke (z), aufrecht die Unterkante (y)
+    float lift = item.flat() ? item.maxZ() + 0.005f : -item.minY() + 0.005f;
+    return DroppedItemPose.of(lift, yaw, pitch);
+});
+flach.cancel();                                              // wieder wie Minecraft
+
+// Werte über mehrere Bilder: eigener Speicher je Item (8 Zahlen, anfangs 0)
+api.droppedItems().addRenderer(item -> {
+    float[] speicher = item.memory();
+    if (speicher[0] == 0) speicher[0] = item.ageTicks();      // erstes Bild dieses Items merken
+    if (item.ageTicks() - speicher[0] < 20) return null;      // die erste Sekunde wie Minecraft
+    return DroppedItemPose.liftOnly(-item.minY() + 0.005f);  // danach kein Schweben mehr, Drehen wie gewohnt
+});
+```
+
+Werte, die keinen Sinn ergeben, fängt HeldixClient ab: `lift` wird auf ±2 Blöcke begrenzt, Winkel über 3600° auf 0 bis 360° gebracht. Ist `lift` keine endliche Zahl (`NaN`, unendlich), schwebt das Item wie gewohnt; ist ein Winkel keine endliche Zahl, dreht es sich wie gewohnt. Wirft dein Renderer, wird dieses Item in diesem Bild normal gezeichnet, und der Fehler zählt wie jeder Fehler eines Addons.
+
+> **Tipp:** Ein vollständiges Beispiel mit Überschlagen in der Luft, sanftem Hinlegen und Stapeln ist das Addon **Item Physics** (`itemphysics`) im [Addon-Store](/addons).
+
+### Cosmetics
+
+`api.cosmetics()` liefert ein `Cosmetics`: Dein Addon kann den [Cosmetics-Katalog](/cosmetics) lesen, Cosmetics nur bei dir vorführen und kurz animieren. Die Auswahl ändert nur der Spieler selbst – ein Addon kann keine eigenen Cosmetics zeichnen lassen, nichts an andere Spieler senden und die Auswahl beim Heldix-Dienst nicht ändern.
+
+- `catalog()` – alle geladenen und geprüften Cosmetics als `CosmeticInfo` mit `id()`, `slot()`, `name()`, `description()` und `teamOnly()`. Ohne Heldix-Dienst ist die Liste leer; die eingebauten Capes stehen nicht darin.
+- `worn(uuid, slot)` – was ein Spieler trägt (`Optional<String>`): für dich deine Auswahl, für andere das, was der Dienst beim Nachschlagen gemeldet hat (nur erkennbare HeldixClient-Spieler in der Nähe oder in der Tab-Liste).
+- `mine()` – deine Auswahl je Slot (`HEAD`, `BACK`, `AURA`, `COMPANION`, `CAPE`), nur belegte.
+- `preview(slot, id, dauer)` – zeigt ein Cosmetic **nur bei dir** (Third-Person, Inventar, Figuren im Heldix-Menü), etwa als Vorschau in einem eigenen Menü. Endet nach der Dauer (höchstens eine Stunde), mit `cancel()` oder wenn das Addon abgeschaltet wird. Beim Dienst ändert sich nichts.
+- `animate(slot, effekt)` – ein kurzer Effekt (etwa 1,6 Sekunden) an deinem Cosmetic, nur bei dir: `"flap"` (Flügel doppelt so schnell, `BACK`), `"spin"` (einmal drehen) und `"bounce"` (hüpfen) für `HEAD`, `BACK` und `COMPANION`, `"burst"` (ein Schwall Partikel, `AURA`).
+- `onChange(change -> …)` – deine Auswahl hat sich geändert (Heldix-Menü, Launcher oder Webseite): `slot()`, `previous()` und `current()`. Läuft im Haupt-Thread.
+
+Eine unbekannte ID oder ein Effekt, den es für den Slot nicht gibt, wirft eine `IllegalArgumentException`.
+
+```java
+// Cosmetics: Katalog lesen, im eigenen Menü vorführen, auf Änderungen hören
+Cosmetics cosmetics = api.cosmetics();
+for (CosmeticInfo c : cosmetics.catalog()) {
+    if (c.slot() == Cosmetics.Slot.BACK) api.logger().info(c.name() + (c.teamOnly() ? " (nur Team)" : ""));
+}
+Registration vorschau = cosmetics.preview(Cosmetics.Slot.HEAD, "krone", Duration.ofSeconds(10)); // nur bei dir
+vorschau.cancel();                                                                                // sofort wieder weg
+cosmetics.animate(Cosmetics.Slot.BACK, "flap");                                                   // Flügel kurz schneller
+cosmetics.onChange(change -> api.chat("Neu in " + change.slot() + ": " + change.current().orElse("nichts")));
+Optional<String> hut = cosmetics.worn(andererSpieler, Cosmetics.Slot.HEAD);                       // z. B. "zylinder"
+```
+
+Cosmetics sind reine Daten (Modell, Textur, Partikel), vom Team signiert. HeldixClient prüft jedes selbst, bevor es gezeichnet wird – in Heldix- und Fabric-Instanzen.
+
+`DroppedItem`, `CosmeticInfo` und `CosmeticChange` sind Schnittstellen, damit spätere Versionen Werte ergänzen können, ohne Addons zu brechen. `DroppedItemPose` baust du selbst, deshalb ist es ein Record (wie `ItemInfo`). Funktionen der Stufe 4 sind in den API-Klassen mit `@since 4` gekennzeichnet.
+
 ## Threads und Fehler
 
-- Ereignisse, Tasten, Aktionen, `onToggle` und Renderer laufen im Haupt-Thread. Warte dort nie auf Netzwerk oder langsame Dateien, sonst ruckelt das Spiel.
+- Ereignisse, Tasten, Aktionen, `onToggle`, HUD-Renderer und Renderer für gedroppte Items laufen im Haupt-Thread. Warte dort nie auf Netzwerk oder langsame Dateien, sonst ruckelt das Spiel.
 - Aus eigenen Threads ist nur `notify` ausdrücklich erlaubt. Alles andere legst du in Felder und verarbeitest es im nächsten Tick oder im Renderer – ab API 3 einfacher mit `api.scheduler().runAsync(…)` und `runOnMainThread(…)`.
-- Fehler in deinem Code fängt HeldixClient ab und schreibt sie ins Log. Nach drei Fehlern – auch in Befehlen, Knöpfen und Aufgaben des Schedulers – wird das Addon für diese Sitzung abgeschaltet, das Spiel läuft weiter. Ein Fehler im Renderer passiert meist jedes Bild – dann ist das Addon sehr schnell aus.
+- Fehler in deinem Code fängt HeldixClient ab und schreibt sie ins Log. Nach drei Fehlern – auch in Befehlen, Knöpfen und Aufgaben des Schedulers – wird das Addon für diese Sitzung abgeschaltet, das Spiel läuft weiter. Ein Fehler im Renderer passiert meist jedes Bild – dann ist das Addon sehr schnell aus. Ist ein Renderer für gedroppte Items abgeschaltet, zeichnet wieder der vorige bzw. Minecraft.
 - Wirft `onEnable` einen Fehler, wird das Addon gar nicht erst geladen. Das Heldix-Menü zeigt es dann rot mit dem Grund an, siehe [Addons installieren und Fehler finden](/entwickler/addon-installieren).

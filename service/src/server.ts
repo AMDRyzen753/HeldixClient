@@ -98,7 +98,7 @@ service.server.listen(port, host, () => {
   const address = service.server.address();
   const shown = typeof address === 'object' && address ? `${address.address}:${address.port}` : String(address);
   log(`Heldix-Dienst läuft auf ${shown} (Daten: ${dataDir}, Updates: ${updatesDir}, Addons: ${addonsDir}, Session-Server: ${sessionServer})`);
-  log(`Webseite: ${website ?? 'nicht eingerichtet (keine Anmeldung auf der Webseite)'} · Update-Schlüssel: ${updateKey ? 'eingerichtet' : 'keiner (kein Veröffentlichen von Updates und Addons im Team-Bereich)'}`);
+  log(`Webseite: ${website ?? 'nicht eingerichtet (keine Anmeldung auf der Webseite)'} · Update-Schlüssel: ${updateKey ? 'eingerichtet' : 'keiner (kein Veröffentlichen von Updates, Addons und Cosmetics im Team-Bereich)'}`);
 });
 
 let stopping = false;

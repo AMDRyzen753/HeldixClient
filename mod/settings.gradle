@@ -18,5 +18,8 @@ include 'heldix-api'
 // (nicht mehr mit dem Launcher). Veröffentlichen: im Ordner launcher `npm run addon -- <id>`, siehe docs/addons.md.
 include 'addons:uhrzeit'
 include 'addons:spotify'
+include 'addons:itemphysics'
 // Automatischer Test im echten Spiel (wird nicht ausgeliefert)
 include 'autotest'
+// Test-Addons mit Zugriff auf Minecraft für den Autotest (werden nicht ausgeliefert)
+include 'test-addons:minecraft'

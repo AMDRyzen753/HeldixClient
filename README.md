@@ -25,7 +25,7 @@ Ein eigener Minecraft-Client nach dem Vorbild von Lunar oder Feather, bestehend 
 | **Launcher** | Lädt Minecraft direkt von Mojang, verwaltet Instanzen und Konten und startet das Spiel. Electron + TypeScript. |
 | **Heldix Loader** | Ein eigener Mod-Loader. Er klinkt sich als Java-Agent beim Start ein, verändert Minecraft-Klassen per ASM und lädt Heldix-Mods. Es gibt ihn auch als Fabric-Mod, damit HeldixClient in Fabric-Instanzen mitläuft. |
 | **HeldixClient-Mod** | Bringt die Features ins Spiel: eigener Ladebildschirm, eigene Oberfläche (Startseite, Einzel-/Mehrspieler, Pausemenü, Heldix-Menü) mit eigener Schrift und eigenen Icons, HUD-Module, Zoom, Heldix-Shader und ein eigenes F3-Menü. |
-| **Heldix-Addons** | Kleine Erweiterungen über eine stabile API, die nach Minecraft-Updates ohne neuen Build weiterlaufen. Einzeln aus dem **Addon-Store** (im Launcher, im Spiel und auf der Webseite, vom Team signiert), z. B. **Spotify** (Song mit Cover im HUD, Musik per Taste steuern) und **Uhrzeit & Spielzeit**. |
+| **Heldix-Addons** | Kleine Erweiterungen über eine stabile API, die nach Minecraft-Updates ohne neuen Build weiterlaufen. Einzeln aus dem **Addon-Store** (im Launcher, im Spiel und auf der Webseite, vom Team signiert), z. B. **Spotify** (Song mit Cover im HUD, Musik per Taste steuern), **Uhrzeit & Spielzeit** und **Item Physics** (Items liegen flach am Boden). |
 
 Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Launcher eine **Fabric-Instanz** an. HeldixClient läuft dort mit (abschaltbar).
 
@@ -159,6 +159,7 @@ mod/                     Java-Projekte (Gradle, Minecraft 26.3, Java 25)
 ├── heldix-api/          API für Heldix-Addons (ohne Minecraft-Abhängigkeit)
 ├── addons/uhrzeit/      Addon „Uhrzeit & Spielzeit“ (auch Vorlage), kommt über den Addon-Store
 ├── addons/spotify/      Spotify-Addon (Windows-Mediensteuerung), kommt über den Addon-Store
+├── addons/itemphysics/  Addon „Item Physics“ (gedroppte Items liegen flach, API 4), kommt über den Addon-Store
 service/                 Heldix-Dienst: Freunde, Capes für alle, Heldix-Symbol (Node.js) und Server-Installer
 website/                 Webseite (Startseite, Download, Impressum, Datenschutz)
 └── autotest/            automatischer Test im echten Spiel

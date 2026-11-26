@@ -1,0 +1,51 @@
+// Test-Addons mit Zugriff auf Minecraft (nur für den Autotest, werden nicht ausgeliefert).
+//
+// Aus denselben Klassen entstehen mehrere Addon-JARs mit je eigener heldix.addon.json (manifeste/<name>.json):
+//   heldix-addon-mctest.jar           Transformer (Minecraft.tick) + clientEntrypoint + entrypoint (Heldix-API) – läuft überall
+//   heldix-addon-mcnurheldix.jar      Transformer auf eine Klasse, die die Fabric-Brücke nicht verändern kann – nur Heldix
+//   heldix-addon-mcdefekt.jar         Transformer, der beim Verändern scheitert – Problem im Menü
+//   heldix-addon-mcfalsch.jar         falsche Minecraft-Version – wird nicht geladen
+//   heldix-addon-mcaus.jar.disabled   abgeschaltet (wie im Launcher) – wird übersprungen
+// Alle landen in mod/build/test-addons/, von dort kopiert sie npm run test:launch -- … --autotest in die Testinstanz.
+plugins {
+	id 'java'
+}
+
+dependencies {
+	compileOnly project(':heldix-loader')
+	compileOnly project(':heldix-api')
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+	it.options.encoding = 'UTF-8'
+}
+
+def fixtures = [
+		mctest     : ['heldix-addon-mctest.jar', ['dev/heldixclient/testaddons/minecraft/**']],
+		mcnurheldix: ['heldix-addon-mcnurheldix.jar', ['dev/heldixclient/testaddons/nurheldix/**']],
+		mcdefekt   : ['heldix-addon-mcdefekt.jar', ['dev/heldixclient/testaddons/defekt/**']],
+		mcfalsch   : ['heldix-addon-mcfalsch.jar', []],
+		mcaus      : ['heldix-addon-mcaus.jar.disabled', []],
+]
+
+def outDir = rootProject.layout.buildDirectory.dir('test-addons')
+def props = [minecraft_version: rootProject.minecraft_version, loader_version: rootProject.heldix_loader_version]
+
+fixtures.each { name, spec ->
+	def task = tasks.register("${name}Jar", Jar) {
+		archiveFileName = spec[0]
+		destinationDirectory = outDir
+		inputs.properties props
+		if (!spec[1].isEmpty()) {
+			from(sourceSets.main.output) {
+				include spec[1]
+			}
+		}
+		from("manifeste/${name}.json") {
+			rename { 'heldix.addon.json' }
+			expand props
+		}
+	}
+	assemble.dependsOn(task)
+}

@@ -1,9 +1,9 @@
 ---
 titel: Konto auf heldixclient.com
-beschreibung: Ohne Passwort im Browser anmelden – über den Launcher oder das Spiel – und dort Profil, Freunde, Nachrichten, Support und Daten verwalten.
+beschreibung: Ohne Passwort im Browser anmelden – über den Launcher oder das Spiel – und dort Profil und Cosmetics, Freunde, Nachrichten, Support, Sicherheit und Daten verwalten.
 kategorie: freunde
 reihenfolge: 5
-stichworte: konto, webseite, browser, anmelden, login, ohne passwort, profil, sitzungen, abmelden, meine daten, support
+stichworte: konto, webseite, browser, anmelden, login, ohne passwort, übersicht, profil, cosmetics, sitzungen, abmelden, überall abmelden, sicherheit, zwei-faktor, meine daten, support
 ---
 Auf heldixclient.com hast du ein Konto mit Profil, Freunden, Nachrichten und Einstellungen. Ein Passwort gibt es nicht: Du meldest dich über den Launcher oder das Spiel an, die schon über dein Microsoft-Konto angemeldet sind.
 
@@ -22,18 +22,21 @@ Der Anmelde-Link gilt zwei Minuten und nur ein einziges Mal. Erscheint „Der An
 > **Hinweis:** Für die Webseite brauchst du ein Microsoft-Konto. Mit einem Offline-Konto geht es nicht.
 
 ## Was du im Konto findest
-- **Profil:** dein Heldix-Cape und die Schalter, was andere von dir sehen
+Nach der Anmeldung landest du in der **Übersicht**: alles Wichtige auf einen Blick, deine letzte Aktivität und Wege in alle Bereiche.
+
+- **Profil & Cosmetics:** dein Heldix-Cape, deine [Cosmetics](/hilfe/cosmetics) und die Schalter, was andere von dir sehen
 - **Freunde:** Anfragen senden, annehmen und ablehnen, Freunde entfernen
 - **Nachrichten:** mit Freunden schreiben, Spieler melden oder blockieren
 - **Support:** Fragen an das HeldixClient-Team – siehe [Support-Anfrage stellen](/hilfe/support-anfrage)
 - **Meine Addons:** eigene Heldix-Addons in den Addon-Store einreichen, den Stand der Prüfung sehen und neue Versionen einreichen – siehe [Addon einreichen](/entwickler/addons#addon-einreichen)
 - **Privatsphäre:** blockierte Spieler und deine Meldungen
-- **Meine Daten:** was gespeichert ist, Datenexport, angemeldete Browser und **Alle Daten löschen**
+- **Sicherheit:** angemeldete Browser, **Überall abmelden (außer hier)** und – für Team-Mitglieder – der Stand der Zwei-Faktor-Anmeldung
+- **Meine Daten:** was gespeichert ist, Datenexport und **Alle Daten löschen**
 
 Deine eigenen Cape-Bilder aus dem Ordner `heldix-capes` stehen hier nicht – sie bleiben auf deinem PC.
 
 ## Angemeldete Browser
-Unter **Meine Daten → Angemeldete Browser** siehst du, wo du angemeldet bist. Dort meldest du einzelne Browser ab oder mit **Alle anderen abmelden** alle außer dem aktuellen.
+Unter **Sicherheit → Angemeldete Browser** siehst du, wo du auf heldixclient.com angemeldet bist. Dort meldest du einzelne Browser ab oder mit **Überall abmelden (außer hier)** alle außer dem aktuellen. Kennst du einen Eintrag nicht, melde ihn ab. Launcher und Spiel stehen nicht in dieser Liste – sie melden sich getrennt an.
 
 Eine Anmeldung gilt höchstens 30 Tage und endet nach 7 Tagen ohne Nutzung. Zum Abmelden auf dem aktuellen Gerät klickst du oben auf **Abmelden**.
 

@@ -1,0 +1,417 @@
+{
+  "format": 1,
+  "id": "mini-drache",
+  "version": 1,
+  "slot": "companion",
+  "name": "Mini-Drache",
+  "description": "Ein kleiner grüner Drache, der neben dir schwebt",
+  "access": "all",
+  "model": {
+    "textureSize": [
+      64,
+      24
+    ],
+    "bones": [
+      {
+        "name": "koerper",
+        "pivot": [
+          0,
+          4,
+          0
+        ],
+        "cubes": [
+          {
+            "origin": [
+              -2.5,
+              2,
+              -3
+            ],
+            "size": [
+              5,
+              4,
+              6
+            ],
+            "uv": [
+              0,
+              0
+            ]
+          },
+          {
+            "origin": [
+              -2,
+              0,
+              1
+            ],
+            "size": [
+              1,
+              2,
+              1
+            ],
+            "uv": [
+              58,
+              10
+            ]
+          },
+          {
+            "origin": [
+              1,
+              0,
+              1
+            ],
+            "size": [
+              1,
+              2,
+              1
+            ],
+            "uv": [
+              0,
+              16
+            ]
+          },
+          {
+            "origin": [
+              -2,
+              0,
+              -2
+            ],
+            "size": [
+              1,
+              2,
+              1
+            ],
+            "uv": [
+              4,
+              16
+            ]
+          },
+          {
+            "origin": [
+              1,
+              0,
+              -2
+            ],
+            "size": [
+              1,
+              2,
+              1
+            ],
+            "uv": [
+              8,
+              16
+            ]
+          },
+          {
+            "origin": [
+              -0.5,
+              6,
+              -2
+            ],
+            "size": [
+              1,
+              1,
+              1
+            ],
+            "uv": [
+              26,
+              16
+            ]
+          },
+          {
+            "origin": [
+              -0.5,
+              6,
+              0
+            ],
+            "size": [
+              1,
+              1,
+              1
+            ],
+            "uv": [
+              30,
+              16
+            ]
+          }
+        ]
+      },
+      {
+        "name": "kopf",
+        "parent": "koerper",
+        "pivot": [
+          0,
+          6,
+          2
+        ],
+        "cubes": [
+          {
+            "origin": [
+              -2.5,
+              5,
+              2
+            ],
+            "size": [
+              5,
+              4,
+              4
+            ],
+            "uv": [
+              22,
+              0
+            ]
+          },
+          {
+            "origin": [
+              -1.5,
+              5,
+              6
+            ],
+            "size": [
+              3,
+              2,
+              2
+            ],
+            "uv": [
+              40,
+              10
+            ]
+          },
+          {
+            "origin": [
+              -2,
+              9,
+              2.5
+            ],
+            "size": [
+              1,
+              2,
+              1
+            ],
+            "uv": [
+              12,
+              16
+            ]
+          },
+          {
+            "origin": [
+              1,
+              9,
+              2.5
+            ],
+            "size": [
+              1,
+              2,
+              1
+            ],
+            "uv": [
+              16,
+              16
+            ]
+          }
+        ]
+      },
+      {
+        "name": "fluegel_links",
+        "parent": "koerper",
+        "pivot": [
+          2.5,
+          6,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          22
+        ],
+        "cubes": [
+          {
+            "origin": [
+              2.5,
+              6,
+              -3.5
+            ],
+            "size": [
+              8,
+              0,
+              6
+            ],
+            "uv": [
+              0,
+              10
+            ]
+          }
+        ]
+      },
+      {
+        "name": "fluegel_rechts",
+        "parent": "koerper",
+        "pivot": [
+          -2.5,
+          6,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          -22
+        ],
+        "cubes": [
+          {
+            "origin": [
+              -10.5,
+              6,
+              -3.5
+            ],
+            "size": [
+              8,
+              0,
+              6
+            ],
+            "uv": [
+              0,
+              10
+            ],
+            "mirror": true
+          }
+        ]
+      },
+      {
+        "name": "schwanz",
+        "parent": "koerper",
+        "pivot": [
+          0,
+          3.5,
+          -3
+        ],
+        "rotation": [
+          12,
+          0,
+          0
+        ],
+        "cubes": [
+          {
+            "origin": [
+              -1,
+              2.5,
+              -7
+            ],
+            "size": [
+              2,
+              2,
+              4
+            ],
+            "uv": [
+              28,
+              10
+            ]
+          }
+        ]
+      },
+      {
+        "name": "schwanzspitze",
+        "parent": "schwanz",
+        "pivot": [
+          0,
+          3.5,
+          -7
+        ],
+        "rotation": [
+          -18,
+          0,
+          0
+        ],
+        "cubes": [
+          {
+            "origin": [
+              -0.5,
+              3,
+              -10
+            ],
+            "size": [
+              1,
+              1,
+              3
+            ],
+            "uv": [
+              50,
+              10
+            ]
+          },
+          {
+            "origin": [
+              -1,
+              3,
+              -11
+            ],
+            "size": [
+              2,
+              1,
+              1
+            ],
+            "uv": [
+              20,
+              16
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "animations": [
+    {
+      "bone": "koerper",
+      "type": "bob",
+      "axis": "y",
+      "amplitude": 1.2,
+      "speed": 0.5,
+      "phase": 0
+    },
+    {
+      "bone": "fluegel_links",
+      "type": "flap",
+      "axis": "z",
+      "amplitude": 32,
+      "speed": 1.6,
+      "phase": 0
+    },
+    {
+      "bone": "fluegel_rechts",
+      "type": "flap",
+      "axis": "z",
+      "amplitude": 32,
+      "speed": 1.6,
+      "phase": 0.5
+    },
+    {
+      "bone": "schwanz",
+      "type": "sway",
+      "axis": "y",
+      "amplitude": 14,
+      "speed": 0.5,
+      "phase": 0.25
+    },
+    {
+      "bone": "schwanzspitze",
+      "type": "sway",
+      "axis": "y",
+      "amplitude": 18,
+      "speed": 0.5,
+      "phase": 0.1
+    },
+    {
+      "bone": "kopf",
+      "type": "sway",
+      "axis": "x",
+      "amplitude": 5,
+      "speed": 0.5,
+      "phase": 0.6
+    }
+  ],
+  "companion": {
+    "offset": [
+      0.8,
+      1.45,
+      -0.3
+    ],
+    "scale": 1
+  }
+}

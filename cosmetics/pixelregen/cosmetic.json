@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "id": "pixelregen",
+  "version": 1,
+  "slot": "cape",
+  "name": "Pixelregen",
+  "description": "Leuchtender Regen aus bunten Pixeln auf dunklem Grund",
+  "access": "all",
+  "cape": {
+    "frames": 24,
+    "fps": 12
+  }
+}

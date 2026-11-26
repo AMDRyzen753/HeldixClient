@@ -5,10 +5,10 @@ kategorie: freunde
 reihenfolge: 6
 stichworte: daten löschen, konto löschen, datenauskunft, datenexport, herunterladen, json, dsgvo, datenschutz, meine daten
 ---
-Der Heldix-Dienst speichert nur, was für Freunde, Nachrichten und Capes nötig ist – kein Passwort und keine E-Mail-Adresse. Du kannst dir jederzeit alles herunterladen oder alles löschen.
+Der Heldix-Dienst speichert nur, was für Freunde, Nachrichten, Capes und Cosmetics nötig ist – kein Passwort und keine E-Mail-Adresse. Du kannst dir jederzeit alles herunterladen oder alles löschen.
 
 ## Was gespeichert ist
-- deine Minecraft-UUID, dein Spielername, dein Heldix-Cape und deine Einstellungen
+- deine Minecraft-UUID, dein Spielername, dein Heldix-Cape, deine gewählten Cosmetics und deine Einstellungen
 - Freundschaften und offene Anfragen
 - Nachrichten an Freunde (höchstens 30 Tage)
 - Spieler, die du blockiert hast, und deine Meldungen (90 Tage)

@@ -10,13 +10,13 @@ import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promise
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { AddonDetails, ContentItem, InstanceLoader, StoreAddon, StoreListing, StoreOverview } from '../../shared/api';
+import type { AddonAccess, AddonDetails, ContentItem, InstanceLoader, StoreAddon, StoreListing, StoreOverview } from '../../shared/api';
 import { LAUNCHER_NAME, LAUNCHER_VERSION } from '../config';
-import { compareVersions, contentDir, listContent, readAddonMeta } from './content';
+import { applyPendingDisable, compareVersions, contentDir, fitsMinecraft, listContent, minecraftReason, readAddonMeta } from './content';
 
 export const ADDON_SIGNATURE_PREFIX = 'heldix-addon\n';
 /** Höchste Heldix-API-Stufe, die die mitgelieferte HeldixClient-Mod kann (HeldixApi.API_VERSION, geprüft beim Bauen) */
-export const HELDIX_ADDON_API = 3;
+export const HELDIX_ADDON_API = 4;
 /** Dateien, die das Spiel beim nächsten Start entfernen soll (gesperrte JARs unter Windows), eine pro Zeile */
 export const PENDING_REMOVALS = '.entfernen';
 /** Ersatz für eine im Spiel gesperrte JAR gleichen Namens (legt das Spiel an) */
@@ -26,9 +26,13 @@ const ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
 const CATEGORIES = ['hud', 'musik', 'chat', 'werkzeuge', 'sonstiges'] as const;
 const PLATFORMS = ['windows', 'mac', 'linux'] as const;
+const LOADERS = ['heldix', 'fabric'] as const;
 const MAX_SIZE = 50 * 1024 * 1024;
+/** Minecraft-Version wie 26.3, 1.21.11, 26.3-pre1 oder 25w45a (oder eine Regel wie 26.x) */
+const MINECRAFT_RE = /^[0-9A-Za-z][0-9A-Za-z._+*-]{0,31}$/;
 
 export type AddonPlatform = (typeof PLATFORMS)[number];
+export type AddonLoader = (typeof LOADERS)[number];
 
 export interface AddonManifest {
   type: 'heldix-addon';
@@ -51,6 +55,12 @@ export interface AddonManifest {
   official: boolean;
   /** Einreicher eines Community-Addons, null bei offiziellen */
   author: { uuid: string; name: string } | null;
+  /** Manifest v2 (aus heldix.addon.json übernommen); alte Manifeste: api */
+  access: AddonAccess;
+  /** Minecraft-Versionen; leer = jede (nur bei access api) */
+  minecraft: string[];
+  /** wo es läuft; alte Manifeste: heldix und fabric */
+  loaders: AddonLoader[];
 }
 
 function text(value: unknown, field: string, min: number, max: number): string {
@@ -90,6 +100,18 @@ export function parseAddonManifest(raw: unknown): AddonManifest {
     }
     author = { uuid: a.uuid, name: a.name };
   }
+  // Manifest v2: Zugriff, Minecraft-Versionen und Loader (fehlen in alten Manifesten)
+  if (m.access !== undefined && m.access !== 'api' && m.access !== 'minecraft') throw new Error('Addon-Manifest: „access“ ist ungültig');
+  const access: AddonAccess = m.access === 'minecraft' ? 'minecraft' : 'api';
+  const minecraft = m.minecraft === undefined ? [] : Array.isArray(m.minecraft) ? m.minecraft : null;
+  if (!minecraft || minecraft.length > 50 || minecraft.some((v) => typeof v !== 'string' || !MINECRAFT_RE.test(v)) || new Set(minecraft).size !== minecraft.length) {
+    throw new Error('Addon-Manifest: „minecraft“ ist ungültig');
+  }
+  if (access === 'minecraft' && minecraft.length === 0) throw new Error('Addon-Manifest: „minecraft“ fehlt (Pflicht, wenn das Addon in Minecraft eingreift)');
+  const loaders = m.loaders === undefined ? (access === 'api' ? [...LOADERS] : ['heldix']) : Array.isArray(m.loaders) ? m.loaders : null;
+  if (!loaders || loaders.length === 0 || loaders.some((l) => !LOADERS.includes(l as AddonLoader)) || new Set(loaders).size !== loaders.length) {
+    throw new Error('Addon-Manifest: „loaders“ ist ungültig');
+  }
   return {
     type: 'heldix-addon',
     id,
@@ -109,6 +131,9 @@ export function parseAddonManifest(raw: unknown): AddonManifest {
     notes: notes.map((n) => text(n, 'notes', 1, 300)),
     official: m.official === true,
     author,
+    access,
+    minecraft: minecraft as string[],
+    loaders: loaders as AddonLoader[],
   };
 }
 
@@ -264,21 +289,37 @@ export async function fetchAddonScreenshot(serviceUrl: string, id: string, index
 
 const PLATFORM_LABEL: Record<AddonPlatform, string> = { windows: 'Windows', mac: 'macOS', linux: 'Linux' };
 
-/** Warum das Addon hier nicht läuft (oder null) */
-function incompatibility(manifest: AddonManifest): { state: 'unsupported-api' | 'unsupported-platform'; reason: string } | null {
+/** Die Instanz, in die ein Addon soll: Minecraft-Version und Loader */
+export interface AddonTarget {
+  minecraft: string;
+  loader: InstanceLoader;
+}
+
+type Unsupported = Extract<StoreAddon['state'], `unsupported-${string}`>;
+
+/**
+ * Warum das Addon hier nicht läuft (oder null): API-Stufe und System auf diesem PC, mit target zusätzlich Minecraft-Version
+ * und Loader der Instanz („Nur für Minecraft 26.3“, „Läuft nur in Heldix-Instanzen“).
+ */
+export function incompatibility(manifest: AddonManifest, target?: AddonTarget): { state: Unsupported; reason: string } | null {
   if (manifest.api > HELDIX_ADDON_API) return { state: 'unsupported-api', reason: `Braucht einen neueren HeldixClient (Addon-API ${manifest.api})` };
   if (manifest.platforms.length > 0 && !manifest.platforms.includes(currentPlatform())) {
     return { state: 'unsupported-platform', reason: `Nur für ${manifest.platforms.map((p) => PLATFORM_LABEL[p]).join(' und ')}` };
+  }
+  if (!target) return null;
+  if (!fitsMinecraft(target.minecraft, manifest.minecraft)) return { state: 'unsupported-minecraft', reason: minecraftReason(manifest.minecraft) };
+  if (!manifest.loaders.includes(target.loader as AddonLoader)) {
+    return { state: 'unsupported-loader', reason: manifest.loaders.length === 1 && manifest.loaders[0] === 'heldix' ? 'Läuft nur in Heldix-Instanzen' : 'Läuft nur in Fabric-Instanzen' };
   }
   return null;
 }
 
 /** Zustand eines Store-Eintrags in einer Instanz (installierte Addons aus listContent) */
-function stateIn(manifest: AddonManifest, installed: ContentItem[]): { state: StoreAddon['state']; present: ContentItem | null; problem: ReturnType<typeof incompatibility> } {
+function stateIn(manifest: AddonManifest, installed: ContentItem[], target?: AddonTarget): { state: StoreAddon['state']; present: ContentItem | null; problem: ReturnType<typeof incompatibility> } {
   const present = installed
     .filter((item) => item.id === manifest.id)
     .sort((a, b) => compareVersions(b.version, a.version))[0] ?? null;
-  const problem = incompatibility(manifest);
+  const problem = incompatibility(manifest, target);
   const state: StoreAddon['state'] = present
     ? compareVersions(manifest.version, present.version) > 0 && !problem
       ? 'update'
@@ -291,12 +332,12 @@ async function installedAddons(gameDir: string): Promise<ContentItem[]> {
   return (await listContent(gameDir, 'addons', 'heldix')).filter((item) => item.id);
 }
 
-/** Store-Liste mit dem Zustand in einer Instanz (installiert, Update, …). */
-export async function storeForInstance(gameDir: string, serviceUrl: string, publicKey: string | null): Promise<StoreAddon[]> {
+/** Store-Liste mit dem Zustand in einer Instanz (installiert, Update, …); target prüft Minecraft-Version und Loader. */
+export async function storeForInstance(gameDir: string, serviceUrl: string, publicKey: string | null, target?: AddonTarget): Promise<StoreAddon[]> {
   const entries = await fetchStore(serviceUrl, publicKey);
   const installed = await installedAddons(gameDir);
   return entries.map(({ manifest, downloads }) => {
-    const { state, present, problem } = stateIn(manifest, installed);
+    const { state, present, problem } = stateIn(manifest, installed, target);
     return {
       id: manifest.id,
       name: manifest.name,
@@ -312,6 +353,9 @@ export async function storeForInstance(gameDir: string, serviceUrl: string, publ
       date: manifest.date,
       notes: manifest.notes,
       downloads,
+      access: manifest.access,
+      minecraft: manifest.minecraft,
+      loaders: manifest.loaders,
       state,
       reason: problem?.reason ?? null,
       installedVersion: present?.version ?? null,
@@ -379,9 +423,12 @@ export async function storeOverview(
     myRating: ratings.get(manifest.id) ?? null,
     screenshots,
     problem: incompatibility(manifest)?.reason ?? null,
+    access: manifest.access,
+    minecraft: manifest.minecraft,
+    loaders: manifest.loaders,
     installs: instances.map((instance, i) => {
-      const { state, present } = stateIn(manifest, installed[i]);
-      return { instanceId: instance.id, state, installedVersion: present?.version ?? null };
+      const { state, present, problem } = stateIn(manifest, installed[i], instance);
+      return { instanceId: instance.id, state, installedVersion: present?.version ?? null, reason: problem?.reason ?? null };
     }),
   }));
   return { addons, instances: list, error: null };
@@ -404,7 +451,8 @@ export async function pendingUpdates(instances: OverviewInstance[], entries: Sto
     const installed = await installedAddons(instance.dir);
     if (installed.length === 0) continue;
     for (const { manifest } of entries) {
-      const { state, present } = stateIn(manifest, installed);
+      // Updates nur, wenn die neue Version zur Instanz passt (Minecraft-Version, Loader)
+      const { state, present } = stateIn(manifest, installed, instance);
       if (state === 'update') {
         updates.push({ instanceId: instance.id, instanceName: instance.name, addonId: manifest.id, name: manifest.name, version: manifest.version, installedVersion: present?.version ?? null });
       }
@@ -429,14 +477,17 @@ export async function uninstallStoreAddon(gameDir: string, id: string): Promise<
   return removed;
 }
 
-/** Lädt ein Addon aus dem Store, prüft es und legt es in die Instanz (ältere Versionen werden ersetzt). Gibt den Namen zurück. */
-export async function installStoreAddon(gameDir: string, serviceUrl: string, publicKey: string | null, id: string, entries?: StoreEntry[]): Promise<string> {
+/**
+ * Lädt ein Addon aus dem Store, prüft es und legt es in die Instanz (ältere Versionen werden ersetzt). Gibt den Namen zurück.
+ * instance: Minecraft-Version und Loader der Instanz – passt das Addon nicht, wird es nicht installiert.
+ */
+export async function installStoreAddon(gameDir: string, serviceUrl: string, publicKey: string | null, id: string, entries?: StoreEntry[], instance?: AddonTarget): Promise<string> {
   if (typeof id !== 'string' || !ID_RE.test(id)) throw new Error('Ungültige Addon-ID');
   // entries: schon geladene (und geprüfte) Liste, z. B. beim Aktualisieren aller Addons
   const entry = (entries ?? (await fetchStore(serviceUrl, publicKey))).find((e) => e.manifest.id === id);
   if (!entry) throw new Error('Dieses Addon gibt es im Store nicht (mehr).');
   const { manifest } = entry;
-  const problem = incompatibility(manifest);
+  const problem = incompatibility(manifest, instance);
   if (problem) throw new Error(problem.reason);
 
   const dir = contentDir(gameDir, 'addons');
@@ -468,6 +519,11 @@ export async function installStoreAddon(gameDir: string, serviceUrl: string, pub
     if (meta.error || meta.id !== manifest.id || meta.version !== manifest.version) {
       throw new Error('Die JAR passt nicht zum Store-Eintrag (ID oder Version weichen ab).');
     }
+    // Was der Spieler im Store sieht (signiert), muss zur JAR passen: kein heimlicher Eingriff in Minecraft
+    if (meta.access === 'minecraft' && manifest.access !== 'minecraft') {
+      throw new Error('Die JAR greift in Minecraft ein, der Store-Eintrag sagt das aber nicht – sie wird nicht installiert.');
+    }
+    if (!sameList(meta.minecraft, manifest.minecraft)) throw new Error('Die JAR passt nicht zum Store-Eintrag (Minecraft-Versionen weichen ab).');
   } catch (error) {
     await rm(part, { force: true });
     throw error;
@@ -481,6 +537,11 @@ export async function installStoreAddon(gameDir: string, serviceUrl: string, pub
   return manifest.name;
 }
 
+function sameList(a: readonly string[], b: readonly string[]): boolean {
+  const x = new Set(a);
+  return x.size === new Set(b).size && b.every((v) => x.has(v));
+}
+
 function pendingFile(gameDir: string): string {
   return path.join(contentDir(gameDir, 'addons'), PENDING_REMOVALS);
 }
@@ -488,6 +549,8 @@ function pendingFile(gameDir: string): string {
 /** Vom Spiel vorgemerkte Löschungen ausführen und Ersatz-JARs (.jar.neu) einsetzen (nur, wenn die Instanz nicht läuft). */
 export async function applyPendingRemovals(gameDir: string): Promise<void> {
   const dir = contentDir(gameDir, 'addons');
+  // im Spiel ausgeschaltete Addons (heldix-addons/.ausschalten)
+  await applyPendingDisable(gameDir).catch(() => undefined);
   try {
     for (const name of (await readdir(dir)).filter((f) => f.endsWith(`.jar${REPLACEMENT}`))) {
       await rename(path.join(dir, name), path.join(dir, name.slice(0, -REPLACEMENT.length))).catch(() => undefined);

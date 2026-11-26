@@ -1,5 +1,6 @@
 // HeldixClient – Webseite: Addon-Store (/addons). Karten aus GET /api/v1/addons, Suche, Kategorie- und
-// Herkunfts-Filter (Offiziell/Community) und Sortierung im Browser. Details als Dialog, verlinkbar als /addons#<id>
+// Herkunfts-Filter (Offiziell/Community), Filter „Nur API-Addons“ und Sortierung im Browser. Addons, die direkt in
+// Minecraft eingreifen, tragen „Greift in Minecraft ein“ samt Minecraft-Versionen und „Nur Heldix-Instanzen“. Details als Dialog, verlinkbar als /addons#<id>
 // (Versionsverlauf aus GET /api/v1/addons/<id>), mit Screenshots (Lightbox), Bewertungen und „Melden“.
 // Entwicklerseite: /addons?autor=<uuid> (GET /api/v1/addon-authors/<uuid>).
 // „Herunterladen“ zeigt auf https://<API>/v1/addons/<id>/download – der Dienst leitet auf die neueste Datei um.
@@ -10,6 +11,12 @@ import {
   ADDON_ID_RE,
   ADDON_REPORT_REASONS,
   API_STUFE,
+  API_STUFE_AB,
+  MINECRAFT_ACCESS,
+  accessChips,
+  loaderLimit,
+  loaderText,
+  minecraftLimit,
   KATEGORIEN,
   UUID_RE,
   addonIcon,
@@ -44,6 +51,7 @@ const els = {
   search: $('addon-suche'),
   categories: $('addon-kategorien'),
   origins: $('addon-herkunft'),
+  apiOnly: $('addon-nur-api'),
   sort: $('addon-sortierung'),
   result: $('addon-ergebnis'),
   unknown: $('addon-unbekannt'),
@@ -60,6 +68,8 @@ const state = {
   addons: [],
   category: 'alle',
   origin: 'alle',
+  /** Filter „Nur API-Addons“ (ohne Eingriffe in Minecraft) */
+  apiOnly: false,
   system: null,
   open: null,
   pushed: false,
@@ -100,7 +110,7 @@ async function checkLogin() {
 // ---------------------------------------------------------------------------------------------------------
 
 const searchText = (addon) =>
-  (addon.searchText ??= [addon.name, addon.id, addon.summary, addon.description, KATEGORIEN[addon.category], platformLimit(addon.platforms), addon.official ? 'offiziell' : 'community', addon.author?.name, ...addon.authors]
+  (addon.searchText ??= [addon.name, addon.id, addon.summary, addon.description, KATEGORIEN[addon.category], platformLimit(addon.platforms), addon.official ? 'offiziell' : 'community', addon.access === 'minecraft' ? MINECRAFT_ACCESS : null, minecraftLimit(addon), loaderLimit(addon), addon.author?.name, ...addon.authors]
     .filter(Boolean)
     .join(' ')
     .toLowerCase());
@@ -117,7 +127,7 @@ function card(addon) {
   const limit = platformLimit(addon.platforms);
   return h(
     'article',
-    { class: 'addon-card tile', dataset: { id: addon.id, kategorie: addon.category, herkunft: addon.official ? 'offiziell' : 'community' } },
+    { class: 'addon-card tile', dataset: { id: addon.id, kategorie: addon.category, herkunft: addon.official ? 'offiziell' : 'community', zugriff: addon.access } },
     h(
       'div',
       { class: 'addon-card-head' },
@@ -134,7 +144,7 @@ function card(addon) {
     h(
       'div',
       { class: 'addon-card-foot' },
-      h('span', { class: 'addon-chips' }, originBadge(addon), h('span', { class: 'chip accent', text: KATEGORIEN[addon.category] }), limit ? h('span', { class: 'chip warning', text: limit }) : null),
+      h('span', { class: 'addon-chips' }, originBadge(addon), h('span', { class: 'chip accent', text: KATEGORIEN[addon.category] }), limit ? h('span', { class: 'chip warning', text: limit }) : null, ...accessChips(addon)),
       h('span', { class: 'addon-card-stats' }, ratingSummary(addon.rating), h('span', { class: 'addon-downloads' }, icon('download'), formatCount(addon.downloads))),
     ),
   );
@@ -164,6 +174,12 @@ function renderCategories() {
     filterButton('herkunft', 'offiziell', 'Offiziell', official, state.origin),
     filterButton('herkunft', 'community', 'Community', community, state.origin),
   );
+  // „Nur API-Addons“ nur, wenn es auch Addons mit Eingriffen in Minecraft gibt
+  const minecraft = state.addons.filter((addon) => addon.access === 'minecraft').length;
+  els.apiOnly.hidden = !minecraft;
+  if (!minecraft) state.apiOnly = false;
+  els.apiOnly.setAttribute('aria-pressed', String(state.apiOnly));
+  els.apiOnly.querySelector('.count-soft').textContent = String(state.addons.length - minecraft);
 }
 
 function matchesOrigin(addon) {
@@ -172,11 +188,11 @@ function matchesOrigin(addon) {
 
 function apply() {
   const terms = els.search.value.toLowerCase().trim().split(/\s+/).filter(Boolean);
-  const shown = sorted(state.addons, els.sort.value).filter((addon) => (state.category === 'alle' || addon.category === state.category) && matchesOrigin(addon) && terms.every((term) => searchText(addon).includes(term)));
+  const shown = sorted(state.addons, els.sort.value).filter((addon) => (state.category === 'alle' || addon.category === state.category) && matchesOrigin(addon) && (!state.apiOnly || addon.access === 'api') && terms.every((term) => searchText(addon).includes(term)));
   els.grid.replaceChildren(...shown.map(card));
   els.noMatch.hidden = shown.length > 0;
   const total = state.addons.length;
-  const filtered = terms.length || state.category !== 'alle' || state.origin !== 'alle';
+  const filtered = terms.length || state.category !== 'alle' || state.origin !== 'alle' || state.apiOnly;
   if (state.author) els.result.textContent = filtered ? `${shown.length} von ${total} Addons von ${state.author.name}` : `${total === 1 ? '1 Addon' : `${total} Addons`} von ${state.author.name}`;
   else els.result.textContent = filtered ? `${shown.length} von ${total} Addons` : total === 1 ? '1 Addon im Store' : `${total} Addons im Store`;
 }
@@ -288,7 +304,7 @@ function apiText(api) {
   if (api === null) return '–';
   if (api <= 1) return 'Stufe 1 – läuft mit jedem HeldixClient';
   if (api === 2) return 'Stufe 2 – ab HeldixClient 0.11.0';
-  if (api === 3) return 'Stufe 3 – ab HeldixClient 0.13.1';
+  if (API_STUFE_AB[api]) return `Stufe ${api} – ab HeldixClient ${API_STUFE_AB[api]}`;
   return `Stufe ${api} – braucht einen neueren HeldixClient`;
 }
 
@@ -522,7 +538,7 @@ function detailView(addon) {
         h('h2', { id: 'addon-detail-titel', text: addon.name }),
         h('p', { class: 'addon-detail-meta', text: [`Version ${addon.version}`, authorText(addon.authors), formatCount(addon.downloads)].filter(Boolean).join(' · ') }),
         h('p', { class: 'addon-detail-rating' }),
-        h('div', { class: 'chips-row' }, originBadge(addon), limit ? h('span', { class: 'chip warning', text: limit }) : null),
+        h('div', { class: 'chips-row' }, originBadge(addon), limit ? h('span', { class: 'chip warning', text: limit }) : null, ...accessChips(addon)),
       ),
     ),
     addon.summary ? h('p', { class: 'addon-detail-summary', text: addon.summary }) : null,
@@ -534,6 +550,19 @@ function detailView(addon) {
     ),
     notHere
       ? h('p', { class: 'addon-warning' }, icon('warning'), h('span', { text: `Dieses Addon läuft nur unter ${addon.platforms.map((system) => SYSTEM_NAMEN[system]).join(' und ')}. Unter ${SYSTEM_NAMEN[state.system]} funktioniert es nicht.` }))
+      : null,
+    addon.access === 'minecraft'
+      ? h(
+          'div',
+          { class: 'addon-access-box', id: 'addon-zugriff-hinweis' },
+          icon('code'),
+          h(
+            'p',
+            null,
+            h('strong', { text: MINECRAFT_ACCESS }),
+            h('span', { text: ` – verändert Minecraft direkt, nicht nur über die Heldix-API. Das HeldixClient-Team hat die Eingriffe geprüft. Läuft mit ${minecraftLimit(addon)}${loaderLimit(addon) === 'Nur Heldix-Instanzen' ? ', nur in Heldix-Instanzen' : loaderLimit(addon) === 'Nur Fabric-Instanzen' ? ', nur in Fabric-Instanzen' : ''}; An und Aus wirkt erst nach dem Neustart des Spiels.` }),
+          ),
+        )
       : null,
     addon.api !== null && addon.api > API_STUFE
       ? h('p', { class: 'addon-warning' }, icon('warning'), h('span', { text: `Braucht die Heldix-API-Stufe ${addon.api}. HeldixClient kann derzeit Stufe ${API_STUFE} – aktualisiere zuerst den Launcher.` }))
@@ -562,6 +591,9 @@ function detailView(addon) {
           fact('Größe', addon.size !== null ? formatBytes(addon.size) : '–'),
           fact('Systeme', platformText(addon.platforms)),
           fact('Heldix-API', apiText(addon.api)),
+          fact('Zugriff', addon.access === 'minecraft' ? MINECRAFT_ACCESS : 'Nur über die Heldix-API'),
+          fact('Minecraft', addon.minecraft.length ? addon.minecraft.join(', ') : 'Jede Version'),
+          fact('Instanzen', loaderText(addon)),
           fact('Herkunft', addon.official ? 'Offiziell – vom HeldixClient-Team' : 'Community – geprüft und signiert vom Team'),
           addon.author ? fact('Entwickler', authorLink(addon.author)) : null,
           addon.authors.length ? fact(addon.authors.length === 1 ? 'Autor' : 'Autoren', addon.authors.join(', ')) : null,
@@ -698,6 +730,11 @@ els.origins.addEventListener('click', (event) => {
   if (!button) return;
   state.origin = button.dataset.herkunft;
   for (const other of els.origins.querySelectorAll('button')) other.setAttribute('aria-pressed', String(other === button));
+  apply();
+});
+els.apiOnly.addEventListener('click', () => {
+  state.apiOnly = !state.apiOnly;
+  els.apiOnly.setAttribute('aria-pressed', String(state.apiOnly));
   apply();
 });
 els.search.addEventListener('input', apply);

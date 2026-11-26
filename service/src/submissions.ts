@@ -11,6 +11,7 @@ import {
   ADDON_CATEGORIES,
   ADDON_PLATFORMS,
   checkAddonManifest,
+  defaultLoaders,
   ICON_RE,
   ID_TAKEN,
   MAX_ADDON_MANIFEST_BYTES,
@@ -166,6 +167,9 @@ export class AddonSubmissions {
       notes: s.notes,
       authors: s.authors,
       api: s.api,
+      access: s.access,
+      minecraft: s.minecraft,
+      loaders: s.loaders,
       size: s.size,
       sha256: s.sha256,
       screenshots: s.screenshots.length,
@@ -286,8 +290,9 @@ export class AddonSubmissions {
 
   /**
    * `PUT /v1/addon-submissions/<sid>/jar` (roher Körper, höchstens 50 MiB): prüft die JAR (ZIP, heldix.addon.json,
-   * Einstiegsklasse, Hinweise aus den Klassen), die Addon-ID (Besitz) und dass die Version höher ist als jede
-   * veröffentlichte. Leere Felder Name und Kurzbeschreibung übernimmt sie aus heldix.addon.json.
+   * Einstiegspunkte, Hinweise aus den Klassen), die Addon-ID (Besitz) und dass die Version höher ist als jede
+   * veröffentlichte. Zugriff, Minecraft-Versionen und Loader kommen aus der JAR; leere Felder Name und
+   * Kurzbeschreibung übernimmt sie aus heldix.addon.json.
    */
   async uploadJar(user: UserRow, sid: string | undefined, req: IncomingMessage) {
     const sub = this.own(user, sid);
@@ -321,6 +326,9 @@ export class AddonSubmissions {
         addonId: info.id,
         version: info.version,
         api: info.api,
+        access: info.access,
+        minecraft: info.minecraft,
+        loaders: info.loaders,
         authors: info.authors.length > 0 ? info.authors : [user.name],
         size,
         sha256,
@@ -446,6 +454,8 @@ export class AddonSubmissions {
     }
     this.addons.checkHigherVersion(sub.addonId, sub.version);
     const now = Date.now();
+    // Aus der JAR (Einreichungen vor 1.6.1 nutzten nur die Heldix-API)
+    const access = sub.access ?? 'api';
     const manifest = JSON.stringify({
       type: 'heldix-addon',
       id: sub.addonId,
@@ -465,6 +475,9 @@ export class AddonSubmissions {
       notes: sub.notes,
       official: false,
       author: { uuid: user.uuid, name: user.name },
+      access,
+      minecraft: sub.minecraft,
+      loaders: sub.loaders.length > 0 ? sub.loaders : defaultLoaders(access),
     });
     const checked = checkAddonManifest(JSON.parse(manifest));
     if (typeof checked === 'string') throw new HttpError(400, `Bitte noch korrigieren: ${checked}.`);

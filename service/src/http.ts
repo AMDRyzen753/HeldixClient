@@ -31,6 +31,27 @@ export function sendJson(res: ServerResponse, status: number, body: unknown, hea
   res.end(text);
 }
 
+/** Nennt `If-None-Match` diesen ETag (auch in einer Liste oder als schwacher ETag `W/…`, oder `*`)? */
+export function etagMatches(req: IncomingMessage, etag: string): boolean {
+  const header = req.headers['if-none-match'];
+  if (typeof header !== 'string') return false;
+  if (header.trim() === '*') return true;
+  return header.split(',').some((part) => part.trim().replace(/^W\//, '') === etag);
+}
+
+/** Fertiger JSON-Text mit ETag: 304 ohne Körper, wenn der Client ihn schon hat, sonst 200. */
+export function sendCachedJson(req: IncomingMessage, res: ServerResponse, cached: { text: string; etag: string }, cacheControl: string): void {
+  if (res.headersSent || res.destroyed) return;
+  const headers = { ...BASE_HEADERS, 'Cache-Control': cacheControl, ETag: cached.etag };
+  if (etagMatches(req, cached.etag)) {
+    res.writeHead(304, headers);
+    res.end();
+    return;
+  }
+  res.writeHead(200, { ...headers, 'Content-Length': String(Buffer.byteLength(cached.text)) });
+  res.end(cached.text);
+}
+
 export function sendError(res: ServerResponse, err: HttpError): void {
   sendJson(res, err.status, err.code === undefined ? { error: err.message } : { error: err.message, code: err.code }, err.headers);
 }

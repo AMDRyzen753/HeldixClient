@@ -1,0 +1,10 @@
+{
+	"id": "mcfalsch",
+	"name": "Falsche-Version-Test-Addon",
+	"version": "1.0.0",
+	"description": "Nur für den Autotest: gebaut für eine andere Minecraft-Version, darf nicht geladen werden.",
+	"authors": ["HeldixClient"],
+	"clientEntrypoint": "gibt.es.nicht.Start",
+	"transformers": ["gibt.es.nicht.Transformer"],
+	"minecraft": ["1.0", "1.1"]
+}

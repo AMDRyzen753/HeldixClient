@@ -1,0 +1,9 @@
+{
+	"id": "mcdefekt",
+	"name": "Defektes Minecraft-Test-Addon",
+	"version": "1.0.0",
+	"description": "Nur für den Autotest: sein Transformer scheitert absichtlich.",
+	"authors": ["HeldixClient"],
+	"transformers": ["dev.heldixclient.testaddons.defekt.DefektTransformer"],
+	"minecraft": ["${minecraft_version}"]
+}

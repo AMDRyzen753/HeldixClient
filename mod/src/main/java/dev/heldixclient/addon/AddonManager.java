@@ -1,11 +1,12 @@
 package dev.heldixclient.addon;
 
-import com.google.gson.Gson;
 import dev.heldixclient.HeldixClient;
 import dev.heldixclient.api.HeldixAddon;
 import dev.heldixclient.api.HeldixApi;
 import dev.heldixclient.api.HeldixEvents;
 import dev.heldixclient.loader.HeldixLoader;
+import dev.heldixclient.loader.api.AddonManifest;
+import dev.heldixclient.loader.api.LoaderAddon;
 import dev.heldixclient.loader.api.event.ChatEvents;
 import dev.heldixclient.loader.api.event.ClientEvents;
 import dev.heldixclient.loader.api.event.WorldEvents;
@@ -16,11 +17,8 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.player.LocalPlayer;
 
-import java.io.InputStreamReader;
-import java.io.Reader;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -30,22 +28,20 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
 import java.util.stream.Stream;
 
 /**
  * Lädt Heldix-Addons aus dem Ordner heldix-addons/ der Instanz.
  *
- * Addons sind einfacher als Mods: sie sehen nur die stabile Heldix-API (keine Minecraft-Klassen)
- * und bekommen je einen eigenen Classloader. Fehler in einem Addon werden abgefangen; nach
- * mehreren Fehlern wird das Addon deaktiviert, das Spiel läuft weiter.
+ * Reine API-Addons sehen nur die stabile Heldix-API (keine Minecraft-Klassen) und bekommen je einen eigenen
+ * Classloader. Addons mit Zugriff auf Minecraft (clientEntrypoint oder transformers in der heldix.addon.json) hat der
+ * Heldix Loader schon beim Start geladen; ihr entrypoint kommt hier über dessen Classloader. Fehler in einem Addon
+ * werden abgefangen; nach mehreren Fehlern wird das Addon deaktiviert, das Spiel läuft weiter.
  */
 public final class AddonManager {
 	public static final String ADDON_DIR = "heldix-addons";
 	public static final String METADATA_FILE = "heldix.addon.json";
 	private static final int MAX_ERRORS = 3;
-	private static final Gson GSON = new Gson();
 
 	record Listener<T>(LoadedAddon addon, T callback) {
 	}
@@ -108,10 +104,13 @@ public final class AddonManager {
 		List<Path> jars = new ArrayList<>();
 		try {
 			Files.createDirectories(dir);
-			// im Addon-Store entfernte bzw. ersetzte JARs (unter Windows waren sie bis zum Spielende gesperrt)
+			// im Addon-Store entfernte bzw. ersetzte JARs (unter Windows waren sie bis zum Spielende gesperrt);
+			// meist hat das der Heldix Loader beim Start schon erledigt
 			AddonStore.applyPendingRemovals(dir);
 			try (Stream<Path> files = Files.list(dir)) {
-				files.filter(p -> p.getFileName().toString().endsWith(".jar")).sorted().forEach(jars::add);
+				// abgeschaltete (.jar.disabled, wie im Launcher) nur anzeigen, nicht laden
+				files.filter(p -> p.getFileName().toString().endsWith(".jar") || p.getFileName().toString().endsWith(".jar" + AddonFiles.DISABLED))
+						.sorted().forEach(jars::add);
 			}
 		} catch (Exception e) {
 			HeldixClient.LOGGER.error("Heldix-Addons: Ordner {} nicht lesbar", dir, e);
@@ -122,6 +121,15 @@ public final class AddonManager {
 		for (Path jar : jars) {
 			LoadedAddon addon = new LoadedAddon(jar);
 			ADDONS.add(addon);
+			if (jar.getFileName().toString().endsWith(AddonFiles.DISABLED)) {
+				addon.state = LoadedAddon.State.DISABLED;
+				try {
+					addon.metadata = readMetadata(jar);
+				} catch (Throwable t) {
+					addon.error = describe(t);
+				}
+				continue;
+			}
 			try {
 				addon.metadata = readMetadata(jar);
 				String id = addon.metadata.id;
@@ -137,7 +145,7 @@ public final class AddonManager {
 
 		Set<String> ids = new HashSet<>();
 		for (LoadedAddon addon : ADDONS) {
-			if (addon.metadata == null) continue;
+			if (addon.metadata == null || addon.state == LoadedAddon.State.DISABLED) continue;
 			LoadedAddon chosen = addon.metadata.id != null ? newest.get(addon.metadata.id) : null;
 			if (chosen != null && chosen != addon) {
 				boolean older = compareVersions(addon.metadata.version, chosen.metadata.version) < 0;
@@ -158,15 +166,39 @@ public final class AddonManager {
 			AddonMetadata meta = addon.metadata;
 			if (meta.id == null || !meta.id.matches("[a-z0-9_-]+")) throw new IllegalStateException("Ungültige Addon-ID: " + meta.id);
 			if (!ids.add(meta.id)) throw new IllegalStateException("Addon-ID \"" + meta.id + "\" ist doppelt installiert");
-			if (meta.api < MIN_API || meta.api > HeldixApi.API_VERSION) {
+			// die API-Stufe zählt nur mit entrypoint (ein Addon nur mit Eingriffen in Minecraft nutzt die Heldix-API nicht)
+			if (meta.entrypoint != null && (meta.api < MIN_API || meta.api > HeldixApi.API_VERSION)) {
 				throw new IllegalStateException(meta.api > HeldixApi.API_VERSION
 						? "Braucht Heldix-API " + meta.api + ", dieser HeldixClient kann bis API " + HeldixApi.API_VERSION + " – bitte HeldixClient aktualisieren"
 						: "Gebaut für die veraltete Heldix-API " + meta.api + ", unterstützt wird ab API " + MIN_API);
 			}
-			if (meta.entrypoint == null || meta.entrypoint.isBlank()) throw new IllegalStateException("\"entrypoint\" fehlt");
+			if (!meta.problems().isEmpty()) throw new IllegalStateException(meta.problems().getFirst());
+			String loaderProblem = meta.loaderProblem(HeldixLoader.version());
+			if (loaderProblem != null) throw new IllegalStateException(loaderProblem);
 
-			URL url = addon.file.toUri().toURL();
-			addon.classLoader = new URLClassLoader("heldix-addon-" + meta.id, new URL[] {url}, AddonManager.class.getClassLoader());
+			if (meta.minecraftAccess()) {
+				// Zugriff auf Minecraft: Der Heldix Loader hat die JAR schon beim Start geladen (Transformer, clientEntrypoint);
+				// der entrypoint kommt über genau dessen Classloader, damit es keine Klasse doppelt gibt
+				LoaderAddon status = loaderStatus(addon.file);
+				if (status == null) throw new IllegalStateException("Vom Heldix Loader nicht geladen – bitte das Spiel neu starten");
+				addon.loaderAddon = status;
+				if (!status.active()) throw new IllegalStateException(status.problem() != null ? status.problem() : "Vom Heldix Loader nicht geladen");
+				addon.classLoader = status.classLoader();
+			} else {
+				// "minecraft" und "loaders" sind bei reinen API-Addons freiwillig, gelten aber genauso
+				String version = meta.manifest != null ? meta.manifest.minecraftProblem(HeldixLoader.minecraftVersion()) : null;
+				if (version != null) throw new IllegalStateException(version);
+				String platform = meta.manifest != null ? meta.manifest.platformProblem(HeldixLoader.platform()) : null;
+				if (platform != null) throw new IllegalStateException(platform);
+				URL url = addon.file.toUri().toURL();
+				addon.classLoader = new URLClassLoader("heldix-addon-" + meta.id, new URL[] {url}, AddonManager.class.getClassLoader());
+			}
+			if (meta.entrypoint == null) {
+				// nur Eingriffe in Minecraft (Transformer, clientEntrypoint) – das hat der Loader schon erledigt
+				addon.state = LoadedAddon.State.ACTIVE;
+				HeldixClient.LOGGER.info("Heldix-Addon {} {} geladen (greift in Minecraft ein, ohne Heldix-API)", meta.displayName(), meta.version);
+				return;
+			}
 			Class<?> type = Class.forName(meta.entrypoint, true, addon.classLoader);
 			if (!HeldixAddon.class.isAssignableFrom(type)) {
 				throw new IllegalStateException(meta.entrypoint + " implementiert HeldixAddon nicht");
@@ -175,7 +207,7 @@ public final class AddonManager {
 			addon.context = new AddonContext(addon);
 			addon.state = LoadedAddon.State.ACTIVE;
 			addon.instance.onEnable(addon.context);
-			HeldixClient.LOGGER.info("Heldix-Addon {} {} geladen", meta.displayName(), meta.version);
+			HeldixClient.LOGGER.info("Heldix-Addon {} {} geladen{}", meta.displayName(), meta.version, meta.minecraftAccess() ? " (greift in Minecraft ein)" : "");
 		} catch (Throwable t) {
 			deactivate(addon, describe(t));
 			HeldixClient.LOGGER.error("Heldix-Addon {} konnte nicht geladen werden", addon.fileName(), t);
@@ -202,16 +234,62 @@ public final class AddonManager {
 		}
 	}
 
+	/** Liest die heldix.addon.json (Version 2, geprüft nach den Regeln des Heldix Loaders); Fehler stehen in problems(). */
 	static AddonMetadata readMetadata(Path jar) throws Exception {
-		try (JarFile file = new JarFile(jar.toFile())) {
-			JarEntry entry = file.getJarEntry(METADATA_FILE);
-			if (entry == null) throw new IllegalStateException(METADATA_FILE + " fehlt in der JAR");
-			try (Reader reader = new InputStreamReader(file.getInputStream(entry), StandardCharsets.UTF_8)) {
-				AddonMetadata meta = GSON.fromJson(reader, AddonMetadata.class);
-				if (meta == null) throw new IllegalStateException(METADATA_FILE + " ist leer");
-				return meta;
+		return AddonMetadata.of(AddonManifest.read(jar));
+	}
+
+	/** Für den Autotest und die Fehlersuche: Manifest aus Text lesen und prüfen (Fehler auf Deutsch, leer = in Ordnung). */
+	public static List<String> manifestProblems(String json) {
+		return AddonManifest.parse(json).problems();
+	}
+
+	/** Das Addon, wie es der Heldix Loader beim Start gesehen hat (nur Addons mit Zugriff auf Minecraft), sonst null */
+	private static LoaderAddon loaderStatus(Path file) {
+		Path wanted = file.toAbsolutePath().normalize();
+		for (LoaderAddon addon : HeldixLoader.addons()) {
+			if (addon.file().toAbsolutePath().normalize().equals(wanted)) return addon;
+		}
+		return null;
+	}
+
+	// ======================================================================================
+	// An/aus im Heldix-Menü
+	// ======================================================================================
+
+	/**
+	 * Schalter im Heldix-Menü (Mods &amp; Addons → Installiert). Gespeichert wird wie im Launcher (Datei .jar.disabled).
+	 * Ausschalten wirkt bei reinen API-Addons sofort; Addons, die in Minecraft eingreifen, laufen bis zum Neustart
+	 * weiter (Transformer lassen sich nicht zurücknehmen). Einschalten wirkt immer nach dem Neustart, weil Addons ihre
+	 * Tasten beim Start anlegen. Im Menü steht dann „Wirkt nach dem Neustart“.
+	 *
+	 * @return false, wenn die Datei nicht geändert werden konnte
+	 */
+	public static boolean setEnabled(LoadedAddon addon, boolean on) {
+		if (!AddonFiles.setSwitchedOn(addon, on)) return false;
+		if (!on && addon.state != LoadedAddon.State.DISABLED && !addon.runsInMinecraft()) {
+			stop(addon);
+			HeldixClient.LOGGER.info("Heldix-Addon {} im Heldix-Menü ausgeschaltet", addon.name());
+		} else {
+			HeldixClient.LOGGER.info("Heldix-Addon {} im Heldix-Menü {}geschaltet – wirkt nach dem Neustart", addon.name(), on ? "ein" : "aus");
+		}
+		return true;
+	}
+
+	/** Sofort ausschalten (reine API-Addons): onDisable, Module weg, Aufgaben abbrechen, Listener werden übersprungen */
+	private static void stop(LoadedAddon addon) {
+		boolean wasActive = addon.isActive();
+		addon.state = LoadedAddon.State.DISABLED;
+		addon.error = null;
+		if (wasActive && addon.instance != null) {
+			try {
+				addon.instance.onDisable();
+			} catch (Throwable t) {
+				HeldixClient.LOGGER.warn("Heldix-Addon {}: Fehler in onDisable", addon.name(), t);
 			}
 		}
+		for (Module module : addon.modules) ModuleManager.removeModule(module);
+		if (addon.scheduler != null) addon.scheduler.shutdown();
 	}
 
 	private static String describe(Throwable t) {
@@ -283,6 +361,7 @@ public final class AddonManager {
 			for (LoadedAddon addon : ADDONS) {
 				if (addon.scheduler != null && addon.isActive()) addon.scheduler.tick();
 			}
+			AddonDroppedItems.tick();
 			try {
 				watch(minecraft);
 			} catch (RuntimeException e) {
@@ -304,6 +383,7 @@ public final class AddonManager {
 			}
 		});
 		WorldEvents.LEAVE.register(minecraft -> {
+			AddonDroppedItems.clear();
 			runAll(WORLD_LEAVE, "onWorldLeave");
 			if (serverAddress != null) {
 				String address = serverAddress;
@@ -314,7 +394,7 @@ public final class AddonManager {
 		ChatEvents.RECEIVE.register((message, fromPlayer) -> chat(message.getString()));
 		ClientEvents.STOPPING.register(minecraft -> {
 			for (LoadedAddon addon : ADDONS) {
-				if (!addon.isActive()) continue;
+				if (!addon.isActive() || addon.instance == null) continue;
 				try {
 					addon.instance.onDisable();
 				} catch (Throwable t) {

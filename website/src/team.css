@@ -1,0 +1,901 @@
+/* HeldixClient – Webseite: Team-Bereich (/team). Nur auf team.html geladen, nach styles.css und app.css.
+   Übersicht (Kennzahlen, neueste Einträge), Schnellsuche (Strg+K), Cosmetics, Zugriff von Addons (Mods & Addons) und
+   ein dichterer, einheitlicher Look der Team-Bereiche (Meldungen, Support, Spieler, Sperren, Neuigkeiten, Protokoll).
+   Gleiche Bausteine und Farben wie app.css; Bewegung entfällt bei prefers-reduced-motion. */
+
+/* =========================================================================================================
+   Übersicht
+   ========================================================================================================= */
+.dash {
+  display: grid;
+  gap: 14px;
+}
+.dash:empty {
+  display: none;
+}
+.app .dash-hello {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding: 18px 20px;
+  background: radial-gradient(120% 180% at 0% 0%, rgba(59, 130, 246, 0.16), transparent 55%), var(--surface);
+}
+.dash-hello-text {
+  min-width: 0;
+}
+.app .dash-hello h2 {
+  font-size: 19px;
+  letter-spacing: -0.01em;
+}
+.app .dash-hello p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 14.5px;
+}
+.dash-hello-side {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.dash-stand {
+  white-space: nowrap;
+}
+
+/* Kennzahlen */
+.dash-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+  gap: 10px;
+}
+.dash-stat-item {
+  display: flex;
+  min-width: 0;
+}
+.dash-stat {
+  --tone: var(--accent-text);
+  --tone-bg: rgba(59, 130, 246, 0.12);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 14px 14px 13px;
+  border-radius: 14px;
+  border: 1px solid var(--surface-line);
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.dash-stat:hover {
+  border-color: rgba(147, 197, 253, 0.35);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), transparent 70%), var(--surface);
+  text-decoration: none;
+}
+.dash-stat:focus-visible {
+  outline-offset: 2px;
+}
+.dash-stat.warn {
+  --tone: #fde68a;
+  --tone-bg: rgba(251, 191, 36, 0.13);
+  border-color: rgba(251, 191, 36, 0.28);
+}
+.dash-stat.accent {
+  border-color: rgba(147, 197, 253, 0.32);
+}
+.dash-stat.neutral {
+  --tone: var(--danger-text);
+  --tone-bg: rgba(248, 113, 113, 0.1);
+}
+.dash-stat.calm {
+  --tone: #6ee7b7;
+  --tone-bg: rgba(52, 211, 153, 0.1);
+}
+.dash-stat-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--tone-bg);
+  color: var(--tone);
+}
+.dash-stat-icon .icon {
+  width: 18px;
+  height: 18px;
+}
+.dash-stat-body {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.dash-stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.dash-stat.calm .dash-stat-value {
+  color: var(--muted);
+}
+.dash-stat-label {
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.dash-stat-detail {
+  color: var(--faint);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Neueste Einträge */
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.app .dash-grid > .app-card + .app-card {
+  margin-top: 0;
+}
+.dash-wide {
+  grid-column: 1 / -1;
+}
+.app .dash-list {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+.dash-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.app .dash-list-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 15px;
+}
+.dash-list-head h3 .icon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: var(--accent-text);
+}
+.app .count.soft-count {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  box-shadow: none;
+}
+.dash-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dash-all .icon {
+  width: 15px;
+  height: 15px;
+}
+.app .rows.dash-rows .row {
+  gap: 10px;
+  padding: 8px 12px;
+  text-decoration: none;
+}
+.dash-row:hover {
+  text-decoration: none;
+}
+.dash-row .row-main {
+  grid-template-columns: minmax(0, 1fr);
+}
+.dash-row .row-title {
+  font-size: 14px;
+}
+.dash-row .row-meta {
+  overflow-wrap: anywhere;
+}
+.dash-ellipsis {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-row .row-title:has(.dash-ellipsis) {
+  flex-wrap: nowrap;
+}
+.dash-audit .row-title {
+  gap: 4px 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.app .dash-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.09);
+  color: var(--muted);
+  font-size: 13.5px;
+}
+.dash-empty .icon {
+  width: 16px;
+  height: 16px;
+  color: #6ee7b7;
+}
+.app .dash-more {
+  margin-top: -2px;
+}
+
+/* Zahlen des Dienstes */
+.app .dash-numbers {
+  padding: 16px;
+}
+.app .dash-numbers h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 15px;
+}
+.dash-numbers h3 .icon {
+  width: 17px;
+  height: 17px;
+  color: var(--accent-text);
+}
+.dash-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.dash-kpi {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--surface-line);
+}
+.dash-kpi dt {
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 600;
+}
+.dash-kpi dd {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.app section.dash-areas {
+  margin-top: 26px;
+  padding: 0;
+}
+.app .dash-section-title {
+  margin: 0 0 10px;
+  color: var(--faint);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* =========================================================================================================
+   Schnellsuche (Befehlspalette)
+   ========================================================================================================= */
+dialog.palette {
+  width: min(640px, calc(100vw - 32px));
+  max-width: none;
+  max-height: none;
+  margin: min(12vh, 110px) auto auto;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 18px;
+  background: #0e1421;
+  color: var(--text);
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+dialog.palette::backdrop {
+  background: rgba(3, 5, 9, 0.62);
+  backdrop-filter: blur(3px);
+}
+dialog.palette[open] {
+  animation: palette-in 0.14s ease-out;
+}
+@keyframes palette-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.99);
+  }
+}
+.palette-box {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: min(560px, calc(100svh - 2 * min(12vh, 110px)));
+}
+.palette-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px 6px 16px;
+  border-bottom: 1px solid var(--surface-line);
+}
+.palette-label {
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+}
+.palette-label .icon {
+  width: 20px;
+  height: 20px;
+}
+.palette-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 48px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: 500 16px/1 var(--font);
+  outline: none;
+}
+.palette-input::placeholder {
+  color: var(--faint);
+}
+.palette-close {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+.palette-close kbd {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.palette-close:hover kbd {
+  color: var(--text);
+}
+.palette-list {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px 8px 8px;
+  scrollbar-width: thin;
+}
+.palette-group + .palette-group {
+  margin-top: 4px;
+}
+.palette-group-title {
+  padding: 10px 10px 4px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.palette-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.palette-option.active {
+  background: var(--selected);
+  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.22);
+}
+.palette-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+}
+.palette-icon .icon {
+  width: 17px;
+  height: 17px;
+}
+.palette-icon.action,
+.palette-option.active .palette-icon {
+  background: rgba(59, 130, 246, 0.14);
+  color: var(--accent-text);
+}
+.palette-option .avatar {
+  flex: none;
+}
+.palette-option .addon-icon.tiny {
+  width: 32px;
+  height: 32px;
+}
+.palette-text {
+  display: grid;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.palette-title {
+  overflow: hidden;
+  font-size: 14.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-sub {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.palette-go {
+  flex: none;
+  color: var(--faint);
+  opacity: 0;
+}
+.palette-go .icon {
+  width: 16px;
+  height: 16px;
+}
+.palette-option.active .palette-go {
+  opacity: 1;
+  color: var(--accent-text);
+}
+.app .palette-empty,
+.palette-empty {
+  padding: 26px 12px;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: center;
+}
+.palette-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 9px 16px;
+  border-top: 1px solid var(--surface-line);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--faint);
+  font-size: 12.5px;
+}
+.palette-status {
+  margin: 0;
+  min-width: 0;
+}
+.palette-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.palette-keys kbd {
+  font-size: 11px;
+}
+
+/* =========================================================================================================
+   Addons: erwartete Prüf-Hinweise (Mods & Addons)
+   ========================================================================================================= */
+/* Chips „Greift in Minecraft ein“ usw. kommen aus addon-common.js (accessChips, Stil in styles.css). Erwartete
+   Prüf-Hinweise (passen zum angegebenen Zugriff) neutral wie eine Info, nicht gelb oder rot. */
+.inspect-item.expected {
+  border-color: rgba(147, 197, 253, 0.28);
+  background: rgba(59, 130, 246, 0.07);
+}
+.inspect-item.expected .icon {
+  color: var(--accent-text);
+}
+.addon-admin.highlight,
+.cosmetic-row.highlight {
+  animation: flash 2s ease-out;
+}
+
+/* =========================================================================================================
+   Cosmetics
+   ========================================================================================================= */
+.cosmetic-top {
+  margin-bottom: 16px;
+}
+.app #cosmetic-upload .file-row {
+  margin-top: 14px;
+}
+.cosmetic-check {
+  margin-top: 14px;
+}
+.cosmetic-check.filled {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--surface-line);
+  background: var(--surface-2);
+}
+.cosmetic-check .check-list {
+  margin: 0;
+}
+.cosmetic-result {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.cosmetic-preview {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+}
+.cosmetic-stage {
+  display: grid;
+  place-items: center;
+  width: 168px;
+  height: 168px;
+  border-radius: 14px;
+  border: 1px solid var(--surface-line);
+  background:
+    radial-gradient(70% 70% at 50% 40%, rgba(59, 130, 246, 0.16), transparent 70%),
+    repeating-conic-gradient(rgba(255, 255, 255, 0.025) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px,
+    #0a0f1a;
+}
+.cosmetic-canvas {
+  width: 168px;
+  height: 168px;
+}
+.cosmetic-textures {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 168px;
+}
+.cosmetic-textures figure {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  margin: 0;
+}
+.cosmetic-texture {
+  display: block;
+  width: 128px;
+  height: auto;
+  max-height: 112px;
+  border-radius: 6px;
+  border: 1px solid var(--surface-line);
+  background: repeating-conic-gradient(rgba(255, 255, 255, 0.06) 0% 25%, transparent 0% 50%) 0 0 / 8px 8px;
+  image-rendering: pixelated;
+  object-fit: contain;
+}
+.cosmetic-textures figcaption {
+  color: var(--faint);
+  font-size: 11.5px;
+}
+.app .cosmetic-facts {
+  font-size: 14px;
+  gap: 6px 16px;
+}
+.cosmetic-toolbar {
+  margin-bottom: 12px;
+}
+.segment-count {
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.segmented button[aria-pressed="true"] .segment-count {
+  color: var(--accent-text);
+}
+.segmented button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.cosmetic-slot-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--accent-text);
+}
+.cosmetic-slot-icon .icon {
+  width: 19px;
+  height: 19px;
+}
+.cosmetic-slot-icon.slot-back {
+  background: rgba(139, 92, 246, 0.13);
+  color: #c4b5fd;
+}
+.cosmetic-slot-icon.slot-aura {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fde68a;
+}
+.cosmetic-slot-icon.slot-companion {
+  background: rgba(52, 211, 153, 0.11);
+  color: #6ee7b7;
+}
+.cosmetic-slot-icon.slot-cape {
+  background: rgba(34, 211, 238, 0.1);
+  color: #67e8f9;
+}
+.cosmetic-row.is-hidden .cosmetic-slot-icon,
+.cosmetic-row.is-hidden .cosmetic-name {
+  opacity: 0.6;
+}
+.cosmetic-row .row-sub {
+  font-size: 13.5px;
+}
+.cosmetic-actions {
+  align-items: center;
+}
+.app .chip.team-only {
+  color: var(--accent-text);
+  background: rgba(59, 130, 246, 0.1);
+}
+dialog.modal.cosmetic-dialog {
+  width: min(640px, calc(100vw - 32px));
+}
+.cosmetic-dialog-body {
+  margin-top: 14px;
+}
+.cosmetic-dialog-body .form-ok {
+  margin-top: 12px;
+}
+
+/* =========================================================================================================
+   Bereiche im neuen Look: dichter, gleiche Aktionen rechts
+   ========================================================================================================= */
+
+/* Werkzeugleisten: Filter links, Aktualisieren rechts */
+.app #panel-meldungen > .toolbar,
+.app #panel-support > .toolbar,
+.app .subpanel > .toolbar {
+  margin-bottom: 12px;
+}
+
+/* Meldungen: kompakte Karten mit Kopfzeile */
+.app #meldungen.stack {
+  gap: 10px;
+}
+.app #meldungen .report,
+.app #addon-meldungen .report {
+  gap: 10px;
+  padding: 16px 18px;
+}
+/* Offene Meldungen mit gelbem Rand links, erledigte ruhiger */
+.app .report[data-status="open"] {
+  box-shadow: inset 3px 0 0 var(--warning), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.app .report[data-status="done"] {
+  background: var(--surface-2);
+}
+.app .report[data-status="done"] .report-who,
+.app .report[data-status="done"] .quote {
+  opacity: 0.85;
+}
+.app #addon-meldungen.stack {
+  gap: 10px;
+}
+.app .report .report-id {
+  font-size: 15px;
+}
+.app .report .report-who {
+  font-size: 14.5px;
+}
+.app .report .quote {
+  font-size: 14px;
+}
+.app .report .card-actions {
+  margin-top: 0;
+  gap: 8px;
+}
+.app .report .snapshot summary {
+  font-size: 14px;
+}
+
+/* Geteilte Ansichten: Liste und Details nebeneinander, Details bleiben beim Scrollen sichtbar */
+@media (min-width: 1101px) {
+  .app .support-split > .detail,
+  .app #panel-spieler .split > .detail {
+    position: sticky;
+    top: calc(var(--nav-h) + 16px);
+    max-height: calc(100vh - var(--nav-h) - 32px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+}
+.app #team-support-liste .rows .row,
+.app #spieler-liste .rows .row,
+.app #einreichungen-liste .rows .row {
+  padding: 10px 12px;
+}
+
+/* Sperren, Mitglieder, Dateien: Zeilen mit Aktionen rechts */
+.app #sperren .row-sub {
+  font-size: 14px;
+}
+.app .member-row .row-actions,
+.app #sperren .row-actions {
+  align-items: center;
+}
+
+/* Neuigkeiten: dichter */
+.app #news-liste.stack {
+  gap: 10px;
+}
+.app #news-liste .news-item {
+  padding: 16px 18px;
+}
+.app #news-liste .news-item .card-actions {
+  margin-top: 10px;
+  gap: 8px;
+}
+
+/* Protokoll: ruhige Tabelle */
+.app #protokoll .table td {
+  vertical-align: top;
+}
+.app #protokoll .table td.muted {
+  font-size: 13.5px;
+}
+
+/* =========================================================================================================
+   Schmale Fenster
+   ========================================================================================================= */
+@media (max-width: 900px) {
+  .dash-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cosmetic-result {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+  }
+  .cosmetic-preview {
+    justify-items: center;
+  }
+}
+@media (max-width: 760px) {
+  .dash-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .dash-stat {
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+  }
+  .dash-stat-icon {
+    width: 32px;
+    height: 32px;
+  }
+  .dash-stat-value {
+    font-size: 22px;
+  }
+  .dash-stat-detail {
+    white-space: normal;
+  }
+  .app .dash-hello {
+    padding: 16px;
+  }
+  .app .dash-list,
+  .app .dash-numbers {
+    padding: 14px;
+  }
+  .dash-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  dialog.palette {
+    width: calc(100vw - 16px);
+    margin-top: 8px;
+    border-radius: 16px;
+  }
+  .palette-box {
+    max-height: calc(100svh - 16px);
+  }
+  .palette-keys {
+    display: none;
+  }
+  .cosmetic-row {
+    flex-wrap: wrap;
+  }
+  .cosmetic-row .row-main {
+    flex-basis: calc(100% - 52px);
+  }
+  .cosmetic-actions {
+    justify-content: flex-start;
+    width: 100%;
+    padding-left: 50px;
+  }
+  .app #meldungen .report,
+  .app #addon-meldungen .report,
+  .app #news-liste .news-item {
+    padding: 14px;
+  }
+}
+@media (max-width: 760px) {
+  /* Protokoll als dichte Karten: Zeit und Wer oben, darunter Aktion, Betrifft, Details */
+  .app #protokoll .table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 3px 10px;
+    padding: 10px 2px;
+  }
+  .app #protokoll .table td {
+    display: block;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .app #protokoll .table td:empty {
+    display: none;
+  }
+  .app #protokoll .table td:first-child {
+    font-size: 12.5px;
+  }
+  .app #protokoll .table td:nth-child(2) {
+    justify-self: end;
+    font-size: 13px;
+  }
+  .app #protokoll .table td:nth-child(n + 3) {
+    grid-column: 1 / -1;
+  }
+  .app #protokoll .table td:nth-child(3) {
+    font-weight: 600;
+  }
+  .app #protokoll .table td:nth-child(5) {
+    font-size: 13px;
+  }
+}
+@media (max-width: 480px) {
+  /* Aktionen in Zeilen: Löschen/Entfernen nur als Symbol (mit aria-label), damit sie in eine Zeile passen */
+  .app #mitglieder .row-actions .button .label,
+  .app #update-dateien .row-actions .button .label,
+  .app #addon-offen .row-actions .button .label,
+  .app .addon-admin-versions .row-actions .button .label {
+    display: none;
+  }
+  .app #mitglieder .row-actions {
+    justify-content: flex-start;
+  }
+}
+@media (max-width: 400px) {
+  .cosmetic-actions .button .label {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  dialog.palette[open] {
+    animation: none;
+  }
+  .addon-admin.highlight,
+  .cosmetic-row.highlight {
+    animation: none;
+  }
+}

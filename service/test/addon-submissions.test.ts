@@ -19,6 +19,7 @@ const TAKEN = 'Diese Addon-ID gehört schon jemand anderem.';
 const NO_SUBMISSION = 'Diese Einreichung gibt es nicht.';
 const WRONG_SIGNATURE = 'Die Signatur stimmt nicht.';
 const SUBMISSION_KEYS = [
+  'access',
   'addonId',
   'api',
   'authors',
@@ -28,6 +29,8 @@ const SUBMISSION_KEYS = [
   'icon',
   'id',
   'inspection',
+  'loaders',
+  'minecraft',
   'name',
   'notes',
   'platforms',
@@ -182,7 +185,7 @@ describe('Addons von Spielern', () => {
     let s = res.body.submission;
     assert.deepEqual(
       [s.addonId, s.version, s.api, s.size, s.sha256, s.name, s.summary, s.authors, s.inspection],
-      ['wetter', '1.0.0', 2, wetter1.length, sha256(wetter1), 'Addon wetter', 'Zeigt das Wetter im HUD.', ['Anna'], { classes: 3, uses: ['netzwerk', 'minecraft'] }],
+      ['wetter', '1.0.0', 2, wetter1.length, sha256(wetter1), 'Addon wetter', 'Zeigt das Wetter im HUD.', ['Anna'], { classes: 3, uses: ['netzwerk', 'minecraft'], expected: [] }],
     );
     assert.deepEqual(filesIn(submissionsDir), [`${wetterSid}.jar`]);
     assert.deepEqual(fs.readFileSync(path.join(submissionsDir, `${wetterSid}.jar`)), wetter1);
@@ -343,8 +346,12 @@ describe('Addons von Spielern', () => {
       notes: ['Erste Version'],
       official: false,
       author: { uuid: anna.uuid, name: 'Anna' },
+      // aus der JAR: nur die Heldix-API, läuft überall
+      access: 'api',
+      minecraft: [],
+      loaders: ['heldix', 'fabric'],
     });
-    assert.deepEqual(Object.keys(manifest).slice(-2), ['official', 'author']);
+    assert.deepEqual(Object.keys(manifest).slice(-5), ['official', 'author', 'access', 'minecraft', 'loaders']);
 
     const jar = await rawRequest(service.url, 'GET', `/v1/team/addon-submissions/${wetterSid}/jar`, { Cookie: `${SESSION_COOKIE}=${mod}` });
     assert.deepEqual(
@@ -586,6 +593,58 @@ describe('Addons von Spielern', () => {
     sid = await draft(ben);
     // Nach der Ablehnung ist die ID wieder frei – aber jetzt offiziell, also gesperrt.
     assert.equal((await upload(`/v1/addon-submissions/${sid}/jar`, ben, addonJar('kollision', '4.0.0'))).status, 409);
+  });
+
+  test('Eingriff in Minecraft: Zugriff, Versionen und Loader aus der JAR, Hinweis „minecraft“ erwartet, im Manifest und im Store', async () => {
+    const dora = await devPlayer(service.url, 'Dora');
+    // Ohne JAR: noch nichts bekannt
+    const empty = await call('POST', '/v1/addon-submissions', dora, {});
+    assert.deepEqual([empty.body.submission.access, empty.body.submission.minecraft, empty.body.submission.loaders], [null, [], []]);
+    // Ohne Minecraft-Version lässt sich ein Eingriff nicht einreichen
+    const noVersion = addonJar('sichtfeld', '1.0.0', {
+      meta: { entrypoint: undefined, clientEntrypoint: 'dev.dora.Start' },
+      extra: [entry('dev/dora/Start.class', classFile())],
+    });
+    let res: AnyResponse = await upload(`/v1/addon-submissions/${empty.body.submission.id}/jar`, dora, noVersion);
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /greift in Minecraft ein .*nennt aber keine Minecraft-Version/);
+    assert.equal((await call('DELETE', `/v1/addon-submissions/${empty.body.submission.id}`, dora)).body.deleted, true);
+
+    const jar = addonJar('sichtfeld', '1.0.0', {
+      meta: { entrypoint: undefined, clientEntrypoint: 'dev.dora.Start', transformers: ['dev.dora.Kamera'], minecraft: ['26.2', '26.3'], description: 'Weiteres Sichtfeld.' },
+      extra: [
+        entry('dev/dora/Start.class', classFile('dev/heldixclient/loader/api/HeldixModInitializer')),
+        entry('dev/dora/Kamera.class', classFile('net/minecraft/client/Camera', 'java/lang/reflect/Method')),
+      ],
+    });
+    const sid = await draft(dora, jar);
+    const own = (await call('GET', '/v1/addon-submissions', dora)).body.submissions.find((x: { id: string }) => x.id === sid);
+    assert.deepEqual([own.access, own.minecraft, own.loaders], ['minecraft', ['26.2', '26.3'], ['heldix']]);
+    // Minecraft-Klassen sind hier erwartet; andere Hinweise (Reflection) bleiben
+    assert.deepEqual(own.inspection, { classes: 2, uses: ['reflection', 'minecraft'], expected: ['minecraft'] });
+    res = await call('POST', `/v1/addon-submissions/${sid}/submit`, dora);
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const detail = await team('GET', `/v1/team/addon-submissions/${sid}`, undefined, mod);
+    assert.deepEqual([detail.body.submission.access, detail.body.submission.inspection.expected], ['minecraft', ['minecraft']]);
+    const manifest = JSON.parse(detail.body.submission.manifest);
+    assert.deepEqual(Object.keys(manifest).slice(-5), ['official', 'author', 'access', 'minecraft', 'loaders']);
+    assert.deepEqual([manifest.access, manifest.minecraft, manifest.loaders, manifest.official], ['minecraft', ['26.2', '26.3'], ['heldix'], false]);
+
+    // Freigeben signiert genau dieses Manifest; im Store steht der Eingriff
+    await approve(sid);
+    const listed = (await api(service.url, 'GET', '/v1/addons/sichtfeld')).body;
+    assert.deepEqual([listed.addon.access, listed.addon.minecraft, listed.addon.loaders], ['minecraft', ['26.2', '26.3'], ['heldix']]);
+    assert.equal(JSON.parse(listed.addon.manifest).access, 'minecraft');
+
+    // Eine neue Version, die nur die Heldix-API nutzt und selbst sagt, wo sie läuft
+    const apiJar = addonJar('sichtfeld', '1.1.0', { meta: { loaders: ['heldix', 'fabric'] }, extra: [entry('dev/dora/Welt.class', classFile('net/minecraft/x'))] });
+    const sid2 = await draft(dora, apiJar);
+    const next = (await call('GET', '/v1/addon-submissions', dora)).body.submissions.find((x: { id: string }) => x.id === sid2);
+    assert.deepEqual([next.access, next.minecraft, next.loaders, next.inspection.uses, next.inspection.expected], ['api', [], ['heldix', 'fabric'], ['minecraft'], []]);
+    assert.equal((await call('POST', `/v1/addon-submissions/${sid2}/submit`, dora)).status, 200);
+    const nextManifest = JSON.parse((await team('GET', `/v1/team/addon-submissions/${sid2}`, undefined, mod)).body.submission.manifest);
+    assert.deepEqual([nextManifest.access, nextManifest.minecraft, nextManifest.loaders], ['api', [], ['heldix', 'fabric']]);
+    assert.equal((await call('DELETE', `/v1/addon-submissions/${sid2}`, dora)).status, 200);
   });
 
   test('Grenzen: 3 wartende und 10 Entwürfe je Spieler, JAR und Kurzbeschreibung nötig, eine wartende je Addon', async () => {
