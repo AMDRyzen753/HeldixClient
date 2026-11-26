@@ -290,6 +290,7 @@ public final class AddonManager {
 		}
 		for (Module module : addon.modules) ModuleManager.removeModule(module);
 		if (addon.scheduler != null) addon.scheduler.shutdown();
+		AddonPlayers.release(addon);
 	}
 
 	private static String describe(Throwable t) {
@@ -305,6 +306,7 @@ public final class AddonManager {
 		addon.error = reason;
 		for (Module module : addon.modules) ModuleManager.removeModule(module);
 		if (addon.scheduler != null) addon.scheduler.shutdown();
+		AddonPlayers.release(addon);
 	}
 
 	/** Fehler eines Addons zur Laufzeit melden; nach MAX_ERRORS wird es abgeschaltet. Nur im Haupt-Thread. */

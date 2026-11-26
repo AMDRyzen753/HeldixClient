@@ -117,6 +117,13 @@ public class FreelookModule extends Module {
 	}
 
 	@Override
+	public List<Setting> keys() {
+		List<Setting> keys = super.keys();
+		keys.addFirst(new Setting.Key("Freelook", "Halten zum Umschauen, ohne die Laufrichtung zu ändern", HeldixClient.freelookKey));
+		return keys;
+	}
+
+	@Override
 	public List<Setting> settings() {
 		List<Setting> settings = super.settings();
 		settings.add(choice("mode", "Taste", "Halten oder einmal drücken zum Ein- und Ausschalten", MODES, 0));

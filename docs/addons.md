@@ -105,7 +105,7 @@ public class MeinAddon implements HeldixAddon {
 }
 ```
 
-**Vorlagen:** [mod/addons/uhrzeit](../mod/addons/uhrzeit) (Uhrzeit, Spielzeit, Begrüßung; API 3: Farbe, Textfeld, Regler, Scheduler, Befehl; API 5: HUD-Stil, Tooltip, Klick), [mod/addons/spotify](../mod/addons/spotify) (Tasten, Einstellungen, Bilder, Einblendungen, Hintergrund-Prozess, Befehle, Laufschrift, Fortschrittsbalken; API 5: Knöpfe im HUD, Stil-Optionen im HUD-Editor) und [mod/addons/itemphysics](../mod/addons/itemphysics) (API 4: Renderer für gedroppte Items, Speicher je Item, Regler mit eigenem Text, Taste ohne Standardbelegung).
+**Vorlagen:** [mod/addons/uhrzeit](../mod/addons/uhrzeit) (Uhrzeit, Spielzeit, Begrüßung; API 3: Farbe, Textfeld, Regler, Scheduler, Befehl; API 5: HUD-Stil, Tooltip, Klick; API 6: eigene Taste), [mod/addons/spotify](../mod/addons/spotify) (Tasten, Einstellungen, Bilder, Einblendungen, Hintergrund-Prozess, Befehle, Laufschrift, Fortschrittsbalken; API 5: Knöpfe im HUD, Stil-Optionen im HUD-Editor; API 6: Tasten im Untermenü) und [mod/addons/itemphysics](../mod/addons/itemphysics) (API 4: Renderer für gedroppte Items, Speicher je Item, Regler mit eigenem Text, Taste ohne Standardbelegung).
 
 ```powershell
 cd mod
@@ -301,11 +301,24 @@ BooleanSupplier kompakt = zaehler.addStyleToggle("kompakt", "Kompakt", false);  
 
 Das Spotify-Addon ([SpotifyHud](../mod/addons/spotify/src/main/java/dev/heldixclient/addons/spotify/SpotifyHud.java)) zeigt so bei offenem Chat Knöpfe für Zurück, Abspielen/Pause und Weiter, springt per Klick auf die Zeitleiste und zeigt bei Klick auf den Titel den Song im Chat; die Uhrzeit hat einen Tooltip mit Datum und zeigt per Klick Uhr- und Spielzeit.
 
+**API 6** (ab HeldixClient 0.13.4, `"api": 6`): Tasten im Modul, andere Spieler, Spielermenü, Sprachkanal
+
+| Neu | Wofür |
+| --- | --- |
+| `modul.addKey(key, label, beschreibung, standardtaste, onPress)` → `KeyHandle` | Taste des Moduls: im Untermenü unter „Tasten“ (Klick, neue Taste drücken; Entf = frei, Esc = abbrechen, ↺ = Standard) und unter Optionen → Steuerung → Heldix-Addons. Nur in `onEnable` (wie `registerKey`, sonst `IllegalStateException`); `onPress` läuft im Spiel als Aktion des Spielers, auch bei ausgeschaltetem Modul |
+| `modul.showKey(keyHandle, label, beschreibung)` | eine mit `api.registerKey` angelegte Taste zusätzlich im Untermenü zeigen (Spotify: alle Musik-Tasten) |
+| `api.nearbyPlayers()` → `List<NearbyPlayer>` | andere Spieler in der geladenen Welt, nächster zuerst: `uuid()`, `name()`, Position, `distance()`, `direction()` (Grad von der Blickrichtung, negativ = links), `heldixPlayer()`; nur im Haupt-Thread |
+| `api.addPlayerMenuEntry(PlayerMenuEntry)` → `Registration` | Eintrag im Spielermenü (Mausrad-Klick auf einen Spieler): `label(spieler)` (`null` = kein Eintrag), `icon(spieler)`, `select(spieler)` als Aktion des Spielers, `keepOpen()` |
+| `api.playerMarkers()` → `PlayerMarkers` | `show(uuid, icon, farbe, dauer)`/`hide(uuid)`: Symbol aus dem Icon-Set hinter dem Namen im Namensschild (Schrift `heldixclient:marker`, U+E100 + Nummer), höchstens eine Minute |
+| `api.voice()` → `VoiceChannel` | Sprachkanal über den Heldix-Dienst (`/v1/voice`, siehe [dienst.md](dienst.md)): `setActive`, `setFriendsOnly`, `status()`/`statusText()`, `range()`, `maxFrameSize()`, `send(rahmen, folge, letzter)`, `onFrame(…)` (Netzwerk-Thread!), `peers()`. Der Kern meldet Server, Welt und Position; kodieren und abspielen macht das Addon |
+
+Jedes Modul – eingebaut oder aus einem Addon – bekommt außerdem von HeldixClient eine Taste „Ein/Aus“ (ab Werk frei, Gruppe „Heldix-Module“ in der Steuerung). Sie entsteht beim Start, solange Minecraft die Optionen noch nicht geladen hat; Module, die ein Addon erst später anlegt, haben keine.
+
 **Warum so:** Neue Methoden gibt es nur an Schnittstellen, die HeldixClient selbst bereitstellt (`HeldixApi`, `HeldixEvents`, `HudCanvas`, `ModuleHandle`); Schnittstellen, die Addons selbst schreiben (`HeldixAddon`, `DroppedItemRenderer`, Listener), bleiben unverändert. Einzige Ausnahme ist `HudRenderer`: Es bekommt in API 5 nur **Default-Methoden** (`onClick`, `onHover`), bleibt ein funktionales Interface, und fertige Addons (auch Lambdas) laufen unverändert. `HudClick`, `HudHover` und `HudStyle` stellt HeldixClient bereit, deshalb sind es Schnittstellen. `GameInfo`, `PlayerState`, `DroppedItem`, `CosmeticInfo` und `CosmeticChange` sind Schnittstellen statt Records, damit spätere Versionen Werte ergänzen können, ohne Addons zu brechen. `DroppedItemPose` baut das Addon selbst, deshalb ist es ein Record (wie `ItemInfo`). Die bisherigen Events (`onTick` …) geben weiter `void` zurück – eine andere Rückgabe würde fertige Addons brechen.
 
 Tastencodes aus `HeldixKeys` sind feste GLFW-Werte. HeldixClient übersetzt sie in die Tasten der jeweiligen Minecraft-Version (seit 26.x nimmt Minecraft SDL-Scancodes). Bis 0.13.0 landeten sie unübersetzt im Spiel: Standardtasten wie Pos1 lagen dadurch auf falschen Tasten, und `HeldixKeys.NONE` brachte das Spiel zum Absturz. Falsch gespeicherte Standardtasten setzt HeldixClient einmal auf die richtigen zurück.
 
-Addons für API 1 bis 4 laufen unverändert weiter. Ein Addon, das eine neuere API braucht, als der installierte HeldixClient kann, wird mit dem Hinweis „bitte HeldixClient aktualisieren“ übersprungen (z. B. ein Addon mit `"api": 5` in HeldixClient 0.13.2). Launcher und Addon-Store im Spiel zeigen es dort mit „Braucht einen neueren HeldixClient“ statt mit „Installieren“.
+Addons für API 1 bis 5 laufen unverändert weiter. Ein Addon, das eine neuere API braucht, als der installierte HeldixClient kann, wird mit dem Hinweis „bitte HeldixClient aktualisieren“ übersprungen (z. B. ein Addon mit `"api": 6` in HeldixClient 0.13.3). Launcher und Addon-Store im Spiel zeigen es dort mit „Braucht einen neueren HeldixClient“ statt mit „Installieren“.
 
 Details stehen in den Javadoc-Kommentaren der [API-Klassen](../mod/heldix-api/src/main/java/dev/heldixclient/api).
 
@@ -458,7 +471,7 @@ Bewertungen (1–5 Sterne) und Meldungen zu Addons gehen auf der Webseite und im
 ### Spotify-Addon
 
 - **Keine Anmeldung nötig.** Das Addon liest den laufenden Song über die Mediensteuerung des Systems. Ein Spotify-Konto, Premium oder ein API-Schlüssel ist nicht nötig. Es werden keine Daten über den Spieler ins Internet geschickt.
-- **Systeme** (Version 2.1.0, API 5):
+- **Systeme** (Version 2.2.0, API 6):
 
   | System | Quelle | Was geht |
   | --- | --- | --- |
@@ -474,6 +487,16 @@ Bewertungen (1–5 Sterne) und Meldungen zu Addons gehen auf der Webseite und im
 - **Chat-Befehle:** `.np` zeigt den laufenden Song nur dir, `.np teilen` schickt „🎵 Titel – Künstler“ an alle. `.spotify play | pause | next | prev | +10 | -10 | shuffle | repeat | player` steuert die Musik.
 - **Technik:** Die Verbindung zum Player läuft nur, solange das Modul an ist, und endet mit dem Spiel. Bricht sie ab, baut das Addon sie mit wachsender Pause (2 s bis 30 s) neu auf. Cover landen als PNG unter `config/heldix-addons/spotify/covers/` (je höchstens 30). Unter macOS und Linux melden die Player nur eine Adresse: Das Addon lädt das Bild dann einmal selbst (nur https oder lokale Datei, höchstens 2 MB). Die Lautstärke lässt sich nicht steuern, das kann die Mediensteuerung nicht.
 - **Getestet** ist Windows (Autotest im echten Spiel, Skript gegen die laufende Spotify-App). Die Wege für macOS und Linux lassen sich nur auf diesen Systemen prüfen.
+
+### Voice-Chat-Addon
+
+Proximity-Voice-Chat über den Heldix-Dienst ([mod/addons/voicechat](../mod/addons/voicechat), Version 1.0.0, API 6), auf jedem Server ohne Plugin.
+
+- **Ton:** Aufnahme mit `javax.sound` (48 kHz mono, 20-ms-Rahmen), Opus mit [Concentus](https://github.com/jaredmdobson/concentus) (reines Java, BSD-Lizenz, liegt in der JAR mit `META-INF/LICENSE-concentus.txt`), 24 kbit/s mit FEC. Wiedergabe: je Sprecher ein Decoder mit 60 ms Puffer, Lücken überbrückt Opus; Mischen in Stereo nach Abstand (bis 4 Blöcke voll, am Rand der Reichweite still) und Richtung (`NearbyPlayer.direction()`).
+- **Sprechen:** Push-to-Talk (`addKey`, ab Werk V) oder Sprachaktivierung mit Schwelle und 300 ms Nachlauf; Tasten „Mikrofon stumm“ und „Ton aus“; „Mikrofon testen“ spielt zehn Sekunden lang die eigenen Rahmen ab, ohne zu senden.
+- **Anzeige:** HUD-Element mit Mikrofon-Zustand, Pegel und Sprechern; Symbol `volume` über dem Kopf von Sprechern (`playerMarkers`); Spielermenü mit Stummschalten, Lauter und Leiser je Spieler (gespeichert in der Addon-Konfiguration).
+- **Start:** Das Modul ist ab Werk aus. Mikrofon und Lautsprecher sind nur offen, solange es an und der Kanal verbunden ist (oder der Test läuft). Beim ersten Einschalten erklärt eine Einblendung, wohin die Stimme geht.
+- **Autotest:** `-Dheldixclient.voicechat.testAudio=true` ersetzt Mikrofon und Lautsprecher durch einen Testton bzw. nichts, `-Dheldixclient.voice.testServer=…` gibt dem Einzelspieler einen Raum. Beides setzt `test:launch` mit `--autotest`.
 
 ### Item-Physics-Addon
 

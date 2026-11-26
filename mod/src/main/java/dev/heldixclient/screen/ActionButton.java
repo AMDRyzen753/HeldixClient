@@ -143,6 +143,7 @@ public class ActionButton extends AbstractButton {
 			Ui.text(g, Ui.ellipsize(label, w - 8, Ui.Font.LABEL), cx, y + (h - 8) / 2, Ui.withAlpha(text, alpha), Ui.Font.LABEL);
 		}
 		if (tooltip != null && isHovered()) Ui.requestTooltip(tooltip, mouseX, mouseY);
+		if (Ui.keyboardFocus(isFocused())) Ui.focusRing(g, x, y, w, h, r, alpha);
 	}
 
 	@Override

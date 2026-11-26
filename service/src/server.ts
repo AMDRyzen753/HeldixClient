@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createService, DEFAULT_SESSION_SERVER } from './app';
 import { CALLBACK_PATH, type MicrosoftEndpoints } from './microsoft';
 import { parseCapeList } from './validate';
+import { VOICE_RANGE_DEFAULT, VOICE_RANGE_MAX, VOICE_RANGE_MIN } from './voice';
 
 function log(line: string): void {
   console.log(`[${new Date().toISOString()}] ${line}`);
@@ -106,6 +107,25 @@ function readMicrosoftEndpoints(dev: boolean): Partial<MicrosoftEndpoints> | und
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** HELDIX_DIENST_VOICE: `0` schaltet den Voice Chat aus, `1` (oder leer) lässt ihn an. */
+function readVoice(raw: string | undefined): boolean {
+  const value = raw?.trim();
+  if (!value || value === '1') return true;
+  if (value === '0') return false;
+  fail(`Ungültige HELDIX_DIENST_VOICE: "${value}" (erwartet 0 oder 1)`);
+}
+
+/** HELDIX_DIENST_VOICE_RANGE: Reichweite des Voice Chats in Blöcken. */
+function readVoiceRange(raw: string | undefined): number {
+  const value = raw?.trim();
+  if (!value) return VOICE_RANGE_DEFAULT;
+  const range = /^\d{1,3}$/.test(value) ? Number(value) : NaN;
+  if (!(range >= VOICE_RANGE_MIN && range <= VOICE_RANGE_MAX)) {
+    fail(`Ungültige HELDIX_DIENST_VOICE_RANGE: "${value}" (erwartet eine ganze Zahl von ${VOICE_RANGE_MIN} bis ${VOICE_RANGE_MAX})`);
+  }
+  return range;
+}
+
 /**
  * HELDIX_DIENST_UPDATE_KEY: Datei mit dem öffentlichen Update-Schlüssel (PEM). Fehlt sie oder ist sie ungültig, startet
  * der Dienst trotzdem; nur das Veröffentlichen im Team-Bereich geht dann nicht (503).
@@ -137,6 +157,8 @@ const dev = env.HELDIX_DIENST_DEV === '1';
 const clientId = readClientId(env.HELDIX_DIENST_MS_CLIENT_ID);
 const clientSecret = readClientSecret(env.HELDIX_DIENST_MS_CLIENT_SECRET_FILE);
 const microsoftEndpoints = readMicrosoftEndpoints(dev);
+const voice = readVoice(env.HELDIX_DIENST_VOICE);
+const voiceRange = readVoiceRange(env.HELDIX_DIENST_VOICE_RANGE);
 // Anmeldung mit dem Minecraft-Konto: nur mit App-ID, Webseite und API-Adresse (und lesbarem Geheimnis, falls angegeben)
 const microsoft = clientId !== null && clientSecret !== undefined && website !== null && apiUrl !== null ? { clientId, clientSecret } : null;
 function microsoftStatus(): string {
@@ -169,6 +191,8 @@ const service = createService({
   microsoft,
   microsoftEndpoints,
   updateKey,
+  voice,
+  voiceRange,
   log,
 });
 
@@ -179,6 +203,7 @@ service.server.listen(port, host, () => {
   log(`Heldix-Dienst läuft auf ${shown} (Daten: ${dataDir}, Updates: ${updatesDir}, Addons: ${addonsDir}, Session-Server: ${sessionServer})`);
   log(`Webseite: ${website ?? 'nicht eingerichtet (keine Anmeldung auf der Webseite)'} · Update-Schlüssel: ${updateKey ? 'eingerichtet' : 'keiner (kein Veröffentlichen von Updates, Addons und Cosmetics im Team-Bereich)'}`);
   log(`Anmeldung mit dem Minecraft-Konto auf der Webseite: ${microsoftStatus()}`);
+  log(`Voice Chat (/v1/voice): ${voice ? `an (Reichweite ${voiceRange} Blöcke)` : 'aus (HELDIX_DIENST_VOICE=0)'}`);
 });
 
 let stopping = false;

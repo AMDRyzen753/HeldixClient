@@ -448,6 +448,7 @@ write_config() {
     cat > "$ENV_FILE" <<EOF
 # Heldix-Dienst – Umgebungsvariablen (siehe docs/dienst.md). Nach Änderungen: systemctl restart $UNIT
 # Eigene Einträge, z. B. HELDIX_DIENST_CAPES=heldix,glut, bleiben bei Updates erhalten.
+# Voice Chat: HELDIX_DIENST_VOICE=0 schaltet ihn aus, HELDIX_DIENST_VOICE_RANGE=48 setzt die Reichweite (8–128 Blöcke).
 EOF
   fi
   set_env PORT "$PORT"
@@ -809,7 +810,7 @@ summary() {
   printf "    %sexport const HELDIX_SERVICE_URL: string = process.env.HELDIX_SERVICE_URL ?? '%s';%s\n" "$BOLD" "$api" "$RESET"
   if [ "$HTTPS" = 0 ]; then
     echo ""
-    echo "  Ohne Caddy installiert: Leite HTTPS (inklusive WebSockets auf /v1/ws) an 127.0.0.1:$PORT weiter."
+    echo "  Ohne Caddy installiert: Leite HTTPS (inklusive WebSockets auf /v1/ws und /v1/voice) an 127.0.0.1:$PORT weiter."
     echo "  Die Webseite liegt zum Ausliefern in $INSTALL_DIR/app/website. Beispiele stehen in docs/dienst.md."
   fi
   if [ "$PLACEHOLDERS" = 1 ] && [ "$WEBSITE" = 1 ]; then
@@ -826,6 +827,12 @@ summary() {
   echo "    Entfernen    sudo bash heldix-dienst-install.sh --uninstall   (Daten bleiben; --purge löscht auch sie)"
   echo "    Daten        $DATA_DIR (Sicherung: Ordner kopieren, während der Dienst gestoppt ist)"
   echo "    Verwaltung   sudo heldix-dienst-admin meldungen   (Meldungen, Sperren, Team: sudo heldix-dienst-admin hilfe)"
+  echo ""
+  if grep -q '^HELDIX_DIENST_VOICE=0' "$ENV_FILE" 2>/dev/null; then
+    echo "  Voice Chat (/v1/voice) ist aus (HELDIX_DIENST_VOICE=0 in $ENV_FILE)."
+  else
+    echo "  Voice Chat (/v1/voice) ist an. Ausschalten: HELDIX_DIENST_VOICE=0 in $ENV_FILE, danach systemctl restart $UNIT."
+  fi
   echo ""
   if [ "$WEBSITE" = 1 ] && grep -q '^HELDIX_DIENST_MS_CLIENT_ID=' "$ENV_FILE" 2>/dev/null; then
     echo "  Anmeldung mit dem Minecraft-Konto auf der Webseite ist an. Einmalig in Azure (dieselbe App-Registrierung wie der Launcher)"

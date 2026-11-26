@@ -1,0 +1,42 @@
+// Voice Chat: Sprache in der Nähe mit anderen HeldixClient-Spielern, über den Heldix-Dienst (Heldix-API 6).
+// Opus kommt aus Concentus (reines Java, BSD-Lizenz) und wird mit in die JAR gepackt.
+plugins {
+	id 'java'
+}
+
+version = '1.0.0'
+
+base {
+	archivesName = 'heldix-addon-voicechat'
+}
+
+configurations {
+	bundled
+	implementation.extendsFrom bundled
+}
+
+dependencies {
+	compileOnly project(':heldix-api')
+	bundled 'io.github.jaredmdobson:concentus:1.0.2'
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+	it.options.encoding = 'UTF-8'
+}
+
+processResources {
+	def props = [version: project.version]
+	inputs.properties props
+	filesMatching('heldix.addon.json') {
+		expand props
+	}
+}
+
+jar {
+	// Concentus in die JAR (ohne Signaturen und Manifest der Bibliothek)
+	from({ configurations.bundled.collect { it.isDirectory() ? it : zipTree(it) } }) {
+		exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA', 'META-INF/MANIFEST.MF', 'META-INF/maven/**', 'module-info.class'
+	}
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}

@@ -86,7 +86,7 @@ Ereignisse kommen erst nach `hello` und werden gebündelt (150 ms).
 
 | Operation | Parameter | Ergebnis |
 | --- | --- | --- |
-| `hello` | – | `{"protocol":1,"launcher":"0.13.3","offline":false,"allowed":true}` |
+| `hello` | – | `{"protocol":1,"launcher":"0.13.4","offline":false,"allowed":true}` |
 | `accounts.list` | – | `{"accounts":[Konto, …],"allowed":true}` |
 | `accounts.session` | `account` | `{"name","uuid","accessToken","userType","xuid"?}` |
 | `accounts.add` | – | `{"account":Konto,"accounts":[Konto, …]}` |
@@ -159,10 +159,10 @@ Die Mod kennt zusätzlich eigene Codes (nie vom Launcher): `unavailable` (kein L
 
 ## Im Spiel
 
-Heldix-Menü → **Konten** (Seitenleiste, Abschnitt Profil) zeigt die Konten des Launchers mit den Marken „Im Spiel“
-und „Aktiv im Launcher“, „Wechseln“ und „Konto hinzufügen“. Das Profil unten in der Seitenleiste und oben rechts auf der
+Heldix-Menü → **Profil → Konten** zeigt die Konten des Launchers mit den Marken „Im Spiel“
+und „Aktiv im Launcher“, „Wechseln“ und „Konto hinzufügen“. Das Profil oben rechts im Heldix-Menü und auf der
 Startseite öffnet die Seite ebenfalls. Ohne Launcher-Verbindung oder mit `allowed: false` fehlen Eintrag und Klick auf
-das Profil; die Seite nennt nur den Grund. Ändert sich das während das Menü offen ist, baut sich die Seitenleiste neu auf.
+das Profil; die Seite nennt nur den Grund. Ändert sich das während das Menü offen ist, baut sich die Navigation neu auf.
 
 Gewechselt wird nur außerhalb einer Welt (Hauptmenü, Mehrspieler-, Realms-Seite, Heldix-Menü ohne Welt). In einer Welt
 bietet die Seite „Welt verlassen und wechseln“ an (zweiter Klick bestätigt; speichern und verlassen wie im Pausemenü,

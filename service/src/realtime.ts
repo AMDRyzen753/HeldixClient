@@ -35,6 +35,8 @@ export class Realtime implements PresenceSource {
   private readonly connections = new Map<string, Set<Connection>>();
   /** Zuletzt gemeldeter Status pro Spieler (gilt für alle seine Verbindungen). */
   private readonly status = new Map<string, Status>();
+  /** Weitere Verbindungen, die disconnectUser mit schließt (Voice Chat). */
+  private readonly disconnectListeners: ((uuid: string, code: number, reason: string) => void)[] = [];
   private closing = false;
 
   constructor(
@@ -124,11 +126,17 @@ export class Realtime implements PresenceSource {
     }
   }
 
+  /** Beim Trennen eines Spielers (Konto gelöscht, gesperrt) auch andere Verbindungen schließen, z. B. den Voice Chat. */
+  onDisconnectUser(listener: (uuid: string, code: number, reason: string) => void): void {
+    this.disconnectListeners.push(listener);
+  }
+
   /**
    * Schließt alle Verbindungen eines Spielers (z. B. Konto gelöscht), ohne Freunde zu benachrichtigen.
    * Antwortet die Gegenseite nicht auf das Schließen, wird hart getrennt.
    */
   disconnectUser(uuid: string, code: number, reason: string): void {
+    for (const listener of this.disconnectListeners) listener(uuid, code, reason);
     const set = this.connections.get(uuid);
     this.connections.delete(uuid);
     this.status.delete(uuid);

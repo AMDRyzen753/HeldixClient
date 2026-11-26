@@ -48,6 +48,7 @@ public class ToggleChip extends AbstractButton {
 		int y = getY();
 		int w = getWidth();
 		int h = getHeight();
+		if (Ui.keyboardFocus(isFocused())) Ui.focusRing(g, x, y, w, h, 8, alpha);
 		if (w < 56) {
 			// kompakt: nur Icon, an = blau hinterlegt; Name und Zustand als Tooltip
 			Ui.rect(g, x, y, w, h, 8, Ui.withAlpha(Ui.lerp(Ui.lerp(Ui.SURFACE, Ui.SURFACE_HOVER, hover), 0x593B82F6, on), alpha));

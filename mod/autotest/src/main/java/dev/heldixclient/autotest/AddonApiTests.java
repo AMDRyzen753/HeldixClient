@@ -89,12 +89,13 @@ final class AddonApiTests {
 		t.click(swatch[0], swatch[1]);
 		t.check("Farbe aus der Palette gewählt", t.compute(mc -> color.get().getAsInt()) == red);
 
-		// Text: im kleinen Testfenster erst nach unten scrollen, dann ins Feld klicken, „Uhr“ löschen, „Zeit“ tippen
-		int[] wheel = center(t, "Farbe");
-		t.run(mc -> mc.gui.screen().mouseScrolled(wheel[0], wheel[1], 0, -20));
+		// Text: im kleinen Testfenster erst die Zeile ins Bild scrollen, dann ins Feld klicken, „Uhr“ löschen, „Zeit“ tippen
+		t.run(mc -> ((HeldixMenuScreen) mc.gui.screen()).scrollToSetting("Beschriftung"));
 		t.waitTicks(3);
 		int[] field = center(t, "Beschriftung");
 		t.click(field[0], field[1]);
+		t.log("Textfeld bei " + field[0] + "," + field[1] + " fokussiert: " + t.compute(mc -> String.valueOf(mc.gui.screen().getFocused())));
+		t.screenshot("heldix-api3-01b-textfeld");
 		for (int i = 0; i < 3; i++) t.pressKey(InputConstants.KEY_BACKSPACE);
 		for (char c : "Zeit".toCharArray()) {
 			t.run(mc -> mc.keyboardHandler.charTyped(mc.getWindow().handle(), new CharacterEvent(c)));
@@ -184,7 +185,7 @@ final class AddonApiTests {
 		t.setScreen(() -> null);
 		LoadedAddon uhrzeit = addon(t, "uhrzeit");
 		HeldixApi api = uhrzeit.api();
-		t.check("Heldix-API " + HeldixApi.API_VERSION + " (mindestens 1)", HeldixApi.API_VERSION == 5 && AddonManager.MIN_API == 1);
+		t.check("Heldix-API " + HeldixApi.API_VERSION + " (mindestens 1)", HeldixApi.API_VERSION == 6 && AddonManager.MIN_API == 1);
 		int errorsBefore = t.compute(mc -> uhrzeit.errorCount());
 
 		// --- Spiel- und Spielerdaten ------------------------------------------------------

@@ -134,6 +134,13 @@ public class WaypointsModule extends Module {
 	}
 
 	@Override
+	public List<Setting> keys() {
+		List<Setting> keys = super.keys();
+		keys.addFirst(new Setting.Key("Wegpunkt setzen", "Setzt einen Wegpunkt an deiner Position", HeldixClient.waypointKey));
+		return keys;
+	}
+
+	@Override
 	public List<Setting> settings() {
 		List<Setting> settings = super.settings();
 		settings.add(toggle("distance", "Entfernung zeigen", "Neben dem Namen der Markierung", true));

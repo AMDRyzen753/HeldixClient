@@ -46,6 +46,13 @@ public class ZoomModule extends Module {
 	}
 
 	@Override
+	public java.util.List<Setting> keys() {
+		java.util.List<Setting> keys = super.keys();
+		keys.addFirst(new Setting.Key("Zoom", "Halten zum Heranzoomen, Mausrad ändert die Stärke", HeldixClient.zoomKey));
+		return keys;
+	}
+
+	@Override
 	public java.util.List<Setting> settings() {
 		java.util.List<Setting> settings = super.settings();
 		HeldixConfig.Data config = HeldixConfig.get();

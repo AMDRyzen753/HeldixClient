@@ -90,7 +90,7 @@ async function main(): Promise<void> {
     for (const leftover of (await readdir(addonsDir)).filter((f) => f === '.entfernen' || f === '.ausschalten' || f.endsWith('.neu') || f.endsWith('.part'))) {
       await rm(path.join(addonsDir, leftover), { force: true });
     }
-    for (const id of ['uhrzeit', 'spotify', 'itemphysics']) {
+    for (const id of ['uhrzeit', 'spotify', 'itemphysics', 'voicechat']) {
       const libs = path.join(modRepo, 'addons', id, 'build', 'libs');
       const built = await Promise.all((await readdir(libs).catch(() => [] as string[]))
         .filter((f) => f.startsWith(`heldix-addon-${id}-`) && f.endsWith('.jar'))
@@ -179,6 +179,8 @@ async function main(): Promise<void> {
   const tuningArgs = tuning ? tunedJvmArguments(prepared.javaMajor, []) : [];
   const testArgs: string[] = [];
   if (autotest) testArgs.push('-Dheldix.autotest=true');
+  // Voice Chat im Autotest: nie das echte Mikrofon und keine Lautsprecher, Raum für die eigene Welt
+  if (autotest) testArgs.push('-Dheldixclient.voicechat.testAudio=true', '-Dheldixclient.voice.testServer=autotest.heldixclient.com');
   // --service=<url>: Heldix-Dienst im Entwicklungsmodus (Anmeldung ohne Mojang, nur für Tests)
   if (flag('service')) testArgs.push(`-Dheldixclient.service=${flag('service')}`, '-Dheldixclient.service.dev=true');
   if (autotest && graphicsArgs.length) testArgs.push(`-Dheldix.autotest.backend=${graphicsApi === 'vulkan' ? 'Vulkan' : 'OpenGL'}`);

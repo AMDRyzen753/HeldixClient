@@ -1,9 +1,24 @@
 {
 	"key.category.heldixclient.main": "HeldixClient",
 	"key.category.heldixclient.addons": "Heldix-Addons",
+	"key.category.heldixclient.modules": "Heldix modules",
 	"key.heldixclient.menu": "Open Heldix menu",
 	"key.heldixclient.zoom": "Zoom",
 	"key.heldixclient.freelook": "Freelook",
 	"key.heldixclient.waypoint": "Set waypoint",
-	"key.heldixclient.hudInteract": "Use HUD (free mouse)"
+	"key.heldixclient.hudInteract": "Use HUD (free mouse)",
+	"key.heldixclient.playerMenu": "Player menu (aim at a player)",
+	"key.heldixclient.module.fps": "FPS on/off",
+	"key.heldixclient.module.cps": "CPS on/off",
+	"key.heldixclient.module.ping": "Ping on/off",
+	"key.heldixclient.module.coordinates": "Coordinates on/off",
+	"key.heldixclient.module.keystrokes": "Keystrokes on/off",
+	"key.heldixclient.module.zoom": "Zoom on/off",
+	"key.heldixclient.module.armor": "Armor on/off",
+	"key.heldixclient.module.effects": "Potion effects on/off",
+	"key.heldixclient.module.togglesprint": "Toggle sprint on/off",
+	"key.heldixclient.module.freelook": "Freelook on/off",
+	"key.heldixclient.module.crosshair": "Crosshair on/off",
+	"key.heldixclient.module.chat": "Chat on/off",
+	"key.heldixclient.module.waypoints": "Waypoints on/off"
 }

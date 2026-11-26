@@ -19,6 +19,7 @@ include 'heldix-api'
 include 'addons:uhrzeit'
 include 'addons:spotify'
 include 'addons:itemphysics'
+include 'addons:voicechat'
 // Automatischer Test im echten Spiel (wird nicht ausgeliefert)
 include 'autotest'
 // Test-Addons mit Zugriff auf Minecraft für den Autotest (werden nicht ausgeliefert)

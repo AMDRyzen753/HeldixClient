@@ -7,6 +7,7 @@ Der Heldix-Dienst ist ein kleiner Server (Ordner [service/](../service)). Zusamm
 - **Heldix-Symbol:** In der Tab-Liste und im Namensschild über dem Kopf steht das Heldix-Logo vor dem Namen von HeldixClient-Spielern. Team-Admins und Moderatoren (nur mit öffentlichem Teamprofil) und Addon-Entwickler haben ein eigenes Symbol; unten in der Tab-Liste steht, wie viele HeldixClient-Spieler da sind.
 - **Freunde:** Freundesliste mit Anfragen und Online-Status. Auf Wunsch zeigt sie, auf welchem Server ein Freund gerade spielt, sodass du ihm direkt beitreten kannst.
 - **Nachrichten:** Kurze Direktnachrichten an Freunde, auch wenn ihr gerade nicht auf demselben Server seid.
+- **Voice Chat:** Ab Version 1.8.0 sprechen HeldixClient-Spieler mit anderen in der Nähe, auf jedem Server und ohne Plugin. Das Addon „Voice Chat“ nimmt auf und spielt ab; der Dienst leitet die Sprache nur weiter und speichert nichts davon (siehe [Voice Chat](#voice-chat)).
 - **Blockieren und Melden:** Wer stört, lässt sich blockieren und beim Betreiber melden.
 - **Launcher-Updates und Downloads:** Der Launcher lädt neue Versionen über den Dienst. Alle Downloads der Webseite (Windows und macOS, mit Prüfsummen) kommen ebenfalls vom Dienst, nicht von GitHub.
 - **Addon-Store:** Heldix-Addons kommen einzeln aus dem Store, im Launcher, im Spiel und auf der Webseite; seit Version 1.6.1 auch Addons, die direkt in Minecraft eingreifen (früher Heldix-Mods). Offizielle Addons veröffentlicht das Team; jeder angemeldete Spieler kann eigene Addons einreichen, das Team prüft sie. Jede Version ist mit dem Update-Schlüssel signiert, auch bei Addons von Spielern (Freigeben heißt signieren). Dazu Screenshots, Bewertungen, Meldungen und eine Seite je Entwickler.
@@ -24,6 +25,7 @@ Ohne eingetragene Adresse des Dienstes sind diese Funktionen aus; der Rest von H
 - **Online-Status und Server** sehen nur bestätigte Freunde. Server-Adressen werden nur weitergegeben, wenn sie öffentliche Domains sind (keine IP-Adressen, kein `localhost`, keine Heimnetz-Namen). Ein Port bleibt dabei, wenn er nicht der Standard-Port 25565 ist, damit Freunde beitreten können.
 - **Erkennbar sein** (Heldix-Symbol, Cape und Cosmetics für andere): Nur wer online ist und die Einstellung an hat, wird bei einer Abfrage als HeldixClient-Spieler gemeldet, mit Cape und gewählten Cosmetics. Dabei meldet der Dienst auch eine Rolle fürs Symbol: Team-Admin oder Moderator nur, wenn das Mitglied auf der öffentlichen Teamseite steht (sonst bleibt die Rolle verborgen), Addon-Entwickler, wenn ein sichtbares Community-Addon des Spielers im Store ist (das steht ohnehin auf seiner Entwicklerseite). Mehr verrät die Abfrage nicht.
 - **Nachrichten** gehen nur an bestätigte Freunde. Der Dienst speichert sie als Verlauf höchstens 30 Tage, danach löscht er sie von selbst; pro Unterhaltung bleiben höchstens die letzten 500. Sie sind **nicht Ende-zu-Ende-verschlüsselt:** Unterwegs schützt sie HTTPS, auf dem Server liegen sie lesbar in der Datenbank. Endet die Freundschaft (Entfernen, Blockieren, Daten löschen), löscht der Dienst die ganze Unterhaltung sofort, für beide. Ob du eine Nachricht gelesen hast, erfährt der Absender nicht.
+- **Voice Chat:** Mit dem Addon „Voice Chat“ gehen deine Sprache (Opus-kodiert) und deine Position, Server-Adresse und Dimension an den Dienst. Er leitet die Sprache nur an HeldixClient-Spieler weiter, die auf demselben Server in derselben Welt in Reichweite sind (Standard 48 Blöcke), nie an Blockierte (in beide Richtungen) und mit „Nur Freunde“ nur an Freunde. Position, Server und Dimension liegen nur im Arbeitsspeicher, solange die Verbindung offen ist. Sprache und Positionen speichert der Dienst nicht und schreibt sie in kein Log. Unterwegs schützt sie HTTPS; Ende-zu-Ende-verschlüsselt ist die Sprache nicht.
 - **Blockieren:** Ein blockierter Spieler ist kein Freund mehr; Anfragen und Unterhaltung werden gelöscht. Er erfährt davon nichts: Eine neue Anfrage von ihm scheitert so, als gäbe es dich beim Dienst nicht. Gespeichert wird nur, wer wen seit wann blockiert hat.
 - **Melden:** Eine Meldung enthält, wer wen gemeldet hat (UUID und Name), den Grund, eine freiwillige Notiz und als Beleg die letzten 20 Nachrichten zwischen beiden. Nur der Betreiber und das Team sehen sie, um Missbrauch zu prüfen. Ist eine Meldung erledigt, merkt sich der Dienst wann und von wem. Alle Meldungen werden nach 90 Tagen gelöscht, auch erledigte. Deine eigenen Meldungen und ihren Stand siehst du auf der Webseite. Löschst du deine Daten, verschwinden deine eigenen Meldungen. Meldungen anderer über dich bleiben bis zum Ablauf, damit Missbrauch nicht durch Löschen und neues Anmelden verschwindet (berechtigtes Interesse an der Abwehr von Missbrauch).
 - **Sperren:** Bei Missbrauch können der Betreiber und das Team ein Konto für den Dienst sperren. Dann löscht der Dienst Konto, Freundschaften, Anfragen, Nachrichten, Blockierungen und Anmeldungen (auch auf der Webseite) und merkt sich nur UUID, letzten Namen, Datum, Grund und wer gesperrt hat. Die Sperre bleibt auch nach „Daten beim Dienst löschen“. Minecraft und der Rest von HeldixClient laufen weiter.
@@ -37,7 +39,7 @@ Ohne eingetragene Adresse des Dienstes sind diese Funktionen aus; der Rest von H
 - **Bewertungen** (1–5 Sterne) speichert der Dienst mit deiner UUID, bis du sie zurücknimmst oder dein Konto löschst; öffentlich sind nur Durchschnitt und Anzahl. **Meldungen zu Addons** (Grund, Notiz, wer gemeldet hat) sehen nur das Team und der Betreiber; sie werden nach 90 Tagen gelöscht, auch erledigte.
 - **Teamseite nur mit Zustimmung:** Auf der öffentlichen Teamseite steht ein Team-Mitglied nur, wenn es das selbst eingeschaltet hat (Standard: aus). Dann zeigt sie Name, Rolle, Aufgabe, einen kurzen Text, seit wann es dabei ist und den Minecraft-Skin; im Spiel trägt es dann das Heldix-Symbol seiner Rolle. Den Skin lädt der Dienst selbst bei Mojang und gibt ihn weiter; der Browser der Besucher fragt nie bei Mojang. Genauso zeigt die Webseite angemeldeten Spielern die Skins ihrer Freunde, Anfragen und Blockierten (und dem Team die von Spielern, um die es geht); andere Skins gibt der Dienst nicht heraus. Ausschalten oder das Verlassen des Teams nimmt den Eintrag sofort heraus.
 - **Support-Anfragen** sehen nur du und das Team. Antworten des Teams zeigen dir den Namen des Mitglieds nur, wenn es auf der Teamseite steht, sonst „HeldixClient-Team“. Geschlossene Anfragen löscht der Dienst 90 Tage nach dem Schließen, andere 180 Tage nach der letzten Nachricht. „Daten löschen“ und eine Sperre löschen deine Anfragen sofort; sie stehen in deiner Datenauskunft. **Anhänge** (Textdateien wie Absturzbericht und Log, z. B. aus der Absturzhilfe des Launchers „An den Support senden“) gehören zur Anfrage und werden mit ihr gelöscht. Absturzberichte und Logs können Dateipfade, Server-Adressen und Namen von Mods enthalten; der Launcher zeigt dir vor dem Senden genau, was er schickt, und ersetzt dein Benutzerverzeichnis durch `~`. Der Dienst speichert Anhänge komprimiert in der Datenbank; die Datenauskunft nennt Name und Größe, den Inhalt lädst du auf der Webseite bei der Anfrage herunter.
-- **Status:** Die öffentliche Status-Abfrage zeigt nur Summen (wie viele Spieler online und insgesamt angemeldet sind, wie viele Addons im Store und Cosmetics im Katalog sind), keine Namen.
+- **Status:** Die öffentliche Status-Abfrage zeigt nur Summen (wie viele Spieler online, im Voice Chat und insgesamt angemeldet sind, wie viele Addons im Store und Cosmetics im Katalog sind), keine Namen.
 - **Einstellungen im Heldix-Menü:** „Für andere erkennbar“, „Online-Status für Freunde“, „Server für Freunde sichtbar“, „Nachrichten von Freunden annehmen“.
 - **Daten löschen:** Im Heldix-Menü unter Freunde → Privatsphäre (oder auf der Webseite) löscht „Daten beim Dienst löschen“ alles, was der Dienst über dich gespeichert hat: Konto, Freundschaften, Anfragen, Nachrichten (auch die an dich), Blockierungen (von dir und gegen dich), deine Meldungen, alle Anmeldungen auf der Webseite und eine Team-Mitgliedschaft. Dazu gehören auch deine Auswahl an Cosmetics, deine Support-Anfragen, dein Teamprofil, deine Addon-Einreichungen (mit JARs und Screenshots), Bewertungen und Meldungen zu Addons. Deine veröffentlichten Addons bleiben im Store: Ihr Manifest ist signiert und bleibt unverändert (mit deinem damaligen Namen und deiner UUID), angezeigt wird als Autor aber „Gelöschter Spieler“, die Entwicklerseite entfällt, und die Addon-ID bleibt gesperrt (auch für ein neues Konto). Es bleiben nur Meldungen anderer über dich (bis zum Ablauf nach 90 Tagen), Einträge im Team-Protokoll (bis zum Ablauf nach 365 Tagen), der Autorname an Neuigkeiten, an Antworten auf Support-Anfragen anderer, an veröffentlichten Addon-Versionen und an veröffentlichten Cosmetics, und eine Sperre.
 
@@ -49,7 +51,7 @@ Alle Anfragen und Antworten sind JSON (UTF-8), außer Download und Upload der La
 - **Bearer-Token** (Launcher, Spiel): `Authorization: Bearer <token>` aus `POST /v1/auth/login`.
 - **Cookie** (Webseite): Die Webseite erreicht den Dienst unter `/api/…` auf ihrer eigenen Adresse (Caddy schneidet `/api` ab: `fetch('/api/v1/web/me')` kommt als `GET /v1/web/me` an). Die Sitzung steckt im Cookie `__Host-heldix_web` (HttpOnly, Secure, SameSite=Strict, Path=/). **CSRF:** Jede Anfrage mit Cookie außer GET und HEAD braucht den Header `X-Heldix-Web: 1`, und ein mitgeschickter `Origin` muss genau die Webseite sein (`HELDIX_DIENST_WEBSITE`); sonst 403. Schickt eine Anfrage beides, zählt das Bearer-Token.
 
-Alle Routen für Spieler (`/v1/me…`, `/v1/friends…`, `/v1/messages…`, `/v1/blocks…`, `/v1/reports…`, `/v1/support…`, `/v1/players/lookup`, `/v1/addon-submissions…`, `/v1/addons/<id>/rating`, `/v1/addons/<id>/reports`) nehmen beides an. `POST /v1/web/link` geht nur mit Bearer-Token, `/v1/web/…` und `/v1/team/…` nur mit Cookie (außer `POST /v1/web/session`, `GET /v1/web/config` und `GET /v1/web/auth/microsoft…`, die ohne Anmeldung gehen), der WebSocket nur mit Bearer-Token.
+Alle Routen für Spieler (`/v1/me…`, `/v1/friends…`, `/v1/messages…`, `/v1/blocks…`, `/v1/reports…`, `/v1/support…`, `/v1/players/lookup`, `/v1/addon-submissions…`, `/v1/addons/<id>/rating`, `/v1/addons/<id>/reports`) nehmen beides an. `POST /v1/web/link` geht nur mit Bearer-Token, `/v1/web/…` und `/v1/team/…` nur mit Cookie (außer `POST /v1/web/session`, `GET /v1/web/config` und `GET /v1/web/auth/microsoft…`, die ohne Anmeldung gehen), die WebSockets (`/v1/ws`, `/v1/voice`) nur mit Bearer-Token.
 
 **Öffentliche Routen** (ohne Anmeldung: `/v1/public/…`, `/v1/news`, `/v1/launcher/…`, `/v1/addons…` außer `…/rating` und `…/reports`, `/v1/addon-authors/…`, `/v1/cosmetics…`, `/v1/status`) antworten immer mit `Access-Control-Allow-Origin: *`, auch bei Fehlern, und mit einem kurzen `Cache-Control` (Addon-Dateien und Cosmetics mit `?v=<sha256>` ändern sich nie und dürfen lange im Cache bleiben).
 
@@ -85,7 +87,7 @@ Wie bei einem Minecraft-Server: Der Dienst gibt eine zufällige `serverId` aus. 
 - `showServer`: Freunde sehen den Server.
 - `messages`: Nachrichten von Freunden annehmen. Ist der Schalter aus, bekommen Freunde beim Senden 403. Selbst schreiben geht trotzdem, und vorhandene Nachrichten bleiben.
 - `cape` muss eine der eingebauten IDs sein: `heldix`, `mitternacht`, `aurora`, `glut`, `kristall`, `neon`, `sakura`, `gewitter`, `galaxie`. Die Liste lässt sich mit der Umgebungsvariable `HELDIX_DIENST_CAPES` (durch Kommas getrennt) ersetzen. `""` heißt: kein Cape. Ab Version 1.6.0 geht auch die ID eines Katalog-Capes (Slot `cape`, siehe [Cosmetics-Katalog](#cosmetics-katalog)), das sichtbar ist und das der Spieler wählen darf; sonst 400 „Unbekanntes Cape.“, bei einem Cape nur fürs Team 403. Ist das gewählte Katalog-Cape gerade ausgeblendet (oder nur fürs Team und der Spieler nicht mehr im Team), zeigt `Me` `cape: ""`; gespeichert bleibt die Wahl trotzdem.
-- `DELETE /v1/me` löscht den Spieler mit allen Tokens, Web-Sitzungen, Freundschaften, Anfragen, Nachrichten und Blockierungen (jeweils in beide Richtungen), der Team-Mitgliedschaft (mit Teamprofil), seiner Auswahl an Cosmetics, seinen Support-Anfragen und den Meldungen, die er selbst gemacht hat. Meldungen anderer über ihn und Einträge im Team-Protokoll bleiben bis zum Ablauf, eine Sperre bleibt ganz. Mit Cookie löscht die Antwort auch das Cookie. Seine offenen WebSocket-Verbindungen schließt der Dienst mit Code 4001 („Konto gelöscht“). Frühere Freunde und Spieler mit offenen Anfragen bekommen, falls verbunden, sofort eine neue `friends`-Nachricht ohne ihn. Danach gilt das alte Token nicht mehr (401). Meldet sich derselbe Spieler später wieder an, legt der Dienst ihn neu mit den Standardwerten an.
+- `DELETE /v1/me` löscht den Spieler mit allen Tokens, Web-Sitzungen, Freundschaften, Anfragen, Nachrichten und Blockierungen (jeweils in beide Richtungen), der Team-Mitgliedschaft (mit Teamprofil), seiner Auswahl an Cosmetics, seinen Support-Anfragen und den Meldungen, die er selbst gemacht hat. Meldungen anderer über ihn und Einträge im Team-Protokoll bleiben bis zum Ablauf, eine Sperre bleibt ganz. Mit Cookie löscht die Antwort auch das Cookie. Seine offenen WebSocket-Verbindungen (auch den Voice Chat) schließt der Dienst mit Code 4001 („Konto gelöscht“). Frühere Freunde und Spieler mit offenen Anfragen bekommen, falls verbunden, sofort eine neue `friends`-Nachricht ohne ihn. Danach gilt das alte Token nicht mehr (401). Meldet sich derselbe Spieler später wieder an, legt der Dienst ihn neu mit den Standardwerten an.
 
 - **Datenexport** (`GET /v1/me/export`): `Content-Disposition: attachment; filename="heldix-daten-<name>.json"`. Enthält `exportedAt`, `profile` (Me mit `createdAt`, `lastSeen`), `friends` (uuid, name, since), `requests` (`incoming`, `outgoing`), `messages` (alle gespeicherten, beide Richtungen), `blocked`, `reports` (eigene, mit Beleg), `logins` (Zeitpunkte der Tokens), `webSessions` (ohne Hashes), `team` (Rolle oder `null`, ohne 2FA-Geheimnis), `news` (eigene Neuigkeiten), `teamActions` (eigene Einträge im Protokoll), `support` (eigene Support-Anfragen mit allen Nachrichten, so wie du sie siehst) und `cosmetics` (`{ "head", "back", "aura", "companion", "cape" }`: die gespeicherte Auswahl je Slot, auch ausgeblendete, `null` = nichts). Höchstens 5 Exporte pro Stunde, sonst 429.
 
@@ -545,7 +547,7 @@ Geprüft wird in dieser Reihenfolge: Rolle vorhanden, 2FA eingerichtet, Code bes
 Spieler (`GET /v1/team/players/<uuid>`) = `{ "uuid", "name", "cape", "visible", "presence", "showServer", "messages", "createdAt", "lastSeen", "online", "friends": <Anzahl>, "blocks": <Anzahl>, "reportsAbout": [<id>], "reportsBy": [<id>], "ban": Ban | null, "role" }` mit `Ban` wie in `GET /v1/team/bans`.
 
 - **`null` bei `by`, `doneBy`, `addedBy`:** über die Server-Konsole (`heldix-dienst-admin`). Im Protokoll heißt der Handelnde dann `{ "uuid": null, "name": "CLI" }`.
-- **Sperren** wirkt wie `heldix-dienst-admin sperren` und trennt offene WebSocket-Verbindungen des Spielers sofort (Code 4003 „Gesperrt“). Sich selbst sperren: 400. Team-Mitglieder lassen sich nicht sperren (409), zuerst aus dem Team entfernen. Spieler, die nie online waren, lassen sich per `uuid` sperren. Unbekannter Name: 404.
+- **Sperren** wirkt wie `heldix-dienst-admin sperren` und trennt offene WebSocket-Verbindungen des Spielers (auch den Voice Chat) sofort (Code 4003 „Gesperrt“). Sich selbst sperren: 400. Team-Mitglieder lassen sich nicht sperren (409), zuerst aus dem Team entfernen. Spieler, die nie online waren, lassen sich per `uuid` sperren. Unbekannter Name: 404.
 - **Spieler suchen:** ohne Groß-/Kleinschreibung nach Namensanfang, oder nach UUID (auch mit Bindestrichen); ohne `q` die zuletzt gesehenen. Gesperrte stehen mit drin: Ihr Konto ist gelöscht, deshalb `lastSeen: null` und in der Detailansicht `createdAt: null`, `lastSeen: null`, Schalter `false` und `ban` gesetzt. Etwas anderes als Name oder UUID: 400. `online` ist die echte Verbindung, unabhängig von `presence`.
 - **Spieler löschen** wirkt wie dessen `DELETE /v1/me` (ohne Sperre): Verbindungen enden mit 4001.
 - **Neuigkeiten:** Titel einzeilig, Text mit Zeilenumbrüchen (`\r\n` wird zu `\n`), sonst die Regeln für Nachrichten. Moderatoren dürfen alle Neuigkeiten bearbeiten. Der Autor bleibt der, der sie angelegt hat.
@@ -607,8 +609,8 @@ Die Routen für das Team (`/v1/team/support…`, jede Rolle) stehen beim [Team-B
 
 ### Status
 
-`GET /v1/status` ohne Anmeldung → `{ "ok": true, "service": "<Version des Dienstes>", "online": <Spieler mit offener WebSocket-Verbindung>, "players": <angemeldete Spieler insgesamt>, "launcher": "<veröffentlichte Version>" | null, "addons": <sichtbare Addons im Store>, "cosmetics": <sichtbare Cosmetics im Katalog>, "since": <Start des Dienstes, ms> }`, `Cache-Control: max-age=30`.
-- Nur Summen, keine Namen. `online` zählt jeden Spieler einmal, auch mit mehreren Verbindungen; eine Web-Sitzung zählt nicht. `players` zählt der Dienst höchstens alle 30 Sekunden neu. `launcher` ist die Version, die `/v1/launcher/latest` gerade ausliefert. `addons` zählt die Addons, die `/v1/addons` gerade zeigt, `cosmetics` (ab Version 1.6.0) die Cosmetics in `/v1/cosmetics`.
+`GET /v1/status` ohne Anmeldung → `{ "ok": true, "service": "<Version des Dienstes>", "online": <Spieler mit offener WebSocket-Verbindung>, "voice": <Spieler mit offener Voice-Verbindung>, "players": <angemeldete Spieler insgesamt>, "launcher": "<veröffentlichte Version>" | null, "addons": <sichtbare Addons im Store>, "cosmetics": <sichtbare Cosmetics im Katalog>, "since": <Start des Dienstes, ms> }`, `Cache-Control: max-age=30`.
+- Nur Summen, keine Namen. `online` zählt jeden Spieler einmal, auch mit mehreren Verbindungen; eine Web-Sitzung zählt nicht. `players` zählt der Dienst höchstens alle 30 Sekunden neu. `launcher` ist die Version, die `/v1/launcher/latest` gerade ausliefert. `addons` zählt die Addons, die `/v1/addons` gerade zeigt, `cosmetics` (ab Version 1.6.0) die Cosmetics in `/v1/cosmetics`. `voice` (ab Version 1.8.0) zählt die Spieler im [Voice Chat](#voice-chat), unabhängig von `online`; ist er aus, steht dort 0.
 
 ### Echtzeit (WebSocket)
 
@@ -632,6 +634,52 @@ Ein Spieler ist online, solange mindestens eine Verbindung offen ist. Bei mehrer
 
 Der Dienst schließt Verbindungen mit Code 4000 („Zeitüberschreitung“), 4001 („Konto gelöscht“) und 4003 („Gesperrt“). Eine Sperre über `heldix-dienst-admin` bemerkt eine offene Verbindung beim nächsten `ping`.
 
+### Voice Chat
+
+Ab Version 1.8.0: Sprechen mit HeldixClient-Spielern in der Nähe, auf jedem Minecraft-Server und ohne Plugin auf dem Server. Das Spiel hält die Verbindung, das offizielle Addon „Voice Chat“ nimmt auf, kodiert (Opus), mischt und spielt ab. Der Dienst verteilt die Sprache nur weiter.
+
+`GET /v1/voice` als WebSocket mit `Authorization: Bearer <token>`, genau wie `/v1/ws` (zählt zur Grenze von 120 Anfragen pro Minute und Token). Ohne gültiges Token: 401, normales GET: 426. Pro Spieler gibt es höchstens eine Voice-Verbindung: Eine neue schließt die alte mit Code 4002 („Neue Verbindung“). Mit `HELDIX_DIENST_VOICE=0` ist der Voice Chat aus, dann antwortet `/v1/voice` mit 404.
+
+Ein **Raum** ist ein Server in einer Dimension. Nur wer im selben Raum ist, kann sich hören.
+
+Client → Dienst (JSON-Text):
+
+| Nachricht | Bedeutung |
+| --- | --- |
+| `{ "type": "join", "server": "mc.example.net", "dimension": "minecraft:overworld", "mode": "all" }` | Raum betreten oder wechseln. `server` prüft der Dienst wie beim Online-Status (nur öffentliche Domains, ein Port außer 25565 bleibt), `dimension` muss zu `^[a-z0-9_.-]{1,32}:[a-z0-9_./-]{1,64}$` passen, `mode` ist `"all"` (Standard, auch ohne Angabe) oder `"friends"`. Ist etwas ungültig, ignoriert der Dienst die Nachricht. Beim Wechsel in einen anderen Raum gilt die alte Position nicht mehr. |
+| `{ "type": "pos", "x": 1.5, "y": 64, "z": -3.25 }` | Eigene Position: endliche Zahlen mit Betrag höchstens 30 000 000, sonst ignoriert. Der Client schickt sie bei Bewegung (höchstens etwa 5-mal pro Sekunde), sonst alle 2 Sekunden. |
+| `{ "type": "mode", "mode": "friends" }` | Nur noch mit Freunden sprechen und hören; `"all"`: wieder mit allen. |
+| `{ "type": "leave" }` | Raum verlassen, die Verbindung bleibt. Die Position gilt danach nicht mehr. |
+| `{ "type": "ping" }` | Antwort `{ "type": "pong" }`. |
+
+Binär (Sprache): `[1 Byte Version = 1][1 Byte Flags][2 Byte Folgenummer, big endian][1–1024 Byte Opus]`. Flags: Bit 0 = letzter Rahmen eines Satzes (Taste losgelassen oder Stille), die anderen Bits 0.
+
+Dienst → Client:
+- `{ "type": "ready", "range": 48, "maxFrame": 1024, "protocol": 1 }` direkt nach dem Verbinden: Reichweite in Blöcken, größte Nutzdaten eines Rahmens in Byte, Version des Protokolls.
+- `{ "type": "peers", "uuids": ["…"] }`: die anderen Spieler im Raum, unabhängig von der Entfernung, höchstens 100. Geht an alle im Raum, sobald jemand ihn betritt, verlässt, in einen anderen Raum wechselt oder die Verbindung trennt. Schickt jemand `join` für seinen Raum noch einmal, bekommt nur er die Liste. Nach `leave` kommt `"uuids": []`.
+- `{ "type": "pong" }`.
+- Binär: `[1 Byte Version = 1][1 Byte Flags][2 Byte Folgenummer][16 Byte UUID des Sprechers][Opus]`. Version, Folgenummer und Opus wie vom Sprecher; von den Flags gibt der Dienst nur Bit 0 weiter.
+
+**Weiterleiten:** Ein Rahmen von A geht an B, wenn
+1. beide im selben Raum sind (gleicher Server nach der Prüfung oben und gleiche Dimension),
+2. beide eine Position haben, die höchstens 15 Sekunden alt ist, und der Abstand (3D) höchstens die Reichweite ist,
+3. keiner den anderen blockiert hat,
+4. beide befreundet sind, falls einer von beiden „Nur Freunde“ (`"friends"`) gewählt hat,
+5. B nicht A ist.
+
+Blockieren und das Ende einer Freundschaft wirken sofort. Hat B mehr als 256 KB ungelesen im Puffer (langsame Leitung), verwirft der Dienst den Rahmen für B; die Verbindung bleibt.
+
+**Grenzen:**
+- Rahmen: höchstens 60 pro Sekunde und Verbindung, der Rest wird verworfen. Ebenso verworfen werden Rahmen unter 5 oder über 1028 Byte, mit einer anderen Version als 1, ohne Raum oder ohne aktuelle Position.
+- Textnachrichten: höchstens 20 pro Sekunde und Verbindung, der Rest wird verworfen. Ungültiges JSON und unbekannte Nachrichten ignoriert der Dienst.
+- Eine WebSocket-Nachricht ist höchstens 4 KB groß; größere trennt der Dienst (Code 1009).
+- Ohne jede Nachricht für 60 Sekunden schließt der Dienst die Verbindung (4000 „Zeitüberschreitung“). Der Client schickt dafür `ping` oder `pos`.
+- Konto gelöscht (4001) oder gesperrt (4003): wie bei `/v1/ws`. Löschen und Sperren im Team-Bereich trennen sofort, eine Sperre über `heldix-dienst-admin` beim nächsten `ping`.
+
+**Nichts gespeichert, nichts geloggt:** Sprache leitet der Dienst nur weiter. Position, Modus und Raum liegen nur im Arbeitsspeicher, solange die Verbindung offen ist, und sind danach weg. In Datenbank und Log landen weder Sprache noch Positionen, Server oder Dimensionen. `/v1/status` zeigt nur, wie viele Spieler verbunden sind (`voice`).
+
+**Einstellungen:** `HELDIX_DIENST_VOICE` (`0` schaltet aus, Standard: an) und `HELDIX_DIENST_VOICE_RANGE` (Reichweite in Blöcken, Standard 48, erlaubt 8–128; ein ungültiger Wert verhindert den Start). Beim Start steht im Log „Voice Chat (/v1/voice): an (Reichweite 48 Blöcke)“ bzw. „aus (HELDIX_DIENST_VOICE=0)“. Zur Bandbreite siehe [docs/einrichtung.md](einrichtung.md#voice-chat-auf-dem-server).
+
 ### Schutz vor Missbrauch
 
 - Anfragekörper sind höchstens 16 KB groß und müssen innerhalb von 15 Sekunden ankommen (sonst 408). Ausnahmen im Team-Bereich: Uploads der Installer bis 1 GiB und der Addons bis 50 MiB, abgebrochen erst, wenn 60 Sekunden lang nichts ankommt; das Addon-Manifest (`PUT /v1/team/addons/manifest`) und das Freigeben einer Einreichung bis 256 KB, der Umschlag eines Cosmetics (`PUT /v1/team/cosmetics`) bis 192 KB. Für Spieler: Addon-Einreichungen (`POST`/`PATCH`) bis 64 KB, JARs bis 50 MiB, Screenshots bis 2 MiB, Anhänge an Support-Anfragen bis 512 KiB.
@@ -642,6 +690,7 @@ Der Dienst schließt Verbindungen mit Code 4000 („Zeitüberschreitung“), 400
 - Skins für Angemeldete (`/v1/skins/<uuid>`): höchstens 300 pro Minute und Spieler; sie zählen nicht zur allgemeinen Grenze.
 - Nachrichten: höchstens 20 pro Minute und Spieler. Meldungen: einmal pro Spieler und höchstens 10 in 24 Stunden. Blockierungen: höchstens 500. Downloads der Launcher-Installer: höchstens 30 pro Minute und IP, Downloads von Addons (`/v1/addons/<id>/files/…`) höchstens 60 pro Minute und IP, Screenshots höchstens 300 pro Minute und IP, Umschläge von Cosmetics (`/v1/cosmetics/<id>`) höchstens 300 pro Minute und IP.
 - Addons von Spielern: höchstens 10 Entwürfe und 3 wartende Einreichungen je Spieler, 30 Uploads pro Stunde je Spieler, 4 Uploads gleichzeitig insgesamt (JARs werden höchstens zu zweit gleichzeitig geprüft). Bewertungen setzen oder löschen höchstens 30-mal pro Minute, Meldungen zu Addons höchstens 10 in 24 Stunden je Spieler.
+- Voice Chat: höchstens 60 Sprach-Rahmen und 20 Textnachrichten pro Sekunde und Verbindung, Nachrichten bis 4 KB, eine Verbindung pro Spieler (siehe [Voice Chat](#voice-chat)).
 - Hinter einem Reverse-Proxy zählt `X-Forwarded-For` nur mit `HELDIX_DIENST_TRUST_PROXY=1`.
 
 ## Betrieb
@@ -821,6 +870,7 @@ Auf dem Server mit sudo (der Befehl läuft als Benutzer des Dienstes, mit dessen
   - `HELDIX_DIENST_MS_CLIENT_ID` (Anwendungs-ID der Azure-App, dieselbe wie `MICROSOFT_CLIENT_ID` im Launcher): Anmeldung mit dem Minecraft-Konto auf der Webseite. Es gibt keinen Standardwert im Dienst (der Installer nimmt die des Launchers). Ungültig (keine GUID): Der Dienst startet nicht. Ohne, oder ohne `HELDIX_DIENST_WEBSITE`/`HELDIX_DIENST_API_URL`: aus.
   - `HELDIX_DIENST_MS_CLIENT_SECRET_FILE` (freiwillig, Datei mit dem Client-Geheimnis, eine Zeile): Mit ihr ist der Dienst ein vertraulicher Client (Plattform „Web“ in Azure), ohne ein öffentlicher Client nur mit PKCE. Den Inhalt schreibt der Dienst nie ins Log. Angegeben, aber unlesbar oder leer: Warnung, die Anmeldung mit dem Minecraft-Konto bleibt aus. Die Datei sollte nur für root und den Dienst lesbar sein.
   - Nur für Tests, nur mit `HELDIX_DIENST_DEV=1` (sonst mit Warnung ignoriert): `HELDIX_DIENST_MS_LOGIN_URL`, `HELDIX_DIENST_XBOX_USER_URL`, `HELDIX_DIENST_XSTS_URL`, `HELDIX_DIENST_MINECRAFT_URL` stellen Microsoft, Xbox Live und die Minecraft-Dienste auf eigene (nachgebaute) Server um.
+  - `HELDIX_DIENST_VOICE` (`0` schaltet den [Voice Chat](#voice-chat) aus, dann antwortet `/v1/voice` mit 404; Standard: an) und `HELDIX_DIENST_VOICE_RANGE` (Reichweite in Blöcken, Standard 48, erlaubt 8–128). Ein anderer Wert als `0` oder `1` bzw. eine ungültige Reichweite: Der Dienst startet nicht.
   - `HOST` (Standard: alle Netzwerkschnittstellen; mit `127.0.0.1` nur von diesem Rechner erreichbar).
   - `HELDIX_DIENST_SESSION_SERVER` (Standard `https://sessionserver.mojang.com`, für Tests umstellbar).
   - Dazu die oben genannten `HELDIX_DIENST_DEV`, `HELDIX_DIENST_CAPES` und `HELDIX_DIENST_TRUST_PROXY`.
@@ -859,10 +909,10 @@ Auf dem Server mit sudo (der Befehl läuft als Benutzer des Dienstes, mit dessen
   }
   ```
 
-  Bei nginx braucht `/v1/ws` die Upgrade-Header und ein Timeout über 90 Sekunden (im `server`-Block mit HTTPS):
+  Bei nginx brauchen `/v1/ws` und `/v1/voice` die Upgrade-Header und ein Timeout über 90 Sekunden (im `server`-Block mit HTTPS):
 
   ```nginx
-  location /v1/ws {
+  location ~ ^/v1/(ws|voice)$ {
       proxy_pass http://127.0.0.1:8787;
       proxy_http_version 1.1;
       proxy_set_header Upgrade $http_upgrade;
@@ -893,6 +943,6 @@ Auf dem Server mit sudo (der Befehl läuft als Benutzer des Dienstes, mit dessen
       proxy_read_timeout 600s;
   }
   ```
-- **Überwachung:** `GET /health` antwortet mit `{ "ok": true }` (nutzt auch der Docker-Healthcheck). Ohne Anmeldung, ohne Daten. `GET /v1/status` zeigt dazu Version, Start, Spieler online und insgesamt, die veröffentlichte Launcher-Version und die Zahl der Addons im Store und der Cosmetics im Katalog.
+- **Überwachung:** `GET /health` antwortet mit `{ "ok": true }` (nutzt auch der Docker-Healthcheck). Ohne Anmeldung, ohne Daten. `GET /v1/status` zeigt dazu Version, Start, Spieler online, im Voice Chat und insgesamt, die veröffentlichte Launcher-Version und die Zahl der Addons im Store und der Cosmetics im Katalog.
 - **Verbindungen nach außen:** Außer zu Mojang für die Anmeldung (`sessionserver.mojang.com`) verbindet sich der Dienst nur für Skins (Teamseite und `/v1/skins`: `sessionserver.mojang.com`, `textures.minecraft.net`) und, wenn eingerichtet, für die Anmeldung mit dem Minecraft-Konto auf der Webseite (`login.microsoftonline.com`, `user.auth.xboxlive.com`, `xsts.auth.xboxlive.com`, `api.minecraftservices.com`), jeweils HTTPS.
 - **Adresse im Client:** In [launcher/src/main/config.ts](../launcher/src/main/config.ts) bei `HELDIX_SERVICE_URL` eintragen (oder beim Bauen die Umgebungsvariable `HELDIX_SERVICE_URL` setzen). Der Launcher gibt sie dem Spiel als `-Dheldixclient.service=<url>` mit.

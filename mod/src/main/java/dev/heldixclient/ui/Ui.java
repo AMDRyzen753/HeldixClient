@@ -359,6 +359,13 @@ public final class Ui {
 		return iconIndex.containsKey(name);
 	}
 
+	/** Nummer eines Icons im Icon-Set (wie in icons.json), -1 = unbekannt; die Schrift heldixclient:marker hat es als U+E100 + Nummer */
+	public static int iconIndex(String name) {
+		loadIconIndex();
+		Integer index = iconIndex.get(name);
+		return index == null ? -1 : index;
+	}
+
 	private static void loadIconIndex() {
 		if (iconIndex != null) return;
 		iconIndex = new HashMap<>();
@@ -733,6 +740,33 @@ public final class Ui {
 	}
 
 	public static boolean inside(double mouseX, double mouseY, float x, float y, float w, float h) {
+		if (targets != null && w > 3 && h > 3) targets.add(new float[] {x, y, w, h});
 		return mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
+	}
+
+	// ======================================================================================
+	// Bedienung mit der Tastatur
+	// ======================================================================================
+
+	/** Flächen, die beim Zeichnen nach der Maus fragen (= anklickbar), solange gesammelt wird */
+	private static List<float[]> targets;
+
+	/**
+	 * Ab jetzt jede Hover-Abfrage ({@link #inside}) als Ziel für die Tastatur sammeln (x, y, Breite, Höhe);
+	 * {@code null} beendet das Sammeln. So werden selbst gezeichnete Kacheln und Zeilen mit den Pfeiltasten erreichbar.
+	 */
+	public static void collectTargets(List<float[]> list) {
+		targets = list;
+	}
+
+	/** Fokus kam von der Tastatur (Tab, Pfeile)? Nur dann einen Fokusrahmen zeigen, nicht nach einem Mausklick. */
+	public static boolean keyboardFocus(boolean focused) {
+		return focused && Minecraft.getInstance().getLastInputType().isKeyboard();
+	}
+
+	/** Fokusrahmen um ein Bedienelement (gut sichtbar, auch auf blauen Flächen) */
+	public static void focusRing(GuiGraphicsExtractor g, float x, float y, float w, float h, float r, float alpha) {
+		outline(g, x - 2, y - 2, w + 4, h + 4, r + 2, withAlpha(0xE693C5FD, alpha));
+		outline(g, x - 1, y - 1, w + 2, h + 2, r + 1, withAlpha(0x660F1420, alpha));
 	}
 }

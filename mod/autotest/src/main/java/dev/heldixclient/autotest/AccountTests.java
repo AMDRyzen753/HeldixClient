@@ -56,7 +56,7 @@ final class AccountTests {
 		// Seite Konten im Heldix-Menü
 		t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.ACCOUNTS));
 		t.waitTicks(10);
-		t.check("Kontowechsel: „Konten“ steht in der Seitenleiste", t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).navIds().contains("ACCOUNTS")));
+		t.check("Kontowechsel: „Konten“ steht in der Navigation", t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).navIds().contains("ACCOUNTS")));
 		List<String> rows = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).describeAccounts());
 		t.log("Seite Konten " + rows);
 		t.check("Kontowechsel: Seite zeigt das Startkonto mit „Im Spiel“ und „Aktiv im Launcher“", rows.contains(home.name() + ":im-spiel:aktiv"));
@@ -111,19 +111,19 @@ final class AccountTests {
 			t.log("Profil oben rechts im kleinen Fenster nicht zu sehen");
 		}
 
-		// Seitenleiste: Profil unten öffnet die Konten
+		// Profil oben rechts im Heldix-Menü öffnet die Konten
 		t.setScreen(() -> new HeldixMenuScreen(null));
 		t.waitTicks(5);
 		Optional<ProfileButton> footer = t.compute(mc -> mc.gui.screen().children().stream()
 				.filter(w -> w instanceof ProfileButton).map(w -> (ProfileButton) w).findFirst());
 		if (footer.isPresent()) {
-			t.check("Seitenleiste: Profil unten ist anklickbar", footer.get().isActive());
+			t.check("Heldix-Menü: Profil oben rechts ist anklickbar", footer.get().isActive());
 			t.click(footer.get().getX() + footer.get().getWidth() / 2.0, footer.get().getY() + footer.get().getHeight() / 2.0);
 			t.waitTicks(5);
-			t.check("Seitenleiste: Klick aufs Profil öffnet die Konten", t.compute(mc -> mc.gui.screen() instanceof HeldixMenuScreen menu
+			t.check("Heldix-Menü: Klick aufs Profil öffnet die Konten", t.compute(mc -> mc.gui.screen() instanceof HeldixMenuScreen menu
 					&& "ACCOUNTS".equals(menu.currentTab())));
 		} else {
-			t.log("Seitenleiste ohne Profil (kleines Fenster)");
+			t.log("Heldix-Menü ohne Profil");
 		}
 
 		// zurück zum Startkonto (der Launcher fragt dafür nicht nach)
@@ -208,14 +208,14 @@ final class AccountTests {
 		return t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).accountButtonCenter(account.name()));
 	}
 
-	/** Kontowechsel ist nirgends zu sehen: Seitenleiste, Profil unten, Seite Konten zeigt nur den Grund */
+	/** Kontowechsel ist nirgends zu sehen: Navigation, Profil oben, Seite Konten zeigt nur den Grund */
 	private static void hidden(TestContext t, String why) {
 		t.check("Kontowechsel ausgeblendet (" + why + ")", !t.compute(mc -> AccountSwitcher.available()));
 		t.setScreen(() -> new HeldixMenuScreen(null));
 		t.waitTicks(5);
-		t.check("Kontowechsel ausgeblendet (" + why + "): nicht in der Seitenleiste",
+		t.check("Kontowechsel ausgeblendet (" + why + "): nicht in der Navigation",
 				t.compute(mc -> !((HeldixMenuScreen) mc.gui.screen()).navIds().contains("ACCOUNTS")));
-		t.check("Kontowechsel ausgeblendet (" + why + "): Profil unten nicht anklickbar", t.compute(mc -> mc.gui.screen().children().stream()
+		t.check("Kontowechsel ausgeblendet (" + why + "): Profil nicht anklickbar", t.compute(mc -> mc.gui.screen().children().stream()
 				.filter(w -> w instanceof ProfileButton).noneMatch(w -> ((ProfileButton) w).isActive())));
 		t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.ACCOUNTS));
 		t.waitTicks(5);

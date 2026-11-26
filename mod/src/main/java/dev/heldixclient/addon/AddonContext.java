@@ -236,26 +236,37 @@ final class AddonContext implements HeldixApi {
 
 	@Override
 	public KeyHandle registerKey(String id, String name, int defaultKey, Runnable onPress) {
+		return createKey(addon, info.name(), id, name, defaultKey, onPress);
+	}
+
+	/** Eine Taste eines Addons: die Tastenbelegung von Minecraft dahinter (für showKey im Untermenü eines Moduls) */
+	record AddonKey(KeyMapping mapping) implements KeyHandle {
+		@Override
+		public boolean isDown() {
+			return mapping.isDown();
+		}
+
+		@Override
+		public String keyName() {
+			return mapping.isUnbound() ? "" : mapping.getTranslatedKeyMessage().getString();
+		}
+	}
+
+	/**
+	 * Legt eine Taste eines Addons an (registerKey bzw. addKey eines Moduls): unter Optionen → Steuerung in der Gruppe
+	 * „Heldix-Addons“, gedrückt im Spiel ruft sie {@code onPress} als Aktion des Spielers auf.
+	 */
+	static AddonKey createKey(LoadedAddon addon, String addonName, String id, String name, int defaultKey, Runnable onPress) {
 		if (id == null || !id.matches("[a-z0-9_-]+")) throw new IllegalArgumentException("Tasten-ID darf nur a-z, 0-9, _ und - enthalten: " + id);
 		Objects.requireNonNull(onPress, "onPress");
 		if (keyCategory == null) keyCategory = KeyMapping.Category.register(HeldixClient.id("addons"));
 		// Der Name ist zugleich der Schlüssel in options.txt; ":" trennt dort Name und Wert
-		String label = (info.name() + " – " + (name == null || name.isBlank() ? id : name)).replace(':', ' ');
+		String label = (addonName + " – " + (name == null || name.isBlank() ? id : name)).replace(':', ' ');
 		// HeldixKeys sind GLFW-Codes; Minecraft nimmt seit 26.x SDL-Scancodes (NONE = -1 würde sonst abstürzen)
 		InputConstants.Key key = AddonKeys.toMinecraft(defaultKey);
 		KeyMapping mapping = KeyMappings.register(new KeyMapping(label, InputConstants.Type.KEYBOARD, key.getValue(), keyCategory));
 		AddonManager.KEYS.add(new AddonManager.Key(addon, mapping, onPress, defaultKey));
-		return new KeyHandle() {
-			@Override
-			public boolean isDown() {
-				return mapping.isDown();
-			}
-
-			@Override
-			public String keyName() {
-				return mapping.isUnbound() ? "" : mapping.getTranslatedKeyMessage().getString();
-			}
-		};
+		return new AddonKey(mapping);
 	}
 
 	@Override
@@ -332,5 +343,34 @@ final class AddonContext implements HeldixApi {
 	@Override
 	public dev.heldixclient.api.Cosmetics cosmetics() {
 		return cosmetics;
+	}
+
+	// --- API 6: andere Spieler, Sprachkanal, Symbole am Namensschild, Spielermenü --------------
+
+	private dev.heldixclient.api.VoiceChannel voice;
+	private dev.heldixclient.api.PlayerMarkers markers;
+
+	@Override
+	public List<dev.heldixclient.api.NearbyPlayer> nearbyPlayers() {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (!minecraft.isSameThread()) throw new IllegalStateException("nearbyPlayers() nur im Haupt-Thread aufrufen");
+		return dev.heldixclient.player.NearbyPlayers.all(minecraft);
+	}
+
+	@Override
+	public dev.heldixclient.api.VoiceChannel voice() {
+		if (voice == null) voice = AddonPlayers.voice(addon);
+		return voice;
+	}
+
+	@Override
+	public dev.heldixclient.api.PlayerMarkers playerMarkers() {
+		if (markers == null) markers = AddonPlayers.markers(addon);
+		return markers;
+	}
+
+	@Override
+	public Registration addPlayerMenuEntry(dev.heldixclient.api.PlayerMenuEntry entry) {
+		return AddonPlayers.addMenuEntry(addon, entry);
 	}
 }

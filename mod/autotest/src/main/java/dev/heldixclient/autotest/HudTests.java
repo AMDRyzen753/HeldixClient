@@ -231,7 +231,7 @@ final class HudTests {
 	}
 
 	@SuppressWarnings("unchecked")
-	private static List<String> chat(TestContext t, int count) {
+	static List<String> chat(TestContext t, int count) {
 		return t.compute(mc -> {
 			try {
 				Field field = ChatComponent.class.getDeclaredField("allMessages");
@@ -1043,7 +1043,7 @@ final class HudTests {
 	private static void spotify(TestContext t) {
 		Module found = t.compute(mc -> ModuleManager.all().stream().filter(m -> m.id().equals("spotify:spotify")).findFirst().orElse(null));
 		LoadedAddon addon = t.compute(mc -> AddonManager.addons().stream().filter(a -> "spotify".equals(a.id()) && a.isActive()).findFirst().orElse(null));
-		t.check("Spotify-Addon 2.1.0 aktiv (API 5)", found instanceof HudModule && addon != null && "2.1.0".equals(addon.version()));
+		t.check("Spotify-Addon 2.2.0 aktiv (API 6)", found instanceof HudModule && addon != null && "2.2.0".equals(addon.version()));
 		HudModule spotify = (HudModule) found;
 		int errors = t.compute(mc -> addon.errorCount());
 		Setting.Choice layout = t.compute(mc -> (Setting.Choice) spotify.settings().stream().filter(s -> s instanceof Setting.Choice && s.label().equals("Darstellung"))

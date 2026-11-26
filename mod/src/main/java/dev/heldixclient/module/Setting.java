@@ -64,6 +64,13 @@ public sealed interface Setting {
 	record Text(String label, String description, int maxLength, java.util.function.Supplier<String> get, Consumer<String> set) implements Setting {
 	}
 
+	/**
+	 * Taste (eine Tastenbelegung von Minecraft): Klick, dann die neue Taste drücken; Entf oder Rücktaste = nicht belegt,
+	 * Esc bricht ab. Dieselbe Belegung steht unter Optionen → Steuerung; geändert wird sie an beiden Stellen.
+	 */
+	record Key(String label, String description, net.minecraft.client.KeyMapping mapping) implements Setting {
+	}
+
 	/** Prozentanzeige für Regler von 0 bis 1. */
 	static String percent(double value) {
 		return Math.round(value * 100) + " %";

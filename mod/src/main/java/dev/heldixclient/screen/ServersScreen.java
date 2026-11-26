@@ -64,6 +64,11 @@ public class ServersScreen extends ShellScreen {
 	// ---------- Aufbau ----------
 
 	@Override
+	protected int toolbarActionsWidth() {
+		return (contentW >= 340 ? ActionButton.widthFor("Server hinzufügen", "plus") : 20) + 48;
+	}
+
+	@Override
 	protected void initContent() {
 		if (servers == null) {
 			servers = new ServerList(minecraft);
@@ -414,7 +419,7 @@ public class ServersScreen extends ShellScreen {
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
-		if (serverCount() > 0) {
+		if (serverCount() > 0 && !widgetKeyFocus()) {
 			int index = 0;
 			for (int i = 0; i < serverCount(); i++) if (servers.get(i) == selected) index = i;
 			switch (event.key()) {

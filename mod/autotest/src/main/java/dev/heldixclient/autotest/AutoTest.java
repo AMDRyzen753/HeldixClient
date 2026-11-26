@@ -196,8 +196,8 @@ public final class AutoTest implements HeldixModInitializer {
 		t.check("Kaputtes Addon als Fehler erkannt", addons.contains("Kaputtes Test-Addon=FAILED"));
 		t.check("Module des Uhrzeit-Addons vorhanden",
 				t.compute(mc -> ModuleManager.all().stream().anyMatch(m -> "uhrzeit:uhrzeit".equals(m.id()))));
-		// Spotify-Addon nutzt API 5: eigene Einstellungen, Tasten, Chat-Befehle und Knöpfe im HUD
-		t.check("Spotify-Addon aktiv (API 5)", addons.contains("Spotify=ACTIVE"));
+		// Spotify-Addon nutzt API 6: eigene Einstellungen, Tasten, Chat-Befehle und Knöpfe im HUD
+		t.check("Spotify-Addon aktiv (API 6)", addons.contains("Spotify=ACTIVE"));
 		t.check("Item-Physics-Addon aktiv (API 4)", addons.contains("Item Physics=ACTIVE"));
 		t.check("Spotify-Modul mit eigenen Einstellungen", t.compute(mc -> ModuleManager.all().stream()
 				.filter(m -> "spotify:spotify".equals(m.id()))
@@ -226,7 +226,7 @@ public final class AutoTest implements HeldixModInitializer {
 		t.check("Hauptmenü hat den Knopf Cape", t.compute(mc -> mc.gui.screen().children().stream()
 				.anyMatch(w -> w instanceof net.minecraft.client.gui.components.AbstractWidget a && "Cape".equals(a.getMessage().getString()))));
 
-		// Weg 1: Hauptmenü → Seitenleiste "Module" → Karte anklicken
+		// Weg 1: Hauptmenü → Knopf "Module" → Karte anklicken
 		t.clickWidget("Module");
 		t.waitTicks(10);
 		clickTest(t, "Hauptmenü");
@@ -271,6 +271,11 @@ public final class AutoTest implements HeldixModInitializer {
 		clickTest(t, "direkt geöffnet");
 		t.screenshot("heldix-03-heldix-menue");
 
+		// Oberfläche: Leisten, Übersicht, Schnellsuche, Tastatur, kleine Fenster
+		ShellTests.run(t);
+		// Tasten im Untermenü der Module (eingebaut und aus Addons)
+		KeyTests.run(t);
+
 		// Unter-Menüs: Einstellungen → Reiter Info; Mods & Addons ist eine eigene Kategorie mit dem Store
 		openPage(t, "INFO");
 		t.check("Einstellungen haben die Reiter Allgemein und Info",
@@ -290,7 +295,7 @@ public final class AutoTest implements HeldixModInitializer {
 		t.waitTicks(10);
 		clickTest(t, "Rechte Umschalttaste");
 
-		// Weg 3: Heldix-Pausemenü (ersetzt Minecrafts Pausemenü) → Seitenleiste "Module"
+		// Weg 3: Heldix-Pausemenü (ersetzt Minecrafts Pausemenü) → Knopf "Module"
 		t.setScreen(() -> new PauseScreen(true));
 		t.waitTicks(5);
 		t.check("Pausemenü ist das Heldix-Pausemenü", t.compute(mc -> mc.gui.screen() instanceof PauseMenuScreen));
@@ -357,6 +362,8 @@ public final class AutoTest implements HeldixModInitializer {
 		// Rüstung, Trank-Effekte, Dauersprint, Freelook, Fadenkreuz, Chat, Wegpunkte; Heldix-Dienst (mit --service)
 		FeatureTests.modules(t);
 		FeatureTests.social(t);
+		// Spielermenü (Mausrad-Klick auf einen Spieler) und Voice Chat über den Heldix-Dienst
+		VoiceTests.run(t);
 		// Heldix-Symbol je Rolle: Tab-Liste (mit Fußzeile) und Namensschilder über Köpfen
 		BadgeTests.run(t);
 		// Heldix-Cosmetics: Katalog (signiert), Seite im Heldix-Menü, alle Slots, andere Spieler, Addon-API (mit --service)
@@ -389,6 +396,8 @@ public final class AutoTest implements HeldixModInitializer {
 		int[] size = t.compute(mc -> new int[] {mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight()});
 		t.moveMouse(size[0] - 20, size[1] - 20);
 		t.waitTicks(10);
+		// Einblendungen früherer Schritte (z. B. „Konto gewechselt“) nicht mit aufs Bild nehmen
+		t.run(mc -> mc.gui.toastManager().clear());
 		t.screenshot("heldix-07-einzelspieler");
 
 		t.run(mc -> Shell.openVanilla(mc, new SelectWorldScreen(titleScreen)));
@@ -756,9 +765,9 @@ public final class AutoTest implements HeldixModInitializer {
 				.orElseThrow(() -> new IllegalStateException(module.id() + " hat keinen Regler " + label));
 	}
 
-	/** Öffnet im Heldix-Menü eine Seite wie ein Spieler: Kategorie in der Seitenleiste, dann der Reiter. */
+	/** Öffnet im Heldix-Menü eine Seite wie ein Spieler: Bereich oben, Seite in der Leiste darunter, dann der Reiter. */
 	static void openPage(TestContext t, String name) {
-		for (int i = 0; i < 3 && !name.equals(t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).currentTab())); i++) {
+		for (int i = 0; i < 4 && !name.equals(t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).currentTab())); i++) {
 			int[] center = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabCenter(name));
 			t.click(center[0], center[1]);
 			t.waitTicks(3);

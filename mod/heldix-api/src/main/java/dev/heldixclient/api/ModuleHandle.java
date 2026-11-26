@@ -111,6 +111,34 @@ public interface ModuleHandle {
 	 */
 	IntSupplier addStyleColor(String key, String label, int defaultColor);
 
+	// --- ab API 6: Tasten im Untermenü des Moduls ---------------------------------------------
+
+	/**
+	 * Taste für dieses Modul. Sie steht im Untermenü des Moduls unter „Tasten“, wo der Spieler sie per Klick und
+	 * Tastendruck umbelegt (Entf = nicht belegt), und wie jede Addon-Taste unter Optionen → Steuerung → Heldix-Addons.
+	 * Wie {@link HeldixApi#registerKey} nur in {@link HeldixAddon#onEnable(HeldixApi)} aufrufen.
+	 *
+	 * @param key         eindeutig innerhalb des Addons, z. B. "show-date" (a-z, 0-9, _ und -)
+	 * @param label       Name im Untermenü und in der Steuerung, z. B. "Datum zeigen"
+	 * @param description kurze Erklärung im Untermenü, darf leer sein
+	 * @param defaultKey  Standardtaste, siehe {@link HeldixKeys} ({@link HeldixKeys#NONE} = nicht belegt)
+	 * @param onPress     läuft im Haupt-Thread bei jedem Druck im Spiel (nicht in Menüs), auch wenn das Modul aus ist –
+	 *                    prüfe dafür {@link #isEnabled()}; ein Druck gilt als Aktion des Spielers
+	 * @since 6
+	 */
+	KeyHandle addKey(String key, String label, String description, int defaultKey, Runnable onPress);
+
+	/**
+	 * Eine mit {@link HeldixApi#registerKey} angelegte Taste zusätzlich im Untermenü dieses Moduls zeigen, damit der
+	 * Spieler sie dort umbelegen kann (z. B. die Musik-Tasten im Modul Spotify).
+	 *
+	 * @param key         Rückgabe von {@link HeldixApi#registerKey}
+	 * @param label       Name im Untermenü
+	 * @param description kurze Erklärung, darf leer sein
+	 * @since 6
+	 */
+	void showKey(KeyHandle key, String label, String description);
+
 	@FunctionalInterface
 	interface ToggleListener {
 		void onToggle(boolean enabled);

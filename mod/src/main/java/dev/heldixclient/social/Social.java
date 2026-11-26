@@ -159,6 +159,17 @@ public final class Social {
 		return state == State.ONLINE;
 	}
 
+	/** Anmeldung beim Dienst für den Sprachkanal (VoiceLink); null ohne Verbindung. Nie loggen oder weitergeben. */
+	public static String serviceToken() {
+		return state == State.ONLINE ? token : null;
+	}
+
+	/** Ist der Spieler ein Freund? (laut Freundesliste des Dienstes) */
+	public static boolean isFriend(UUID uuid) {
+		for (Friend friend : friends) if (friend.uuid().equals(uuid)) return true;
+		return false;
+	}
+
 	public static List<Friend> friends() {
 		return friends;
 	}

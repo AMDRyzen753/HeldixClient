@@ -30,6 +30,7 @@ import dev.heldixclient.social.Social;
 import dev.heldixclient.waypoint.Waypoints;
 import dev.heldixclient.ui.Shell;
 import dev.heldixclient.ui.Ui;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.Screen;
@@ -172,6 +173,12 @@ public class HeldixMenuScreen extends ShellScreen {
 	private final Map<String, SearchField> textFields = new HashMap<>();
 	/** Untermenü: Farbeinstellung, deren Palette gerade aufgeklappt ist (Beschriftung) */
 	private String colorOpen;
+	/** Palette gerade aufgeklappt: beim nächsten Zeichnen ganz ins Bild holen */
+	private boolean revealPalette;
+	/** Taste, die gerade auf einen neuen Tastendruck wartet (Einstellung „Taste“), sonst null */
+	private KeyMapping keyCapture;
+	/** im laufenden Klick abgebrochenes Warten (damit derselbe Chip es nicht gleich neu startet) */
+	private KeyMapping captureCancelled;
 	/** Mitte der Bedienelemente aus dem letzten Bild (für den Autotest) */
 	private final Map<String, int[]> settingCenters = new HashMap<>();
 
@@ -262,6 +269,312 @@ public class HeldixMenuScreen extends ShellScreen {
 		this.directSubmenu = module != null;
 	}
 
+	/** Schnellsuche: Einstellungen eines Moduls öffnen („Zurück“ führt zur Liste der Module), optional eine hervorheben */
+	public static HeldixMenuScreen moduleSettings(Screen parent, Module module, String setting) {
+		HeldixMenuScreen screen = new HeldixMenuScreen(parent, Shell.Page.MODULES);
+		screen.openModule = module;
+		if (setting != null) screen.highlight("setting:" + setting);
+		return screen;
+	}
+
+	/**
+	 * Schnellsuche: Seite öffnen, optional mit Reiter ({@code "cape:OPTIONS"}, {@code "waypoints:DISPLAY"} …) und
+	 * einer hervorgehobenen Zeile ({@code "setting:Beschriftung"}, {@code "addon:id"}, {@code "store:id"}).
+	 */
+	public static HeldixMenuScreen highlighted(Screen parent, Shell.Page page, String tab, String key) {
+		HeldixMenuScreen screen = new HeldixMenuScreen(parent, page);
+		if (tab != null) screen.selectTab(tab);
+		if (key != null) {
+			screen.highlight(key);
+			if (key.startsWith("store:")) screen.storeOpen = key.substring(6);
+		}
+		return screen;
+	}
+
+	/** Einstellung einer Heldix-Seite für die Schnellsuche */
+	public record SettingEntry(Shell.Page page, String tab, String label, String description, String group) {
+	}
+
+	/**
+	 * Alle Einstellungen der Seiten Einstellungen, Leistung, Shader, Privatsphäre, Wegpunkte (Anzeige), Cape und Cosmetics
+	 * (Optionen): die Seiten werden dafür einmal aufgebaut, aber nicht angezeigt.
+	 */
+	public static List<SettingEntry> searchableSettings() {
+		List<SettingEntry> list = new ArrayList<>();
+		Object[][] sources = {{Shell.Page.SETTINGS, null}, {Shell.Page.PERFORMANCE, null}, {Shell.Page.SHADER, null}, {Shell.Page.PRIVACY, null},
+				{Shell.Page.WAYPOINTS, "waypoints:DISPLAY"}, {Shell.Page.CAPE, "cape:OPTIONS"}, {Shell.Page.COSMETICS, "cosmetics:OPTIONS"}};
+		for (Object[] source : sources) {
+			Shell.Page page = (Shell.Page) source[0];
+			String tab = (String) source[1];
+			try {
+				HeldixMenuScreen screen = new HeldixMenuScreen(null, page);
+				if (tab != null) screen.selectTab(tab);
+				screen.bodyW = 400;
+				for (Row row : screen.buildRows()) collectSettings(row, null, page, tab, list);
+			} catch (RuntimeException e) {
+				HeldixClient.LOGGER.debug("Schnellsuche: Seite {} nicht durchsuchbar", page, e);
+			}
+		}
+		return list;
+	}
+
+	private static void collectSettings(Row row, String group, Shell.Page page, String tab, List<SettingEntry> list) {
+		switch (row) {
+			case Group card -> {
+				for (Row child : card.rows) collectSettings(child, card.title != null ? card.title : group, page, tab, list);
+			}
+			case Columns columns -> {
+				collectSettings(columns.left, group, page, tab, list);
+				collectSettings(columns.right, group, page, tab, list);
+			}
+			case SettingRow setting -> list.add(new SettingEntry(page, tab, setting.setting.label(), setting.setting.description(), group));
+			default -> {
+			}
+		}
+	}
+
+	/** Reiter einer Seite setzen ("filter:HUD", "cape:OPTIONS", "cosmetics:OPTIONS", "waypoints:DISPLAY") */
+	private void selectTab(String tab) {
+		int colon = tab.indexOf(':');
+		if (colon < 0) return;
+		String value = tab.substring(colon + 1);
+		try {
+			switch (tab.substring(0, colon)) {
+				case "filter" -> filter = Filter.valueOf(value);
+				case "cape" -> capeTab = CapeTab.valueOf(value);
+				case "cosmetics" -> cosmeticTab = CosmeticTab.valueOf(value);
+				case "waypoints" -> waypointTab = WaypointTab.valueOf(value);
+				default -> {
+				}
+			}
+		} catch (IllegalArgumentException ignored) {
+			// unbekannter Reiter: Standard bleibt
+		}
+	}
+
+	// ======================================================================================
+	// Hervorheben (Schnellsuche)
+	// ======================================================================================
+
+	/** hervorgehobene Zeile ("setting:…", "addon:…", "store:…"), sonst null */
+	private String highlight;
+	private long highlightAt;
+	/** beim nächsten Aufbau zur hervorgehobenen Zeile scrollen */
+	private boolean highlightScroll;
+
+	private void highlight(String key) {
+		highlight = key;
+		highlightAt = System.nanoTime();
+		highlightScroll = true;
+	}
+
+	private boolean highlighted(Row row) {
+		if (highlight == null) return false;
+		return switch (row) {
+			case SettingRow setting -> highlight.equals("setting:" + setting.setting.label());
+			case AddonCard card -> highlight.equals("addon:" + card.addon.id());
+			case StoreCard card -> highlight.equals("store:" + card.entry.id());
+			default -> false;
+		};
+	}
+
+	/** Lage der hervorgehobenen Zeile {x, y, Breite, Höhe} relativ zum Anfang des Inhalts, sonst null */
+	private int[] highlightRect() {
+		if (highlight == null) return null;
+		int y = 0;
+		for (Row row : rows) {
+			int[] found = row.find(this::highlighted, bodyW);
+			if (found != null) return new int[] {found[0], y + found[1], found[2], found[3]};
+			y += row.height(bodyW) + row.gapAfter();
+		}
+		return null;
+	}
+
+	/** Zeile einer Einstellung ins Bild scrollen (oben, mit etwas Abstand) */
+	public void scrollToSetting(String label) {
+		layout();
+		int y = 0;
+		for (Row row : rows) {
+			int[] found = row.find(r -> r instanceof SettingRow setting && setting.setting.label().equals(label), bodyW);
+			if (found != null) {
+				scroll = Math.clamp(y + found[1] - 10, 0, maxScroll());
+				return;
+			}
+			y += row.height(bodyW) + row.gapAfter();
+		}
+	}
+
+	/** Für den Autotest: Schnellschalter der Übersicht ins Bild scrollen */
+	public void revealQuickToggles() {
+		layout();
+		int y = 0;
+		for (Row row : rows) {
+			int[] found = row.find(r -> r instanceof QuickToggles, bodyW);
+			if (found != null) {
+				scroll = Math.clamp(y + found[1] - 30, 0, maxScroll());
+				return;
+			}
+			y += row.height(bodyW) + row.gapAfter();
+		}
+	}
+
+	/** Für den Autotest: Mitte des Schnellschalters Nummer {@code index} auf der Übersicht (aus dem letzten Bild) */
+	public int[] quickToggleCenter(int index) {
+		return settingCenters.get("quick:" + index);
+	}
+
+	/** Für den Autotest: hervorgehobene Zeile (oder null) */
+	public String highlightKey() {
+		return highlight;
+	}
+
+	// ======================================================================================
+	// Bedienung mit der Tastatur (Pfeile, Enter, Leertaste)
+	// ======================================================================================
+
+	/** Ziel im Inhalt mit eigener Bedienung (Einstellungen): Enter/Leertaste und Pfeil links/rechts */
+	private record KeyTarget(float x, float y, float w, float h, Runnable activate, IntConsumer adjust) {
+	}
+
+	/** Ziele aus dem letzten Bild (Bildschirm-Koordinaten): gesammelte Hover-Flächen und eigene */
+	private List<float[]> frameTargets = List.of();
+	private List<KeyTarget> frameKeyTargets = List.of();
+	private final List<float[]> collecting = new ArrayList<>();
+	private final List<KeyTarget> collectingKeys = new ArrayList<>();
+	/** gewähltes Ziel in Inhalts-Koordinaten (y ohne Scrollen), sonst null */
+	private float[] keyFocus;
+	/** Tastatur-Modus: Hover und Fokusrahmen folgen dem gewählten Ziel statt der Maus */
+	private boolean keyMode;
+	private double lastMouseX = Double.NaN;
+	private double lastMouseY = Double.NaN;
+	/** nach dem Scrollen im nächsten Bild noch einmal in diese Richtung gehen (0 = nein) */
+	private int pendingMoveX;
+	private int pendingMoveY;
+
+	/** Einstellungen melden sich hier als Ziel (statt nur über ihre Hover-Fläche) */
+	private void keyTarget(float x, float y, float w, float h, Runnable activate, IntConsumer adjust) {
+		collectingKeys.add(new KeyTarget(x, y, w, h, activate, adjust));
+	}
+
+	/** gewähltes Ziel auf dem Bildschirm {x, y, w, h} */
+	private float[] focusOnScreen() {
+		return keyFocus == null ? null : new float[] {keyFocus[0], keyFocus[1] - (float) scroll, keyFocus[2], keyFocus[3]};
+	}
+
+	private void setKeyFocus(float[] screenRect) {
+		keyFocus = new float[] {screenRect[0], screenRect[1] + (float) scroll, screenRect[2], screenRect[3]};
+		keyMode = true;
+		// ganz ins Bild holen
+		float top = screenRect[1];
+		float bottom = screenRect[1] + screenRect[3];
+		if (top < bodyY + 2) scroll = Math.clamp(scroll - (bodyY + 2 - top) - 6, 0, maxScroll());
+		else if (bottom > bodyY + bodyH - 2) scroll = Math.clamp(scroll + (bottom - bodyY - bodyH + 2) + 6, 0, maxScroll());
+	}
+
+	/** Alle Ziele dieses Bilds: eigene der Einstellungen, dazu Hover-Flächen, die nicht in einer davon liegen */
+	private List<float[]> allTargets() {
+		List<float[]> list = new ArrayList<>();
+		for (KeyTarget target : frameKeyTargets) list.add(new float[] {target.x(), target.y(), target.w(), target.h()});
+		float area = bodyW * (float) bodyH;
+		outer:
+		for (float[] t : frameTargets) {
+			if (t[2] * t[3] > area * 0.6f) continue;
+			if (t[1] + t[3] <= bodyY || t[1] >= bodyY + bodyH) continue;
+			float cx = t[0] + t[2] / 2;
+			float cy = t[1] + t[3] / 2;
+			for (KeyTarget k : frameKeyTargets) if (Ui.inside(cx, cy, k.x(), k.y(), k.w(), k.h())) continue outer;
+			for (float[] o : list) if (Math.abs(o[0] - t[0]) < 1 && Math.abs(o[1] - t[1]) < 1 && Math.abs(o[2] - t[2]) < 1 && Math.abs(o[3] - t[3]) < 1) continue outer;
+			list.add(t);
+		}
+		return list;
+	}
+
+	/** eigenes Ziel (Einstellung) unter dem Fokus, sonst null */
+	private KeyTarget focusedKeyTarget() {
+		float[] f = focusOnScreen();
+		if (f == null) return null;
+		for (KeyTarget k : frameKeyTargets) {
+			if (Math.abs(k.x() - f[0]) < 1 && Math.abs(k.y() - f[1]) < 1 && Math.abs(k.w() - f[2]) < 1 && Math.abs(k.h() - f[3]) < 1) return k;
+		}
+		return null;
+	}
+
+	/** Fokus in eine Richtung bewegen (dx, dy je -1/0/1); am Rand wird weitergescrollt */
+	private void moveFocus(int dx, int dy) {
+		List<float[]> list = allTargets();
+		float[] current = focusOnScreen();
+		if (current == null || !keyMode) {
+			float[] first = null;
+			for (float[] t : list) {
+				if (t[1] < bodyY || t[1] + t[3] > bodyY + bodyH) continue;
+				if (first == null || t[1] < first[1] - 2 || Math.abs(t[1] - first[1]) <= 2 && t[0] < first[0]) first = t;
+			}
+			if (first != null) setKeyFocus(first);
+			return;
+		}
+		float cx = current[0] + current[2] / 2;
+		float cy = current[1] + current[3] / 2;
+		float[] best = null;
+		float bestScore = Float.MAX_VALUE;
+		for (float[] t : list) {
+			boolean nested = Ui.inside(t[0] + t[2] / 2, t[1] + t[3] / 2, current[0], current[1], current[2], current[3])
+					|| Ui.inside(cx, cy, t[0], t[1], t[2], t[3]);
+			// hoch/runter überspringt Flächen in bzw. um das gewählte Ziel (z. B. Zahnrad in einer Kachel)
+			if (dy != 0 && nested) continue;
+			float tx = t[0] + t[2] / 2;
+			float ty = t[1] + t[3] / 2;
+			float primary = dy != 0 ? (ty - cy) * dy : (tx - cx) * dx;
+			if (primary <= 2) continue;
+			float orthogonal = dy != 0 ? Math.abs(tx - cx) : Math.abs(ty - cy);
+			float score = primary + orthogonal * 2.5f;
+			if (score < bestScore) {
+				bestScore = score;
+				best = t;
+			}
+		}
+		if (best != null) {
+			setKeyFocus(best);
+			return;
+		}
+		// nichts mehr in dieser Richtung zu sehen: weiterscrollen und im nächsten Bild noch einmal versuchen
+		if (dy != 0) {
+			double before = scroll;
+			scroll = Math.clamp(scroll + dy * 48, 0, maxScroll());
+			if (scroll != before) {
+				pendingMoveX = dx;
+				pendingMoveY = dy;
+			} else if (dy < 0) {
+				// ganz oben: zurück zu den Reitern bzw. der Navigation
+				keyMode = false;
+				keyFocus = null;
+				net.minecraft.client.gui.components.AbstractWidget up = null;
+				for (ShellTab tab : tabs) if (tab.selected()) up = tab;
+				if (up == null) for (ShellNavButton button : nav) if (button.kind() == ShellNavButton.Kind.PAGE && button.selected()) up = button;
+				if (up != null) keyFocusWidget(up);
+			}
+		}
+	}
+
+	/** Enter/Leertaste auf dem gewählten Ziel: eigene Aktion bzw. ein Klick in seine Mitte */
+	private void activateFocus() {
+		KeyTarget own = focusedKeyTarget();
+		if (own != null) {
+			if (own.activate() != null) own.activate().run();
+			return;
+		}
+		float[] f = focusOnScreen();
+		if (f == null) return;
+		var button = new net.minecraft.client.input.MouseButtonInfo(InputConstants.MOUSE_BUTTON_LEFT, 0);
+		MouseButtonEvent event = new MouseButtonEvent(f[0] + f[2] / 2, f[1] + f[3] / 2, button);
+		mouseClicked(event, false);
+		mouseReleased(event);
+	}
+
+	/** Für den Autotest: Tastatur-Fokus {x, y, w, h} auf dem Bildschirm, sonst null */
+	public float[] keyFocusRect() {
+		return keyMode ? focusOnScreen() : null;
+	}
+
 	// ======================================================================================
 	// Layout
 	// ======================================================================================
@@ -296,6 +609,17 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 		if (openChat != null) scroll = Math.max(0, maxScroll() - chatFromBottom);
 		else scroll = Math.clamp(scroll, 0, maxScroll());
+		// aus der Schnellsuche: zur hervorgehobenen Zeile scrollen (Store: sobald er geladen ist, höchstens 5 Sekunden)
+		if (highlightScroll && openChat == null) {
+			int[] found = highlightRect();
+			if (found != null) {
+				scroll = Math.clamp(found[1] - bodyH / 4.0, 0, maxScroll());
+				highlightScroll = false;
+				highlightAt = System.nanoTime();
+			} else if (System.nanoTime() - highlightAt > 5_000_000_000L) {
+				highlightScroll = false;
+			}
+		}
 	}
 
 	private int contentHeight() {
@@ -321,21 +645,6 @@ public class HeldixMenuScreen extends ShellScreen {
 	// ======================================================================================
 	// Autotest-Hilfen
 	// ======================================================================================
-
-	/**
-	 * Mitte des Reiters {@code name} (Unterseite wie PERFORMANCE, ADDONS, REQUESTS oder Reiter wie "filter:HUD");
-	 * ist er nicht zu sehen, die Mitte seiner Kategorie in der Seitenleiste (danach ist der Reiter da).
-	 */
-	public int[] tabCenter(String name) {
-		for (ShellTab tab : tabs) {
-			if (tab.id().equals(name)) return new int[] {tab.getX() + tab.getWidth() / 2, tab.getY() + tab.getHeight() / 2};
-		}
-		Shell.Page target = Shell.Page.valueOf(name);
-		for (ShellNavButton button : nav) {
-			if (button.page() == target.head()) return new int[] {button.getX() + button.getWidth() / 2, button.getY() + button.getHeight() / 2};
-		}
-		throw new IllegalStateException("Kein Eintrag " + name + " in der Seitenleiste");
-	}
 
 	/** Details einer Karte im Addon-Store aufklappen (für den Autotest) */
 	public void showStoreDetails(String id) {
@@ -948,6 +1257,28 @@ public class HeldixMenuScreen extends ShellScreen {
 	}
 
 	@Override
+	protected boolean detailHeader() {
+		return openModule != null || openChat != null;
+	}
+
+	/** Platz der Knöpfe rechts in der Werkzeugzeile (wie in initContent bzw. initChat angelegt) */
+	@Override
+	protected int toolbarActionsWidth() {
+		int back = ActionButton.widthFor("Zurück", "back");
+		if (openChat != null) {
+			Social.Friend friend = friendOf(openChat);
+			int join = friend != null && joinable(friend) && contentW >= 360 ? ActionButton.widthFor("Beitreten", "play") + 6 : 0;
+			return back + 6 + join + 44;
+		}
+		if (openModule != null) return back;
+		if (page == Shell.Page.MODULES) {
+			int search = Math.min(150, contentW / 3);
+			return contentW >= 300 ? search + 6 + ActionButton.widthFor("HUD-Editor", "hud") : search;
+		}
+		return 0;
+	}
+
+	@Override
 	protected Component headerTitle() {
 		if (openChat != null) return Component.literal(openChatName);
 		return openModule != null ? Component.literal(openModule.name()) : super.headerTitle();
@@ -983,7 +1314,7 @@ public class HeldixMenuScreen extends ShellScreen {
 				long on = ModuleManager.all().stream().filter(Module::isEnabled).count();
 				yield on + " von " + ModuleManager.all().size() + " Modulen aktiv";
 			}
-			case OVERVIEW -> "Alles auf einen Blick";
+			case OVERVIEW -> null;
 			case CAPE -> "Dein Cape in der Third-Person-Ansicht (F5)";
 			case COSMETICS -> dev.heldixclient.cosmetic.Cosmetics.serviceProblem() == null ? "Hüte, Flügel, Partikel und Begleiter – für alle HeldixClient-Spieler"
 					: Social.state() == Social.State.OFFLINE_ACCOUNT ? "Nur mit Microsoft-Konto" : "Braucht den Heldix-Dienst";
@@ -1037,6 +1368,15 @@ public class HeldixMenuScreen extends ShellScreen {
 				list.add(new Section("Einstellungen", null));
 				list.add(new Group(settings.stream().<Row>map(SettingRow::new).toList()));
 			}
+			List<Setting> keys = openModule.keys();
+			if (!keys.isEmpty()) {
+				list.add(new Section("Tasten", "Klick, dann die neue Taste drücken"));
+				list.add(new Group(keys.stream().<Row>map(SettingRow::new).toList()));
+			}
+			Module module = openModule;
+			list.add(new Section("Schnellzugriff", null));
+			list.add(new Group(List.of(new SettingRow(new Setting.Toggle("In den Schnellschaltern", "Auf der Übersicht und im Pausemenü direkt umschalten",
+					() -> dev.heldixclient.module.QuickModules.contains(module), on -> dev.heldixclient.module.QuickModules.set(module, on))))));
 			return list;
 		}
 		switch (page) {
@@ -1225,8 +1565,20 @@ public class HeldixMenuScreen extends ShellScreen {
 	}
 
 	/** Seite Übersicht: Spielfigur, dann Karten für Freunde, Wegpunkte, aktive Module und Tasten */
+	/**
+	 * Übersicht: Begrüßung mit Figur und Ort, Schnellschalter für die gewählten Module, Hinweise (Updates, Anfragen,
+	 * Probleme), Freunde, Wegpunkte bzw. Tasten und Neuigkeiten.
+	 */
 	private void buildOverviewRows(List<Row> list) {
 		list.add(new OverviewHero());
+
+		List<Module> quick = dev.heldixclient.module.QuickModules.list(dev.heldixclient.module.QuickModules.MAX);
+		long quickOn = quick.stream().filter(Module::isEnabled).count();
+		Group quickCard = new Group("star", "Schnellschalter", quick.isEmpty() ? null : quickOn + " von " + quick.size() + " an",
+				List.of(quick.isEmpty() ? new Text("Noch keine gewählt: im Untermenü eines Moduls „In den Schnellschaltern“ einschalten.", Ui.MUTED)
+						: new QuickToggles(quick)))
+				.link("Module", () -> go(Shell.Page.MODULES));
+		list.add(new Columns(quickCard, noticesCard()));
 
 		List<Social.Friend> friends = Social.online() ? sortedFriends() : List.of();
 		long online = friends.stream().filter(Social.Friend::online).count();
@@ -1268,12 +1620,161 @@ public class HeldixMenuScreen extends ShellScreen {
 		if (minecraft.level != null) list.add(keysCard());
 	}
 
+	/** Karte Hinweise auf der Übersicht: was Aufmerksamkeit braucht, jeweils mit Sprung zur Seite */
+	private Group noticesCard() {
+		List<Row> rows = new ArrayList<>();
+		int updates = AddonStore.updateCount();
+		if (updates > 0) {
+			rows.add(new NoticeLine("download", updates == 1 ? "1 Addon-Update verfügbar" : updates + " Addon-Updates verfügbar", Ui.ACCENT_TEXT,
+					"Anzeigen", () -> go(Shell.Page.STORE)));
+		}
+		long broken = AddonManager.addons().stream().filter(addon -> addon.error() != null).count();
+		if (broken > 0) {
+			rows.add(new NoticeLine("warning", broken == 1 ? "1 Addon hat einen Fehler" : broken + " Addons haben Fehler", Ui.WARNING,
+					"Ansehen", () -> go(Shell.Page.ADDONS)));
+		}
+		if (Social.online()) {
+			int requests = Social.incoming().size();
+			if (requests > 0) {
+				rows.add(new NoticeLine("user-plus", requests == 1 ? "1 Freundschaftsanfrage" : requests + " Freundschaftsanfragen", Ui.ACCENT_TEXT,
+						"Anzeigen", () -> go(Shell.Page.REQUESTS)));
+			}
+			int unread = Messages.unreadTotal();
+			if (unread > 0) {
+				rows.add(new NoticeLine("chat", unread == 1 ? "1 ungelesene Nachricht" : unread + " ungelesene Nachrichten", Ui.ACCENT_TEXT,
+						"Lesen", () -> go(Shell.Page.MESSAGES)));
+			}
+		} else if (Social.state() == Social.State.ERROR) {
+			rows.add(new NoticeLine("warning", "Keine Verbindung zum Heldix-Dienst", Ui.WARNING, "Verbinden", Social::connect));
+		}
+		int problems = HeldixLoader.problems().size();
+		if (problems > 0) {
+			rows.add(new NoticeLine("info", problems == 1 ? "1 Hinweis beim Laden" : problems + " Hinweise beim Laden", Ui.WARNING,
+					"Info", () -> go(Shell.Page.INFO)));
+		}
+		boolean ok = rows.isEmpty();
+		if (ok) rows.add(new NoticeLine("check", "Alles in Ordnung", Ui.SUCCESS, null, null));
+		return new Group("lightbulb", "Hinweise", ok ? null : rows.size() == 1 ? "1 neu" : rows.size() + " neu", rows);
+	}
+
+	/** Zeile in der Karte Hinweise: Icon, Text, optional ein Knopf rechts */
+	private final class NoticeLine implements Row, Groupable {
+		private static final int H = 28;
+		private final String icon;
+		private final String text;
+		private final int color;
+		private final String button;
+		private final Runnable action;
+
+		NoticeLine(String icon, String text, int color, String button, Runnable action) {
+			this.icon = icon;
+			this.text = text;
+			this.color = color;
+			this.button = button;
+			this.action = action;
+		}
+
+		@Override
+		public void grouped() {
+		}
+
+		@Override
+		public int height(int width) {
+			return H;
+		}
+
+		private int buttonWidth() {
+			return button == null ? 0 : Ui.width(button, Ui.Font.SMALL) + 20;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			Ui.circle(g, x + 20, y + H / 2f, 8, (color & 0xFFFFFF) | 0x24000000);
+			Ui.icon(g, icon, x + 15, y + H / 2f - 5, 10, color);
+			int bw = buttonWidth();
+			Ui.text(g, Ui.ellipsize(text, w - 44 - (bw > 0 ? bw + 8 : 0), Ui.Font.BODY), x + 34, y + (H - 8) / 2, Ui.TEXT, Ui.Font.BODY);
+			if (button != null) {
+				int bx = x + w - 10 - bw;
+				int by = y + (H - 16) / 2;
+				pill(g, button, bx, by, bw, false, Ui.inside(mouseX, mouseY, bx, by, bw, 16));
+			}
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			if (button == null) return false;
+			int bw = buttonWidth();
+			if (!Ui.inside(mouseX, mouseY, x + w - 10 - bw, y + (H - 16) / 2, bw, 16)) return false;
+			HeldixMenuScreen.this.click();
+			action.run();
+			return true;
+		}
+	}
+
+	/** Schnellschalter: Module als Kacheln mit Schalter, in Spalten (Klick schaltet um) */
+	private final class QuickToggles implements Row {
+		private static final int CHIP_H = 24;
+		private static final int GAP = 6;
+		private final List<Module> modules;
+
+		QuickToggles(List<Module> modules) {
+			this.modules = modules;
+		}
+
+		private int columns(int w) {
+			return Math.clamp((w + GAP) / (110 + GAP), 1, 4);
+		}
+
+		@Override
+		public int height(int width) {
+			int rows = (modules.size() + columns(width) - 1) / columns(width);
+			return rows * (CHIP_H + GAP) - GAP;
+		}
+
+		private int[] cell(int index, int x, int y, int w) {
+			int cols = columns(w);
+			int cw = (w - (cols - 1) * GAP) / cols;
+			return new int[] {x + (index % cols) * (cw + GAP), y + (index / cols) * (CHIP_H + GAP), cw};
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			for (int i = 0; i < modules.size(); i++) {
+				Module module = modules.get(i);
+				int[] c = cell(i, x, y, w);
+				settingCenters.put("quick:" + i, new int[] {c[0] + c[2] / 2, c[1] + CHIP_H / 2});
+				boolean over = Ui.inside(mouseX, mouseY, c[0], c[1], c[2], CHIP_H);
+				float on = animate(module.id() + "#quick", module.isEnabled() ? 1f : 0f);
+				float hover = animate(module.id() + "#quickHover", over ? 1f : 0f);
+				Ui.rect(g, c[0], c[1], c[2], CHIP_H, 8, Ui.lerp(Ui.lerp(0x0AFFFFFF, Ui.SURFACE_HOVER, hover), 0x223B82F6, on));
+				Ui.outline(g, c[0], c[1], c[2], CHIP_H, 8, Ui.lerp(Ui.LINE, Ui.ACCENT_LINE, on * 0.8f));
+				Ui.icon(g, module.icon(), c[0] + 8, c[1] + (CHIP_H - 10) / 2f, 10, Ui.lerp(Ui.FAINT, Ui.ACCENT_TEXT, on));
+				String name = Ui.ellipsize(dev.heldixclient.module.QuickModules.shortName(module), c[2] - 54, Ui.Font.LABEL);
+				Ui.text(g, name, c[0] + 23, c[1] + (CHIP_H - 8) / 2, Ui.TEXT, Ui.Font.LABEL);
+				Ui.toggle(g, c[0] + c[2] - 26, c[1] + (CHIP_H - 10) / 2f, on);
+				if (over) Ui.requestTooltip(module.name() + (module.isEnabled() ? ": an" : ": aus") + " · Klick schaltet um", mouseX, mouseY);
+			}
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			for (int i = 0; i < modules.size(); i++) {
+				int[] c = cell(i, x, y, w);
+				if (!Ui.inside(mouseX, mouseY, c[0], c[1], c[2], CHIP_H)) continue;
+				HeldixMenuScreen.this.click();
+				modules.get(i).toggle();
+				return true;
+			}
+			return false;
+		}
+	}
+
 	private Group keysCard() {
-		return new Group("keyboard", "Tasten", "ändern unter Optionen → Steuerung", List.of(
-				new Info("Heldix-Menü", HeldixClient.menuKey.getTranslatedKeyMessage().getString()),
-				new Info("Zoom", HeldixClient.zoomKey.getTranslatedKeyMessage().getString()),
-				new Info("Freelook", HeldixClient.freelookKey.getTranslatedKeyMessage().getString()),
-				new Info("Wegpunkt setzen", HeldixClient.waypointKey.getTranslatedKeyMessage().getString())));
+		return new Group("keyboard", "Tasten", "zum Ändern anklicken", List.of(
+				new SettingRow(new Setting.Key("Heldix-Menü", null, HeldixClient.menuKey)),
+				new SettingRow(new Setting.Key("Zoom", null, HeldixClient.zoomKey)),
+				new SettingRow(new Setting.Key("Freelook", null, HeldixClient.freelookKey)),
+				new SettingRow(new Setting.Key("Wegpunkt setzen", null, HeldixClient.waypointKey))));
 	}
 
 	/** Freunde, online zuerst */
@@ -1795,13 +2296,14 @@ public class HeldixMenuScreen extends ShellScreen {
 					ModuleManager.hud().forEach(HudModule::resetPosition);
 					HeldixConfig.save();
 				})))));
-		list.add(new Section("Tasten", "ändern unter Optionen → Steuerung → HeldixClient"));
+		list.add(new Section("Tasten", "Klick, dann die neue Taste drücken · Tasten der Module in ihrem Untermenü"));
 		list.add(new Group(List.of(
-				new Info("Heldix-Menü", HeldixClient.menuKey.getTranslatedKeyMessage().getString()),
-				new Info("Zoom", HeldixClient.zoomKey.getTranslatedKeyMessage().getString()),
-				new Info("Freelook", HeldixClient.freelookKey.getTranslatedKeyMessage().getString()),
-				new Info("Wegpunkt setzen", HeldixClient.waypointKey.getTranslatedKeyMessage().getString()),
-				new Info("HUD bedienen", HeldixClient.hudKey.isUnbound() ? "nicht belegt" : HeldixClient.hudKey.getTranslatedKeyMessage().getString()))));
+				new SettingRow(new Setting.Key("Heldix-Menü öffnen", "Im Spiel", HeldixClient.menuKey)),
+				new SettingRow(new Setting.Key("Zoom", "Halten zum Heranzoomen", HeldixClient.zoomKey)),
+				new SettingRow(new Setting.Key("Freelook", "Halten zum Umschauen", HeldixClient.freelookKey)),
+				new SettingRow(new Setting.Key("Wegpunkt setzen", "An deiner Position", HeldixClient.waypointKey)),
+				new SettingRow(new Setting.Key("HUD bedienen", "Maus frei, um HUD-Elemente anzuklicken", HeldixClient.hudKey)),
+				new SettingRow(new Setting.Key("Spielermenü", "Auf einen Spieler zielen und drücken: Freund hinzufügen, Name kopieren …", HeldixClient.playerMenuKey)))));
 	}
 
 	private Setting.Toggle configToggle(String label, String description, BooleanSupplier get, Consumer<Boolean> set) {
@@ -1876,6 +2378,11 @@ public class HeldixMenuScreen extends ShellScreen {
 		/** Abstand zur nächsten Zeile */
 		default int gapAfter() {
 			return 6;
+		}
+
+		/** Lage einer passenden Zeile in dieser (auch verschachtelt): {x, y, Breite, Höhe} relativ zu dieser, sonst null */
+		default int[] find(java.util.function.Predicate<Row> match, int width) {
+			return match.test(this) ? new int[] {0, 0, width, height(width)} : null;
 		}
 	}
 
@@ -1978,6 +2485,24 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 
 		@Override
+		public int[] find(java.util.function.Predicate<Row> match, int w) {
+			if (match.test(this)) return new int[] {0, 0, w, height(w)};
+			int cy = head();
+			for (Row row : rows) {
+				int rh = childHeight(row, w);
+				if (row instanceof Groupable) {
+					int[] found = row.find(match, w);
+					if (found != null) return new int[] {found[0], cy + found[1], found[2], found[3]};
+				} else {
+					int[] found = row.find(match, w - 24);
+					if (found != null) return new int[] {12 + found[0], cy + 7 + found[1], found[2], found[3]};
+				}
+				cy += rh;
+			}
+			return null;
+		}
+
+		@Override
 		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
 			if (link != null && Ui.inside(mouseX, mouseY, x + w - 8 - linkWidth(), y + 5, linkWidth(), 18)) {
 				HeldixMenuScreen.this.click();
@@ -2043,6 +2568,23 @@ public class HeldixMenuScreen extends ShellScreen {
 			right.draw(g, x + cw + SPACE, y, w - cw - SPACE, mouseX, mouseY);
 			if (left instanceof Group group) group.stretch = 0;
 			if (right instanceof Group group) group.stretch = 0;
+		}
+
+		@Override
+		public int[] find(java.util.function.Predicate<Row> match, int w) {
+			if (match.test(this)) return new int[] {0, 0, w, height(w)};
+			if (!split(w)) {
+				int[] found = left.find(match, w);
+				if (found != null) return found;
+				found = right.find(match, w);
+				int dy = left.height(w) + left.gapAfter();
+				return found == null ? null : new int[] {found[0], dy + found[1], found[2], found[3]};
+			}
+			int cw = columnW(w);
+			int[] found = left.find(match, cw);
+			if (found != null) return found;
+			found = right.find(match, w - cw - SPACE);
+			return found == null ? null : new int[] {cw + SPACE + found[0], found[1], found[2], found[3]};
 		}
 
 		@Override
@@ -2350,7 +2892,66 @@ public class HeldixMenuScreen extends ShellScreen {
 				case Setting.Color color -> 40;
 				case Setting.Slider slider -> 0;
 				case Setting.Text text -> 0;
+				case Setting.Key key -> keyChipWidth(key) + (key.mapping().isDefault() ? 0 : 24);
 			};
+		}
+
+		// --- Taste (Chip mit der Belegung, Klick = neue Taste drücken) ---
+
+		private int keyChipWidth(Setting.Key key) {
+			return Math.max(64, Ui.width(keyText(key), Ui.Font.LABEL) + 22);
+		}
+
+		private void drawKey(GuiGraphicsExtractor g, Setting.Key key, int x, int y, int w, int h, int mouseX, int mouseY) {
+			KeyMapping mapping = key.mapping();
+			boolean capturing = mapping == keyCapture;
+			int cw = keyChipWidth(key);
+			int cx = x + w - 12 - cw;
+			int cy = y + (h - 18) / 2;
+			boolean over = Ui.inside(mouseX, mouseY, cx, cy, cw, 18);
+			String conflict = keyConflict(mapping);
+			float pulse = capturing ? 0.5f + 0.5f * (float) Math.sin(System.nanoTime() / 160_000_000.0) : 0f;
+			int fill = capturing ? Ui.withAlpha(0x553B82F6, 0.6f + 0.4f * pulse) : over ? Ui.SURFACE_STRONG : 0x14FFFFFF;
+			Ui.rect(g, cx, cy, cw, 18, 6, fill);
+			Ui.outline(g, cx, cy, cw, 18, 6, capturing ? Ui.ACCENT : conflict != null ? (Ui.WARNING & 0xFFFFFF) | 0x99000000 : Ui.LINE_STRONG);
+			int textColor = capturing ? 0xFFFFFFFF : mapping.isUnbound() ? Ui.FAINT : Ui.TEXT;
+			if (conflict != null && !capturing) {
+				Ui.icon(g, "warning", cx + 6, cy + 4, 10, Ui.WARNING);
+				Ui.text(g, keyText(key), cx + 19, cy + 5, textColor, Ui.Font.LABEL);
+			} else {
+				Ui.textCentered(g, keyText(key), cx + cw / 2, cy + 5, textColor, Ui.Font.LABEL);
+			}
+			if (over) {
+				Ui.requestTooltip(capturing ? "Neue Taste drücken · Entf = nicht belegt · Esc = abbrechen"
+						: conflict != null ? "Auch belegt: " + conflict + " · Klick zum Ändern" : "Klick, dann die neue Taste drücken", mouseX, mouseY);
+			}
+			// zurück auf die Standardtaste
+			if (!mapping.isDefault() && !capturing) {
+				int rx = cx - 22;
+				boolean overReset = Ui.inside(mouseX, mouseY, rx, cy, 18, 18);
+				if (overReset) {
+					Ui.rect(g, rx, cy, 18, 18, 6, Ui.SURFACE_STRONG);
+					Ui.requestTooltip("Standard: " + defaultKeyText(mapping), mouseX, mouseY);
+				}
+				Ui.icon(g, "reset", rx + 4, cy + 4, 10, overReset ? Ui.TEXT : Ui.MUTED);
+			}
+			settingCenters.put(key.label() + "#reset", new int[] {cx - 13, cy + 9});
+		}
+
+		/** Klick auf den Chip startet bzw. beendet das Warten auf eine Taste; Klick auf ↺ setzt die Standardtaste */
+		private boolean clickKey(Setting.Key key, double mouseX, double mouseY, int x, int y, int w, int h) {
+			KeyMapping mapping = key.mapping();
+			int cw = keyChipWidth(key);
+			int cx = x + w - 12 - cw;
+			int cy = y + (h - 18) / 2;
+			if (!mapping.isDefault() && mapping != keyCapture && Ui.inside(mouseX, mouseY, cx - 22, cy, 18, 18)) {
+				bindKey(mapping, mapping.getDefaultKey());
+				return true;
+			}
+			if (mapping == captureCancelled) return true;
+			HeldixMenuScreen.this.click();
+			keyCapture = mapping == keyCapture ? null : mapping;
+			return true;
 		}
 
 		// --- Farbpalette (aufgeklappt unter der Zeile) ---
@@ -2409,6 +3010,53 @@ public class HeldixMenuScreen extends ShellScreen {
 				case Setting.Text text -> new int[] {x + w / 2, y + h - 16 - (grouped ? 2 : 0)};
 				default -> new int[] {x + w - 12 - controlWidth() / 2, y + rh / 2};
 			});
+			// Tastatur: die Zeile ist ein Ziel; Enter/Leertaste wie ein Klick, Pfeil links/rechts für Regler und Auswahl
+			keyTarget(x, y, w, rh, switch (setting) {
+				case Setting.Toggle toggle -> () -> {
+					toggle.set().accept(!toggle.get().getAsBoolean());
+					HeldixMenuScreen.this.click();
+				};
+				case Setting.Choice choice -> () -> {
+					choice.set().accept(Math.floorMod(choice.get().getAsInt() + 1, choice.options().size()));
+					HeldixMenuScreen.this.click();
+				};
+				case Setting.Action action -> () -> {
+					HeldixMenuScreen.this.click();
+					action.run().run();
+				};
+				case Setting.Color color -> () -> {
+					HeldixMenuScreen.this.click();
+					colorOpen = color.label().equals(colorOpen) ? null : color.label();
+					revealPalette = colorOpen != null;
+				};
+				case Setting.Text text -> () -> {
+					SearchField field = textFields.get(text.label());
+					if (field != null && field.visible) {
+						keyMode = false;
+						setFocused(field);
+						field.setFocused(true);
+					}
+				};
+				case Setting.Slider slider -> null;
+				case Setting.Key key -> () -> {
+					HeldixMenuScreen.this.click();
+					keyCapture = key.mapping() == keyCapture ? null : key.mapping();
+				};
+			}, switch (setting) {
+				case Setting.Slider slider -> direction -> {
+					double step = Math.max(slider.step(), (slider.max() - slider.min()) / 20);
+					double value = slider.snap(slider.get().getAsDouble() + direction * step);
+					if (value != slider.get().getAsDouble()) {
+						slider.set().accept(value);
+						HeldixConfig.save();
+					}
+				};
+				case Setting.Choice choice -> direction -> {
+					choice.set().accept(Math.floorMod(choice.get().getAsInt() + direction, choice.options().size()));
+					HeldixMenuScreen.this.click();
+				};
+				default -> null;
+			});
 			switch (setting) {
 				case Setting.Toggle toggle -> {
 					float on = animate(setting.label() + "#toggle", toggle.get().getAsBoolean() ? 1f : 0f);
@@ -2435,6 +3083,7 @@ public class HeldixMenuScreen extends ShellScreen {
 					Ui.textCentered(g, action.button(), bx + bw / 2, by + 5, 0xFFFFFFFF, Ui.Font.LABEL);
 				}
 				case Setting.Color color -> drawColor(g, color, x, y, w, rh, mouseX, mouseY);
+				case Setting.Key key -> drawKey(g, key, x, y, w, h, mouseX, mouseY);
 				case Setting.Text text -> {
 					SearchField field = textFields.get(text.label());
 					if (field != null) {
@@ -2452,6 +3101,12 @@ public class HeldixMenuScreen extends ShellScreen {
 
 		/** Farbfeld rechts (Klick klappt die Palette auf) und darunter die Palette */
 		private void drawColor(GuiGraphicsExtractor g, Setting.Color color, int x, int y, int w, int rh, int mouseX, int mouseY) {
+			// gerade aufgeklappt: Palette ganz ins Bild holen
+			if (color.label().equals(colorOpen) && revealPalette) {
+				revealPalette = false;
+				int bottom = y + height(w);
+				if (bottom > bodyY + bodyH) scroll = Math.clamp(scroll + bottom - (bodyY + bodyH) + 6, 0, maxScroll());
+			}
 			int current = color.get().getAsInt();
 			int cw = controlWidth();
 			int cx = x + w - 12 - cw;
@@ -2546,7 +3201,11 @@ public class HeldixMenuScreen extends ShellScreen {
 					}
 					HeldixMenuScreen.this.click();
 					colorOpen = color.label().equals(colorOpen) ? null : color.label();
+					revealPalette = colorOpen != null;
 					return true;
+				}
+				case Setting.Key key -> {
+					return clickKey(key, mouseX, mouseY, x, y, w, h);
 				}
 				case Setting.Text text -> {
 					// Klick neben das Feld: Zeile ganz ins Bild holen und das Feld auswählen
@@ -3774,11 +4433,18 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	/** Übersicht oben: Spielfigur mit Cape (Klick: Cape-Auswahl), Name, Status und Knöpfe */
 	private final class OverviewHero implements Row {
-		private static final int H = 124;
+		/** niedrige Fenster: flacher, mit kleinerer Figur */
+		private boolean compactHero() {
+			return bodyH < 300;
+		}
+
+		private int heroH() {
+			return compactHero() ? 92 : 124;
+		}
 
 		@Override
 		public int height(int width) {
-			return H;
+			return heroH();
 		}
 
 		@Override
@@ -3787,53 +4453,73 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 
 		private int figureW() {
-			return 76;
+			return compactHero() ? 56 : 76;
 		}
 
-		/** Knöpfe unten rechts: {x, Breite} für Cape und HUD-Editor */
+		/** Hauptknopf: im Spiel zurück ins Spiel, im Hauptmenü zu den Welten */
+		private String primary() {
+			return minecraft.level != null ? "Zurück zum Spiel" : "Spielen";
+		}
+
+		/** Knöpfe unten: {x, Breite} für Hauptknopf, Cape und HUD-Editor (Breite 0 = passt nicht) */
 		private int[][] buttons(int x, int y, int w) {
+			int playW = Ui.width(primary(), Ui.Font.SMALL) + 26;
 			int capeW = Ui.width("Cape ändern", Ui.Font.SMALL) + 26;
 			int hudW = Ui.width("HUD-Editor", Ui.Font.SMALL) + 26;
 			int bx = x + figureW() + 18;
-			return new int[][] {{bx, capeW}, {bx + capeW + 6, hudW}};
+			int room = x + w - 12 - bx;
+			if (playW + 6 + capeW + 6 + hudW > room) capeW = 0;
+			if (playW + 6 + hudW > room) hudW = 0;
+			return new int[][] {{bx, playW}, {bx + playW + 6, capeW}, {bx + playW + 6 + (capeW > 0 ? capeW + 6 : 0), hudW}};
 		}
 
 		@Override
 		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
-			Ui.rect(g, x, y, w, H, 12, 0x1A3B82F6);
-			Ui.outline(g, x, y, w, H, 12, 0x333B82F6);
+			Ui.rect(g, x, y, w, heroH(), 12, 0x1A3B82F6);
+			Ui.outline(g, x, y, w, heroH(), 12, 0x333B82F6);
 			// Figur links auf einem leuchtenden Podest
 			int fx = x + 10;
-			Ui.rect(g, fx + 6, y + H - 14, figureW() - 12, 7, 3, 0x3D3B82F6);
+			Ui.rect(g, fx + 6, y + heroH() - 14, figureW() - 12, 7, 3, 0x3D3B82F6);
 			float seconds = (System.nanoTime() - created) / 1_000_000_000f;
-			Capes.drawShowcase(g, Shell.skin(minecraft).get(), Capes.selected(), fx, y + 8, fx + figureW(), y + H - 10, seconds);
+			Capes.drawShowcase(g, Shell.skin(minecraft).get(), Capes.selected(), fx, y + 8, fx + figureW(), y + heroH() - 10, seconds);
 
 			int tx = x + figureW() + 18;
 			int tw = w - (tx - x) - 12;
-			Ui.text(g, greeting() + ",", tx, y + 16, Ui.MUTED, Ui.Font.BODY);
-			Ui.text(g, Ui.ellipsize(minecraft.getUser().getName(), tw, Ui.Font.TITLE), tx, y + 28, Ui.TEXT, Ui.Font.TITLE);
+			int top = compactHero() ? -6 : 0;
+			Ui.text(g, greeting() + ",", tx, y + 16 + top, Ui.MUTED, Ui.Font.BODY);
+			Ui.text(g, Ui.ellipsize(minecraft.getUser().getName(), tw, Ui.Font.TITLE), tx, y + 28 + top, Ui.TEXT, Ui.Font.TITLE);
 			Capes.Cape cape = Capes.selected();
 			String status = (cape == null ? "Ohne Heldix-Cape" : "Cape: " + cape.name()) + "  ·  " + place();
-			Ui.text(g, Ui.ellipsize(status, tw, Ui.Font.SMALL), tx, y + 48, Ui.MUTED, Ui.Font.SMALL);
+			Ui.text(g, Ui.ellipsize(status, tw, Ui.Font.SMALL), tx, y + 48 + top, Ui.MUTED, Ui.Font.SMALL);
 			String service = FriendWidget.serviceHint();
 			boolean ok = service == null;
-			Ui.circle(g, tx + 3, y + 64, 2.5f, ok ? Ui.SUCCESS : Ui.FAINT);
-			Ui.text(g, Ui.ellipsize(ok ? "Mit dem Heldix-Dienst verbunden" : service, tw - 10, Ui.Font.SMALL), tx + 10, y + 60, ok ? Ui.SUCCESS : Ui.FAINT, Ui.Font.SMALL);
+			if (!compactHero()) Ui.circle(g, tx + 3, y + 64, 2.5f, ok ? Ui.SUCCESS : Ui.FAINT);
+			if (!compactHero()) Ui.text(g, Ui.ellipsize(ok ? "Mit dem Heldix-Dienst verbunden" : service, tw - 10, Ui.Font.SMALL), tx + 10, y + 60, ok ? Ui.SUCCESS : Ui.FAINT, Ui.Font.SMALL);
 
 			int[][] b = buttons(x, y, w);
-			pill(g, "Cape ändern", b[0][0], y + H - 30, b[0][1], true, Ui.inside(mouseX, mouseY, b[0][0], y + H - 30, b[0][1], 16));
-			pill(g, "HUD-Editor", b[1][0], y + H - 30, b[1][1], false, Ui.inside(mouseX, mouseY, b[1][0], y + H - 30, b[1][1], 16));
+			int by = y + heroH() - 30;
+			pill(g, primary(), b[0][0], by, b[0][1], true, Ui.inside(mouseX, mouseY, b[0][0], by, b[0][1], 16));
+			if (b[1][1] > 0) pill(g, "Cape ändern", b[1][0], by, b[1][1], false, Ui.inside(mouseX, mouseY, b[1][0], by, b[1][1], 16));
+			if (b[2][1] > 0) pill(g, "HUD-Editor", b[2][0], by, b[2][1], false, Ui.inside(mouseX, mouseY, b[2][0], by, b[2][1], 16));
 		}
 
 		@Override
 		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
 			int[][] b = buttons(x, y, w);
-			if (Ui.inside(mouseX, mouseY, x, y, figureW() + 14, H) || Ui.inside(mouseX, mouseY, b[0][0], y + H - 30, b[0][1], 16)) {
+			int by = y + heroH() - 30;
+			if (Ui.inside(mouseX, mouseY, b[0][0], by, b[0][1], 16)) {
+				HeldixMenuScreen.this.click();
+				HeldixConfig.save();
+				if (minecraft.level != null) minecraft.gui.setScreen(null);
+				else Shell.open(minecraft, Shell.Page.WORLDS, HeldixMenuScreen.this);
+				return true;
+			}
+			if (Ui.inside(mouseX, mouseY, x, y, figureW() + 14, heroH()) || b[1][1] > 0 && Ui.inside(mouseX, mouseY, b[1][0], by, b[1][1], 16)) {
 				HeldixMenuScreen.this.click();
 				go(Shell.Page.CAPE);
 				return true;
 			}
-			if (Ui.inside(mouseX, mouseY, b[1][0], y + H - 30, b[1][1], 16)) {
+			if (b[2][1] > 0 && Ui.inside(mouseX, mouseY, b[2][0], by, b[2][1], 16)) {
 				HeldixMenuScreen.this.click();
 				minecraft.gui.setScreen(new HudEditorScreen(HeldixMenuScreen.this));
 				return true;
@@ -4523,8 +5209,21 @@ public class HeldixMenuScreen extends ShellScreen {
 		cosmeticHover = NO_HOVER;
 		layout();
 
+		// Tastatur: solange ein Ziel gewählt ist, zeigen Hover und Tooltips dort statt an der Maus; Mausbewegung beendet das
+		if (!Double.isNaN(lastMouseX) && (Math.abs(mouseX - lastMouseX) > 1 || Math.abs(mouseY - lastMouseY) > 1)) keyMode = false;
+		lastMouseX = mouseX;
+		lastMouseY = mouseY;
+		float[] focus = keyMode ? focusOnScreen() : null;
+		if (focus != null) {
+			mouseX = Math.round(focus[0] + focus[2] / 2);
+			mouseY = Math.round(focus[1] + focus[3] / 2);
+		}
+
 		g.enableScissor(bodyX - 2, bodyY, bodyX + bodyW + 2, bodyY + bodyH);
 		boolean inBody = Ui.inside(mouseX, mouseY, bodyX, bodyY, bodyW, bodyH);
+		collecting.clear();
+		collectingKeys.clear();
+		Ui.collectTargets(collecting);
 		int y = bodyY - (int) scroll;
 		if (pageInput != null) {
 			pageInput.visible = false;
@@ -4549,9 +5248,59 @@ public class HeldixMenuScreen extends ShellScreen {
 			if (y + h >= bodyY && y <= bodyY + bodyH) row.draw(g, bodyX, y, bodyW, mouseX, inBody ? mouseY : -1000);
 			y += h + row.gapAfter();
 		}
+		Ui.collectTargets(null);
+		frameTargets = List.copyOf(collecting);
+		frameKeyTargets = List.copyOf(collectingKeys);
+		drawHighlight(g);
 		g.disableScissor();
 		Ui.scrollbar(g, bodyX + bodyW + 4, bodyY, bodyH, scroll, maxScroll());
+		if (keyMode) drawKeyFocus(g);
 		if (openChat != null) drawChatExtras(g, mouseX, mouseY);
+		if (pendingMoveX != 0 || pendingMoveY != 0) {
+			int dx = pendingMoveX;
+			int dy = pendingMoveY;
+			pendingMoveX = 0;
+			pendingMoveY = 0;
+			moveFocus(dx, dy);
+		}
+	}
+
+	/** Hervorhebung aus der Schnellsuche: pulsiert zweimal und blendet aus */
+	private void drawHighlight(GuiGraphicsExtractor g) {
+		if (highlight == null || highlightScroll) return;
+		float t = (System.nanoTime() - highlightAt) / 1_000_000_000f;
+		if (t > 2.6f) return;
+		int[] r = highlightRect();
+		if (r == null) return;
+		float x = bodyX + r[0];
+		float y = bodyY - (float) scroll + r[1];
+		float pulse = 0.5f + 0.5f * (float) Math.cos(t * Math.PI * 2 / 1.3);
+		float alpha = Math.min(1f, (2.6f - t) / 0.6f);
+		Ui.rect(g, x, y, r[2], r[3], 9, Ui.withAlpha(0x403B82F6, alpha * (0.35f + 0.65f * pulse)));
+		Ui.outline(g, x, y, r[2], r[3], 9, Ui.withAlpha(Ui.ACCENT, alpha));
+	}
+
+	/** Fokusrahmen um das gewählte Ziel; folgt kleinen Verschiebungen (Animationen, neu aufgebaute Zeilen) */
+	private void drawKeyFocus(GuiGraphicsExtractor g) {
+		float[] f = focusOnScreen();
+		if (f == null) return;
+		float[] near = null;
+		float best = 16;
+		for (float[] t : allTargets()) {
+			if (Math.abs(t[2] - f[2]) > 1.5f || Math.abs(t[3] - f[3]) > 1.5f) continue;
+			float d = Math.abs(t[0] - f[0]) + Math.abs(t[1] - f[1]);
+			if (d < best) {
+				best = d;
+				near = t;
+			}
+		}
+		if (near != null) {
+			keyFocus = new float[] {near[0], near[1] + (float) scroll, near[2], near[3]};
+			f = near;
+		}
+		g.enableScissor(bodyX - 5, bodyY - 3, bodyX + bodyW + 5, bodyY + bodyH + 3);
+		Ui.focusRing(g, f[0], f[1], f[2], f[3], Math.min(9, f[3] / 2f), 1f);
+		g.disableScissor();
 	}
 
 	/** Liste der Unterhaltungen links (breite Fenster), „Neue Nachricht ↓“, Zeichenzähler */
@@ -4683,6 +5432,52 @@ public class HeldixMenuScreen extends ShellScreen {
 	}
 
 	// ======================================================================================
+	// Tasten umbelegen (Einstellung „Taste“)
+	// ======================================================================================
+
+	private String keyText(Setting.Key key) {
+		if (key.mapping() == keyCapture) return "Taste drücken …";
+		return key.mapping().isUnbound() ? "Nicht belegt" : key.mapping().getTranslatedKeyMessage().getString();
+	}
+
+	private static String defaultKeyText(KeyMapping mapping) {
+		InputConstants.Key key = mapping.getDefaultKey();
+		return key.equals(InputConstants.UNKNOWN) ? "nicht belegt" : key.getDisplayName().getString();
+	}
+
+	/** Name einer anderen Belegung mit derselben Taste, sonst null */
+	private String keyConflict(KeyMapping mapping) {
+		if (mapping.isUnbound()) return null;
+		for (KeyMapping other : minecraft.options.keyMappings) {
+			if (other == mapping || !other.same(mapping)) continue;
+			// gewollt: das Spielermenü teilt sich die Taste mit „Block auswählen“ (wirkt nur auf Spielern)
+			if (mapping == HeldixClient.playerMenuKey && other == minecraft.options.keyPickItem
+					|| other == HeldixClient.playerMenuKey && mapping == minecraft.options.keyPickItem) continue;
+			return Component.translatable(other.getName()).getString();
+		}
+		return null;
+	}
+
+	/** Neue Taste übernehmen und wie Minecraft in options.txt speichern */
+	private void bindKey(KeyMapping mapping, InputConstants.Key key) {
+		mapping.setKey(key);
+		KeyMapping.resetMapping();
+		minecraft.options.save();
+		keyCapture = null;
+		click();
+	}
+
+	/** Für den Autotest: wartet gerade eine Taste auf einen Tastendruck? */
+	public boolean capturingKey() {
+		return keyCapture != null;
+	}
+
+	/** Für den Autotest: Mitte des Tasten-Chips einer Einstellung bzw. ihres Knopfs „Standard“ (Beschriftung + "#reset") */
+	public int[] keyChipCenter(String label) {
+		return settingCenters.get(label);
+	}
+
+	// ======================================================================================
 	// Eingaben
 	// ======================================================================================
 
@@ -4727,6 +5522,18 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		// wartet eine Taste: Mausrad- und Seitentasten werden zur Belegung, Links- und Rechtsklick brechen ab
+		if (keyCapture != null && event.button() != InputConstants.MOUSE_BUTTON_LEFT && event.button() != InputConstants.MOUSE_BUTTON_RIGHT) {
+			bindKey(keyCapture, InputConstants.Type.MOUSE.getOrCreate(event.button()));
+			return true;
+		}
+		captureCancelled = null;
+		if (keyCapture != null) {
+			// Links- oder Rechtsklick beendet das Warten; ein Klick auf denselben Chip startet es nicht neu
+			captureCancelled = keyCapture;
+			keyCapture = null;
+			if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT) return true;
+		}
 		if (super.mouseClicked(event, doubleClick)) return true;
 		if (search != null && !search.isMouseOver(event.x(), event.y())) {
 			search.setFocused(false);
@@ -4798,6 +5605,14 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
+		// eine Taste wartet auf ihre neue Belegung: jeder Tastendruck gehört ihr (Esc bricht ab, Entf/Rücktaste = keine)
+		if (keyCapture != null) {
+			int key = event.key();
+			if (key == InputConstants.KEY_ESCAPE) keyCapture = null;
+			else if (key == InputConstants.KEY_BACKSPACE || key == InputConstants.KEY_DELETE) bindKey(keyCapture, InputConstants.UNKNOWN);
+			else bindKey(keyCapture, InputConstants.getKey(event));
+			return true;
+		}
 		boolean typing = (search != null && search.isFocused()) || (pageInput != null && pageInput.isFocused()) || (chatInput != null && chatInput.isFocused())
 				|| textFields.values().stream().anyMatch(SearchField::isFocused);
 		if (!typing && HeldixClient.menuKey.matches(event)) {
@@ -4812,7 +5627,65 @@ public class HeldixMenuScreen extends ShellScreen {
 			closeChat();
 			return true;
 		}
+		if (!typing && openChat == null && !event.hasControlDown() && !event.hasAltDown() && contentKey(event)) return true;
 		return super.keyPressed(event);
+	}
+
+	/**
+	 * Tastatur im Inhalt: Pfeile wählen Kacheln, Zeilen und Knöpfe (am Rand wird gescrollt), Enter/Leertaste löst aus,
+	 * Pfeil links/rechts ändert Regler und Auswahlen. Tab bleibt bei den Widgets (Leisten, Reiter, Knöpfe); von dort
+	 * führt Pfeil runter in den Inhalt, vom obersten Ziel Pfeil hoch zurück.
+	 */
+	private boolean contentKey(KeyEvent event) {
+		int key = event.key();
+		if (key == InputConstants.KEY_TAB) {
+			keyMode = false;
+			keyFocus = null;
+			return false;
+		}
+		int dx = event.isLeft() ? -1 : event.isRight() ? 1 : 0;
+		int dy = event.isUp() ? -1 : event.isDown() ? 1 : 0;
+		if (dx != 0 || dy != 0) {
+			if (widgetKeyFocus() && !keyMode) {
+				// erst zwischen den Widgets; geht es dort nicht weiter nach unten, in den Inhalt
+				var before = getFocused();
+				super.keyPressed(event);
+				if (dy > 0 && getFocused() == before) {
+					setFocused(null);
+					moveFocus(0, 1);
+					return true;
+				}
+				return true;
+			}
+			KeyTarget own = keyMode ? focusedKeyTarget() : null;
+			if (dx != 0 && own != null && own.adjust() != null) {
+				own.adjust().accept(dx);
+				return true;
+			}
+			setFocused(null);
+			moveFocus(dx, dy);
+			return true;
+		}
+		if (keyMode && keyFocus != null && (key == InputConstants.KEY_RETURN || key == InputConstants.KEY_NUMPADENTER || key == InputConstants.KEY_SPACE)) {
+			activateFocus();
+			return true;
+		}
+		if (getFocused() == null || keyMode) {
+			double page = Math.max(40, bodyH * 0.8);
+			double target = switch (key) {
+				case InputConstants.KEY_PAGEDOWN -> scroll + page;
+				case InputConstants.KEY_PAGEUP -> scroll - page;
+				case InputConstants.KEY_HOME -> 0;
+				case InputConstants.KEY_END -> maxScroll();
+				default -> Double.NaN;
+			};
+			if (!Double.isNaN(target)) {
+				scroll = Math.clamp(target, 0, maxScroll());
+				keyMode = false;
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Bilder ins Fenster gezogen: auf der Seite Cape als eigenes Cape übernehmen */
@@ -4839,6 +5712,7 @@ public class HeldixMenuScreen extends ShellScreen {
 	@Override
 	public void removed() {
 		super.removed();
+		keyCapture = null;
 		if (openChat != null) Messages.setViewing(null);
 		if (page == Shell.Page.CAPE) Capes.trim();
 	}

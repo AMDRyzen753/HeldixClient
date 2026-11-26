@@ -12,6 +12,8 @@ public abstract class Module {
 	private final String name;
 	private final String description;
 	protected final HeldixConfig.ModuleState state;
+	/** Taste zum Ein- und Ausschalten im Spiel (null = keine, z. B. bei einem später geladenen Modul) */
+	private net.minecraft.client.KeyMapping toggleKey;
 
 	protected Module(String id, String name, String description, boolean defaultEnabled, int defaultX, int defaultY) {
 		this.id = id;
@@ -80,6 +82,25 @@ public abstract class Module {
 
 	/** Wird jeden Client-Tick aufgerufen, auch wenn das Modul deaktiviert ist. */
 	public void tick(Minecraft mc) {
+	}
+
+	/** Taste zum Ein- und Ausschalten (nicht belegt, bis der Spieler eine wählt); null = keine */
+	public net.minecraft.client.KeyMapping toggleKey() {
+		return toggleKey;
+	}
+
+	void setToggleKey(net.minecraft.client.KeyMapping key) {
+		toggleKey = key;
+	}
+
+	/**
+	 * Tasten für den Abschnitt „Tasten“ im Untermenü: die Tasten des Moduls selbst (z. B. Zoom, bei Addons über
+	 * {@code addKey}) und zuletzt die Taste zum Ein- und Ausschalten. Umbelegen geht dort und unter Optionen → Steuerung.
+	 */
+	public List<Setting> keys() {
+		List<Setting> keys = new ArrayList<>();
+		if (toggleKey != null) keys.add(new Setting.Key("Ein/Aus", "Schaltet „" + name + "“ im Spiel an und aus", toggleKey));
+		return keys;
 	}
 
 	/** Einstellungen für das Untermenü des Moduls im Heldix-Menü (leer = kein Untermenü). */

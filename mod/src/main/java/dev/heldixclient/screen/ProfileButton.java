@@ -43,6 +43,7 @@ public class ProfileButton extends AbstractButton {
 			Ui.outline(g, getX(), getY(), getWidth(), getHeight(), radius, Ui.withAlpha(Ui.LINE_STRONG, hover * alpha));
 		}
 		if (hovered && isHovered()) Ui.requestTooltip("Konto wechseln", mouseX, mouseY);
+		if (Ui.keyboardFocus(isFocused())) Ui.focusRing(g, getX(), getY(), getWidth(), getHeight(), radius, alpha);
 	}
 
 	@Override

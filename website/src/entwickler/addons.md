@@ -115,17 +115,18 @@ Was die einzelnen Bausteine können, steht ausführlich unter [Addon-API im Deta
 
 ## Die API-Version
 
-Die aktuelle API-Stufe ist **5** (Konstante `HeldixApi.API_VERSION`, Stand HeldixClient 0.13.3). HeldixClient lädt Addons, die für API 1 bis 5 gebaut sind.
+Die aktuelle API-Stufe ist **6** (Konstante `HeldixApi.API_VERSION`, Stand HeldixClient 0.13.4). HeldixClient lädt Addons, die für API 1 bis 6 gebaut sind.
 
 - **API 1:** Module und HUD-Module, Ereignisse (Tick, Welt betreten und verlassen, Chat), Spielerdaten, lokale Chatnachrichten, eigene Einstellungen mit `api.config()` und ein Logger.
 - **API 2** (ab HeldixClient 0.11.0): eigene Tasten, Einblendungen oben rechts, Einstellungen im Untermenü eines Moduls, Icons für Module, Bilder, Heldix-Schrift und abgerundete Flächen im HUD sowie ein eigener Datenordner.
 - **API 3** (ab HeldixClient 0.13.1): weitere Ereignisse mit Abmeldung (Server, Menüs, Tod, Dimension, Leben), Spiel- und Spielerdaten (`game()`, `playerState()`), ein Scheduler für Aufgaben im Haupt-Thread und im Hintergrund, Chat-Befehle „.name“, Chat an den Server als Aktion des Spielers, Regler, Farbwahl und Textfelder als Einstellungen und neue Zeichenhilfen im HUD. Mehr unter [Ab API 3](/entwickler/addon-api#ab-api-3).
 - **API 4** (ab HeldixClient 0.13.2): gedroppte Items in der Welt selbst zeichnen lassen – Höhe und Drehung je Item, statt zu schweben und sich zu drehen (`api.droppedItems()`, `DroppedItemRenderer`, `DroppedItem`, `DroppedItemPose`) – und den Cosmetics-Katalog lesen, Cosmetics bei dir vorführen und kurz animieren (`api.cosmetics()`). Mehr unter [Ab API 4](/entwickler/addon-api#ab-api-4).
 - **API 5** (ab HeldixClient 0.13.3): HUD-Elemente, die man im Spiel anklicken kann – bei offenem Chat oder mit der Taste „HUD bedienen“ –, mit Tooltip, Knöpfen und klickbaren Bereichen (`HudRenderer.onClick`, `onHover`, `canvas.hotspot`, `canvas.iconButton`), das eingestellte HUD-Aussehen (`canvas.style()`, `canvas.panel`), weitere Zeichenhilfen und Stil-Optionen für das Rechtsklick-Menü im HUD-Editor (`addStyleToggle`, `addStyleChoice`, `addStyleColor`). Mehr unter [Ab API 5](/entwickler/addon-api#ab-api-5).
+- **API 6** (ab HeldixClient 0.13.4): Tasten im Untermenü eines Moduls, die der Spieler dort umbelegt (`addKey`, `showKey`), andere Spieler in der Nähe (`nearbyPlayers()`), Einträge im Spielermenü (`addPlayerMenuEntry`), Symbole am Namensschild (`playerMarkers()`) und ein Sprachkanal über den Heldix-Dienst (`voice()`). Mehr unter [Ab API 6](/entwickler/addon-api#ab-api-6).
 
 Neue Stufen erweitern die API nur. Ein Addon für API 1 läuft deshalb unverändert weiter. Ein Addon, das eine höhere Stufe verlangt, als der installierte HeldixClient kennt, wird mit dem Hinweis „bitte HeldixClient aktualisieren“ übersprungen.
 
-Trag in `api` die höchste Stufe ein, deren Funktionen du benutzt. In den API-Klassen sind die Funktionen der Stufen 2 bis 5 mit `@since 2`, `@since 3`, `@since 4` bzw. `@since 5` gekennzeichnet. Das Beispiel oben nutzt `registerKey`, `notify`, `addToggle` und `withIcon` und braucht deshalb `"api": 2`.
+Trag in `api` die höchste Stufe ein, deren Funktionen du benutzt. In den API-Klassen sind die Funktionen der Stufen 2 bis 6 mit `@since 2` bis `@since 6` gekennzeichnet. Das Beispiel oben nutzt `registerKey`, `notify`, `addToggle` und `withIcon` und braucht deshalb `"api": 2`.
 
 > **Hinweis:** Die API-Datei hat eine eigene Versionsnummer (derzeit `heldix-api-1.0.0.jar`). Für die Kompatibilität zählt allein die API-Stufe im Feld `api`. Ob ein Addon in Minecraft eingreift, hängt nicht an der API-Stufe.
 
@@ -293,10 +294,11 @@ Unter **Meine Addons** steht dann die Begründung des Teams. Mit **Überarbeiten
 
 ## Vorlagen
 
-Drei Addons des Teams sind gleichzeitig gute Vorlagen. Alle gibt es im [Addon-Store](/addons):
+Vier Addons des Teams sind gleichzeitig gute Vorlagen. Alle gibt es im [Addon-Store](/addons):
 
 - **Uhrzeit & Spielzeit** (`uhrzeit`): zwei HUD-Module, ein Schalt-Modul für eine Begrüßung im Chat, Farbe, Textfeld und Regler als Einstellungen, ein Scheduler und der Befehl `.uhr`.
 - **Spotify** (`spotify`): eigene Tasten, mehrere Einstellungen, ein selbst gezeichnetes HUD-Element mit Album-Cover, Einblendungen beim Songwechsel, Chat-Befehle und ein Hintergrund-Prozess, der nur läuft, solange das Modul an ist.
 - **Item Physics** (`itemphysics`, API 4): ein Renderer für gedroppte Items mit Speicher je Item, Regler mit eigenem Text und einer Taste ohne Standardbelegung. Ursprünglich eine Heldix-Mod mit Transformern – heute nur noch Heldix-API, deshalb läuft es auch in Fabric-Instanzen.
+- **Voice Chat** (`voicechat`, API 6): Sprachkanal über den Heldix-Dienst, Aufnahme und Wiedergabe in eigenen Threads, eine mitgelieferte Bibliothek (Opus), Tasten im Untermenü, Einträge im Spielermenü und Symbole über Köpfen.
 
 Ausschnitte daraus findest du unter [Addon-API im Detail](/entwickler/addon-api).

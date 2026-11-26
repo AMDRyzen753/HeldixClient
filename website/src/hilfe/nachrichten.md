@@ -12,7 +12,7 @@ Mit HeldixClient schreibst du deinen Freunden direkt – egal, ob ihr gerade auf
 2. Wähle eine Unterhaltung oder unter **Schreib einem Freund** bzw. **Neue Unterhaltung** einen Freund aus. Alternativ klickst du in der Freundesliste auf das Sprechblasen-Symbol.
 3. Tippe deine Nachricht unten ein und drücke [[Enter]] oder klicke auf **Senden**.
 
-Neue Nachrichten blendet HeldixClient im Spiel ein. Die Zahl der ungelesenen steht in der Seitenleiste des Heldix-Menüs.
+Neue Nachrichten blendet HeldixClient im Spiel ein. Die Zahl der ungelesenen steht im Heldix-Menü an der Seite **Freunde** (am Bereich **Profil** als Punkt).
 
 ## Gut zu wissen
 - **Nur zwischen Freunden:** Nachrichten gehen nur an bestätigte Freunde.

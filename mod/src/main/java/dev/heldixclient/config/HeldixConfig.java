@@ -160,6 +160,8 @@ public final class HeldixConfig {
 		public boolean badgeNameTags = true;
 		/** Nachrichten von Freunden annehmen */
 		public boolean socialMessages = true;
+		/** Schnellschalter auf der Übersicht und im Pausemenü (Modul-Ids); null = Standardauswahl */
+		public java.util.List<String> quickModules;
 		/** zuletzt betretener Server (für "Weiterspielen" im Hauptmenü) */
 		public String lastServerIp;
 		public String lastServerName;

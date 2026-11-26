@@ -37,10 +37,6 @@ public class PauseMenuScreen extends ShellScreen {
 	private static final int SESSION_H = CARD_HEAD + 2 * 24 + 4;
 	private static final int WAYPOINTS_H = CARD_HEAD + 26;
 	private static final int TOGGLE_ROW = 24;
-	/** Module für die Schnellschalter, wichtigste zuerst; kurze Namen für die Schalter */
-	private static final String[][] QUICK = {
-			{"togglesprint", "Dauersprint"}, {"freelook", "Freelook"}, {"crosshair", "Fadenkreuz"}, {"waypoints", "Wegpunkte"},
-			{"zoom", "Zoom"}, {"fps", "FPS"}, {"coordinates", "Koordinaten"}, {"effects", "Effekte"}};
 
 	/** Beginn der Sitzung (Welt bzw. Server betreten), 0 = unbekannt */
 	private static long sessionStart;
@@ -85,6 +81,11 @@ public class PauseMenuScreen extends ShellScreen {
 	}
 
 	private record Entry(String label, String icon, Runnable action) {
+	}
+
+	@Override
+	protected int toolbarActionsWidth() {
+		return ActionButton.widthFor("Klassisches Pausemenü", "external");
 	}
 
 	@Override
@@ -200,22 +201,11 @@ public class PauseMenuScreen extends ShellScreen {
 	}
 
 	private static List<Module> quickModules(int max) {
-		List<Module> list = new ArrayList<>();
-		for (String[] entry : QUICK) {
-			if (list.size() >= max) break;
-			for (Module module : ModuleManager.all()) {
-				if (module.id().equals(entry[0])) {
-					list.add(module);
-					break;
-				}
-			}
-		}
-		return list;
+		return dev.heldixclient.module.QuickModules.list(max);
 	}
 
 	private static String shortName(Module module) {
-		for (String[] entry : QUICK) if (entry[0].equals(module.id())) return entry[1];
-		return module.name();
+		return dev.heldixclient.module.QuickModules.shortName(module);
 	}
 
 	/** Rechte Spalte: Sitzung oben, Wegpunkte unten, dazwischen Freunde */

@@ -3,7 +3,7 @@ titel: Module im Überblick
 beschreibung: Alle Module von HeldixClient – von FPS und Keystrokes bis Dauersprint und Fadenkreuz – ein- und ausschalten und einstellen.
 kategorie: spiel
 reihenfolge: 2
-stichworte: module, modul, hud, fps, cps, ping, koordinaten, keystrokes, rüstung, trank-effekte, dauersprint, togglesprint, fadenkreuz, crosshair, chat
+stichworte: module, modul, tasten, taste, tastenbelegung, keybind, umbelegen, schnellschalter, hud, fps, cps, ping, koordinaten, keystrokes, rüstung, trank-effekte, dauersprint, togglesprint, fadenkreuz, crosshair, chat
 ---
 Module sind die Funktionen von HeldixClient. Du findest sie im Heldix-Menü ([[Rechte Umschalttaste]]) unter **Module**. Eine Übersicht mit Bildern gibt es auch auf der Seite [Module](/module).
 
@@ -12,7 +12,17 @@ Module sind die Funktionen von HeldixClient. Du findest sie im Heldix-Menü ([[R
 - Das **Regler-Symbol** oben rechts in der Kachel öffnet die Einstellungen des Moduls, z. B. Größe, Farben und Anzeige.
 - Die Reiter **Alle**, **HUD**, **Funktionen** und **Addons** filtern die Liste. Über **Module suchen** findest du ein Modul schnell.
 
-Im Pausemenü gibt es außerdem Schnellschalter für bis zu acht Module.
+Auf der Übersicht und im Pausemenü gibt es außerdem **Schnellschalter**. Welche Module dort stehen, wählst du im Untermenü eines Moduls mit **In den Schnellschaltern**.
+
+## Tasten
+Im Untermenü eines Moduls stehen unter **Tasten** alle Tasten, die zu ihm gehören – zum Beispiel **Zoom**, **Freelook** oder die Musik-Tasten von Spotify. Dazu hat jedes Modul eine Taste **Ein/Aus**, mit der du es im Spiel an- und ausschaltest (ab Werk nicht belegt).
+
+- Klick auf die Taste rechts, dann die neue Taste drücken. Auch Maus-Seitentasten und das Mausrad (Klick) gehen.
+- [[Entf]] oder [[Rücktaste]] entfernt die Belegung, [[Esc]] bricht ab.
+- Das Pfeil-Symbol daneben setzt die Standardtaste zurück.
+- Ist dieselbe Taste schon anders belegt, zeigt ein gelbes Warnzeichen, womit sie sich überschneidet.
+
+Dieselben Tasten findest du auch unter **Optionen → Steuerung** (Gruppen **HeldixClient**, **Heldix-Module** und **Heldix-Addons**). Die Haupttasten von HeldixClient stehen zusätzlich unter **System → Einstellungen → Tasten**.
 
 > **Hinweis:** Anfangs sind FPS, CPS, Koordinaten, Zoom und Wegpunkte an. Alles andere schaltest du bei Bedarf ein.
 

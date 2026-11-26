@@ -48,6 +48,8 @@ public class HeldixClient implements HeldixModInitializer {
 	public static KeyMapping waypointKey;
 	/** HUD bedienen: Maus frei, HUD-Elemente anklickbar (ohne Standardtaste) */
 	public static KeyMapping hudKey;
+	/** Spielermenü: auf einen Spieler zielen und drücken (ab Werk Mausrad-Klick) */
+	public static KeyMapping playerMenuKey;
 
 	@Override
 	public void onInitialize() {
@@ -63,6 +65,10 @@ public class HeldixClient implements HeldixModInitializer {
 		freelookKey = KeyMappings.register(new KeyMapping("key.heldixclient.freelook", InputConstants.Type.KEYBOARD, InputConstants.KEY_LALT, category));
 		waypointKey = KeyMappings.register(new KeyMapping("key.heldixclient.waypoint", InputConstants.Type.KEYBOARD, InputConstants.KEY_B, category));
 		hudKey = KeyMappings.register(new KeyMapping("key.heldixclient.hudInteract", InputConstants.Type.KEYBOARD, InputConstants.UNKNOWN.getValue(), category));
+		// teilt sich ab Werk die Taste mit „Block auswählen“ – auf Spielern macht das in Minecraft nichts
+		playerMenuKey = KeyMappings.register(new KeyMapping("key.heldixclient.playerMenu", InputConstants.Type.MOUSE, InputConstants.MOUSE_BUTTON_MIDDLE, category));
+		// je Modul eine Taste zum Ein- und Ausschalten (auch für Module aus Addons, die bis hier geladen sind)
+		ModuleManager.createToggleKeys();
 
 		HudEvents.RENDER.register(HudRenderer::extract);
 		ClientEvents.TICK_END.register(HeldixClient::onTick);
@@ -135,6 +141,9 @@ public class HeldixClient implements HeldixModInitializer {
 				mc.gui.setScreen(new dev.heldixclient.screen.HudInteractScreen());
 			}
 		}
+		ModuleManager.handleToggleKeys();
+		dev.heldixclient.player.PlayerMenu.tick(mc);
+		dev.heldixclient.voice.VoiceLink.tick(mc);
 		ModuleManager.tick(mc);
 		DebugOverlay.seed(mc);
 	}

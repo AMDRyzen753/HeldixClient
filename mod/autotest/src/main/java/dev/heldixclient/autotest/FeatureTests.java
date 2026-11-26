@@ -356,7 +356,7 @@ final class FeatureTests {
 			t.waitTicks(8);
 			t.check("Freunde: Reiter Freunde, Anfragen, Privatsphäre",
 					t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabIds()).equals(List.of("FRIENDS", "MESSAGES", "REQUESTS", "PRIVACY")));
-			t.check("Seitenleiste zeigt die offene Anfrage", "1".equals(t.compute(mc -> Shell.badge(Shell.Page.FRIENDS))));
+			t.check("Navigation zeigt die offene Anfrage", "1".equals(t.compute(mc -> Shell.badge(Shell.Page.FRIENDS))));
 			t.screenshot("heldix-26a-freunde-hinweis");
 			AutoTest.openPage(t, "REQUESTS");
 			t.moveMouse(5, 5);

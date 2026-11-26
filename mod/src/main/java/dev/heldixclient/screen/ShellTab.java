@@ -11,8 +11,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvents;
 
 /**
- * Reiter unter dem Seitenkopf (Unter-Menü einer Kategorie): Icon, Name und ggf. eine Zahl.
- * Den blauen Strich unter dem aktiven Reiter zeichnet {@link ShellScreen}, damit er beim Wechsel hinübergleiten kann.
+ * Reiter im Kopf einer Seite (Unterseiten bzw. Ansichten, z. B. Module: Alle, HUD …): Icon, Name und ggf. eine Zahl,
+ * als Pillen nebeneinander. Die Pille hinter dem aktiven Reiter zeichnet {@link ShellScreen}, damit sie beim Wechsel
+ * hinübergleiten kann.
  */
 public class ShellTab extends AbstractButton {
 	/** Anzeige eines Reiters; {@code badge} und {@code selected} werden jedes Bild neu abgefragt */
@@ -45,6 +46,21 @@ public class ShellTab extends AbstractButton {
 		return Math.max(13, Ui.width(badge, Ui.Font.SMALL) + 8);
 	}
 
+	private int padding = 9;
+
+	/** Innenabstand (für das Nachführen der Breite) */
+	void setPadding(int padding) {
+		this.padding = padding;
+	}
+
+	int padding() {
+		return padding;
+	}
+
+	boolean showsIcon() {
+		return showIcon;
+	}
+
 	public Spec spec() {
 		return spec;
 	}
@@ -75,7 +91,8 @@ public class ShellTab extends AbstractButton {
 		int y = getY();
 		int w = getWidth();
 		int h = getHeight();
-		if (hover > 0.01f) Ui.rect(g, x + 1, y + 2, w - 2, h - 6, 6, Ui.withAlpha(Ui.SURFACE_HOVER, hover * alpha));
+		// aktiver Reiter: die gleitende Pille zeichnet ShellScreen dahinter
+		if (hover > 0.01f) Ui.rect(g, x + 1, y + 1, w - 2, h - 2, (h - 2) / 2f, Ui.withAlpha(Ui.SURFACE_HOVER, hover * alpha));
 		int color = on ? Ui.TEXT : Ui.lerp(Ui.MUTED, Ui.TEXT, hover);
 		String badge = spec.badge() == null ? null : spec.badge().get();
 		int content = Ui.width(spec.label(), Ui.Font.LABEL) + (showIcon ? ICON + 5 : 0) + (badge != null ? badgeWidth(badge) + 5 : 0);
@@ -95,6 +112,7 @@ public class ShellTab extends AbstractButton {
 			Ui.rect(g, cx, textY - 1, bw, 11, 5.5f, Ui.withAlpha(fill, alpha));
 			Ui.textCentered(g, badge, cx + bw / 2, textY + 1, Ui.withAlpha(spec.alert() ? 0xFFFFFFFF : on ? Ui.ACCENT_TEXT : Ui.MUTED, alpha), Ui.Font.SMALL);
 		}
+		if (Ui.keyboardFocus(isFocused())) Ui.focusRing(g, x, y, w, h, h / 2f, alpha);
 	}
 
 	@Override

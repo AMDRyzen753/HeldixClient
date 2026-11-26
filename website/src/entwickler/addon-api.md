@@ -2,9 +2,9 @@
 titel: Addon-API im Detail
 beschreibung: Module, HUD-Elemente, Einstellungen, Tasten, Einblendungen, Ereignisse und gedroppte Items – mit echten Beispielen aus den Addons Spotify, Uhrzeit & Spielzeit und Item Physics.
 reihenfolge: 2
-stichworte: api, heldixapi, hudclick, hudhover, hudstyle, hotspot, iconbutton, anklickbar, hud bedienen, stil-optionen, cosmetics, cosmeticinfo, preview, animate, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate, api 4, api 5, droppeditems, droppeditemrenderer, droppeditem, droppeditempose, item physics, gedroppte items
+stichworte: api, heldixapi, addkey, showkey, voice, voicechat, sprachkanal, nearbyplayers, spielermenü, playermenuentry, playermarkers, tasten, keybind, tastenbelegung, hudclick, hudhover, hudstyle, hotspot, iconbutton, anklickbar, hud bedienen, stil-optionen, cosmetics, cosmeticinfo, preview, animate, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate, api 4, api 5, api 6, droppeditems, droppeditemrenderer, droppeditem, droppeditempose, item physics, gedroppte items
 ---
-Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **5** (Stand HeldixClient 0.13.3). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3`, alles unter [Ab API 4](#ab-api-4) den Eintrag `"api": 4` und alles unter [Ab API 5](#ab-api-5) den Eintrag `"api": 5`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Addons entwickeln](/entwickler/addons).
+Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **6** (Stand HeldixClient 0.13.4). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3`, alles unter [Ab API 4](#ab-api-4) den Eintrag `"api": 4`, alles unter [Ab API 5](#ab-api-5) den Eintrag `"api": 5` und alles unter [Ab API 6](#ab-api-6) den Eintrag `"api": 6`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Addons entwickeln](/entwickler/addons).
 
 > **Hinweis:** Die Heldix-API reicht für die meisten Addons und läuft über Minecraft-Updates hinweg. Was sie nicht kann, darf ein Addon auch direkt in Minecraft ändern – mit Transformern des Heldix Loaders, siehe [Weg 2: Eingriff in Minecraft](/entwickler/addons#weg-2-eingriff-in-minecraft). Mit der API-Stufe hat das nichts zu tun.
 
@@ -24,6 +24,7 @@ In `onEnable(HeldixApi api)` bekommst du ein Objekt, über das alles läuft:
 - ab API 3: `game()`, `playerState()`, `scheduler()`, `registerCommand(...)` und `sendChatMessage(...)` – siehe [Ab API 3](#ab-api-3).
 - ab API 4: `droppedItems()` – Lage und Drehung der gedroppten Items in der Welt – und `cosmetics()` – der Cosmetics-Katalog, siehe [Ab API 4](#ab-api-4).
 - ab API 5: anklickbare HUD-Elemente im HUD-Stil (an `HudRenderer`, `HudCanvas` und `ModuleHandle`), siehe [Ab API 5](#ab-api-5).
+- ab API 6: Tasten im Untermenü eines Moduls (`addKey`, `showKey`), `nearbyPlayers()`, `playerMarkers()`, `addPlayerMenuEntry(...)` und `voice()` – siehe [Ab API 6](#ab-api-6).
 
 ## Ereignisse
 
@@ -507,6 +508,46 @@ if (canvas.interactive()) {
 ```
 
 `HudClick`, `HudHover` und `HudStyle` stellt HeldixClient bereit, deshalb sind es Schnittstellen. `HudRenderer` bekommt nur Default-Methoden und bleibt ein funktionales Interface – fertige Renderer (auch Lambdas) laufen unverändert. Funktionen der Stufe 5 sind in den API-Klassen mit `@since 5` gekennzeichnet.
+
+## Ab API 6
+
+Mit `"api": 6` (ab HeldixClient 0.13.4) bekommen Module eigene Tasten, die der Spieler im Untermenü umbelegt, und Addons sehen andere Spieler in der Nähe, hängen Einträge ins Spielermenü, zeigen Symbole am Namensschild und sprechen über den Sprachkanal des Heldix-Dienstes. Fertige Addons für API 1 bis 5 laufen unverändert weiter.
+
+### Tasten im Untermenü eines Moduls
+
+Tasten, die zu einem Modul gehören, legst du direkt am `ModuleHandle` an. Sie stehen im Untermenü des Moduls unter **Tasten**: Der Spieler klickt auf die Taste, drückt die neue (Entf = nicht belegt, Esc = abbrechen) und kann zur Standardtaste zurück. Dieselbe Belegung steht wie jede Addon-Taste unter Optionen → Steuerung → Heldix-Addons.
+
+- `addKey(schlüssel, name, beschreibung, standardtaste, onPress)` – neue Taste für dieses Modul, gibt ein `KeyHandle` zurück. Wie `registerKey` nur in `onEnable` aufrufen (später lehnt HeldixClient sie ab). `onPress` läuft im Spiel (nicht in Menüs) als Aktion des Spielers, auch wenn das Modul aus ist – prüfe dafür `isEnabled()`.
+- `showKey(taste, name, beschreibung)` – eine mit `api.registerKey` angelegte Taste zusätzlich im Untermenü zeigen.
+
+Jedes Modul (auch aus Addons) bekommt außerdem von selbst eine Taste **Ein/Aus**, ab Werk nicht belegt. Darum musst du dich nicht kümmern.
+
+```java
+// Uhrzeit-Addon: eigene Taste, ab Werk frei
+clock.addKey("tell-time", "Uhrzeit im Chat", "Zeigt Uhr- und Spielzeit nur dir im Chat", HeldixKeys.NONE, () -> api.chat(clockText()));
+
+// Spotify-Addon: vorhandene Tasten im Untermenü zeigen
+module.showKey(api.registerKey("play-pause", "Abspielen/Pause", HeldixKeys.HOME, this::playPause), "Abspielen/Pause", "");
+```
+
+### Andere Spieler, Spielermenü und Symbole
+
+- `api.nearbyPlayers()` – die anderen Spieler in der geladenen Welt, nächster zuerst, als `NearbyPlayer`: `uuid()`, `name()`, `x()`/`y()`/`z()`, `distance()` (Blöcke), `direction()` (Grad von deiner Blickrichtung aus: 0 geradeaus, negativ links, positiv rechts) und `heldixPlayer()`. Nur im Haupt-Thread.
+- `api.addPlayerMenuEntry(eintrag)` – eigener Eintrag im **Spielermenü** (Mausrad-Klick auf einen Spieler). `PlayerMenuEntry` liefert `label(spieler)` (`null` = hier kein Eintrag), `icon(spieler)`, `select(spieler)` (Aktion des Spielers im Haupt-Thread) und `keepOpen()`.
+- `api.playerMarkers().show(uuid, icon, farbe, dauer)` – ein Symbol aus dem Heldix-Icon-Set hinter dem Namen im Namensschild über dem Kopf, z. B. `"volume"` für „spricht“. Es verschwindet nach `dauer` (höchstens eine Minute) von selbst; `hide(uuid)` nimmt es sofort weg.
+
+### Sprachkanal (Voice Chat)
+
+`api.voice()` ist ein Kanal über den Heldix-Dienst zu HeldixClient-Spielern in der Nähe – auf demselben Server, in derselben Welt und innerhalb von `range()` Blöcken (meist 48). Blockierungen und „Nur Freunde“ (`setFriendsOnly`) gelten. HeldixClient hält die Verbindung und meldet Server, Welt und Position; Aufnehmen, Kodieren, Mischen und Abspielen macht dein Addon.
+
+- `setActive(true)` verbindet (nur, solange du ihn brauchst), `status()` und `statusText()` sagen, wie es steht (z. B. „Nur auf Servern“).
+- `send(rahmen, folgenummer, letzter)` schickt einen Rahmen (bis `maxFrameSize()` Bytes, z. B. 20 ms Opus); aus jedem Thread. Kommt die Verbindung nicht hinterher, werden Rahmen verworfen.
+- `onFrame((sender, folgenummer, letzter, rahmen) -> …)` empfängt die Rahmen der anderen – **im Netzwerk-Thread**: schnell zurückkehren und keine Minecraft-Objekte anfassen.
+- `peers()` – andere Spieler mit eingeschaltetem Kanal im selben Raum.
+
+Das offizielle Addon **Voice Chat** ist ein vollständiges Beispiel: Aufnahme mit `javax.sound`, Opus aus Concentus, Puffer gegen Schwankungen, Lautstärke nach Abstand und Richtung, Push-to-Talk mit `addKey`, Einträge im Spielermenü und das Symbol „spricht“.
+
+`NearbyPlayer` und `VoiceChannel` stellt HeldixClient bereit, deshalb sind es Schnittstellen; `PlayerMenuEntry` schreibst du selbst (mit Default-Methoden für `icon` und `keepOpen`). Funktionen der Stufe 6 sind in den API-Klassen mit `@since 6` gekennzeichnet.
 
 ## Threads und Fehler
 

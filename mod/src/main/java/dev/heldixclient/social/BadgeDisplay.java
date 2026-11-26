@@ -96,9 +96,14 @@ public final class BadgeDisplay {
 	 * selbst zeigt die Schilder von Spielern in einem Team (Sichtbarkeit „immer“) auch dann noch.
 	 */
 	public static Component nameTag(Component name, Entity entity) {
-		if (name == null || !(entity instanceof Player player) || !HeldixConfig.get().badgeNameTags) return name;
+		if (name == null || !(entity instanceof Player player)) return name;
 		if (Minecraft.getInstance().gui.hud.isHidden()) return name;
-		Badge.Role role = Social.roleOf(player.getUUID());
-		return role == null ? name : Badge.prefix(name, role);
+		Component result = name;
+		if (HeldixConfig.get().badgeNameTags) {
+			Badge.Role role = Social.roleOf(player.getUUID());
+			if (role != null) result = Badge.prefix(name, role);
+		}
+		// Symbole der Addons hinter dem Namen (z. B. „spricht“ im Voice Chat)
+		return dev.heldixclient.player.PlayerMarkerStore.decorate(result, player.getUUID());
 	}
 }

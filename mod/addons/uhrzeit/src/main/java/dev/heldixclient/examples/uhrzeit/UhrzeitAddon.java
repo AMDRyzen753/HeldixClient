@@ -4,6 +4,7 @@ import dev.heldixclient.api.CommandContext;
 import dev.heldixclient.api.HeldixAddon;
 import dev.heldixclient.api.HeldixApi;
 import dev.heldixclient.api.HeldixColors;
+import dev.heldixclient.api.HeldixKeys;
 import dev.heldixclient.api.HudCanvas;
 import dev.heldixclient.api.HudClick;
 import dev.heldixclient.api.HudHover;
@@ -62,6 +63,8 @@ public class UhrzeitAddon implements HeldixAddon {
 		label = clock.addText("label", "Beschriftung", "Text vor der Uhrzeit (leer = keiner)", "Uhr", 16);
 		// ab API 5: noch eine Stil-Option (Datum vor der Uhrzeit)
 		showDate = clock.addStyleToggle("date", "Datum", false);
+		// ab API 6: eigene Taste im Untermenü des Moduls (dort und unter Optionen → Steuerung umbelegbar), ab Werk frei
+		clock.addKey("tell-time", "Uhrzeit im Chat", "Zeigt Uhr- und Spielzeit nur dir im Chat", HeldixKeys.NONE, () -> api.chat(clockText()));
 
 		ModuleHandle playtime = api.registerHudModule(ModuleSpec.of("spielzeit", "Spielzeit", "Zeit in dieser Welt").at(4, 208).withIcon("hourglass"),
 				canvas -> canvas.labelValue("Spielzeit", format(played())));

@@ -1,9 +1,24 @@
 {
 	"key.category.heldixclient.main": "HeldixClient",
 	"key.category.heldixclient.addons": "Heldix-Addons",
+	"key.category.heldixclient.modules": "Heldix-Module",
 	"key.heldixclient.menu": "Heldix-Menü öffnen",
 	"key.heldixclient.zoom": "Zoom",
 	"key.heldixclient.freelook": "Freelook (frei umschauen)",
 	"key.heldixclient.waypoint": "Wegpunkt setzen",
-	"key.heldixclient.hudInteract": "HUD bedienen (Maus frei)"
+	"key.heldixclient.hudInteract": "HUD bedienen (Maus frei)",
+	"key.heldixclient.playerMenu": "Spielermenü (auf einen Spieler zielen)",
+	"key.heldixclient.module.fps": "FPS an/aus",
+	"key.heldixclient.module.cps": "CPS an/aus",
+	"key.heldixclient.module.ping": "Ping an/aus",
+	"key.heldixclient.module.coordinates": "Koordinaten an/aus",
+	"key.heldixclient.module.keystrokes": "Keystrokes an/aus",
+	"key.heldixclient.module.zoom": "Zoom an/aus",
+	"key.heldixclient.module.armor": "Rüstung an/aus",
+	"key.heldixclient.module.effects": "Trank-Effekte an/aus",
+	"key.heldixclient.module.togglesprint": "Dauersprint an/aus",
+	"key.heldixclient.module.freelook": "Freelook an/aus",
+	"key.heldixclient.module.crosshair": "Fadenkreuz an/aus",
+	"key.heldixclient.module.chat": "Chat an/aus",
+	"key.heldixclient.module.waypoints": "Wegpunkte an/aus"
 }

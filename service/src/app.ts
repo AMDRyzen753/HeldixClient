@@ -25,6 +25,7 @@ import { Support } from './support';
 import { playerLabel, Team, writeAudit, type Actor } from './team';
 import { DOWNLOAD_TARGETS, MAX_SETUP_SIZE, NOTHING_PUBLISHED, Updates, type DownloadTarget } from './updates';
 import { DEFAULT_CAPES, isName, isUuid } from './validate';
+import { Voice, VOICE_MAX_PAYLOAD, VOICE_RANGE_DEFAULT, VOICE_RANGE_MAX, VOICE_RANGE_MIN } from './voice';
 import { CALLBACK_PATH, LoginError, MICROSOFT_ENDPOINTS, MicrosoftLogin, type MicrosoftEndpoints } from './microsoft';
 import {
   bindingCookie,
@@ -86,6 +87,14 @@ export interface ServiceOptions {
   microsoftEndpoints?: Partial<MicrosoftEndpoints>;
   /** Uhr für die 2FA-Codes (nur Tests stellen sie). */
   totpNow?: () => number;
+  /** Voice Chat über `/v1/voice` (Standard: an); aus: 404. */
+  voice?: boolean;
+  /** Reichweite des Voice Chats in Blöcken (8–128, Standard 48). */
+  voiceRange?: number;
+  /** Voice Chat: Verbindung ohne Nachricht so lange offen (Standard 60 s). */
+  voiceIdleTimeoutMs?: number;
+  /** Uhr des Voice Chats für Positionen und Begrenzungen (nur Tests stellen sie). */
+  voiceNow?: () => number;
 
   // Zeiten und Grenzen; die Standardwerte entsprechen docs/dienst.md. Tests stellen sie kürzer.
   challengeTtlMs?: number;
@@ -296,6 +305,10 @@ export function createService(options: ServiceOptions): Service {
         })
       : null;
   const auditTtlMs = options.auditTtlMs ?? 365 * 24 * 60 * 60 * 1000;
+  const voiceRange = options.voiceRange ?? VOICE_RANGE_DEFAULT;
+  if (!Number.isInteger(voiceRange) || voiceRange < VOICE_RANGE_MIN || voiceRange > VOICE_RANGE_MAX) {
+    throw new Error(`Die Reichweite des Voice Chats muss eine ganze Zahl von ${VOICE_RANGE_MIN} bis ${VOICE_RANGE_MAX} sein.`);
+  }
   let updateKey: KeyObject | null = null;
   if (options.updateKey) {
     updateKey = createPublicKey(options.updateKey);
@@ -338,6 +351,17 @@ export function createService(options: ServiceOptions): Service {
     messageWindowMs: rateWindowMs,
     log,
   });
+  const voice =
+    options.voice === false
+      ? null
+      : new Voice(store, {
+          range: voiceRange,
+          idleTimeoutMs: options.voiceIdleTimeoutMs ?? 60_000,
+          now: options.voiceNow ?? Date.now,
+          log,
+        });
+  // Konto gelöscht oder gesperrt: auch die Voice-Verbindung schließen.
+  if (voice) realtime.onDisconnectUser((uuid, code, reason) => voice.disconnectUser(uuid, code, reason));
   const friends = new Friends(store, realtime, {
     maxFriends: options.maxFriends ?? 200,
     maxOutgoing: options.maxOutgoingRequests ?? 50,
@@ -833,6 +857,7 @@ export function createService(options: ServiceOptions): Service {
         ok: true,
         service: serviceVersion,
         online: realtime.onlineCount(),
+        voice: voice?.connectedCount() ?? 0,
         players: playerCount.value,
         launcher: published?.version ?? null,
         addons: addons.visibleCount(),
@@ -1499,6 +1524,19 @@ export function createService(options: ServiceOptions): Service {
         throw new HttpError(426, 'Dieser Weg ist nur per WebSocket erreichbar.', { Upgrade: 'websocket' });
       },
     },
+    // Voice Chat aus: /v1/voice gibt es nicht (404).
+    ...(voice
+      ? [
+          {
+            method: 'GET',
+            pattern: /^\/v1\/voice$/,
+            kind: 'public',
+            handler: () => {
+              throw new HttpError(426, 'Dieser Weg ist nur per WebSocket erreichbar.', { Upgrade: 'websocket' });
+            },
+          } satisfies Route,
+        ]
+      : []),
   ];
 
   function pathOf(req: IncomingMessage): string {
@@ -1566,14 +1604,33 @@ export function createService(options: ServiceOptions): Service {
   server.requestTimeout = REQUEST_TIMEOUT_MS;
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: BODY_LIMIT, clientTracking: false });
+  const voiceWss = voice ? new WebSocketServer({ noServer: true, maxPayload: VOICE_MAX_PAYLOAD, clientTracking: false }) : null;
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on('error', () => socket.destroy());
     try {
-      if (pathOf(req) !== '/v1/ws') throw new HttpError(404, 'Nicht gefunden.');
+      const path = pathOf(req);
+      const isVoice = path === '/v1/voice' && voice !== null;
+      if (path !== '/v1/ws' && !isVoice) throw new HttpError(404, 'Nicht gefunden.');
       if (req.method !== 'GET') throw new HttpError(405, 'Diese Methode ist hier nicht erlaubt.', { Allow: 'GET' });
       const { user, tokenHash } = authenticate(req);
       rateLimit(apiLimiter, tokenHash);
+      if (isVoice) {
+        // Höchstens eine Voice-Verbindung pro Spieler: Die neue ersetzt die alte (4002).
+        voiceWss!.handleUpgrade(req, socket, head, (ws) => {
+          if (closed) {
+            ws.terminate();
+            return;
+          }
+          try {
+            voice!.attach(ws, user.uuid);
+          } catch (err) {
+            log(`Fehler beim Verbinden mit dem Voice Chat: ${(err as Error)?.stack ?? String(err)}`);
+            ws.terminate();
+          }
+        });
+        return;
+      }
       if (realtime.connectionCount(user.uuid) >= maxConnectionsPerUser) {
         throw new HttpError(429, 'Zu viele gleichzeitige Verbindungen.', { 'Retry-After': '30' });
       }
@@ -1640,8 +1697,10 @@ export function createService(options: ServiceOptions): Service {
     closed = true;
     clearInterval(sweepTimer);
     realtime.closeAll();
+    voice?.closeAll();
     closing = new Promise<void>((resolve) => {
       wss.close();
+      voiceWss?.close();
       server.close(() => {
         store.close();
         resolve();

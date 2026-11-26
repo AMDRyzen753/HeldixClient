@@ -86,6 +86,11 @@
     "friends",
     "send",
     "ban",
-    "flag"
+    "flag",
+    "mic",
+    "mic-off",
+    "volume",
+    "volume-off",
+    "headphones"
   ]
 }

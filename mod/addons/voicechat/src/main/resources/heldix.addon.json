@@ -1,0 +1,9 @@
+{
+	"id": "voicechat",
+	"name": "Voice Chat",
+	"version": "${version}",
+	"description": "Sprich mit HeldixClient-Spielern in deiner Nähe – auf jedem Server, ohne Plugin. Push-to-Talk oder Sprachaktivierung, Richtung und Abstand hörbar, Stummschalten im Spielermenü.",
+	"authors": ["HeldixClient"],
+	"entrypoint": "dev.heldixclient.addons.voicechat.VoiceChatAddon",
+	"api": 6
+}

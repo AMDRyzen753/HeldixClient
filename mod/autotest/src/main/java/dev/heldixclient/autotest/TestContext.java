@@ -178,9 +178,14 @@ final class TestContext {
 
 	/** Taste drücken und loslassen über den echten KeyboardHandler. */
 	void pressKey(int key) {
-		run(minecraft -> minecraft.keyboardHandler.keyPress(minecraft.getWindow().handle(), InputConstants.PRESS, new KeyEvent(key, 0, 0)));
+		pressKey(key, 0);
+	}
+
+	/** Taste mit Umschalt-/Strg-Tasten ({@code InputConstants.MOD_CONTROL} …) drücken und loslassen. */
+	void pressKey(int key, int modifiers) {
+		run(minecraft -> minecraft.keyboardHandler.keyPress(minecraft.getWindow().handle(), InputConstants.PRESS, new KeyEvent(key, 0, modifiers)));
 		waitTicks(1);
-		run(minecraft -> minecraft.keyboardHandler.keyPress(minecraft.getWindow().handle(), InputConstants.RELEASE, new KeyEvent(key, 0, 0)));
+		run(minecraft -> minecraft.keyboardHandler.keyPress(minecraft.getWindow().handle(), InputConstants.RELEASE, new KeyEvent(key, 0, modifiers)));
 		waitTicks(2);
 	}
 

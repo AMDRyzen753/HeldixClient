@@ -1,0 +1,12 @@
+{
+	"_hinweis": "Angaben für den Addon-Store (nicht in der JAR). Name, Version, Kurzbeschreibung, Autoren und API kommen aus src/main/resources/heldix.addon.json.",
+	"icon": "mic",
+	"kategorie": "chat",
+	"plattformen": [],
+	"beschreibung": "Sprich mit anderen HeldixClient-Spielern in deiner Nähe – auf jedem Server, ganz ohne Plugin.\n\n- Push-to-Talk (Taste V halten) oder Sprachaktivierung mit einstellbarer Schwelle\n- Je weiter weg, desto leiser – und in Stereo hörst du, aus welcher Richtung jemand spricht\n- Ein Symbol über dem Kopf zeigt, wer gerade spricht; die Anzeige im HUD zeigt dein Mikrofon und die Sprecher\n- Mausrad-Klick auf einen Spieler: stummschalten, lauter oder leiser\n- „Nur Freunden“: dann sprichst und hörst du nur mit deinen HeldixClient-Freunden\n- Mikrofon testen: zehn Sekunden lang hörst du dich selbst, ohne etwas zu senden\n\nDie Sprache läuft über den Heldix-Dienst an Spieler auf demselben Server und in derselben Welt (bis 48 Blöcke). Gespeichert wird nichts. Voice Chat ist aus, bis du das Modul einschaltest. Am besten mit Kopfhörern – sonst hören die anderen sich selbst.\n\nAuf dem Mac fragt das System beim ersten Mal, ob Minecraft das Mikrofon benutzen darf.",
+	"hinweise": [
+		"Voice Chat in der Nähe – auf jedem Server, ohne Plugin",
+		"Push-to-Talk oder Sprachaktivierung, Lautstärke nach Abstand, Richtung in Stereo",
+		"Stummschalten und Lautstärke je Spieler im Spielermenü (Mausrad-Klick)"
+	]
+}

@@ -17,7 +17,7 @@ Mit HeldixClient siehst du, welche Freunde gerade online sind und wo sie spielen
 Der Spieler muss HeldixClient nutzen und damit schon einmal online gewesen sein. Sonst erscheint „Dieser Spieler nutzt HeldixClient nicht (oder war noch nie online).“ Hat er dir selbst schon eine Anfrage geschickt, seid ihr sofort befreundet.
 
 ## Anfragen annehmen
-Neue Anfragen blendet HeldixClient im Spiel ein, und ihre Zahl steht in der Seitenleiste des Heldix-Menüs. Unter **Freunde → Anfragen** kannst du:
+Neue Anfragen blendet HeldixClient im Spiel ein, und ihre Zahl steht im Heldix-Menü an der Seite **Freunde** (am Bereich **Profil** als Punkt). Unter **Freunde → Anfragen** kannst du:
 - eine Anfrage **annehmen** oder **ablehnen**,
 - eine eigene, gesendete Anfrage **zurückziehen**,
 - den Absender über das Symbol daneben direkt **blockieren**.

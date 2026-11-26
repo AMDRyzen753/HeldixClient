@@ -6,6 +6,7 @@
 //   textures/gui/heldix/logo.png                – HeldixClient-Symbol
 //   font/ui_<stil>_<skalierung>.json            – Schrift Inter je GUI-Skalierung (scharf ohne Skalieren)
 //   font/badge.json + textures/font/badge*.png  – Heldix-Symbol als Schriftzeichen (U+E000–U+E003, je Rolle eins)
+//   font/marker.json + textures/font/marker.png – alle Icons als Schriftzeichen (U+E100 + Nummer) für Namensschilder
 // Aufruf: npm run ui-assets
 import { app, BrowserWindow } from 'electron';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -128,6 +129,13 @@ const ICONS = {
   send: '<path d="M20.5 3.5 L3.5 10.5 L10.5 13.5 L13.5 20.5 Z"/><path d="M20.5 3.5 L10.5 13.5"/>',
   ban: '<circle cx="12" cy="12" r="8.5"/><path d="M6 6 L18 18"/>',
   flag: '<path d="M5.5 21 V3.5"/><path d="M5.5 4 H18 L15.5 8.5 L18 13 H5.5"/>',
+  // Voice Chat
+  mic: '<rect x="9" y="2.5" width="6" height="11.5" rx="3"/><path d="M5.5 11 A6.5 6.5 0 0 0 18.5 11"/><path d="M12 17.5 V21"/>',
+  'mic-off': '<path d="M15 9 V5.5 A3 3 0 0 0 9.3 4.2"/><path d="M9 9 V11 A3 3 0 0 0 13.9 13.3"/>'
+    + '<path d="M5.5 11 A6.5 6.5 0 0 0 16.6 15.6 M18.5 11 A6.4 6.4 0 0 1 18.1 13.3"/><path d="M12 17.5 V21"/><path d="M3.5 3.5 L20.5 20.5"/>',
+  volume: '<path d="M3.5 9.5 H7 L11.5 5.5 V18.5 L7 14.5 H3.5 Z"/><path d="M15 9 A4 4 0 0 1 15 15"/><path d="M17.8 6.2 A8 8 0 0 1 17.8 17.8"/>',
+  'volume-off': '<path d="M3.5 9.5 H7 L11.5 5.5 V18.5 L7 14.5 H3.5 Z"/><path d="M15.5 9.5 L20.5 14.5 M20.5 9.5 L15.5 14.5"/>',
+  headphones: '<path d="M4 15.5 V12 A8 8 0 0 1 20 12 V15.5"/><rect x="3.5" y="14" width="4.5" height="7" rx="1.8"/><rect x="16" y="14" width="4.5" height="7" rx="1.8"/>',
 };
 
 const NAMES = Object.keys(ICONS);
@@ -446,6 +454,23 @@ app.whenReady().then(async () => {
     badgeProviders.push({ type: 'bitmap', file: `heldixclient:font/badge_${role.name}.png`, ascent: 7, height: 8, chars: [role.char] });
   }
   await writeFile(path.join(fontDir, 'badge.json'), `${JSON.stringify({ providers: badgeProviders }, null, 2)}\n`);
+
+  // Alle Icons als Schriftzeichen (Schrift heldixclient:marker, U+E100 + Nummer in icons.json): für Symbole am
+  // Namensschild über dem Kopf, z. B. „spricht gerade“ im Voice Chat. Weiß, Minecraft färbt sie mit der Textfarbe.
+  const markerCell = 32;
+  const markerImage = await render(iconsHtml(markerCell), COLUMNS * markerCell, ROWS * markerCell);
+  await writeFile(path.join(fontTextures, 'marker.png'), markerImage.toPNG());
+  const markerRows = [];
+  for (let row = 0; row < ROWS; row++) {
+    let line = '';
+    for (let col = 0; col < COLUMNS; col++) {
+      const index = row * COLUMNS + col;
+      line += index < NAMES.length ? String.fromCharCode(0xe100 + index) : '\u0000';
+    }
+    markerRows.push(line);
+  }
+  const markerFont = { providers: [{ type: 'bitmap', file: 'heldixclient:font/marker.png', ascent: 7, height: 8, chars: markerRows }] };
+  await writeFile(path.join(fontDir, 'marker.json'), `${JSON.stringify(markerFont, null, 2)}\n`);
 
   await writeFonts();
 

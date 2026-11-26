@@ -16,8 +16,11 @@ public interface HeldixApi {
 	 * Version 5: anklickbare HUD-Elemente ({@link HudRenderer#onClick}, {@link HudCanvas#hotspot}), HUD-Stil lesen
 	 * ({@link HudCanvas#style()}), Stil-Optionen im HUD-Editor ({@link ModuleHandle#addStyleToggle}) und weitere
 	 * Zeichenhilfen.
+	 * Version 6: Tasten im Untermenü eines Moduls ({@link ModuleHandle#addKey}, {@link ModuleHandle#showKey}), andere
+	 * Spieler ({@link #nearbyPlayers()}), Spielermenü ({@link #addPlayerMenuEntry}), Symbole am Namensschild
+	 * ({@link #playerMarkers()}) und Sprachkanal über den Heldix-Dienst ({@link #voice()}).
 	 */
-	int API_VERSION = 5;
+	int API_VERSION = 6;
 
 	/** Informationen über das eigene Addon (aus heldix.addon.json). */
 	AddonInfo addon();
@@ -164,4 +167,35 @@ public interface HeldixApi {
 	 * @since 4
 	 */
 	Cosmetics cosmetics();
+
+	// --- ab API 6 ---------------------------------------------------------------------------
+
+	/**
+	 * Andere Spieler in der geladenen Welt, nächster zuerst (ohne dich). Ohne Welt leer. Nur im Haupt-Thread aufrufen.
+	 *
+	 * @since 6
+	 */
+	java.util.List<NearbyPlayer> nearbyPlayers();
+
+	/**
+	 * Sprachkanal über den Heldix-Dienst (für Voice Chat in der Nähe).
+	 *
+	 * @since 6
+	 */
+	VoiceChannel voice();
+
+	/**
+	 * Symbole am Namensschild über dem Kopf anderer Spieler.
+	 *
+	 * @since 6
+	 */
+	PlayerMarkers playerMarkers();
+
+	/**
+	 * Eigener Eintrag im Spielermenü (Mausrad-Klick auf einen Spieler). Die Einträge erscheinen in der Reihenfolge der
+	 * Anmeldung nach denen von HeldixClient.
+	 *
+	 * @since 6
+	 */
+	Registration addPlayerMenuEntry(PlayerMenuEntry entry);
 }

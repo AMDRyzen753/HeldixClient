@@ -79,6 +79,17 @@ Einmal im [Azure-Portal](https://portal.azure.com) (als Besitzer der App-Registr
 
 **Ausschalten:** Installer mit `--no-minecraft-login` (löscht auch das Geheimnis auf dem Server), danach Umleitungs-URI und Geheimnis in Azure entfernen. Der Knopf verschwindet sofort, die Anmeldung über den Launcher geht wie bisher.
 
+## Voice Chat auf dem Server
+
+Ab Heldix-Dienst 1.8.0 ist der Voice Chat (`/v1/voice`, für das Addon „Voice Chat“) von selbst an. Einzurichten ist nichts: Caddy aus dem Installer reicht die WebSockets ohne weitere Einstellung durch. Bei nginx braucht `/v1/voice` wie `/v1/ws` die Upgrade-Header ([docs/dienst.md](dienst.md#von-hand)). Wie der Voice Chat funktioniert: [docs/dienst.md](dienst.md#voice-chat).
+
+Optional in `/etc/heldix-dienst/dienst.env`, danach `systemctl restart heldix-dienst`:
+
+- `HELDIX_DIENST_VOICE=0` schaltet den Voice Chat aus; `/v1/voice` antwortet dann mit 404.
+- `HELDIX_DIENST_VOICE_RANGE=48` setzt die Reichweite in Blöcken (Standard 48, erlaubt 8–128). Ein ungültiger Wert verhindert den Start.
+
+**Bandbreite:** Der Dienst schickt die Sprache an jeden Hörer in Reichweite einzeln. Mit Opus bei 24 kbit/s sind das etwa 3–4 KB/s je Sprecher und Hörer: Spricht einer und hören fünf zu, kommen beim Dienst etwa 3–4 KB/s an und gehen etwa 15–20 KB/s hinaus. Übertragen wird nur, während jemand spricht.
+
 ## Discord-Status (Rich Presence)
 
 Der Launcher zeigt in Discord, was gespielt wird. Discord blendet dabei „Spielt HeldixClient“ ein, darunter zum Beispiel:

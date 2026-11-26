@@ -5,5 +5,5 @@
 	"description": "Zeigt den laufenden Song mit Cover im HUD und steuert die Musik per Taste und Chat-Befehl. Ohne Anmeldung, für Windows, macOS und Linux.",
 	"authors": ["HeldixClient"],
 	"entrypoint": "dev.heldixclient.addons.spotify.SpotifyAddon",
-	"api": 5
+	"api": 6
 }

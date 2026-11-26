@@ -126,6 +126,30 @@ final class AddonHudModule extends HudModule implements ModuleHandle {
 		return color.get();
 	}
 
+	// --- Tasten im Untermenü (API 6) -------------------------------------------------------------
+
+	private final List<Setting> keys = new ArrayList<>();
+
+	@Override
+	public dev.heldixclient.api.KeyHandle addKey(String key, String label, String description, int defaultKey, Runnable onPress) {
+		AddonContext.AddonKey handle = AddonContext.createKey(addon, addon.name(), key, label, defaultKey, onPress);
+		keys.add(new Setting.Key(label == null || label.isBlank() ? key : label, AddonSettings.text(description), handle.mapping()));
+		return handle;
+	}
+
+	@Override
+	public void showKey(dev.heldixclient.api.KeyHandle key, String label, String description) {
+		if (!(key instanceof AddonContext.AddonKey handle)) throw new IllegalArgumentException("showKey braucht eine Taste aus api.registerKey");
+		keys.add(new Setting.Key(label == null || label.isBlank() ? handle.mapping().getName() : label, AddonSettings.text(description), handle.mapping()));
+	}
+
+	@Override
+	public List<Setting> keys() {
+		List<Setting> list = new ArrayList<>(keys);
+		list.addAll(super.keys());
+		return list;
+	}
+
 	@Override
 	public void onToggle(ToggleListener listener) {
 		listeners.add(listener);

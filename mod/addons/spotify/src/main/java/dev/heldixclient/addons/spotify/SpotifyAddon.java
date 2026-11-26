@@ -14,7 +14,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 
 /**
- * Spotify-Addon für HeldixClient (API 5):
+ * Spotify-Addon für HeldixClient (API 6):
  * <ul>
  *   <li>HUD-Element in drei Darstellungen (Kompakt, Groß mit Cover, Nur Titel) mit Fortschritt und Akzentfarbe,
  *   im HUD-Stil und bei offenem Chat bedienbar (Knöpfe, Zeitleiste, Titel)</li>
@@ -81,19 +81,20 @@ public final class SpotifyAddon implements HeldixAddon {
 		announceHiddenOnly = module.addToggle("announce-hidden-only", "Einblendung nur ohne HUD-Element",
 				"Nur einblenden, wenn das HUD-Element aus oder ausgeblendet ist (auch mit F1)", false);
 		onlySpotify = module.addToggle("only-spotify", "Nur Spotify", "Aus: auch andere Player steuern, z. B. Browser oder VLC", true);
-		module.addAction("Abspielen / Pause", "Standardtaste: Pos1", "Umschalten", this::playPause);
-		module.addAction("Nächster Song", "Standardtaste: Bild ab", "Weiter", () -> command(() -> player.next()));
-		module.addAction("Vorheriger Song", "Standardtaste: Bild auf", "Zurück", () -> command(() -> player.previous()));
+		module.addAction("Abspielen / Pause", "", "Umschalten", this::playPause);
+		module.addAction("Nächster Song", "", "Weiter", () -> command(() -> player.next()));
+		module.addAction("Vorheriger Song", "", "Zurück", () -> command(() -> player.previous()));
 		module.addAction("Player wechseln", "Wenn mehrere Player laufen (Windows, „Nur Spotify“ aus)", "Wechseln", () -> command(() -> player.nextPlayer()));
 
-		api.registerKey("play-pause", "Abspielen/Pause", HeldixKeys.HOME, this::playPause);
-		api.registerKey("next", "Nächster Song", HeldixKeys.PAGE_DOWN, () -> command(() -> player.next()));
-		api.registerKey("previous", "Vorheriger Song", HeldixKeys.PAGE_UP, () -> command(() -> player.previous()));
-		api.registerKey("seek-forward", "10 Sekunden vor", HeldixKeys.NONE, () -> seek(SEEK_MS));
-		api.registerKey("seek-back", "10 Sekunden zurück", HeldixKeys.NONE, () -> seek(-SEEK_MS));
-		api.registerKey("shuffle", "Zufallswiedergabe", HeldixKeys.NONE, this::shuffle);
-		api.registerKey("repeat", "Wiederholen", HeldixKeys.NONE, this::repeat);
-		api.registerKey("share", "Song im Chat teilen", HeldixKeys.NONE, this::share);
+		// ab API 6: die Tasten stehen zusätzlich im Untermenü des Moduls unter „Tasten“ (dort umbelegbar)
+		module.showKey(api.registerKey("play-pause", "Abspielen/Pause", HeldixKeys.HOME, this::playPause), "Abspielen/Pause", "");
+		module.showKey(api.registerKey("next", "Nächster Song", HeldixKeys.PAGE_DOWN, () -> command(() -> player.next())), "Nächster Song", "");
+		module.showKey(api.registerKey("previous", "Vorheriger Song", HeldixKeys.PAGE_UP, () -> command(() -> player.previous())), "Vorheriger Song", "");
+		module.showKey(api.registerKey("seek-forward", "10 Sekunden vor", HeldixKeys.NONE, () -> seek(SEEK_MS)), "10 Sekunden vor", "");
+		module.showKey(api.registerKey("seek-back", "10 Sekunden zurück", HeldixKeys.NONE, () -> seek(-SEEK_MS)), "10 Sekunden zurück", "");
+		module.showKey(api.registerKey("shuffle", "Zufallswiedergabe", HeldixKeys.NONE, this::shuffle), "Zufallswiedergabe", "");
+		module.showKey(api.registerKey("repeat", "Wiederholen", HeldixKeys.NONE, this::repeat), "Wiederholen", "");
+		module.showKey(api.registerKey("share", "Song im Chat teilen", HeldixKeys.NONE, this::share), "Song im Chat teilen", "");
 
 		api.registerCommand("np", "[teilen]", "Zeigt den laufenden Song (teilen: für alle im Chat)", this::nowPlaying);
 		api.registerCommand("spotify", "play|pause|next|prev|+10|-10|shuffle|repeat|player", "Musik steuern", this::spotifyCommand);

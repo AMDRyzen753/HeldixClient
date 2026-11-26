@@ -2,9 +2,11 @@
 # Jede Zeile mit "- " erscheint im Launcher unter „Was ist neu“ und im Versionsverlauf auf heldixclient.com.
 # Vor jedem "npm run release" anpassen. Zeilen mit # werden ignoriert.
 
-- Neu: HUD überarbeitet – drei Stile (Heldix, Minimal, Klassisch), Deckkraft, Größe und Akzentfarbe für alle Widgets; Widgets bleiben bei jeder Fenstergröße an ihrem Platz; Rüstung mit Haltbarkeit, Effekte mit Restzeit
-- Neu: HUD-Editor mit Rechtsklick-Menü (Ausrichtung, Größe, Hintergrund, Farben, Rahmen, Ebene …), Einrasten mit Hilfslinien, Mehrfachauswahl und Rückgängig (Strg+Z)
-- Neu: Widgets sind anklickbar, wenn der Chat offen ist oder du die Taste „HUD bedienen“ drückst – z. B. Koordinaten in den Chat einfügen oder Spotify steuern
-- Neu: Konto-Wechsler im Spiel – im Heldix-Menü unter „Konten“ zwischen deinen Microsoft-Konten aus dem Launcher wechseln, ohne Neustart (abschaltbar in den Launcher-Einstellungen)
-- Neu: Addon-API Stufe 5 für Entwickler – anklickbare HUD-Widgets im HUD-Stil und Stil-Optionen für den HUD-Editor
-- Geändert: Konto-Menü im Launcher – die Knöpfe passen wieder in eine Zeile
+- Neu: Heldix-Menü neu aufgebaut – oben die Bereiche Spielen, Heldix, Profil und System, darunter ihre Seiten; der Inhalt bekommt die ganze Breite, und in kleinen Fenstern rückt alles zusammen
+- Neu: Schnellsuche im Heldix-Menü (Strg+K) – findet Seiten, Module, Einstellungen, Addons, Freunde und Wegpunkte und springt direkt hin
+- Neu: Heldix-Menü ganz mit der Tastatur bedienbar – Pfeile, Enter, Strg+Tab für Reiter und Strg+1 bis 4 für die Bereiche
+- Neu: Spielermenü – mit dem Fadenkreuz auf einen Spieler zielen und Mausrad klicken: Freund hinzufügen, Nachricht, Name kopieren und mehr
+- Neu: Voice Chat als Addon im Store – mit HeldixClient-Spielern in der Nähe sprechen, auf jedem Server ohne Plugin (Push-to-Talk oder Sprachaktivierung, Richtung in Stereo)
+- Neu: Tasten direkt im Heldix-Menü ändern – im Untermenü jedes Moduls (Zoom, Freelook, Spotify …) und unter System → Einstellungen; dazu für jedes Modul eine Taste zum Ein- und Ausschalten
+- Neu: Übersicht mit Schnellschaltern für deine Lieblingsmodule (wählbar je Modul, auch im Pausemenü) und Hinweisen zu Updates, Anfragen und Problemen
+- Neu: Addon-API Stufe 6 für Entwickler – Tasten im Untermenü eines Moduls, Spieler in der Nähe, Spielermenü, Symbole am Namensschild und Sprachkanal

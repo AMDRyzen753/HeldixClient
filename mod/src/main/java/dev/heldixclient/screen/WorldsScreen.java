@@ -120,6 +120,11 @@ public class WorldsScreen extends ShellScreen {
 	// ---------- Aufbau ----------
 
 	@Override
+	protected int toolbarActionsWidth() {
+		return ActionButton.widthFor("Neue Welt", "plus");
+	}
+
+	@Override
 	protected void initContent() {
 		String label = "Neue Welt";
 		int w = ActionButton.widthFor(label, "plus");
@@ -374,7 +379,7 @@ public class WorldsScreen extends ShellScreen {
 	@Override
 	public boolean keyPressed(KeyEvent event) {
 		boolean typing = search != null && search.isFocused();
-		if (!typing) {
+		if (!typing && !widgetKeyFocus()) {
 			List<LevelSummary> list = visible();
 			int index = -1;
 			for (int i = 0; i < list.size(); i++) if (list.get(i).getLevelId().equals(selected)) index = i;
