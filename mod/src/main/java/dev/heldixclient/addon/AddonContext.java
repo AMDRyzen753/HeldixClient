@@ -7,6 +7,8 @@ import dev.heldixclient.loader.api.KeyMappings;
 import dev.heldixclient.loader.HeldixLoader;
 import dev.heldixclient.api.AddonConfig;
 import dev.heldixclient.api.AddonInfo;
+import dev.heldixclient.api.CommandHandler;
+import dev.heldixclient.api.GameInfo;
 import dev.heldixclient.api.HeldixApi;
 import dev.heldixclient.api.HeldixEvents;
 import dev.heldixclient.api.HeldixLogger;
@@ -15,6 +17,9 @@ import dev.heldixclient.api.KeyHandle;
 import dev.heldixclient.api.ModuleHandle;
 import dev.heldixclient.api.ModuleSpec;
 import dev.heldixclient.api.PlayerInfo;
+import dev.heldixclient.api.PlayerState;
+import dev.heldixclient.api.Registration;
+import dev.heldixclient.api.Scheduler;
 import dev.heldixclient.module.ModuleManager;
 import dev.heldixclient.ui.Theme;
 import net.minecraft.SharedConstants;
@@ -23,6 +28,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.TextColor;
+import net.minecraft.util.StringUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -83,6 +89,66 @@ final class AddonContext implements HeldixApi {
 			@Override
 			public void onChatMessage(Consumer<String> listener) {
 				AddonManager.CHAT.add(new AddonManager.Listener<>(addon, listener));
+			}
+
+			// --- API 3 ---
+
+			@Override
+			public Registration onServerJoin(Consumer<String> listener) {
+				return listen(AddonManager.SERVER_JOIN, listener);
+			}
+
+			@Override
+			public Registration onServerLeave(Consumer<String> listener) {
+				return listen(AddonManager.SERVER_LEAVE, listener);
+			}
+
+			@Override
+			public Registration onScreenOpen(Consumer<String> listener) {
+				return listen(AddonManager.SCREEN_OPEN, listener);
+			}
+
+			@Override
+			public Registration onScreenClose(Consumer<String> listener) {
+				return listen(AddonManager.SCREEN_CLOSE, listener);
+			}
+
+			@Override
+			public Registration onDeath(Runnable listener) {
+				return listen(AddonManager.DEATH, listener);
+			}
+
+			@Override
+			public Registration onRespawn(Runnable listener) {
+				return listen(AddonManager.RESPAWN, listener);
+			}
+
+			@Override
+			public Registration onDimensionChange(Consumer<String> listener) {
+				return listen(AddonManager.DIMENSION, listener);
+			}
+
+			@Override
+			public Registration onHealthChange(HealthListener listener) {
+				return listen(AddonManager.HEALTH, listener);
+			}
+		};
+	}
+
+	/** Listener anmelden; die Registration meldet genau diesen wieder ab */
+	private <T> Registration listen(List<AddonManager.Listener<T>> list, T callback) {
+		Objects.requireNonNull(callback, "listener");
+		AddonManager.Listener<T> listener = new AddonManager.Listener<>(addon, callback);
+		list.add(listener);
+		return new Registration() {
+			@Override
+			public void cancel() {
+				list.removeIf(entry -> entry == listener);
+			}
+
+			@Override
+			public boolean isActive() {
+				return addon.isActive() && list.stream().anyMatch(entry -> entry == listener);
 			}
 		};
 	}
@@ -170,8 +236,10 @@ final class AddonContext implements HeldixApi {
 		if (keyCategory == null) keyCategory = KeyMapping.Category.register(HeldixClient.id("addons"));
 		// Der Name ist zugleich der Schlüssel in options.txt; ":" trennt dort Name und Wert
 		String label = (info.name() + " – " + (name == null || name.isBlank() ? id : name)).replace(':', ' ');
-		KeyMapping mapping = KeyMappings.register(new KeyMapping(label, InputConstants.Type.KEYBOARD, defaultKey, keyCategory));
-		AddonManager.KEYS.add(new AddonManager.Key(addon, mapping, onPress));
+		// HeldixKeys sind GLFW-Codes; Minecraft nimmt seit 26.x SDL-Scancodes (NONE = -1 würde sonst abstürzen)
+		InputConstants.Key key = AddonKeys.toMinecraft(defaultKey);
+		KeyMapping mapping = KeyMappings.register(new KeyMapping(label, InputConstants.Type.KEYBOARD, key.getValue(), keyCategory));
+		AddonManager.KEYS.add(new AddonManager.Key(addon, mapping, onPress, defaultKey));
 		return new KeyHandle() {
 			@Override
 			public boolean isDown() {
@@ -204,5 +272,48 @@ final class AddonContext implements HeldixApi {
 			log.warn("Ordner {} nicht anlegbar", dir, e);
 		}
 		return dir;
+	}
+
+	// --- API 3 ------------------------------------------------------------------------------
+
+	@Override
+	public GameInfo game() {
+		return AddonSnapshots.game();
+	}
+
+	@Override
+	public Optional<PlayerState> playerState() {
+		return Optional.ofNullable(AddonSnapshots.player());
+	}
+
+	@Override
+	public synchronized Scheduler scheduler() {
+		if (addon.scheduler == null) {
+			addon.scheduler = new AddonScheduler(addon);
+			if (!addon.isActive() && addon.instance != null) addon.scheduler.shutdown();
+		}
+		return addon.scheduler;
+	}
+
+	@Override
+	public Registration registerCommand(String name, String usage, String description, CommandHandler handler) {
+		return AddonCommands.register(addon, name, usage, description, handler);
+	}
+
+	@Override
+	public boolean sendChatMessage(String message) {
+		AddonManager.requireUserAction(addon);
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player == null || mc.player.connection == null || message == null) return false;
+		// § und Steuerzeichen würden vom Server mit einem Rauswurf beantwortet
+		String text = StringUtil.filterText(message.replace('§', ' ')).strip();
+		if (text.startsWith("/")) throw new IllegalArgumentException("Befehle (mit „/“) dürfen Addons nicht senden");
+		text = StringUtil.trimChatMessage(text);
+		if (!text.isEmpty() && Character.isHighSurrogate(text.charAt(text.length() - 1))) text = text.substring(0, text.length() - 1);
+		text = text.strip();
+		if (text.isEmpty()) return false;
+		log.info("Sendet Chatnachricht an den Server: {}", text);
+		mc.player.connection.sendChat(text);
+		return true;
 	}
 }

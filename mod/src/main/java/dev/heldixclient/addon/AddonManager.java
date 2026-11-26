@@ -4,12 +4,17 @@ import com.google.gson.Gson;
 import dev.heldixclient.HeldixClient;
 import dev.heldixclient.api.HeldixAddon;
 import dev.heldixclient.api.HeldixApi;
+import dev.heldixclient.api.HeldixEvents;
 import dev.heldixclient.loader.HeldixLoader;
 import dev.heldixclient.loader.api.event.ChatEvents;
 import dev.heldixclient.loader.api.event.ClientEvents;
 import dev.heldixclient.loader.api.event.WorldEvents;
 import dev.heldixclient.module.Module;
 import dev.heldixclient.module.ModuleManager;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.player.LocalPlayer;
 
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -23,6 +28,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -44,9 +50,12 @@ public final class AddonManager {
 	record Listener<T>(LoadedAddon addon, T callback) {
 	}
 
-	/** Taste eines Addons (API 2) */
-	record Key(LoadedAddon addon, net.minecraft.client.KeyMapping mapping, Runnable onPress) {
+	/** Taste eines Addons (API 2); apiCode = Standardtaste als Code aus HeldixKeys */
+	record Key(LoadedAddon addon, net.minecraft.client.KeyMapping mapping, Runnable onPress, int apiCode) {
 	}
+
+	/** Falsch übersetzte Tasten aus options.txt einmal nach dem Laden der Optionen reparieren */
+	private static boolean keysMigrated;
 
 	private static final List<LoadedAddon> ADDONS = new ArrayList<>();
 	static final List<Listener<Runnable>> TICK = new ArrayList<>();
@@ -54,6 +63,27 @@ public final class AddonManager {
 	static final List<Listener<Runnable>> WORLD_LEAVE = new ArrayList<>();
 	static final List<Listener<Consumer<String>>> CHAT = new ArrayList<>();
 	static final List<Key> KEYS = new ArrayList<>();
+	// API 3: abmeldbar (Registration), deshalb thread-sicher
+	static final List<Listener<Consumer<String>>> SERVER_JOIN = new CopyOnWriteArrayList<>();
+	static final List<Listener<Consumer<String>>> SERVER_LEAVE = new CopyOnWriteArrayList<>();
+	static final List<Listener<Consumer<String>>> SCREEN_OPEN = new CopyOnWriteArrayList<>();
+	static final List<Listener<Consumer<String>>> SCREEN_CLOSE = new CopyOnWriteArrayList<>();
+	static final List<Listener<Runnable>> DEATH = new CopyOnWriteArrayList<>();
+	static final List<Listener<Runnable>> RESPAWN = new CopyOnWriteArrayList<>();
+	static final List<Listener<Consumer<String>>> DIMENSION = new CopyOnWriteArrayList<>();
+	static final List<Listener<HeldixEvents.HealthListener>> HEALTH = new CopyOnWriteArrayList<>();
+
+	/** Zustand aus dem letzten Tick, um Änderungen zu erkennen (nur Haupt-Thread) */
+	private static Screen lastScreen;
+	private static String lastScreenKind = "";
+	private static boolean wasDead;
+	private static String lastDimension;
+	private static float lastHealth = -1;
+	private static String serverAddress;
+
+	/** Addon, dessen Taste, Befehl oder Knopf gerade läuft (Chat an den Server erlaubt), sonst null */
+	private static LoadedAddon actionAddon;
+	private static int actionMessages;
 	/** älteste API-Version, für die gebaute Addons noch laufen */
 	public static final int MIN_API = 1;
 
@@ -191,15 +221,21 @@ public final class AddonManager {
 		return message != null ? message : root.getClass().getSimpleName();
 	}
 
-	/** Schaltet ein Addon ab: Module entfernen, Listener werden ab jetzt übersprungen. */
+	/** Schaltet ein Addon ab: Module entfernen, geplante Aufgaben abbrechen, Listener werden ab jetzt übersprungen. */
 	static void deactivate(LoadedAddon addon, String reason) {
 		addon.state = LoadedAddon.State.FAILED;
 		addon.error = reason;
 		for (Module module : addon.modules) ModuleManager.removeModule(module);
+		if (addon.scheduler != null) addon.scheduler.shutdown();
 	}
 
-	/** Fehler eines Addons zur Laufzeit melden; nach MAX_ERRORS wird es abgeschaltet. */
+	/** Fehler eines Addons zur Laufzeit melden; nach MAX_ERRORS wird es abgeschaltet. Nur im Haupt-Thread. */
 	static void reportError(LoadedAddon addon, String where, Throwable t) {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft != null && !minecraft.isSameThread()) {
+			minecraft.execute(() -> reportError(addon, where, t));
+			return;
+		}
 		addon.errorCount++;
 		HeldixClient.LOGGER.error("Heldix-Addon {} – Fehler in {}", addon.name(), where, t);
 		if (addon.errorCount >= MAX_ERRORS && addon.isActive()) {
@@ -219,13 +255,62 @@ public final class AddonManager {
 		}
 	}
 
+	/** API 3: Listener aufrufen; Fehler zählen wie alle Addon-Fehler */
+	static <T> void dispatch(List<Listener<T>> listeners, String where, Consumer<T> call) {
+		if (listeners.isEmpty()) return;
+		for (Listener<T> listener : List.copyOf(listeners)) {
+			if (!listener.addon().isActive()) continue;
+			try {
+				call.accept(listener.callback());
+			} catch (Throwable t) {
+				reportError(listener.addon(), where, t);
+			}
+		}
+	}
+
 	private static void registerEvents() {
 		ClientEvents.TICK_END.register(minecraft -> {
+			AddonSnapshots.tick();
+			if (!keysMigrated) {
+				keysMigrated = true;
+				try {
+					AddonKeys.migrate(KEYS);
+				} catch (RuntimeException e) {
+					HeldixClient.LOGGER.warn("Heldix-Addons: Tastenbelegung nicht prüfbar", e);
+				}
+			}
 			keys();
+			for (LoadedAddon addon : ADDONS) {
+				if (addon.scheduler != null && addon.isActive()) addon.scheduler.tick();
+			}
+			try {
+				watch(minecraft);
+			} catch (RuntimeException e) {
+				// Fehler der Addons fängt dispatch ab; das hier wäre ein Fehler von HeldixClient selbst
+				HeldixClient.LOGGER.warn("Heldix-Addons: Events nicht prüfbar", e);
+			}
 			runAll(TICK, "onTick");
 		});
-		WorldEvents.JOIN.register(minecraft -> runAll(WORLD_JOIN, "onWorldJoin"));
-		WorldEvents.LEAVE.register(minecraft -> runAll(WORLD_LEAVE, "onWorldLeave"));
+		WorldEvents.JOIN.register(minecraft -> {
+			lastDimension = null;
+			lastHealth = -1;
+			wasDead = false;
+			runAll(WORLD_JOIN, "onWorldJoin");
+			ServerData server = minecraft.getCurrentServer();
+			serverAddress = server != null && !minecraft.isLocalServer() ? server.ip : null;
+			if (serverAddress != null) {
+				String address = serverAddress;
+				dispatch(SERVER_JOIN, "onServerJoin", listener -> listener.accept(address));
+			}
+		});
+		WorldEvents.LEAVE.register(minecraft -> {
+			runAll(WORLD_LEAVE, "onWorldLeave");
+			if (serverAddress != null) {
+				String address = serverAddress;
+				serverAddress = null;
+				dispatch(SERVER_LEAVE, "onServerLeave", listener -> listener.accept(address));
+			}
+		});
 		ChatEvents.RECEIVE.register((message, fromPlayer) -> chat(message.getString()));
 		ClientEvents.STOPPING.register(minecraft -> {
 			for (LoadedAddon addon : ADDONS) {
@@ -236,20 +321,91 @@ public final class AddonManager {
 					HeldixClient.LOGGER.warn("Heldix-Addon {}: Fehler in onDisable", addon.name(), t);
 				}
 			}
+			for (LoadedAddon addon : ADDONS) {
+				if (addon.scheduler != null) addon.scheduler.shutdown();
+			}
 		});
+	}
+
+	/** API 3: Menüs, Tod und Wiederbeleben, Dimension und Leben einmal pro Tick vergleichen */
+	private static void watch(Minecraft mc) {
+		Screen screen = mc.gui.screen();
+		if (screen != lastScreen) {
+			String closed = lastScreenKind;
+			boolean hadScreen = lastScreen != null;
+			lastScreen = screen;
+			lastScreenKind = AddonSnapshots.screenKind(screen);
+			if (hadScreen) dispatch(SCREEN_CLOSE, "onScreenClose", listener -> listener.accept(closed));
+			String opened = lastScreenKind;
+			if (screen != null) dispatch(SCREEN_OPEN, "onScreenOpen", listener -> listener.accept(opened));
+		}
+
+		LocalPlayer player = mc.player;
+		if (player == null || mc.level == null) {
+			wasDead = false;
+			lastDimension = null;
+			lastHealth = -1;
+			return;
+		}
+		boolean dead = player.isDeadOrDying();
+		if (dead != wasDead) {
+			wasDead = dead;
+			if (dead) dispatch(DEATH, "onDeath", Runnable::run);
+			else dispatch(RESPAWN, "onRespawn", Runnable::run);
+		}
+		String dimension = mc.level.dimension().identifier().getPath();
+		if (lastDimension != null && !dimension.equals(lastDimension)) {
+			dispatch(DIMENSION, "onDimensionChange", listener -> listener.accept(dimension));
+		}
+		lastDimension = dimension;
+		float health = player.getHealth();
+		if (lastHealth >= 0 && Math.abs(health - lastHealth) > 1e-4f) {
+			float previous = lastHealth;
+			dispatch(HEALTH, "onHealthChange", listener -> listener.onChange(previous, health));
+		}
+		lastHealth = health;
 	}
 
 	private static void keys() {
 		for (Key key : KEYS) {
 			while (key.mapping().consumeClick()) {
 				if (!key.addon().isActive()) continue;
-				try {
-					key.onPress().run();
-				} catch (Throwable t) {
-					reportError(key.addon(), "Taste " + key.mapping().getName(), t);
-				}
+				userAction(key.addon(), "Taste " + key.mapping().getName(), key.onPress());
 			}
 		}
+	}
+
+	// --- Aktionen des Spielers (API 3): nur hier darf ein Addon an den Server chatten ----------
+
+	/** Führt eine Taste, einen Befehl oder einen Knopf eines Addons aus; Fehler zählen als Addon-Fehler */
+	static void userAction(LoadedAddon addon, String where, Runnable action) {
+		LoadedAddon previousAddon = actionAddon;
+		int previousMessages = actionMessages;
+		actionAddon = addon;
+		actionMessages = 0;
+		try {
+			action.run();
+		} catch (Throwable t) {
+			reportError(addon, where, t);
+		} finally {
+			actionAddon = previousAddon;
+			actionMessages = previousMessages;
+		}
+	}
+
+	/** Vor dem Senden: wirft, wenn gerade keine Aktion des Spielers für dieses Addon läuft */
+	static void requireUserAction(LoadedAddon addon) {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft == null || !minecraft.isSameThread() || actionAddon != addon) {
+			throw new IllegalStateException("Chat an den Server nur direkt nach einer Aktion des Spielers (Taste, Chat-Befehl oder Knopf)");
+		}
+		if (actionMessages >= 1) throw new IllegalStateException("Höchstens eine Chatnachricht an den Server pro Aktion");
+		actionMessages++;
+	}
+
+	/** ChatScreen.handleChatInput: Addon-Befehl („.np“) statt Nachricht an den Server? */
+	public static boolean handleChatInput(String message, boolean addToHistory) {
+		return AddonCommands.handle(message, addToHistory);
 	}
 
 	private static void chat(String text) {

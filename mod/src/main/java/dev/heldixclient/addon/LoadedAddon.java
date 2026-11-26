@@ -19,6 +19,8 @@ public final class LoadedAddon {
 	HeldixAddon instance;
 	URLClassLoader classLoader;
 	AddonContext context;
+	/** API 3: erst beim ersten Aufruf von scheduler() angelegt */
+	AddonScheduler scheduler;
 	final List<Module> modules = new ArrayList<>();
 	int errorCount;
 
@@ -70,6 +72,16 @@ public final class LoadedAddon {
 
 	public int moduleCount() {
 		return modules.size();
+	}
+
+	/** Fehler zur Laufzeit bisher (ab drei wird das Addon abgeschaltet) */
+	public int errorCount() {
+		return errorCount;
+	}
+
+	/** Die API, wie das Addon sie sieht (null, wenn es nicht geladen wurde) – z. B. für den Autotest */
+	public dev.heldixclient.api.HeldixApi api() {
+		return context;
 	}
 
 	/** Icon für die Addon-Liste: das eigene Icon des ersten Moduls, sonst das Puzzleteil */

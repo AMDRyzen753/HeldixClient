@@ -2,11 +2,15 @@
 # Liest Titel, Künstler, Album, Cover und Fortschritt der laufenden Wiedergabe (Spotify oder anderer Player)
 # und führt Befehle aus. Kein Spotify-Konto, kein Premium, kein API-Schlüssel nötig.
 #
-# Ausgabe (eine Zeile pro Sekunde, Tab-getrennt):
+# Ausgabe (eine Zeile pro Sekunde bzw. nach jedem Befehl, Tab-getrennt):
 #   STATE <tab> App <tab> Status <tab> Titel <tab> Künstler <tab> Album <tab> PositionMs <tab> DauerMs <tab> StandMs <tab> Cover-Datei
+#         <tab> Zufall (True/False, leer = unbekannt) <tab> Wiederholen (None/List/Track, leer = unbekannt) <tab> Spulen möglich (True/False)
+#         <tab> Nummer des Players <tab> alle Player (durch | getrennt)
 #   NONE                      – nichts spielt / Player nicht offen
+#   RESULT <tab> Befehl <tab> ok|unsupported|failed [<tab> Info]
 #   ERROR <tab> Meldung
-# Eingabe (eine Zeile pro Befehl): playpause | next | previous | mode spotify | mode any | quit
+# Eingabe (eine Zeile pro Befehl): playpause | next | previous | position <ms> | shuffle | repeat | player next
+#                                  | mode spotify | mode any | quit
 param(
 	[string]$CoverDir = (Join-Path $env:TEMP 'heldix-media'),
 	[string]$Mode = 'spotify'
@@ -29,6 +33,7 @@ function Await($operation, [Type]$type) {
 
 $null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
 $null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties, Windows.Media.Control, ContentType = WindowsRuntime]
+$null = [Windows.Media.MediaPlaybackAutoRepeatMode, Windows.Media, ContentType = WindowsRuntime]
 $null = [Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage.Streams, ContentType = WindowsRuntime]
 $null = [Windows.Storage.Streams.IInputStream, Windows.Storage.Streams, ContentType = WindowsRuntime]
 # Der WinRT-Stream ist für PowerShell nur ein __ComObject: Umwandlung in einen .NET-Stream per Reflection
@@ -42,18 +47,35 @@ function Clean([string]$text) {
 	return ($text -replace "[`t`r`n]", ' ').Trim()
 }
 
-function Find-Session {
+# Player, zwischen denen man wählen kann: nur Spotify oder alle, die sich bei Windows angemeldet haben
+function Candidates {
 	$sessions = @($manager.GetSessions())
-	$spotify = $sessions | Where-Object { $_.SourceAppUserModelId -like '*Spotify*' } | Select-Object -First 1
+	if ($Mode -eq 'any') { return $sessions }
+	return @($sessions | Where-Object { $_.SourceAppUserModelId -like '*Spotify*' })
+}
+
+# vom Spieler gewählter Player („Player wechseln“), sonst Spotify, sonst der aktuelle von Windows
+$script:Pinned = ''
+function Find-Session {
+	$candidates = @(Candidates)
+	if ($candidates.Count -eq 0) { return $null }
+	if ($script:Pinned -ne '') {
+		$pinned = $candidates | Where-Object { $_.SourceAppUserModelId -eq $script:Pinned } | Select-Object -First 1
+		if ($pinned) { return $pinned }
+	}
+	$spotify = $candidates | Where-Object { $_.SourceAppUserModelId -like '*Spotify*' } | Select-Object -First 1
 	if ($spotify) { return $spotify }
-	if ($Mode -eq 'any') { return $manager.GetCurrentSession() }
-	return $null
+	if ($Mode -eq 'any') {
+		$current = $manager.GetCurrentSession()
+		if ($current) { return $current }
+	}
+	return $candidates[0]
 }
 
 function App-Name([string]$id) {
 	if ($id -like '*Spotify*') { return 'Spotify' }
-	$name = ($id -split '[\\/!]')[-1] -replace '\.exe$', ''
-	if ($name.Length -gt 0) { return $name.Substring(0, 1).ToUpper() + $name.Substring(1) }
+	$name = (($id -split '[\\/!]')[-1] -replace '\.exe$', '') -replace '\|', ' '
+	if ($name.Length -gt 0) { return (Clean ($name.Substring(0, 1).ToUpper() + $name.Substring(1))) }
 	return 'Player'
 }
 
@@ -130,6 +152,11 @@ function Save-Cover($properties) {
 	return $script:coverFile
 }
 
+function Optional($value) {
+	if ($null -eq $value) { return '' }
+	return [string]$value
+}
+
 function Write-State {
 	$session = Find-Session
 	if ($null -eq $session) {
@@ -145,6 +172,17 @@ function Write-State {
 		return
 	}
 	$cover = Save-Cover $properties
+	$candidates = @(Candidates)
+	$names = @($candidates | ForEach-Object { App-Name $_.SourceAppUserModelId })
+	$index = -1
+	for ($i = 0; $i -lt $candidates.Count; $i++) {
+		if ($candidates[$i].SourceAppUserModelId -eq $session.SourceAppUserModelId) { $index = $i; break }
+	}
+	$controls = $playback.Controls
+	$shuffle = ''
+	if ($controls.IsShuffleEnabled) { $shuffle = Optional $playback.IsShuffleActive }
+	$repeat = ''
+	if ($controls.IsRepeatEnabled) { $repeat = Optional $playback.AutoRepeatMode }
 	$fields = @(
 		'STATE',
 		(App-Name $session.SourceAppUserModelId),
@@ -155,18 +193,69 @@ function Write-State {
 		[long]$timeline.Position.TotalMilliseconds,
 		[long]$timeline.EndTime.TotalMilliseconds,
 		[long]$timeline.LastUpdatedTime.ToUnixTimeMilliseconds(),
-		$cover
+		$cover,
+		$shuffle,
+		$repeat,
+		[string][bool]$controls.IsPlaybackPositionEnabled,
+		$index,
+		($names -join '|')
 	)
 	[Console]::Out.WriteLine(($fields -join "`t"))
 }
 
-function Run-Command([string]$command) {
+function Write-Result([string]$command, [string]$result, [string]$info = '') {
+	[Console]::Out.WriteLine("RESULT`t$command`t$result`t$info")
+}
+
+function Run-Command([string]$line) {
+	$parts = $line -split ' ', 2
+	$command = $parts[0]
+	$argument = if ($parts.Count -gt 1) { $parts[1] } else { '' }
+	if ($command -eq 'player') {
+		# zum nächsten Player wechseln (nur mit „mode any“ sinnvoll)
+		$candidates = @(Candidates)
+		if ($candidates.Count -lt 2) { Write-Result 'player' 'unsupported'; return }
+		$current = Find-Session
+		$index = 0
+		for ($i = 0; $i -lt $candidates.Count; $i++) {
+			if ($current -and $candidates[$i].SourceAppUserModelId -eq $current.SourceAppUserModelId) { $index = $i; break }
+		}
+		$next = $candidates[($index + 1) % $candidates.Count]
+		$script:Pinned = $next.SourceAppUserModelId
+		Write-Result 'player' 'ok' (App-Name $next.SourceAppUserModelId)
+		return
+	}
 	$session = Find-Session
 	if ($null -eq $session) { return }
+	$playback = $session.GetPlaybackInfo()
+	$controls = $playback.Controls
 	switch ($command) {
 		'playpause' { $null = Await ($session.TryTogglePlayPauseAsync()) ([bool]) }
 		'next' { $null = Await ($session.TrySkipNextAsync()) ([bool]) }
 		'previous' { $null = Await ($session.TrySkipPreviousAsync()) ([bool]) }
+		'position' {
+			if (-not $controls.IsPlaybackPositionEnabled) { Write-Result 'position' 'unsupported'; return }
+			# Position in Ticks (100 ns)
+			$ticks = [long]$argument * 10000
+			$ok = Await ($session.TryChangePlaybackPositionAsync($ticks)) ([bool])
+			if (-not $ok) { Write-Result 'position' 'failed' }
+		}
+		'shuffle' {
+			if (-not $controls.IsShuffleEnabled) { Write-Result 'shuffle' 'unsupported'; return }
+			$target = -not ($playback.IsShuffleActive -eq $true)
+			$ok = Await ($session.TryChangeShuffleActiveAsync($target)) ([bool])
+			if (-not $ok) { Write-Result 'shuffle' 'failed' }
+		}
+		'repeat' {
+			if (-not $controls.IsRepeatEnabled) { Write-Result 'repeat' 'unsupported'; return }
+			$next = switch ([string]$playback.AutoRepeatMode) {
+				'List' { [Windows.Media.MediaPlaybackAutoRepeatMode]::Track }
+				'Track' { [Windows.Media.MediaPlaybackAutoRepeatMode]::None }
+				default { [Windows.Media.MediaPlaybackAutoRepeatMode]::List }
+			}
+			$ok = Await ($session.TryChangeAutoRepeatModeAsync($next)) ([bool])
+			if (-not $ok) { Write-Result 'repeat' 'failed' }
+		}
 	}
 }
 
@@ -189,9 +278,16 @@ while ($running) {
 				if ($line -eq 'quit') { $running = $false; break }
 				if ($line -like 'mode *') {
 					$script:Mode = $line.Substring(5)
+					$script:Pinned = ''
 				} elseif ($line -ne '') {
-					Run-Command $line
+					try {
+						Run-Command $line
+					} catch {
+						Write-Result (($line -split ' ')[0]) 'failed'
+						[Console]::Out.WriteLine("ERROR`t" + (Clean $_.Exception.Message))
+					}
 				}
+				# nach einem Befehl gleich den neuen Zustand melden
 				$lastState = [DateTime]::MinValue
 			}
 			if (-not $running) { break }

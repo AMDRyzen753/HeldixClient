@@ -106,4 +106,73 @@ public interface HudCanvas {
 	 * @since 2
 	 */
 	boolean isPreview();
+
+	// --- ab API 3 ---------------------------------------------------------------------------
+
+	/**
+	 * Fortschrittsbalken mit runden Enden.
+	 *
+	 * @param progress   von 0 bis 1
+	 * @param background Farbe der Bahn, z. B. 0x2EFFFFFF
+	 * @param foreground Farbe des gefüllten Teils
+	 * @since 3
+	 */
+	void progressBar(float x, float y, float width, float height, float progress, int background, int foreground);
+
+	/**
+	 * Fläche mit Farbverlauf von startColor nach endColor (waagrecht: links → rechts, sonst oben → unten).
+	 *
+	 * @since 3
+	 */
+	void gradientRect(int x, int y, int width, int height, int startColor, int endColor, boolean horizontal);
+
+	/**
+	 * Gerade Linie von (x1, y1) nach (x2, y2) in beliebiger Richtung.
+	 *
+	 * @param thickness Dicke in GUI-Pixeln, z. B. 1 oder 1.5
+	 * @since 3
+	 */
+	void line(float x1, float y1, float x2, float y2, float thickness, int color);
+
+	/**
+	 * Ausgefüllter, kantengeglätteter Kreis.
+	 *
+	 * @since 3
+	 */
+	void circle(float centerX, float centerY, float radius, int color);
+
+	/**
+	 * Item-Symbol wie im Inventar, z. B. "minecraft:diamond_sword" (ohne Namensraum gilt "minecraft").
+	 *
+	 * @param size Kantenlänge in GUI-Pixeln (16 = wie im Inventar)
+	 * @return false bei unbekanntem Item (dann wird nichts gezeichnet)
+	 * @since 3
+	 */
+	boolean item(String itemId, int x, int y, int size);
+
+	/**
+	 * Kopf (Gesicht) eines Spielers: per Name für Spieler auf dem aktuellen Server bzw. sich selbst, per UUID
+	 * für alle (der Skin wird dann im Hintergrund geladen, bis dahin erscheint der Standard-Skin).
+	 *
+	 * @return false, wenn der Name hier nicht bekannt ist (dann wird nichts gezeichnet)
+	 * @since 3
+	 */
+	boolean playerHead(String nameOrUuid, int x, int y, int size);
+
+	/**
+	 * Text in höchstens maxWidth Pixeln: Passt er nicht, läuft er langsam hin und her (Laufschrift) und wird an
+	 * den Rändern abgeschnitten. Passt er, wird er ganz normal gezeichnet.
+	 *
+	 * @since 3
+	 */
+	void scrollingText(String text, int x, int y, int maxWidth, int color, TextStyle style);
+
+	/**
+	 * Typische Farbe eines PNG-Bildes (Durchschnitt, kräftige Farben zählen mehr), z. B. als Akzentfarbe passend
+	 * zu einem Album-Cover. Wird mit dem Bild zwischengespeichert.
+	 *
+	 * @return deckende ARGB-Farbe, 0 wenn das Bild fehlt oder ungültig ist
+	 * @since 3
+	 */
+	int imageColor(Path png);
 }

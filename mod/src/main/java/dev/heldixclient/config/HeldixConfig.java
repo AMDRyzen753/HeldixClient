@@ -87,6 +87,10 @@ public final class HeldixConfig {
 		public boolean socialNotifications = true;
 		/** Heldix-Capes anderer Spieler zeigen */
 		public boolean socialCapes = true;
+		/** Heldix-Symbol (mit Rolle) vor Namen in der Tab-Liste, dazu die Zeile „HeldixClient: … Spieler hier“ */
+		public boolean badgeTabList = true;
+		/** Heldix-Symbol (mit Rolle) im Namensschild über den Köpfen anderer Spieler */
+		public boolean badgeNameTags = true;
 		/** Nachrichten von Freunden annehmen */
 		public boolean socialMessages = true;
 		/** zuletzt betretener Server (für "Weiterspielen" im Hauptmenü) */

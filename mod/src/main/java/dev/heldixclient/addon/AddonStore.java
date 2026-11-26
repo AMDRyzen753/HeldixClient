@@ -77,7 +77,18 @@ public final class AddonStore {
 	/** Ein Addon aus dem Store (nur aus dem geprüften, signierten Manifest) */
 	public record Entry(String id, String name, String version, String summary, String description, List<String> authors, int api,
 			String icon, String category, List<String> platforms, String file, long size, String sha256, String date, List<String> notes,
-			long downloads) {
+			long downloads, boolean official, String author, double ratingAverage, int ratingCount) {
+		/** Herkunft für die Anzeige: „Offiziell“ oder „Community · <Name>“ (aus dem signierten Manifest) */
+		public String origin() {
+			return official ? "Offiziell" : author != null ? "Community · " + author : "Community";
+		}
+
+		/** z. B. „4,5 Sterne (12)“, null ohne Bewertungen (Anzeigedaten des Dienstes, nicht signiert) */
+		public String ratingText() {
+			if (ratingCount <= 0) return null;
+			return String.format(Locale.GERMANY, "%.1f", ratingAverage) + (ratingCount == 1 ? " Sterne (1)" : " Sterne (" + ratingCount + ")");
+		}
+
 		/** Warum es hier nicht läuft, sonst null */
 		public String problem() {
 			if (api > HeldixApi.API_VERSION) return "Braucht einen neueren HeldixClient";
@@ -191,6 +202,28 @@ public final class AddonStore {
 	// Liste laden
 	// ======================================================================================
 
+	private static volatile boolean updateHintShown;
+
+	/** Einmal beim Start: nach etwa 20 Sekunden still nach Addon-Updates sehen (nur mit Heldix-Dienst). */
+	public static void init() {
+		int[] ticks = {0};
+		dev.heldixclient.loader.api.event.ClientEvents.TICK_END.register(minecraft -> {
+			if (ticks[0] < 0 || ++ticks[0] < 400) return;
+			ticks[0] = -1;
+			refresh(false);
+		});
+	}
+
+	/** Nach dem Laden: gibt es Updates, einmal pro Sitzung eine Einblendung */
+	private static void hintUpdates() {
+		if (updateHintShown) return;
+		int count = updateCount();
+		if (count <= 0) return;
+		updateHintShown = true;
+		dev.heldixclient.hud.Notifications.show("addon-updates", "Addon-Updates verfügbar",
+				(count == 1 ? "1 Addon kann" : count + " Addons können") + " aktualisiert werden – Heldix-Menü → Addons", null);
+	}
+
 	/** Liste (neu) laden; ohne force nur, wenn sie älter als fünf Minuten ist. */
 	public static void refresh(boolean force) {
 		if (!available() || status == Status.LOADING) return;
@@ -208,6 +241,7 @@ public final class AddonStore {
 				status = Status.ERROR;
 			}
 			rescan();
+			if (status == Status.READY) hintUpdates();
 		});
 	}
 
@@ -226,7 +260,14 @@ public final class AddonStore {
 			try {
 				JsonObject item = element.getAsJsonObject();
 				long downloads = item.has("downloads") && item.get("downloads").isJsonPrimitive() ? item.get("downloads").getAsLong() : 0;
-				result.add(verify(item.get("manifest").getAsString(), item.get("signature").getAsString(), downloads));
+				double average = 0;
+				int count = 0;
+				if (item.has("rating") && item.get("rating").isJsonObject()) {
+					JsonObject rating = item.getAsJsonObject("rating");
+					average = rating.has("average") && rating.get("average").isJsonPrimitive() ? Math.max(0, Math.min(5, rating.get("average").getAsDouble())) : 0;
+					count = rating.has("count") && rating.get("count").isJsonPrimitive() ? Math.max(0, rating.get("count").getAsInt()) : 0;
+				}
+				result.add(verify(item.get("manifest").getAsString(), item.get("signature").getAsString(), downloads, average, count));
 			} catch (Exception e) {
 				HeldixClient.LOGGER.warn("Addon-Store: Eintrag verworfen: {}", e.getMessage());
 			}
@@ -236,6 +277,11 @@ public final class AddonStore {
 
 	/** Prüft Signatur und Felder eines Manifests (gleiche Regeln wie Launcher und Dienst); wirft bei Fehlern. */
 	public static Entry verify(String manifest, String signature, long downloads) throws Exception {
+		return verify(manifest, signature, downloads, 0, 0);
+	}
+
+	/** wie oben, mit Bewertung aus der Liste des Dienstes (nur Anzeige) */
+	public static Entry verify(String manifest, String signature, long downloads, double ratingAverage, int ratingCount) throws Exception {
 		Signature check = Signature.getInstance("Ed25519");
 		check.initVerify(publicKey());
 		check.update((SIGNATURE_PREFIX + manifest).getBytes(StandardCharsets.UTF_8));
@@ -259,9 +305,19 @@ public final class AddonStore {
 		if (!ICON.matcher(icon).matches()) icon = "addons";
 		List<String> platforms = strings(m, "platforms", 3, 10);
 		if (!PLATFORMS.containsAll(platforms)) throw new IllegalArgumentException("Systeme ungültig");
+		// Offiziell/Community und Einreicher stehen im signierten Text (fehlt "official": Community)
+		boolean official = m.has("official") && m.get("official").isJsonPrimitive() && m.get("official").getAsJsonPrimitive().isBoolean()
+				&& m.get("official").getAsBoolean();
+		String author = null;
+		if (m.has("author") && m.get("author").isJsonObject()) {
+			JsonObject a = m.getAsJsonObject("author");
+			String name = a.has("name") && a.get("name").isJsonPrimitive() ? a.get("name").getAsString() : "";
+			if (name.matches("[A-Za-z0-9_]{1,16}")) author = name;
+		}
 		return new Entry(id, text(m, "name", 1, 40), version, text(m, "summary", 1, 200),
 				m.has("description") ? text(m, "description", 0, 4000) : "", strings(m, "authors", 5, 40), api, icon, category,
-				platforms, file, size, sha256, m.has("date") ? text(m, "date", 1, 40) : "", strings(m, "notes", 20, 300), downloads);
+				platforms, file, size, sha256, m.has("date") ? text(m, "date", 1, 40) : "", strings(m, "notes", 20, 300), downloads,
+				official, official ? null : author, ratingAverage, ratingCount);
 	}
 
 	private static String text(JsonObject object, String key, int min, int max) {

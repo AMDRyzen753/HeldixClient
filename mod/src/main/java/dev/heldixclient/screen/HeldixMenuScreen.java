@@ -22,6 +22,7 @@ import dev.heldixclient.render.Performance;
 import dev.heldixclient.render.ShaderEngine;
 import dev.heldixclient.render.ShaderPreset;
 import dev.heldixclient.render.Shaders;
+import dev.heldixclient.social.BadgeDisplay;
 import dev.heldixclient.social.Messages;
 import dev.heldixclient.social.Social;
 import dev.heldixclient.waypoint.Waypoints;
@@ -145,6 +146,12 @@ public class HeldixMenuScreen extends ShellScreen {
 	private Setting.Slider dragging;
 	private float dragX;
 	private float dragW;
+	/** Untermenü: Eingabefelder der Text-Einstellungen (nach Beschriftung), sie folgen ihrer Zeile beim Scrollen */
+	private final Map<String, SearchField> textFields = new HashMap<>();
+	/** Untermenü: Farbeinstellung, deren Palette gerade aufgeklappt ist (Beschriftung) */
+	private String colorOpen;
+	/** Mitte der Bedienelemente aus dem letzten Bild (für den Autotest) */
+	private final Map<String, int[]> settingCenters = new HashMap<>();
 
 	/** Seite Cape: Kachel unter der Maus (aus dem letzten Bild) für die Vorschau */
 	private static final Object NO_HOVER = new Object();
@@ -352,6 +359,14 @@ public class HeldixMenuScreen extends ShellScreen {
 		return new int[] {cell[0] + cell[2] / 2, cell[1] + CapeGrid.TILE / 2};
 	}
 
+	/**
+	 * Mitte des Bedienelements der Einstellung {@code label} im offenen Untermenü (wie zuletzt gezeichnet);
+	 * mit {@code label + "#" + n} die n-te Farbe der aufgeklappten Palette. null = gerade nicht zu sehen.
+	 */
+	public int[] settingCenter(String label) {
+		return settingCenters.get(label);
+	}
+
 	/** ID des Moduls, dessen Untermenü offen ist (null = keins). */
 	public String openModuleId() {
 		return openModule == null ? null : openModule.id();
@@ -378,6 +393,23 @@ public class HeldixMenuScreen extends ShellScreen {
 	// Aufbau
 	// ======================================================================================
 
+	/** Untermenü: je Text-Einstellung ein Eingabefeld (unsichtbar, bis seine Zeile gezeichnet wird) */
+	private void addTextFields() {
+		for (Setting setting : openModule.settings()) {
+			if (!(setting instanceof Setting.Text text) || textFields.containsKey(text.label())) continue;
+			SearchField field = new SearchField(0, 0, 120, 20, "Text eingeben").withIcon("edit").withMaxLength(text.maxLength()).keepOnEscape();
+			field.setValue(text.get().get());
+			field.setResponder(value -> text.set().accept(value));
+			field.setOnEnter(() -> {
+				field.setFocused(false);
+				if (getFocused() == field) setFocused(null);
+			});
+			field.visible = false;
+			addRenderableWidget(field);
+			textFields.put(text.label(), field);
+		}
+	}
+
 	@Override
 	protected void initContent() {
 		AddonStore.refresh(false);
@@ -385,6 +417,7 @@ public class HeldixMenuScreen extends ShellScreen {
 		pageInput = null;
 		pageButton = null;
 		chatInput = null;
+		textFields.clear();
 		layout();
 		if (openChat != null) {
 			initChat();
@@ -396,6 +429,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			String back = "Zurück";
 			int w = ActionButton.widthFor(back, "back");
 			addRenderableWidget(new ActionButton(headerRight() - w, headerButtonY(), w, 20, back, false, this::closeSubmenu).withIcon("back"));
+			addTextFields();
 		} else if (page == Shell.Page.MODULES) {
 			String hud = "HUD-Editor";
 			int hw = ActionButton.widthFor(hud, "hud");
@@ -1011,7 +1045,7 @@ public class HeldixMenuScreen extends ShellScreen {
 		switch (Social.state()) {
 			case DISABLED -> {
 				list.add(new Notice("info", "Der Heldix-Dienst ist in dieser Installation nicht eingerichtet. Freunde, Capes für andere Spieler "
-						+ "und das Heldix-Symbol in der Tab-Liste brauchen ihn.", Ui.ACCENT_TEXT));
+						+ "und das Heldix-Symbol brauchen ihn.", Ui.ACCENT_TEXT));
 				return false;
 			}
 			case OFFLINE_ACCOUNT -> {
@@ -1022,7 +1056,7 @@ public class HeldixMenuScreen extends ShellScreen {
 				addPageMessage(list);
 				list.add(new EmptyState("friends", "Heldix-Dienst ist aus", "Ohne ihn gibt es keine Freunde, keine Capes anderer Spieler und kein "
 						+ "Heldix-Symbol. Es werden keine Daten an den Dienst geschickt."));
-				list.add(new Group(List.of(new SettingRow(new Setting.Toggle("Heldix-Dienst nutzen", "Freunde, Capes für alle und das Heldix-Symbol in der Tab-Liste",
+				list.add(new Group(List.of(new SettingRow(new Setting.Toggle("Heldix-Dienst nutzen", "Freunde, Capes für alle und das Heldix-Symbol",
 						() -> HeldixConfig.get().socialEnabled, Social::setEnabled)))));
 				return false;
 			}
@@ -1183,7 +1217,7 @@ public class HeldixMenuScreen extends ShellScreen {
 		addPageMessage(list);
 		list.add(new Section("Sichtbarkeit", null));
 		list.add(new Group(List.of(
-				new SettingRow(socialToggle("Für andere erkennbar", "Heldix-Symbol in der Tab-Liste und dein Heldix-Cape für andere HeldixClient-Spieler",
+				new SettingRow(socialToggle("Für andere erkennbar", "Dein Heldix-Symbol (Tab-Liste, über deinem Kopf) und dein Heldix-Cape für andere HeldixClient-Spieler",
 						() -> config.socialVisible, v -> config.socialVisible = v)),
 				new SettingRow(socialToggle("Online-Status für Freunde", "Freunde sehen, ob du online bist und ob du im Menü oder in einer Welt bist",
 						() -> config.socialPresence, v -> config.socialPresence = v)),
@@ -1202,7 +1236,14 @@ public class HeldixMenuScreen extends ShellScreen {
 				new SettingRow(configToggle("Einblendungen", "Bei Anfragen, Nachrichten und wenn Freunde online kommen",
 						() -> config.socialNotifications, v -> config.socialNotifications = v)),
 				new SettingRow(configToggle("Capes anderer Spieler", "Heldix-Capes anderer HeldixClient-Spieler zeigen",
-						() -> config.socialCapes, v -> config.socialCapes = v)))));
+						() -> config.socialCapes, v -> config.socialCapes = v)),
+				new SettingRow(configToggle("Heldix-Symbol in der Tab-Liste", "Vor den Namen von HeldixClient-Spielern und unten, wie viele hier sind",
+						() -> config.badgeTabList, v -> {
+							config.badgeTabList = v;
+							BadgeDisplay.refresh();
+						})),
+				new SettingRow(configToggle("Heldix-Symbol über Köpfen", "Im Namensschild über dem Kopf anderer HeldixClient-Spieler",
+						() -> config.badgeNameTags, v -> config.badgeNameTags = v)))));
 		list.add(new Section("Heldix-Dienst", null));
 		boolean confirming = confirmDeleteAt > 0 && System.currentTimeMillis() - confirmDeleteAt < 5000;
 		String status = switch (Social.state()) {
@@ -1941,7 +1982,10 @@ public class HeldixMenuScreen extends ShellScreen {
 		public int height(int width) {
 			int extra = grouped ? 2 : 0;
 			if (setting instanceof Setting.Slider) return (hasDescription() ? 44 : 34) + extra;
-			return (hasDescription() ? 34 : 26) + extra;
+			if (setting instanceof Setting.Text) return (hasDescription() ? 54 : 44) + extra;
+			int base = (hasDescription() ? 34 : 26) + extra;
+			if (setting instanceof Setting.Color color && color.label().equals(colorOpen)) base += paletteHeight(color, width) + 6;
+			return base;
 		}
 
 		/** Breite des Bedienelements rechts */
@@ -1954,8 +1998,39 @@ public class HeldixMenuScreen extends ShellScreen {
 					yield max + 34;
 				}
 				case Setting.Action action -> Ui.width(action.button(), Ui.Font.LABEL) + 20;
+				case Setting.Color color -> 40;
 				case Setting.Slider slider -> 0;
+				case Setting.Text text -> 0;
 			};
+		}
+
+		// --- Farbpalette (aufgeklappt unter der Zeile) ---
+
+		private static final int SWATCH = 16;
+		private static final int SWATCH_GAP = 6;
+
+		private int paletteColumns(int w) {
+			return Math.max(1, (w - 24 + SWATCH_GAP) / (SWATCH + SWATCH_GAP));
+		}
+
+		private int paletteHeight(Setting.Color color, int w) {
+			int rows = (color.palette().size() + paletteColumns(w) - 1) / paletteColumns(w);
+			return rows * (SWATCH + SWATCH_GAP) - SWATCH_GAP;
+		}
+
+		/** obere Kante der Palette: unter der normalen Zeile */
+		private int paletteY(int y) {
+			return y + (hasDescription() ? 34 : 26) + (grouped ? 2 : 0);
+		}
+
+		private int[] swatch(int index, int x, int y, int w) {
+			int columns = paletteColumns(w);
+			return new int[] {x + 12 + (index % columns) * (SWATCH + SWATCH_GAP), paletteY(y) + (index / columns) * (SWATCH + SWATCH_GAP)};
+		}
+
+		/** Höhe der normalen Zeile (ohne aufgeklappte Palette) */
+		private int rowHeight(int w) {
+			return setting instanceof Setting.Color ? (hasDescription() ? 34 : 26) + (grouped ? 2 : 0) : height(w);
 		}
 
 		@Override
@@ -1969,14 +2044,22 @@ public class HeldixMenuScreen extends ShellScreen {
 				Ui.rect(g, x, y, w, h, 9, Ui.lerp(Ui.SURFACE, Ui.SURFACE_HOVER, t));
 				Ui.outline(g, x, y, w, h, 9, Ui.LINE);
 			}
-			boolean slider = setting instanceof Setting.Slider;
-			int textW = slider ? w - 80 : w - 24 - controlWidth() - 8;
-			int labelY = hasDescription() ? y + (h - 20) / 2 : y + (h - 8) / 2;
-			if (slider) labelY = y + 8;
+			// Regler und Textfeld: Beschriftung oben, Bedienelement darunter über die ganze Breite
+			boolean wide = setting instanceof Setting.Slider || setting instanceof Setting.Text;
+			int rh = rowHeight(w);
+			int textW = setting instanceof Setting.Slider ? w - 80 : wide ? w - 24 : w - 24 - controlWidth() - 8;
+			int labelY = hasDescription() ? y + (rh - 20) / 2 : y + (rh - 8) / 2;
+			if (wide) labelY = y + 8;
 			Ui.text(g, Ui.ellipsize(setting.label(), textW, Ui.Font.LABEL), x + 12, labelY, Ui.TEXT, Ui.Font.LABEL);
 			if (hasDescription()) {
-				Ui.text(g, Ui.ellipsize(setting.description(), slider ? w - 24 : textW, Ui.Font.SMALL), x + 12, labelY + 12, Ui.MUTED, Ui.Font.SMALL);
+				Ui.text(g, Ui.ellipsize(setting.description(), wide ? w - 24 : textW, Ui.Font.SMALL), x + 12, labelY + 12, Ui.MUTED, Ui.Font.SMALL);
 			}
+			settingCenters.put(setting.label(), switch (setting) {
+				case Setting.Toggle toggle -> new int[] {x + w - 21, y + h / 2};
+				case Setting.Slider s -> new int[] {x + w / 2, y + h - 9};
+				case Setting.Text text -> new int[] {x + w / 2, y + h - 16 - (grouped ? 2 : 0)};
+				default -> new int[] {x + w - 12 - controlWidth() / 2, y + rh / 2};
+			});
 			switch (setting) {
 				case Setting.Toggle toggle -> {
 					float on = animate(setting.label() + "#toggle", toggle.get().getAsBoolean() ? 1f : 0f);
@@ -2002,6 +2085,47 @@ public class HeldixMenuScreen extends ShellScreen {
 					Ui.rect(g, bx, by, bw, 18, 9, over ? Ui.ACCENT_HOVER : Ui.ACCENT);
 					Ui.textCentered(g, action.button(), bx + bw / 2, by + 5, 0xFFFFFFFF, Ui.Font.LABEL);
 				}
+				case Setting.Color color -> drawColor(g, color, x, y, w, rh, mouseX, mouseY);
+				case Setting.Text text -> {
+					SearchField field = textFields.get(text.label());
+					if (field != null) {
+						int fy = y + h - 26 - (grouped ? 2 : 0);
+						field.setX(x + 12);
+						field.setY(fy);
+						field.setWidth(w - 24);
+						// nur ganz sichtbare Felder zeigen (Widgets zeichnen über dem Inhalt, ohne Ausschnitt)
+						field.visible = fy >= bodyY && fy + 20 <= bodyY + bodyH;
+						if (!field.isFocused() && !field.getValue().equals(text.get().get())) field.setValue(text.get().get());
+					}
+				}
+			}
+		}
+
+		/** Farbfeld rechts (Klick klappt die Palette auf) und darunter die Palette */
+		private void drawColor(GuiGraphicsExtractor g, Setting.Color color, int x, int y, int w, int rh, int mouseX, int mouseY) {
+			int current = color.get().getAsInt();
+			int cw = controlWidth();
+			int cx = x + w - 12 - cw;
+			int cy = y + (rh - 18) / 2;
+			boolean open = color.label().equals(colorOpen);
+			boolean over = Ui.inside(mouseX, mouseY, cx, cy, cw, 18);
+			Ui.rect(g, cx, cy, cw, 18, 9, over || open ? Ui.SURFACE_STRONG : 0x14FFFFFF);
+			Ui.rect(g, cx + 4, cy + 3, 18, 12, 6, current | 0xFF000000);
+			Ui.outline(g, cx + 4, cy + 3, 18, 12, 6, Ui.LINE_STRONG);
+			Ui.icon(g, open ? "chevron-down" : "chevron-right", cx + cw - 15, cy + 4, 10, Ui.ACCENT_TEXT);
+			if (!open) return;
+			List<Integer> palette = color.palette();
+			for (int i = 0; i < palette.size(); i++) {
+				int[] s = swatch(i, x, y, w);
+				settingCenters.put(color.label() + "#" + i, new int[] {s[0] + SWATCH / 2, s[1] + SWATCH / 2});
+				int value = palette.get(i);
+				boolean selected = (value | 0xFF000000) == (current | 0xFF000000);
+				boolean hover = Ui.inside(mouseX, mouseY, s[0], s[1], SWATCH, SWATCH);
+				if (selected) Ui.rect(g, s[0] - 2, s[1] - 2, SWATCH + 4, SWATCH + 4, (SWATCH + 4) / 2f, 0xFFFFFFFF);
+				else if (hover) Ui.rect(g, s[0] - 2, s[1] - 2, SWATCH + 4, SWATCH + 4, (SWATCH + 4) / 2f, Ui.LINE_STRONG);
+				Ui.circle(g, s[0] + SWATCH / 2f, s[1] + SWATCH / 2f, SWATCH / 2f, value | 0xFF000000);
+				// Punkt in der Mitte: Standardfarbe
+				if (value == color.defaultColor()) Ui.circle(g, s[0] + SWATCH / 2f, s[1] + SWATCH / 2f, 2, 0x99000000);
 			}
 		}
 
@@ -2055,6 +2179,34 @@ public class HeldixMenuScreen extends ShellScreen {
 					if (!Ui.inside(mouseX, mouseY, x + w - 12 - bw, y, bw, h)) return false;
 					HeldixMenuScreen.this.click();
 					action.run().run();
+					return true;
+				}
+				case Setting.Color color -> {
+					if (color.label().equals(colorOpen) && mouseY >= y + rowHeight(w)) {
+						List<Integer> palette = color.palette();
+						for (int i = 0; i < palette.size(); i++) {
+							int[] s = swatch(i, x, y, w);
+							if (Ui.inside(mouseX, mouseY, s[0] - 2, s[1] - 2, SWATCH + 4, SWATCH + 4)) {
+								HeldixMenuScreen.this.click();
+								color.set().accept(palette.get(i));
+								colorOpen = null;
+								return true;
+							}
+						}
+						return false;
+					}
+					HeldixMenuScreen.this.click();
+					colorOpen = color.label().equals(colorOpen) ? null : color.label();
+					return true;
+				}
+				case Setting.Text text -> {
+					// Klick neben das Feld: Zeile ganz ins Bild holen und das Feld auswählen
+					SearchField field = textFields.get(text.label());
+					if (field == null) return false;
+					if (y + h > bodyY + bodyH) scroll = Math.clamp(scroll + (y + h - bodyY - bodyH), 0, maxScroll());
+					else if (y < bodyY) scroll = Math.clamp(scroll - (bodyY - y), 0, maxScroll());
+					setFocused(field);
+					field.setFocused(true);
 					return true;
 				}
 			}
@@ -2552,8 +2704,11 @@ public class HeldixMenuScreen extends ShellScreen {
 			} else {
 				List<String> chips = new ArrayList<>();
 				if (update) chips.add("Update von " + installed());
+				chips.add(entry.origin());
+				if (entry.ratingText() != null) chips.add(entry.ratingText());
 				chips.add(entry.categoryLabel());
-				if (!entry.platforms().isEmpty()) chips.add(entry.problem() == null ? "Nur " + platformNames(entry.platforms()) : entry.problem());
+				if (entry.problem() != null) chips.add(entry.problem());
+				else if (!entry.platforms().isEmpty() && !entry.platforms().containsAll(List.of("windows", "mac", "linux"))) chips.add("Nur " + platformNames(entry.platforms()));
 				chips.add(entry.downloads() == 1 ? "1 Download" : entry.downloads() + " Downloads");
 				chips.add(open() ? "Weniger" : "Details");
 				third = String.join("  ·  ", chips);
@@ -3598,6 +3753,9 @@ public class HeldixMenuScreen extends ShellScreen {
 			pageInput.visible = false;
 			pageButton.visible = false;
 		}
+		// Textfelder der Einstellungen zeigt erst ihre Zeile (beim Zeichnen) wieder
+		for (SearchField field : textFields.values()) field.visible = false;
+		settingCenters.clear();
 		for (Row row : rows) {
 			int h = row.height(bodyW);
 			if (row == inputRow && pageInput != null) {
@@ -3753,6 +3911,7 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	private void openSubmenu(Module module) {
 		openModule = module;
+		colorOpen = null;
 		scroll = 0;
 		rebuildWidgets();
 	}
@@ -3763,6 +3922,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			return;
 		}
 		openModule = null;
+		colorOpen = null;
 		scroll = 0;
 		rebuildWidgets();
 	}
@@ -3798,6 +3958,12 @@ public class HeldixMenuScreen extends ShellScreen {
 		if (pageInput != null && !pageInput.isMouseOver(event.x(), event.y())) {
 			pageInput.setFocused(false);
 			if (getFocused() == pageInput) setFocused(null);
+		}
+		for (SearchField field : textFields.values()) {
+			if (field.isFocused() && !(field.visible && field.isMouseOver(event.x(), event.y()))) {
+				field.setFocused(false);
+				if (getFocused() == field) setFocused(null);
+			}
 		}
 		layout();
 		double mx = event.x();
@@ -3855,7 +4021,8 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
-		boolean typing = (search != null && search.isFocused()) || (pageInput != null && pageInput.isFocused()) || (chatInput != null && chatInput.isFocused());
+		boolean typing = (search != null && search.isFocused()) || (pageInput != null && pageInput.isFocused()) || (chatInput != null && chatInput.isFocused())
+				|| textFields.values().stream().anyMatch(SearchField::isFocused);
 		if (!typing && HeldixClient.menuKey.matches(event)) {
 			onClose();
 			return true;

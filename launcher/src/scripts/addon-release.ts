@@ -83,6 +83,9 @@ async function main(): Promise<void> {
     sha256: createHash('sha256').update(data).digest('hex'),
     date: new Date().toISOString(),
     notes: store.hinweise ?? [],
+    // Team-Addons sind „Offiziell“; Community-Addons signiert das Team bei der Freigabe im Team-Bereich
+    official: true,
+    author: null,
   });
 
   if (!existsSync(UPDATE_KEY_PATH)) throw new Error(`Kein Update-Schlüssel unter ${UPDATE_KEY_PATH}. Einmalig "npm run update-key" ausführen.`);

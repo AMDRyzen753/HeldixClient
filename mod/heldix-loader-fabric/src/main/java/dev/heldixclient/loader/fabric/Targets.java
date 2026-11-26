@@ -33,6 +33,7 @@ public final class Targets {
 	public static final String CHAT_COMPONENT = "net.minecraft.client.gui.components.ChatComponent";
 	public static final String CHAT_SCREEN = "net.minecraft.client.gui.screens.ChatScreen";
 	public static final String PLAYER_TAB_OVERLAY = "net.minecraft.client.gui.components.PlayerTabOverlay";
+	public static final String ENTITY_RENDERER = "net.minecraft.client.renderer.entity.EntityRenderer";
 	public static final String LEVEL_LOADING_SCREEN = "net.minecraft.client.gui.screens.LevelLoadingScreen";
 	public static final String CONNECT_SCREEN = "net.minecraft.client.gui.screens.ConnectScreen";
 
@@ -61,6 +62,7 @@ public final class Targets {
 			CHAT_COMPONENT,
 			CHAT_SCREEN,
 			PLAYER_TAB_OVERLAY,
+			ENTITY_RENDERER,
 			LEVEL_LOADING_SCREEN,
 			CONNECT_SCREEN);
 

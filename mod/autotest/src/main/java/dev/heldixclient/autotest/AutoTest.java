@@ -68,7 +68,8 @@ public final class AutoTest implements HeldixModInitializer {
 
 	private static volatile boolean joined;
 	private static volatile boolean left;
-	private static final List<String> CHAT = new CopyOnWriteArrayList<>();
+	/** empfangene Chatnachrichten ("[System] …" bzw. "[Spieler] …"), auch für FeatureTests */
+	static final List<String> CHAT = new CopyOnWriteArrayList<>();
 
 	@Override
 	public void onInitialize() {
@@ -165,8 +166,8 @@ public final class AutoTest implements HeldixModInitializer {
 		t.check("Kaputtes Addon als Fehler erkannt", addons.contains("Kaputtes Test-Addon=FAILED"));
 		t.check("Module des Uhrzeit-Addons vorhanden",
 				t.compute(mc -> ModuleManager.all().stream().anyMatch(m -> "uhrzeit:uhrzeit".equals(m.id()))));
-		// Spotify-Addon nutzt API 2: eigene Einstellungen und Tasten
-		t.check("Spotify-Addon aktiv (API 2)", addons.contains("Spotify=ACTIVE"));
+		// Spotify-Addon nutzt API 3: eigene Einstellungen, Tasten und Chat-Befehle
+		t.check("Spotify-Addon aktiv (API 3)", addons.contains("Spotify=ACTIVE"));
 		t.check("Spotify-Modul mit eigenen Einstellungen", t.compute(mc -> ModuleManager.all().stream()
 				.filter(m -> "spotify:spotify".equals(m.id()))
 				.anyMatch(m -> m.settings().stream().anyMatch(s -> s.label().equals("Cover anzeigen")))));
@@ -318,7 +319,13 @@ public final class AutoTest implements HeldixModInitializer {
 		// Rüstung, Trank-Effekte, Dauersprint, Freelook, Fadenkreuz, Chat, Wegpunkte; Heldix-Dienst (mit --service)
 		FeatureTests.modules(t);
 		FeatureTests.social(t);
+		// Heldix-Symbol je Rolle: Tab-Liste (mit Fußzeile) und Namensschilder über Köpfen
+		BadgeTests.run(t);
 		FeatureTests.addonStore(t);
+		// Heldix-API 3: Einstellungen (Regler, Farbe, Text), Spotify-Darstellungen, Daten, Scheduler, Befehle, Events
+		AddonApiTests.settings(t);
+		AddonApiTests.spotifyLayouts(t);
+		AddonApiTests.api(t);
 
 		// Welt verlassen
 		t.run(mc -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));
@@ -665,7 +672,13 @@ public final class AutoTest implements HeldixModInitializer {
 				&& mc.options.cloudStatus().get() == CloudStatus.FANCY && mc.options.entityShadows().get()));
 
 		// Hintergrund-FPS: hängt davon ab, ob das Testfenster gerade im Vordergrund ist
-		int[] fps = t.compute(mc -> new int[] {Performance.framerateLimit(260), mc.isWindowActive() ? 1 : 0, mc.getFramerateLimitTracker().getFramerateLimit()});
+		// (der Test schaltet Hintergrund-FPS am Anfang aus, damit Bilder auch ohne Fokus kommen: nur für die Messung an)
+		int[] fps = t.compute(mc -> {
+			HeldixConfig.get().backgroundFps = true;
+			int limit = Performance.framerateLimit(260);
+			HeldixConfig.get().backgroundFps = false;
+			return new int[] {limit, mc.isWindowActive() ? 1 : 0, mc.getFramerateLimitTracker().getFramerateLimit()};
+		});
 		boolean active = fps[1] == 1;
 		t.log("Bildrate: Fenster " + (active ? "aktiv" : "im Hintergrund") + ", Grenze laut Minecraft " + fps[2]);
 		t.check("Hintergrund-FPS (" + (active ? "Fenster aktiv" : "Fenster inaktiv") + " → " + fps[0] + ")", active ? fps[0] == 260 : fps[0] == 30);

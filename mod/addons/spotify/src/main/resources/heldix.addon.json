@@ -2,8 +2,8 @@
 	"id": "spotify",
 	"name": "Spotify",
 	"version": "${version}",
-	"description": "Zeigt den laufenden Song mit Cover im HUD und steuert die Musik per Taste. Ohne Anmeldung, nur Windows.",
+	"description": "Zeigt den laufenden Song mit Cover im HUD und steuert die Musik per Taste und Chat-Befehl. Ohne Anmeldung, für Windows, macOS und Linux.",
 	"authors": ["HeldixClient"],
 	"entrypoint": "dev.heldixclient.addons.spotify.SpotifyAddon",
-	"api": 2
+	"api": 3
 }

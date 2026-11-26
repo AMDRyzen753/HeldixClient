@@ -1,4 +1,4 @@
-<!--seite {"titel": "Addon-Store", "beschreibung": "Heldix-Addons für HeldixClient: zusätzliche Module und HUD-Anzeigen, vom Team geprüft und signiert. Installieren im Launcher, im Spiel oder per Download.", "bild": "/images/spiel-heldix-menue.png"}-->
+<!--seite {"titel": "Addon-Store", "beschreibung": "Heldix-Addons für HeldixClient: zusätzliche Module und HUD-Anzeigen vom Team und aus der Community, vom Team geprüft und signiert. Mit Bewertungen und Screenshots. Installieren im Launcher, im Spiel oder per Download.", "bild": "/images/spiel-heldix-menue.png"}-->
 <!doctype html>
 <html lang="de">
 <head>
@@ -10,10 +10,11 @@
 {{include:nav.html}}
 
 <main id="inhalt" class="wrap store-page" data-api-base="https://__API_DOMAIN__">
-  <div class="page-hero">
-    <span class="eyebrow">Addon-Store</span>
-    <h1>Mehr Module mit <span class="gradient">Heldix-Addons</span></h1>
-    <p class="lead">Addons erweitern HeldixClient um eigene Module und HUD-Anzeigen. Jedes Addon prüft und signiert das Team, bevor es hier erscheint.</p>
+  <div class="page-hero" id="store-kopf">
+    <a class="back-link" id="store-zurueck" href="/addons" hidden>{{icon:chevron-left}}Alle Addons</a>
+    <span class="eyebrow" id="store-eyebrow">Addon-Store</span>
+    <h1 id="store-titel">Mehr Module mit <span class="gradient">Heldix-Addons</span></h1>
+    <p class="lead" id="store-lead">Addons erweitern HeldixClient um eigene Module und HUD-Anzeigen – vom Team und aus der Community. Jedes Addon prüft und signiert das Team, bevor es hier erscheint.</p>
   </div>
 
   <noscript><p class="notice">Der Addon-Store braucht JavaScript. Ohne Browser geht es im Launcher: Instanzen → Instanz → Heldix-Addons → Addon-Store.</p></noscript>
@@ -25,11 +26,13 @@
       <input type="search" id="addon-suche" placeholder="Addon suchen, z. B. Musik" autocomplete="off">
     </label>
     <div class="segmented" role="group" aria-label="Kategorie" id="addon-kategorien"></div>
+    <div class="segmented" role="group" aria-label="Herkunft" id="addon-herkunft" hidden></div>
     <label class="sort-field">
       <span>Sortieren</span>
       <select class="input select tiny-select" id="addon-sortierung">
         <option value="beliebt">Beliebt</option>
         <option value="neu">Neu</option>
+        <option value="bewertung">Bewertung</option>
         <option value="name">Name</option>
       </select>
     </label>
@@ -48,6 +51,14 @@
     <h2>Noch keine Addons im Store</h2>
     <p>Sobald das Team ein Addon veröffentlicht, steht es hier – und im Launcher und im Spiel.</p>
     <p class="store-state-actions"><a class="button small ghost" href="/entwickler/addons">Eigenes Addon schreiben{{icon:chevron-right}}</a></p>
+  </div>
+
+  <!-- Entwicklerseite ohne Addons -->
+  <div class="store-state glass" id="store-autor-fehlt" hidden>
+    <span class="badge">{{icon:user}}</span>
+    <h2>Diesen Entwickler gibt es hier nicht</h2>
+    <p>Vielleicht stehen seine Addons nicht mehr im Store, oder der Link ist unvollständig.</p>
+    <p class="store-state-actions"><a class="button small" href="/addons">{{icon:addons}}Zum Addon-Store</a></p>
   </div>
 
   <!-- Dienst nicht erreichbar -->
@@ -96,11 +107,23 @@
     <div class="faq">
       <details>
         <summary>Sind Addons sicher?{{icon:chevron-down}}</summary>
-        <p>Addons sind Programmcode, der in deinem Spiel läuft. Deshalb kommen in den Store nur Addons, die das Team geprüft und mit seinem Schlüssel signiert hat. Launcher und Spiel prüfen beim Installieren die Signatur und die SHA-256-Prüfsumme der Datei.</p>
+        <p>Addons sind Programmcode, der in deinem Spiel läuft. Deshalb kommen in den Store nur Addons, die das Team geprüft und mit seinem Schlüssel signiert hat – auch die aus der Community. Launcher und Spiel prüfen beim Installieren die Signatur und die SHA-256-Prüfsumme der Datei.</p>
+      </details>
+      <details>
+        <summary>Was heißt „Offiziell“ und „Community“?{{icon:chevron-down}}</summary>
+        <p><strong>Offiziell</strong> sind Addons des HeldixClient-Teams. <strong>Community</strong>-Addons haben Spieler geschrieben und eingereicht; das Team hat sie geprüft und signiert. Welche Art ein Addon ist, steht im signierten Manifest und lässt sich nachträglich nicht ändern. Über den Namen des Entwicklers kommst du zu all seinen Addons.</p>
+      </details>
+      <details>
+        <summary>Wie funktionieren die Bewertungen?{{icon:chevron-down}}</summary>
+        <p>Angemeldete Spieler vergeben 1 bis 5 Sterne – jeder einmal pro Addon, ändern oder entfernen geht jederzeit. Eigene Addons kann man nicht bewerten. Angemeldet bist du hier über den <a href="/konto">Konto-Bereich</a>, ganz ohne Passwort über den Launcher oder im Spiel.</p>
+      </details>
+      <details>
+        <summary>Ein Addon macht Probleme?{{icon:chevron-down}}</summary>
+        <p>Öffne das Addon und wähle <strong>Melden</strong> – etwa wenn es nicht funktioniert, fremde Inhalte enthält oder sich verdächtig verhält. Das Team sieht die Meldung und kann das Addon aus dem Store nehmen. Der Entwickler erfährt nicht, wer gemeldet hat.</p>
       </details>
       <details>
         <summary>Was bedeutet „API-Stufe“?{{icon:chevron-down}}</summary>
-        <p>Die Stufe der Heldix-API, die ein Addon braucht. HeldixClient lädt derzeit Addons bis Stufe 2. Braucht ein Addon mehr, aktualisiere den Launcher – HeldixClient kommt mit ihm.</p>
+        <p>Die Stufe der Heldix-API, die ein Addon braucht. HeldixClient lädt derzeit Addons bis Stufe 3. Braucht ein Addon mehr, aktualisiere den Launcher – HeldixClient kommt mit ihm.</p>
       </details>
       <details>
         <summary>Läuft ein Addon nach einem Minecraft-Update weiter?{{icon:chevron-down}}</summary>
@@ -112,7 +135,7 @@
       </details>
       <details>
         <summary>Kann ich ein eigenes Addon in den Store bringen?{{icon:chevron-down}}</summary>
-        <p>Ja. Schick es dem Team über eine <a href="/konto#ziel=support">Support-Anfrage</a>. Das Team prüft es, signiert es und stellt es in den Store. Wie du ein Addon baust, steht unter <a href="/entwickler/addons">Für Entwickler</a>.</p>
+        <p>Ja. Im <a href="/konto#addons">Konto</a> unter <strong>Meine Addons</strong> lädst du die JAR hoch, füllst die Store-Angaben aus und reichst es zur Prüfung ein. Das Team sieht sich den Code an, signiert das Addon und stellt es als Community-Addon in den Store. Wie du ein Addon baust und was dabei erlaubt ist, steht unter <a href="/entwickler/addons#addon-einreichen">Für Entwickler</a>.</p>
       </details>
     </div>
   </section>

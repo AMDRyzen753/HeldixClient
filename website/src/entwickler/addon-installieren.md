@@ -46,10 +46,10 @@ Du kannst ein Addon auch direkt in den Ordner `heldix-addons` der Instanz kopier
 ## Kompatibilität
 
 - **Minecraft-Versionen:** Addons nutzen nur die Heldix-API. Dieselbe JAR läuft deshalb auch nach Minecraft-Updates weiter, solange es HeldixClient für die Version gibt.
-- **API-Stufe:** HeldixClient 0.13.0 lädt Addons für API 1 und API 2. Ein Addon mit `"api": 2` braucht mindestens HeldixClient 0.11.0. Welche Stufe dein HeldixClient kann, steht im Heldix-Menü unter **Addons → Installiert** ganz unten („Heldix Loader … · Addon-API 2“).
+- **API-Stufe:** HeldixClient 0.13.1 lädt Addons für API 1, 2 und 3. Ein Addon mit `"api": 2` braucht mindestens HeldixClient 0.11.0, eines mit `"api": 3` mindestens 0.13.1. Welche Stufe dein HeldixClient kann, steht im Heldix-Menü unter **Addons → Installiert** ganz unten („Heldix Loader … · Addon-API 3“).
 - **Zu neues Addon:** Verlangt ein Addon eine höhere API-Stufe, wird es mit „bitte HeldixClient aktualisieren“ übersprungen. HeldixClient kommt mit dem Launcher und wird mit ihm aktualisiert – hol dir also die neueste Launcher-Version.
 - **Doppelt installiert:** Liegt dasselbe Addon (gleiche `id`) mehrmals im Ordner, nutzt HeldixClient die neueste Version. Die anderen erscheinen im Heldix-Menü mit „Ältere Version – genutzt wird …“ bzw. „Doppelt installiert – genutzt wird …“.
-- **Betriebssystem:** Addons laufen überall, wo HeldixClient läuft – es sei denn, ein Addon nutzt etwas Systemeigenes, wie das Spotify-Addon die Windows-Mediensteuerung.
+- **Betriebssystem:** Addons laufen überall, wo HeldixClient läuft – es sei denn, ein Addon nutzt etwas Systemeigenes. Das Spotify-Addon etwa braucht unter Linux das Programm `playerctl`. Im Store steht bei solchen Addons „Nur Windows“ o. Ä.
 
 ## Wenn ein Addon nicht lädt
 

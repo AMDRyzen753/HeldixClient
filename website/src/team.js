@@ -1,5 +1,6 @@
 // HeldixClient – Webseite: Team-Bereich (/team) für Moderatoren und Admins
-// (Meldungen, Support, Spieler, Sperren, Neuigkeiten, Mein Teamprofil; Admins zusätzlich Updates, Addons, Team, Protokoll).
+// (Meldungen, Support, Spieler, Sperren, Neuigkeiten, Addons: Einreichungen und Addon-Meldungen (team-addons.js), Mein
+// Teamprofil; Admins zusätzlich Updates, Addons freigeben und veröffentlichen, Team, Protokoll).
 // Zugang: Cookie-Sitzung + Team-Rolle + Zwei-Faktor-Anmeldung (TOTP), in dieser Sitzung bestätigt (12 Stunden).
 // Der Dienst antwortet sonst mit 403 und code forbidden / 2fa_setup_required / 2fa_required – dann zeigt
 // die Seite die passende Sperre (Einrichten, Code eingeben, kein Zugang).
@@ -39,8 +40,10 @@ import {
   uid,
   upload,
 } from './app-common.js';
-import { ADDON_ID_RE, KATEGORIEN, addonIcon, hasIcon, platformText } from './addon-common.js';
+import { ADDON_ID_RE, API_STUFE, KATEGORIEN, addonIcon, hasIcon, platformText } from './addon-common.js';
 import { memberCard, newsCard, publicGet, skinHead } from './public-cards.js';
+import { initTeamAddons } from './team-addons.js';
+import { attachmentList, normalizeAttachments } from './support-attachments.js';
 
 // Spielerbilder im Team-Bereich: Minecraft-Köpfe über die Cookie-Sitzung (das bestätigte Team darf alle).
 setSkinSource('auth');
@@ -83,6 +86,7 @@ const state = {
 };
 
 let tabs = null;
+let teamAddonsUi = null;
 const teamRefresher = poller(() => teamTick(), 30_000);
 
 // ---------------------------------------------------------------------------------------------------------
@@ -135,8 +139,12 @@ const VIEWS = ['team-laden', 'team-fehler', 'team-gast', 'team-kein-zugang', 'te
 
 function showView(id) {
   for (const view of VIEWS) $(`#${view}`).hidden = view !== id;
-  for (const dialog of document.querySelectorAll('dialog.modal')) if (id !== 'team-app') dialog.remove();
-  if (id !== 'team-app') teamRefresher.stop();
+  for (const dialog of document.querySelectorAll('dialog.modal, dialog.lightbox-dialog')) if (id !== 'team-app') dialog.remove();
+  if (id !== 'team-app') {
+    teamRefresher.stop();
+    // Signier-Schlüssel nie über das Ende der Team-Ansicht hinaus behalten
+    teamAddonsUi?.reset();
+  }
 }
 
 function showGuest(message) {
@@ -288,6 +296,7 @@ function showApp() {
   const current = tabs.current();
   tabs.select(tabs.has(wanted) ? wanted : current && tabs.has(current) ? current : 'meldungen');
   refreshSupportCount().catch(() => {});
+  teamAddonsUi.refreshCounts().catch(() => {});
   if (tabs.current() !== 'profil') loadProfile().catch(() => {});
   teamRefresher.start();
 }
@@ -299,7 +308,11 @@ function onTab(name) {
     sperren: loadBans,
     neuigkeiten: loadNews,
     updates: loadUpdates,
-    addons: loadTeamAddons,
+    addons: async () => {
+      teamAddonsUi.show();
+      // Admins: Liste, öffentlicher Schlüssel (für die Prüfung der Schlüsseldatei) und ausgeblendete Addons
+      if (isAdmin()) await loadTeamAddons();
+    },
     team: loadMembers,
     protokoll: loadAudit,
     support: loadSupport,
@@ -1384,7 +1397,7 @@ const ADDON_FILE_RE = /^heldix-addon-[a-z0-9][a-z0-9_-]{0,39}-\d+\.\d+\.\d+(?:-[
 const ADDON_VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
 const ADDON_MAX = 50 * 1024 * 1024;
 /** Höchste Heldix-API-Stufe, die HeldixClient derzeit lädt. */
-const ADDON_API_HEUTE = 2;
+const ADDON_API_HEUTE = API_STUFE;
 
 const textLength = (value) => [...value].length;
 
@@ -1396,6 +1409,9 @@ function normalizeTeamAddons(data) {
       .sort((a, b) => String(a.name ?? a.id).localeCompare(String(b.name ?? b.id), 'de', { sensitivity: 'base' })),
     pending: Array.isArray(data?.pending) ? data.pending.filter((entry) => entry && typeof entry.file === 'string') : [],
     keyConfigured: data?.keyConfigured !== false,
+    publicKey: typeof data?.publicKey === 'string' && data.publicKey.includes('PUBLIC KEY') ? data.publicKey : null,
+    pendingSubmissions: Number.isInteger(data?.pendingSubmissions) ? data.pendingSubmissions : null,
+    openReports: Number.isInteger(data?.openReports) ? data.openReports : null,
   };
 }
 
@@ -1455,6 +1471,18 @@ function renderTeamAddons() {
     );
   });
   renderAddonCheck();
+  teamAddonsUi?.teamAddonsChanged();
+}
+
+/** Aus Addon-Meldungen: ausblenden (PATCH) und die Liste übernehmen. */
+async function setAddonHidden(id, hidden) {
+  await applyTeamAddons(await teamCall('PATCH', `/v1/team/addons/${encodeURIComponent(id)}`, { hidden }));
+}
+
+/** Besitzer eines Community-Addons (Einreicher) oder null bei offiziellen Addons. */
+function ownerName(addon) {
+  if (addon.owner && typeof addon.owner === 'object') return typeof addon.owner.name === 'string' ? addon.owner.name : '?';
+  return typeof addon.ownerName === 'string' ? addon.ownerName : null;
 }
 
 function addonAdminItem(addon) {
@@ -1474,7 +1502,18 @@ function addonAdminItem(addon) {
       h(
         'div',
         { class: 'row-main' },
-        h('div', { class: 'row-title' }, h('span', { text: name }), h('code', { class: 'mono muted', text: addon.id }), chip(`Version ${addon.latest ?? latest?.version ?? '?'}`, 'accent'), addon.hidden ? chip('ausgeblendet', 'warning') : null),
+        h(
+          'div',
+          { class: 'row-title' },
+          h('span', { text: name }),
+          h('code', { class: 'mono muted', text: addon.id }),
+          chip(`Version ${addon.latest ?? latest?.version ?? '?'}`, 'accent'),
+          addon.hidden ? chip('ausgeblendet', 'warning') : null,
+          addon.official === false || ownerName(addon) ? h('span', { class: 'chip community' }, icon('friends'), 'Community') : h('span', { class: 'chip official' }, icon('shield'), 'Offiziell'),
+        ),
+        ownerName(addon)
+          ? h('div', { class: 'row-meta addon-owner' }, 'Besitzer: ', addon.owner?.uuid ? h('button', { type: 'button', class: 'link-button', onClick: () => openPlayer(addon.owner.uuid) }, ownerName(addon)) : h('span', { text: ownerName(addon) }))
+          : null,
         h(
           'div',
           { class: 'row-sub', text: [addonDownloads(addon.downloads), addon.versions.length === 1 ? '1 Version' : `${addon.versions.length} Versionen`, latest?.publishedAt ? `zuletzt ${formatDate(latest.publishedAt)}${latest.publishedBy ? ` von ${latest.publishedBy}` : ''}` : null].filter(Boolean).join(' · ') },
@@ -2171,6 +2210,7 @@ function buildTicketView(ticket) {
     h('div', { class: 'ticket-title' }, h('h2', { id: 'team-ticket-titel', tabindex: '-1', text: ticket.subject }), h('p', { class: 'row-meta', id: 'team-ticket-meta' })),
     h('p', { class: 'ticket-player' }, avatar(ticket.player?.name, ticket.player?.uuid, { size: 'sm' }), h('span', null, 'Von ', playerButton(ticket.player)), h('span', { class: 'muted', id: 'team-ticket-seit' })),
     h('ol', { class: 'ticket-messages', id: 'team-ticket-verlauf', 'aria-labelledby': 'team-ticket-titel' }),
+    h('div', { id: 'team-ticket-anhaenge' }),
     form,
     h('p', { class: 'notice small-notice closed-notice', id: 'team-ticket-geschlossen', hidden: true, text: 'Diese Anfrage ist geschlossen. Antworten geht nicht mehr.' }),
   );
@@ -2206,6 +2246,9 @@ function updateTicketView(ticket) {
       );
     }),
   );
+  // Anhänge mit Vorschau (erste 200 Zeilen, nur als Text) und Download
+  const attachments = normalizeAttachments(ticket.attachments);
+  rerender($('#team-ticket-anhaenge'), JSON.stringify([ticket.id, attachments]), () => attachmentList(ticket.id, attachments, { base: '/v1/team/support', preview: true, onError: handleAccessError }));
   const closed = ticket.status === 'closed';
   $('#team-ticket-antwort').hidden = closed;
   $('#team-ticket-geschlossen').hidden = !closed;
@@ -2269,7 +2312,7 @@ async function closeTeamTicket() {
 /** Alle 30 Sekunden (solange sichtbar): Zähler am Reiter, im Support-Reiter auch Liste und offene Anfrage. */
 async function teamTick() {
   if ($('#team-app').hidden) return;
-  const tasks = [refreshSupportCount()];
+  const tasks = [refreshSupportCount(), teamAddonsUi.refreshCounts()];
   if (tabs.current() === 'support') {
     tasks.push(loadSupport());
     const id = state.ticket?.id;
@@ -2434,6 +2477,11 @@ const ACTIONS = {
   'addon.hide': 'Addon aus dem Store genommen',
   'addon.show': 'Addon wieder im Store',
   'addon.delete': 'Addon-Datei gelöscht',
+  'addon.approve': 'Addon-Einreichung freigegeben',
+  'addon.reject': 'Addon-Einreichung abgelehnt',
+  'addon.report.done': 'Addon-Meldung erledigt',
+  'addon-report.done': 'Addon-Meldung erledigt',
+  'addon.report': 'Addon-Meldung erledigt',
   'member.add': 'Mitglied hinzugefügt',
   'team.add': 'Mitglied hinzugefügt',
   'member.role': 'Rolle geändert',
@@ -2500,6 +2548,12 @@ async function loadAudit() {
 // Start
 // ---------------------------------------------------------------------------------------------------------
 
+/** Aus dem Addons-Reiter zu den Spieler-Details wechseln. */
+function openPlayerFromAddons(uuid) {
+  tabs.select('spieler');
+  openPlayer(uuid);
+}
+
 async function logout() {
   try {
     await busy($('#team-abmelden'), () => api('POST', '/v1/web/logout'));
@@ -2511,6 +2565,7 @@ async function logout() {
 
 function init() {
   tabs = setupTabs($('#team-tabs'), onTab);
+  teamAddonsUi = initTeamAddons({ teamCall, handleAccessError, isAdmin, openPlayer: (uuid) => openPlayerFromAddons(uuid), getTeamAddons: () => state.teamAddons, loadTeamAddons, setAddonHidden });
   $('#team-erneut').addEventListener('click', start);
   $('#team-abmelden').addEventListener('click', logout);
 

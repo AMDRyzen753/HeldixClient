@@ -16,7 +16,8 @@
 #   - Der Dienst läuft als eigener Benutzer ohne Rechte, nur auf 127.0.0.1; Caddy stellt Webseite und API per HTTPS bereit.
 #   - Daten liegen in /var/lib/heldix-dienst. Ein zweiter Aufruf aktualisiert, die Daten bleiben.
 #   - Launcher-Updates: Installer und update.json kommen nach /var/lib/heldix-dienst/updates (per scp oder im Team-Bereich).
-#   - Addon-Store: signierte Addons (JAR) liegen in /var/lib/heldix-dienst/addons, veröffentlicht im Team-Bereich.
+#   - Addon-Store: signierte Addons (JAR) liegen in /var/lib/heldix-dienst/addons, veröffentlicht im Team-Bereich;
+#     Einreichungen von Spielern (noch ungeprüft) in addons/einreichungen, Screenshots in addons/screenshots.
 #   - Anmeldung auf der Webseite (ohne Passwort, über den Launcher) unter https://<domain>/konto, Team-Bereich dort.
 #   - Verwaltung (Meldungen, Sperren, Team): sudo heldix-dienst-admin hilfe; erster Admin: sudo heldix-dienst-admin team <name> admin
 #
@@ -465,8 +466,9 @@ $API_DOMAIN {
 	# Caddy streamt die Antwort (kein Puffern der ganzen Datei) und hat für Antworten keine Zeitgrenze;
 	# einen hängenden Client trennt der Dienst selbst.
 	# Uploads im Team-Bereich (bis 1 GiB): Caddy hat keine Grenze für den Anfragekörper und reicht ihn gestreamt durch.
-	# Addons (JAR bis 50 MiB) genauso: Downloads unter /v1/addons/<id>/files/ (mit Range), Uploads im Team-Bereich.
-	@gross path /v1/launcher/download/* /v1/team/updates/files/* /v1/addons/* /v1/team/addons/files/*
+	# Addons (JAR bis 50 MiB) genauso: Downloads und Screenshots unter /v1/addons/<id>/… (mit Range), Uploads im
+	# Team-Bereich, Einreichungen von Spielern (JAR und Screenshots hochladen) und die JAR zum Prüfen im Team-Bereich.
+	@gross path /v1/launcher/download/* /v1/team/updates/files/* /v1/addons/* /v1/team/addons/files/* /v1/addon-submissions/* /v1/team/addon-submissions/*
 	handle @gross {
 		reverse_proxy 127.0.0.1:$PORT
 	}
@@ -747,8 +749,9 @@ summary() {
   echo ""
   if [ -f "$UPDATE_KEY_FILE" ]; then
     echo "  Addon veröffentlichen: im Team-Bereich unter „Addons“ JAR und .addon.json hochladen (Signatur wird geprüft)."
+    echo "  Einreichungen von Spielern freigeben: Team-Bereich → Addons → Einreichungen, Schlüsseldatei wählen (signiert im Browser)."
   else
-    echo "  Addons lassen sich ohne Update-Schlüssel nicht veröffentlichen (Team-Bereich antwortet mit 503)."
+    echo "  Addons lassen sich ohne Update-Schlüssel weder veröffentlichen noch freigeben (Team-Bereich antwortet mit 503)."
   fi
 }
 

@@ -32,27 +32,9 @@ Das Ergebnis von `npm run dist` liegt in `launcher/release/`:
 
 Weitere Hinweise:
 - Das Logo (Sechseck mit „H“) steht in [logo.svg](../launcher/src/renderer/logo.svg). `npm run icon` erzeugt daraus App-Icon (`launcher/build/icon.png`), Discord-Bild, Mod-Icon, `pack.png` und den Schriftzug für den Ladebildschirm; `npm run ui-assets` das Logo für die Oberfläche im Spiel. Nach einer Änderung am Logo das Discord-Bild neu hochladen (siehe [einrichtung.md](einrichtung.md)).
-- Im Entwicklungsmodus gehen **Offline-Konten** immer. Damit lässt sich ohne Microsoft-Login testen. In der fertig gepackten App gibt es sie erst, wenn ein Microsoft-Konto mit Minecraft im Launcher ist (wie bei Prism Launcher). Wer das Spiel nicht gekauft hat, kann also nicht spielen.
+- **Offline-Konten** gibt es nur im Entwicklungsmodus (`npm start`). Damit lässt sich ohne Microsoft-Login testen. Die fertig gepackte App kennt keine Offline-Konten: Gespielt wird mit dem Microsoft-Konto, mit dem Minecraft gekauft wurde; alte Offline-Konten aus früheren Versionen blendet sie aus.
 - Die Java-Projekte in `mod/` lassen sich in IntelliJ IDEA als Gradle-Projekt öffnen (JDK 25 auswählen).
 - Minecraft lädt Gradle zum Kompilieren selbst von Mojang ([gradle/minecraft.gradle](../mod/gradle/minecraft.gradle)). Die Dateien landen in `mod/.gradle/minecraft/` und sind vom Git ausgeschlossen.
-
-## Entwickleroptionen in der fertigen App
-
-In der installierten .exe gibt es Offline-Konten normalerweise erst mit einem Microsoft-Konto. Für die eigene Entwicklung (z. B. Tests ohne Microsoft-Konto oder mit einer noch nicht freigeschalteten eigenen App-ID) gibt es **Einstellungen → Entwickler → Entwickleroptionen**. Sie schalten Offline-Konten ohne Microsoft-Konto frei, aber nur auf PCs mit einem **Entwickler-Schlüssel**:
-
-```powershell
-cd launcher
-npm run dev-key                                  # Schlüssel für diesen PC (beim ersten Mal entsteht das Schlüsselpaar)
-npm run dev-key -- --name=Max --pc=3F2A-91C0-7B44-E0D1   # Schlüssel für einen anderen PC
-npm run dist                                     # nur nötig, wenn das Schlüsselpaar neu ist
-```
-
-**Automatisch:** Liegt der Signaturschlüssel auf dem PC, erstellt der Launcher den Entwickler-Schlüssel selbst, sobald man die Entwickleroptionen einschaltet. Auf weiteren eigenen PCs einmal **„Schlüssel importieren …“** klicken und `signing-key.pem` auswählen (z. B. vom USB-Stick); danach geht es dort ebenfalls automatisch. Wer den Signaturschlüssel nicht bekommen soll, bekommt eine mit `--pc` ausgestellte Schlüsseldatei und importiert sie genauso.
-
-- Der private Schlüssel liegt in `%USERPROFILE%\.heldixclient-dev\signing-key.pem`. Nur auf eigene PCs kopieren, nie weitergeben, nicht einchecken, gut sichern.
-- Der öffentliche Schlüssel steht in [src/main/dev-public-key.ts](../launcher/src/main/dev-public-key.ts) und kommt mit in die .exe.
-- Ein Entwickler-Schlüssel (`developer.key` im Datenordner des Launchers) gilt nur für den PC, dessen Kennung er enthält. Die Kennung steht in der Entwickler-Karte. Sie ist ein Hash der Windows-MachineGuid; die GUID selbst wird nirgends gespeichert.
-- Wer die App aus dem Quellcode selbst baut, erzeugt mit `npm run dev-key` sein eigenes Schlüsselpaar. Schlüssel aus einem anderen Build gelten dann nicht.
 
 ## Testen
 
@@ -68,7 +50,11 @@ npm run test:launch -- 26.3 heldix "--world=Meine Welt"   # Direktstart (Quick P
 npm run test:launch -- 26.3 fabric              # nur Fabric, ohne HeldixClient
 npm run test:launch -- 1.8.9 vanilla
 npm run test:discord -- <Application-ID>       # Discord-Status, Discord muss laufen
+npm run test:crash                             # Absturz-Hilfe: Ursachen-Erkennung mit nachgebauten Crash-Reports
+npm run test:social / test:profile / test:store   # Freunde, Skins & Capes, Addon-Store (gegen lokalen Dienst bzw. Attrappen)
 ```
+
+**Absturz-Hilfe** ([core/crash.ts](../launcher/src/main/core/crash.ts)): Nach einem Absturz (Fehlercode, neuer Crash-Report oder `hs_err_pid*.log`, nicht nach „Spiel beenden“) erkennt der Launcher häufige Ursachen (RAM, Grafiktreiber, OpenGL, Java-Version, Mod-Konflikte per Mixin, fehlende Abhängigkeiten, Mods aus dem Stacktrace über die Pakete der Mod-JARs) und zeigt Schritte mit Knopf. „An den Support senden“ legt eine Support-Anfrage an und hängt Crash-Report, JVM-Fehler und Log an – vorher sichtbar, Benutzerordner durch `~` ersetzt, Tokens entfernt. Zum Ansehen ohne echtes Spiel: `HELDIX_SCREENSHOT_CRASH=<Ordner mit crash-reports/, logs/, mods/>` zusammen mit `HELDIX_SCREENSHOT` (nur Entwicklungsmodus).
 
 Der Starttest bricht mit Fehler ab, wenn:
 
@@ -84,6 +70,7 @@ Der Starttest bricht mit Fehler ab, wenn:
 - prüft die Startseite (Seitenleiste, Schnellstart-Karten) und klickt über die echte Maus-Verarbeitung von Minecraft das Heldix-Menü auf vier Wegen an;
 - erstellt eine flache Testwelt und prüft darin HUD, Chat- und Welt-Events, den Zoom und die Module Rüstung, Trank-Effekte, Dauersprint/-schleichen, Freelook, Fadenkreuz, Chat und Wegpunkte (mit Todespunkt);
 - mit `--service=<adresse>` zusätzlich den Heldix-Dienst im Entwicklungsmodus: Eine zweite Spielerin schickt über die Schnittstelle eine Freundschaftsanfrage, ihr Status und ihr Cape kommen an, und das Heldix-Symbol steht in der Tab-Liste;
+- prüft das Heldix-Symbol je Rolle (normal, Team-Admin, Moderator, Addon-Entwickler; Rollen als vorgegebene Antwort des Dienstes) vor Namen in der Tab-Liste (Teamfarbe färbt es nicht, Zeile „HeldixClient: … Spieler hier“ in der Fußzeile, nur mit Dienst) und im Namensschild über dem Kopf, auch beim Schleichen, unsichtbar, mit F1 und mit vom Server ausgeblendeten Namensschildern;
 - prüft im HUD-Editor Verschieben, Auswählen, Skalieren über den Griff, Pfeiltasten, Ausblenden mit Entf, Rückgängig (Strg+Z), Rechtsklick zu den Einstellungen und die Elemente-Liste, im Hauptmenü auch die Vorschau ohne Welt;
 - prüft, dass Minecrafts Einzel- und Mehrspieler-Menü sowie das Pausemenü durch die Heldix-Seiten ersetzt werden (Testwelt und Testserver in der Liste) und die klassischen Ansichten Vanilla bleiben;
 - lädt die Ressourcen neu und fotografiert dabei den Heldix-Ladebildschirm;

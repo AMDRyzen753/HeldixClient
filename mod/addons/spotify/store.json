@@ -2,7 +2,15 @@
 	"_hinweis": "Angaben für den Addon-Store (nicht in der JAR). Name, Version, Kurzbeschreibung, Autoren und API kommen aus src/main/resources/heldix.addon.json.",
 	"icon": "music",
 	"kategorie": "musik",
-	"plattformen": ["windows"],
-	"beschreibung": "Zeigt den laufenden Song mit Cover, Titel, Künstler und Fortschritt als HUD-Element. Bei jedem Songwechsel erscheint oben rechts eine kurze Einblendung.\n\nSteuern lässt sich die Musik per Taste: Abspielen/Pause mit Pos1, nächster Song mit Bild ab, vorheriger Song mit Bild auf. Die Tasten änderst du unter Optionen → Steuerung → Heldix-Addons.\n\n- Keine Anmeldung: Das Addon liest den Song über die Windows-Mediensteuerung, ein Spotify-Konto oder Premium ist nicht nötig.\n- Es werden keine Daten ins Internet geschickt.\n- Auf Wunsch steuert es auch andere Player wie den Browser oder VLC (Einstellung „Nur Spotify“ ausschalten).\n- Nur unter Windows.",
-	"hinweise": ["Jetzt im Addon-Store statt im Launcher"]
+	"plattformen": ["windows", "mac", "linux"],
+	"beschreibung": "Zeigt den laufenden Song mit Cover, Titel, Künstler und Fortschritt als HUD-Element – wahlweise kompakt, groß mit Cover oder nur als Titelzeile. Fortschritt und Equalizer leuchten in Spotify-Grün, in der Farbe des Covers oder in deiner eigenen Farbe. Lange Titel laufen als Laufschrift durch.\n\nSteuern lässt sich die Musik per Taste: Abspielen/Pause mit Pos1, nächster Song mit Bild ab, vorheriger Song mit Bild auf. Für 10 Sekunden vor und zurück, Zufallswiedergabe, Wiederholen und „Song teilen“ gibt es weitere Tasten, die du unter Optionen → Steuerung → Heldix-Addons belegst.\n\nIm Chat zeigt .np den laufenden Song nur dir, .np teilen schickt „🎵 Titel – Künstler“ an alle. Mit .spotify play, pause, next oder prev steuerst du die Musik, ohne das Spiel zu verlassen.\n\n- Keine Anmeldung: Ein Spotify-Konto, Premium oder ein API-Schlüssel ist nicht nötig.\n- Windows: über die Windows-Mediensteuerung, auf Wunsch auch für andere Player wie den Browser oder VLC (Einstellung „Nur Spotify“ ausschalten, dann lässt sich der Player wechseln).\n- macOS: über die Spotify-App (beim ersten Mal fragt macOS, ob Minecraft Spotify steuern darf).\n- Linux: über die Mediensteuerung MPRIS, dafür muss das Programm playerctl installiert sein.\n- Die Einblendung beim Songwechsel lässt sich abschalten oder nur zeigen, wenn das HUD-Element nicht zu sehen ist.\n- Es werden keine Daten über dich ins Internet geschickt. Nur unter macOS und Linux lädt das Addon die Cover-Bilder direkt von Spotify.",
+	"hinweise": [
+		"Jetzt auch für macOS und Linux (mit playerctl)",
+		"Drei Darstellungen: Kompakt, Groß mit Cover und Nur Titel",
+		"Akzentfarbe aus dem Cover oder als eigene Farbe, Laufschrift für lange Titel",
+		"Chat-Befehle .np, .np teilen und .spotify play/pause/next/prev",
+		"Neue Tasten: 10 Sekunden vor/zurück, Zufallswiedergabe, Wiederholen, Song teilen",
+		"Windows: Player wechseln, wenn mehrere laufen",
+		"Einblendung beim Songwechsel einstellbar, HUD-Element bei Pause ausblendbar"
+	]
 }

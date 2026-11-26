@@ -2,9 +2,9 @@
 titel: Addon-API im Detail
 beschreibung: Module, HUD-Elemente, Einstellungen, Tasten, Einblendungen und Ereignisse – mit echten Beispielen aus den Addons Spotify und Uhrzeit & Spielzeit.
 reihenfolge: 2
-stichworte: api, heldixapi, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config
+stichworte: api, heldixapi, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate
 ---
-Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **2** (Stand HeldixClient 0.13.0). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Heldix-Addons schreiben](/entwickler/addons).
+Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **3** (Stand HeldixClient 0.13.1). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Heldix-Addons schreiben](/entwickler/addons).
 
 ## Das Objekt HeldixApi
 
@@ -19,10 +19,11 @@ In `onEnable(HeldixApi api)` bekommst du ein Objekt, über das alles läuft:
 - `chat(text)` – eine Nachricht nur im eigenen Chat.
 - `config()` – einfache, dauerhaft gespeicherte Einstellungen.
 - ab API 2: `registerKey(...)`, `notify(...)` und `dataDirectory()`.
+- ab API 3: `game()`, `playerState()`, `scheduler()`, `registerCommand(...)` und `sendChatMessage(...)` – siehe [Ab API 3](#ab-api-3).
 
 ## Ereignisse
 
-`api.events()` liefert ein `HeldixEvents` mit vier Ereignissen. Alle Listener laufen im Haupt-Thread des Spiels.
+`api.events()` liefert ein `HeldixEvents` mit vier Ereignissen (ab API 3 kommen weitere dazu, siehe unten). Alle Listener laufen im Haupt-Thread des Spiels.
 
 - `onTick(Runnable)` – 20-mal pro Sekunde, bei jedem Client-Tick.
 - `onWorldJoin(Runnable)` – beim Betreten einer Welt oder eines Servers.
@@ -256,9 +257,98 @@ api.notify(track.title(), byline(track), track.cover());
 
 `api.chat(text)` zeigt eine Nachricht nur in deinem eigenen Chat, mit dem Namen deines Addons davor. Sie wird nicht an den Server gesendet.
 
+## Ab API 3
+
+Mit `"api": 3` (ab HeldixClient 0.13.1) kommen diese Bausteine dazu. Neue Methoden gibt es nur an Schnittstellen, die HeldixClient bereitstellt – fertige Addons für API 1 und 2 laufen unverändert weiter.
+
+### Mehr Ereignisse, mit Abmeldung
+
+- `onServerJoin(adresse -> …)` und `onServerLeave(…)` – Server betreten oder verlassen (nicht im Einzelspieler), mit Adresse.
+- `onScreenOpen(art -> …)` und `onScreenClose(…)` – ein Menü geht auf oder zu. `art` ist `chat`, `inventory`, `container`, `pause`, `death`, `options`, `title`, `worlds`, `servers`, `loading`, `heldix` oder `other`.
+- `onDeath(…)`, `onRespawn(…)`, `onDimensionChange(dimension -> …)` und `onHealthChange((vorher, jetzt) -> …)`.
+
+Alle neuen Ereignisse, Befehle und geplanten Aufgaben geben eine `Registration` zurück: `cancel()` meldet ab, `isActive()` sagt, ob sie noch läuft. Die bisherigen Ereignisse wie `onTick` bleiben, wie sie sind.
+
+```java
+Registration tod = api.events().onDeath(() -> api.notify("Autsch", "Zurück zum Spawn?"));
+api.events().onDimensionChange(dimension -> api.chat("Jetzt in " + dimension));
+api.events().onScreenOpen(art -> { if (art.equals("pause")) api.logger().info("Pause"); });
+```
+
+### Spiel- und Spielerdaten
+
+- `api.game()` liefert ein `GameInfo`: FPS, Ping, Einzel- oder Mehrspieler, Server-Adresse, Tageszeit, Wetter, pausiert, HUD ausgeblendet ([[F1]]) und das offene Menü. Es gibt die Angaben immer, auch im Hauptmenü – dann sind sie leer bzw. -1.
+- `api.playerState()` liefert ein `Optional<PlayerState>`: alles aus `player()` plus Blickrichtung, Tempo, maximale Leben, Absorption, Sättigung, Rüstungspunkte, Level, Spielmodus, Sprinten, Schleichen und Fliegen, die Items in der Hand und die Rüstung (`ItemInfo`) und aktive Effekte (`EffectInfo`).
+
+```java
+GameInfo spiel = api.game();
+String wo = spiel.multiplayer() ? spiel.serverAddress() : "Einzelspieler";
+api.playerState().ifPresent(p -> api.chat(p.mainHand().name() + ", noch " + p.mainHand().durability() + " Haltbarkeit"));
+```
+
+### Aufgaben planen
+
+`api.scheduler()` liefert einen `Scheduler`:
+
+- `runLater(ticks, …)` und `runRepeating(verzögerung, abstand, …)` laufen im Haupt-Thread; ein Tick ist eine Zwanzigstelsekunde.
+- `runAsync(…)` läuft im Hintergrund (zwei Threads je Addon) – für Downloads und langsame Dateien.
+- `runOnMainThread(…)` bringt ein Ergebnis zurück in den Haupt-Thread, `isMainThread()` sagt, wo du gerade bist.
+
+Schaltet sich das Addon ab oder endet das Spiel, bricht HeldixClient alle geplanten Aufgaben ab.
+
+```java
+api.scheduler().runAsync(() -> {
+    String text = ladeEtwas(); // darf blockieren
+    api.scheduler().runOnMainThread(() -> api.chat(text));
+});
+api.scheduler().runRepeating(20, 20 * 60, () -> api.notify("Minute um", "Trink etwas"));
+```
+
+### Chat-Befehle und Chat an den Server
+
+`api.registerCommand(name, verwendung, beschreibung, befehl -> …)` legt einen Befehl „.name …“ an. Er geht nicht an den Server. `.hilfe` listet alle Befehle, [[Tab]] ergänzt, und über dem Eingabefeld stehen passende Befehle. `befehl.arg(0)` liefert das erste Argument, `befehl.reply(text)` antwortet nur dir.
+
+`api.sendChatMessage(text)` schickt eine Nachricht an den Server – aber nur direkt in einer Taste, einem Befehl oder einem Knopf und höchstens einmal pro Aktion, sonst gibt es eine `IllegalStateException`. `/`-Befehle gehen damit nicht. So kann kein Addon von sich aus spammen.
+
+```java
+api.registerCommand("winken", "[alle]", "Winkt (alle: im öffentlichen Chat)", befehl -> {
+    if (befehl.arg(0).equals("alle")) api.sendChatMessage("*winkt*");
+    else befehl.reply("*winkt*");
+});
+```
+
+### Regler, Farben und Textfelder
+
+Zu Schalter, Auswahl und Knopf kommen im Untermenü eines Moduls:
+
+- `addSlider(schlüssel, label, beschreibung, min, max, schritt, standard)` – ein Regler, liefert einen `DoubleSupplier`; auf Wunsch mit eigenem Text für den Wert.
+- `addColor(schlüssel, label, beschreibung, standardFarbe)` – Farbwahl aus der Heldix-Palette, liefert einen `IntSupplier`.
+- `addText(schlüssel, label, beschreibung, standard, maxLänge)` – ein Textfeld, liefert einen `Supplier<String>`.
+
+```java
+DoubleSupplier abstand = modul.addSlider("abstand", "Abstand", "", 0, 10, 0.5, 2);
+IntSupplier farbe = modul.addColor("farbe", "Farbe", "", HeldixColors.ACCENT);
+Supplier<String> titel = modul.addText("titel", "Titel", "", "Mein HUD", 32);
+```
+
+### Neue Zeichenhilfen im HUD
+
+- `progressBar(...)`, `gradientRect(...)`, `line(...)` und `circle(...)` – Fortschrittsbalken, Farbverläufe, Linien in jede Richtung und Kreise.
+- `item("minecraft:diamond_sword", x, y, größe)` und `playerHead(name oder uuid, …)` – Item-Symbole und Spielerköpfe.
+- `scrollingText(...)` – Laufschrift für Texte, die nicht passen.
+- `imageColor(png)` – die typische Farbe eines Bildes, etwa als Akzentfarbe aus einem Album-Cover.
+
+```java
+canvas.progressBar(0, 20, 100, 3, 0.4f, 0x2EFFFFFF, farbe.getAsInt());
+canvas.item("minecraft:clock", 0, 0, 16);
+canvas.scrollingText("Ein sehr langer Titel, der nicht passt", 20, 4, 80, HeldixColors.TEXT, TextStyle.BOLD);
+```
+
+Alle Einzelheiten stehen in den Javadoc-Kommentaren der API-Klassen; Funktionen der Stufe 3 sind mit `@since 3` gekennzeichnet.
+
 ## Threads und Fehler
 
 - Ereignisse, Tasten, Aktionen, `onToggle` und Renderer laufen im Haupt-Thread. Warte dort nie auf Netzwerk oder langsame Dateien, sonst ruckelt das Spiel.
-- Aus eigenen Threads ist nur `notify` ausdrücklich erlaubt. Alles andere legst du in Felder und verarbeitest es im nächsten Tick oder im Renderer.
-- Fehler in deinem Code fängt HeldixClient ab und schreibt sie ins Log. Nach drei Fehlern wird das Addon für diese Sitzung abgeschaltet, das Spiel läuft weiter. Ein Fehler im Renderer passiert meist jedes Bild – dann ist das Addon sehr schnell aus.
+- Aus eigenen Threads ist nur `notify` ausdrücklich erlaubt. Alles andere legst du in Felder und verarbeitest es im nächsten Tick oder im Renderer – ab API 3 einfacher mit `api.scheduler().runAsync(…)` und `runOnMainThread(…)`.
+- Fehler in deinem Code fängt HeldixClient ab und schreibt sie ins Log. Nach drei Fehlern – auch in Befehlen, Knöpfen und Aufgaben des Schedulers – wird das Addon für diese Sitzung abgeschaltet, das Spiel läuft weiter. Ein Fehler im Renderer passiert meist jedes Bild – dann ist das Addon sehr schnell aus.
 - Wirft `onEnable` einen Fehler, wird das Addon gar nicht erst geladen. Das Heldix-Menü zeigt es dann rot mit dem Grund an, siehe [Addons installieren und Fehler finden](/entwickler/addon-installieren).

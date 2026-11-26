@@ -55,10 +55,10 @@ export function rejectUpgrade(socket: Duplex, err: HttpError): void {
 export const BODY_TIMEOUT_MS = 15_000;
 
 /**
- * Liest den Anfragekörper als JSON-Objekt. Höchstens `limit` Byte, sonst 413; höchstens `timeoutMs` lang, sonst 408.
- * Ein leerer Körper ergibt `{}`.
+ * Liest den ganzen Anfragekörper in den Speicher. Höchstens `limit` Byte, sonst 413; höchstens `timeoutMs` lang,
+ * sonst 408; abgebrochen: 400.
  */
-export function readJsonObject(req: IncomingMessage, limit: number, timeoutMs = BODY_TIMEOUT_MS): Promise<Record<string, unknown>> {
+export function readRawBody(req: IncomingMessage, limit: number, timeoutMs = BODY_TIMEOUT_MS): Promise<Buffer> {
   const tooLarge = () =>
     new HttpError(413, `Die Anfrage ist zu groß (höchstens ${Math.floor(limit / 1024)} KB).`, { Connection: 'close' });
   const declared = Number(req.headers['content-length'] ?? '0');
@@ -74,7 +74,7 @@ export function readJsonObject(req: IncomingMessage, limit: number, timeoutMs = 
       finish(new HttpError(408, 'Die Anfrage kam zu langsam an.', { Connection: 'close' }));
     }, timeoutMs);
     timer.unref();
-    const finish = (err: HttpError | null, value?: Record<string, unknown>) => {
+    const finish = (err: HttpError | null, value?: Buffer) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
@@ -92,20 +92,25 @@ export function readJsonObject(req: IncomingMessage, limit: number, timeoutMs = 
       chunks.push(chunk);
     });
     req.on('error', () => finish(new HttpError(400, 'Die Anfrage wurde abgebrochen.')));
-    req.on('end', () => {
-      if (done) return;
-      const text = Buffer.concat(chunks).toString('utf8').trim();
-      if (text === '') return finish(null, {});
-      let value: unknown;
-      try {
-        value = JSON.parse(text);
-      } catch {
-        return finish(new HttpError(400, 'Ungültige Anfrage: kein gültiges JSON.'));
-      }
-      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-        return finish(new HttpError(400, 'Ungültige Anfrage: Es wird ein JSON-Objekt erwartet.'));
-      }
-      finish(null, value as Record<string, unknown>);
-    });
+    req.on('end', () => finish(null, Buffer.concat(chunks)));
   });
+}
+
+/**
+ * Liest den Anfragekörper als JSON-Objekt. Höchstens `limit` Byte, sonst 413; höchstens `timeoutMs` lang, sonst 408.
+ * Ein leerer Körper ergibt `{}`.
+ */
+export async function readJsonObject(req: IncomingMessage, limit: number, timeoutMs = BODY_TIMEOUT_MS): Promise<Record<string, unknown>> {
+  const text = (await readRawBody(req, limit, timeoutMs)).toString('utf8').trim();
+  if (text === '') return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new HttpError(400, 'Ungültige Anfrage: kein gültiges JSON.');
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new HttpError(400, 'Ungültige Anfrage: Es wird ein JSON-Objekt erwartet.');
+  }
+  return value as Record<string, unknown>;
 }

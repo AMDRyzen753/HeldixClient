@@ -298,3 +298,44 @@ export function rawRequest(base: string, method: string, pathname: string, heade
     req.end();
   });
 }
+
+export interface RawResult {
+  status: number;
+  body: any;
+  headers: IncomingHttpHeaders;
+}
+
+/**
+ * Roher Upload mit node:http. Mit `declared` (größer als die Daten) wird nur angekündigt und nicht zu Ende gesendet:
+ * So antwortet der Dienst mit 413, ohne dass der Client mitten im Senden getrennt wird.
+ */
+export function rawUpload(base: string, method: string, pathname: string, data: Buffer, headers: Record<string, string>, declared?: number): Promise<RawResult> {
+  const url = new URL(base);
+  return new Promise((resolve, reject) => {
+    let answered = false;
+    const req = httpRequest(
+      {
+        host: url.hostname,
+        port: url.port,
+        method,
+        path: pathname,
+        headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': String(declared ?? data.length), ...headers },
+      },
+      (res) => {
+        answered = true;
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8');
+          resolve({ status: res.statusCode ?? 0, body: text === '' ? undefined : JSON.parse(text), headers: res.headers });
+          if (declared !== undefined) req.destroy();
+        });
+      },
+    );
+    req.on('error', (err) => {
+      if (!answered) reject(err);
+    });
+    if (declared !== undefined && declared > data.length) req.write(data);
+    else req.end(data);
+  });
+}

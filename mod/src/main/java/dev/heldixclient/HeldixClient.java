@@ -66,6 +66,8 @@ public class HeldixClient implements HeldixModInitializer {
 		StatusReporter.init();
 		// Heldix-Dienst: Capes anderer Spieler, Heldix-Symbol, Freunde (nur mit eingetragener Adresse)
 		dev.heldixclient.social.Social.init();
+		// Addon-Store: kurz nach dem Start nach Updates sehen (Hinweis einmal pro Sitzung)
+		dev.heldixclient.addon.AddonStore.init();
 		// F3: eigener Eintrag – vor dem Laden der F3-Einstellungen, damit Minecraft ihn kennt
 		DebugOverlay.register();
 

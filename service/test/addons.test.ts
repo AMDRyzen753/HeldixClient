@@ -9,7 +9,7 @@ import { after, before, describe, test } from 'node:test';
 import { ADDON_SIGNATURE_PREFIX, verifyAddonSignature } from '../src/addons';
 import { Store } from '../src/db';
 import { SESSION_COOKIE } from '../src/web';
-import { api, devPlayer, rawRequest, sleep, startService, waitFor, type Player, type TestService } from './helpers';
+import { api, devPlayer, rawRequest, rawUpload, sleep, startService, waitFor, type Player, type TestService } from './helpers';
 import { Clock, teamLogin, webApi, webLogin, WEBSITE } from './web-helpers';
 
 const NO_ADDON = 'Dieses Addon gibt es nicht.';
@@ -38,6 +38,8 @@ function fields(id: string, version: string, data: Buffer, extra: Record<string,
     sha256: sha256(data),
     date: '2026-11-25',
     notes: ['Erste Version'],
+    official: true,
+    author: null,
     ...extra,
   };
 }
@@ -87,6 +89,7 @@ async function upload(service: TestService, cookie: string | null, file: string,
 
 const ENTRY_KEYS = [
   'api',
+  'author',
   'authors',
   'category',
   'date',
@@ -98,8 +101,12 @@ const ENTRY_KEYS = [
   'manifest',
   'name',
   'notes',
+  'official',
   'platforms',
   'publishedAt',
+  'rating',
+  'screenshots',
+  'screenshotsVersion',
   'sha256',
   'signature',
   'size',
@@ -165,7 +172,14 @@ describe('Addon-Store', () => {
     assert.equal((await api(service.url, 'GET', '/v1/status')).body.addons, 0);
     const overview = await webApi(service, 'GET', '/v1/team/addons', { cookie });
     assert.equal(overview.status, 200, JSON.stringify(overview.body));
-    assert.deepEqual(overview.body, { addons: [], pending: [], keyConfigured: true });
+    assert.deepEqual(overview.body, {
+      addons: [],
+      pending: [],
+      keyConfigured: true,
+      publicKey: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+      pendingSubmissions: 0,
+      openReports: 0,
+    });
   });
 
   test('Hochladen: gestreamt mit SHA-256, nur gültige Namen, höchstens die Grenze, keine Reste', async () => {
@@ -194,7 +208,8 @@ describe('Addon-Store', () => {
       assert.equal((await upload(service, cookie, bad, uhr1)).status, 400, bad);
     }
     // Über der Grenze (im Test 1 MiB): 413, ohne Datei oder Rest.
-    const big = await upload(service, cookie, fileName('uhrzeit', '9.0.0'), randomBytes(MIB + 1));
+    // Nur ankündigen und nicht zu Ende senden: So trennt der Dienst den Client nicht mitten im Senden (ECONNRESET).
+    const big = await rawUpload(service.url, 'PUT', `/v1/team/addons/files/${fileName('uhrzeit', '9.0.0')}`, randomBytes(1000), { Cookie: `${SESSION_COOKIE}=${cookie}`, 'X-Heldix-Web': '1' }, MIB + 1);
     assert.equal(big.status, 413);
     assert.deepEqual(fs.readdirSync(addonsDir), [file]);
   });
@@ -344,6 +359,15 @@ describe('Addon-Store', () => {
       [{ notes: ['x'.repeat(301)] }, /„notes“ \(Eintrag 1\) ist zu lang/],
       [{ notes: undefined }, /„notes“ fehlt/],
       [{ notes: 'Neu' }, /„notes“ fehlt oder ist keine Liste/],
+      [{ official: 'ja' }, /„official“ muss true oder false sein/],
+      [{ author: { uuid: 'x', name: 'Anna' } }, /„author“ muss null oder/],
+      [{ author: 'Anna' }, /„author“ muss null oder/],
+      [{ author: { uuid: 'a'.repeat(32), name: 'Anna' } }, /Offizielle Addons haben keinen „author“/],
+      // Gültig, aber kein Team-Addon: Der Team-Upload braucht official: true und author: null.
+      [{ official: false, author: { uuid: 'a'.repeat(32), name: 'Anna' } }, /Team-Addons brauchen „official“: true und „author“: null/],
+      [{ official: false }, /Team-Addons brauchen/],
+      [{ official: undefined }, /Team-Addons brauchen/],
+      [{ author: undefined }, /Team-Addons brauchen/],
     ];
     for (const [extra, expected] of rejected) {
       const res = await put(signAddon(keys.privateKey, fields('feldtest', '1.0.0', data, extra)));
@@ -431,7 +455,20 @@ describe('Addon-Store', () => {
       assert.equal(verifyAddonSignature(entry.manifest, entry.signature, keys.publicKey), true);
       const { type, ...rest } = JSON.parse(entry.manifest);
       assert.equal(type, 'heldix-addon');
-      assert.deepEqual({ ...rest, downloads: entry.downloads, publishedAt: entry.publishedAt, manifest: entry.manifest, signature: entry.signature }, entry);
+      assert.deepEqual(
+        {
+          ...rest,
+          downloads: entry.downloads,
+          publishedAt: entry.publishedAt,
+          rating: { average: 0, count: 0 },
+          screenshots: 0,
+          screenshotsVersion: entry.screenshotsVersion,
+          manifest: entry.manifest,
+          signature: entry.signature,
+        },
+        entry,
+      );
+      assert.deepEqual([entry.official, entry.author], [true, null]);
       assert.equal(entry.downloads, 0);
       assert.equal(typeof entry.publishedAt, 'number');
     }

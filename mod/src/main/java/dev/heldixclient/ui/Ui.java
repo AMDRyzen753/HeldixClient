@@ -397,6 +397,8 @@ public final class Ui {
 		final long modified;
 		final int width;
 		final int height;
+		/** typische Farbe des Bildes (für Akzentfarben), 0 = unbekannt */
+		int color;
 		long checkedAt;
 
 		FileTexture(Identifier id, long modified, int width, int height) {
@@ -430,6 +432,57 @@ public final class Ui {
 		return true;
 	}
 
+	/** Typische Farbe eines PNG aus einer Datei (lädt es wie {@link #image}); 0, wenn es fehlt oder ungültig ist */
+	public static int imageColor(Path file) {
+		FileTexture texture = fileTexture(file);
+		return texture == null ? 0 : texture.color;
+	}
+
+	/**
+	 * Durchschnittsfarbe, bei der kräftige Farben viel mehr zählen als Grau, Schwarz und Weiß – so wird ein Cover
+	 * mit dunklem Hintergrund und rotem Schriftzug „rot“ und nicht „dunkelgrau“. Liest höchstens 32×32 Punkte.
+	 */
+	private static int typicalColor(NativeImage image) {
+		int w = image.getWidth();
+		int h = image.getHeight();
+		if (w <= 0 || h <= 0) return 0;
+		int stepX = Math.max(1, w / 32);
+		int stepY = Math.max(1, h / 32);
+		double r = 0, gr = 0, b = 0, weight = 0;
+		double pr = 0, pg = 0, pb = 0, plain = 0;
+		for (int y = stepY / 2; y < h; y += stepY) {
+			for (int x = stepX / 2; x < w; x += stepX) {
+				int argb = image.getPixel(x, y);
+				if ((argb >>> 24) < 128) continue;
+				int cr = (argb >> 16) & 0xFF;
+				int cg = (argb >> 8) & 0xFF;
+				int cb = argb & 0xFF;
+				int max = Math.max(cr, Math.max(cg, cb));
+				int min = Math.min(cr, Math.min(cg, cb));
+				double saturation = max == 0 ? 0 : (max - min) / (double) max;
+				double value = max / 255.0;
+				double wgt = saturation * saturation * (value < 0.2 ? value * 2 : 1) + 0.002;
+				r += cr * wgt;
+				gr += cg * wgt;
+				b += cb * wgt;
+				weight += wgt;
+				pr += cr;
+				pg += cg;
+				pb += cb;
+				plain++;
+			}
+		}
+		if (plain == 0) return 0;
+		if (weight < plain * 0.01) {
+			// fast ohne Farbe: einfacher Durchschnitt
+			r = pr;
+			gr = pg;
+			b = pb;
+			weight = plain;
+		}
+		return 0xFF000000 | ((int) Math.round(r / weight) << 16) | ((int) Math.round(gr / weight) << 8) | (int) Math.round(b / weight);
+	}
+
 	private static FileTexture fileTexture(Path file) {
 		if (file == null) return null;
 		long now = System.currentTimeMillis();
@@ -455,6 +508,7 @@ public final class Ui {
 			NativeImage image = NativeImage.read(in);
 			Identifier id = HeldixClient.id("dynamic/file_" + (++fileTextureCounter));
 			FileTexture texture = new FileTexture(id, modified, image.getWidth(), image.getHeight());
+			texture.color = typicalColor(image);
 			Minecraft.getInstance().getTextureManager().register(id, new LinearTexture(id, image));
 			texture.checkedAt = now;
 			FILE_TEXTURES.put(file, texture);

@@ -39,8 +39,8 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Verbindung zum Heldix-Dienst (siehe docs/dienst.md): Capes anderer HeldixClient-Spieler, Heldix-Symbol in der
- * Tab-Liste und Freunde mit Online-Status.
+ * Verbindung zum Heldix-Dienst (siehe docs/dienst.md): Capes anderer HeldixClient-Spieler, Heldix-Symbol (mit Rolle) in
+ * der Tab-Liste und über Köpfen und Freunde mit Online-Status.
  *
  * <p>Anmeldung wie beim Betreten eines Minecraft-Servers: Der Dienst gibt eine serverId aus, der Client meldet bei
  * Mojang den Beitritt (Session-Service von Minecraft), der Dienst prüft das bei Mojang. Das Zugangs-Token verlässt
@@ -78,7 +78,8 @@ public final class Social {
 	public record Request(UUID uuid, String name, long at) {
 	}
 
-	private record Lookup(boolean heldix, String cape, long at) {
+	/** Ergebnis des Nachschlagens; role ist bei heldix immer gesetzt (PLAYER ohne besondere Rolle) */
+	private record Lookup(boolean heldix, String cape, Badge.Role role, long at) {
 	}
 
 	private static final long LOOKUP_POSITIVE_MS = 30_000;
@@ -123,6 +124,7 @@ public final class Social {
 	public static void init() {
 		// erst im ersten Client-Tick verbinden: dann gibt es Minecraft und das angemeldete Konto sicher
 		ClientEvents.TICK_END.register(Social::tick);
+		ClientEvents.TICK_END.register(BadgeDisplay::tick);
 		NET.scheduleAtFixedRate(Social::ping, 30, 30, TimeUnit.SECONDS);
 	}
 
@@ -310,6 +312,8 @@ public final class Social {
 		NET.execute(() -> {
 			try {
 				syncProfile();
+				// eigene Rolle beim nächsten Nachschlagen neu holen (z. B. nach „Für andere erkennbar“ an)
+				LOOKUP.remove(Minecraft.getInstance().getUser().getProfileId());
 			} catch (Exception e) {
 				HeldixClient.LOGGER.info("Heldix-Dienst: Profil nicht gespeichert ({})", e.getMessage());
 			}
@@ -647,7 +651,7 @@ public final class Social {
 	}
 
 	// ======================================================================================
-	// Andere Spieler: Heldix-Symbol und Capes
+	// Andere Spieler: Heldix-Symbol (mit Rolle) und Capes
 	// ======================================================================================
 
 	private static void tick(Minecraft mc) {
@@ -663,9 +667,11 @@ public final class Social {
 		Set<UUID> wanted = new LinkedHashSet<>();
 		for (PlayerInfo info : connection.getOnlinePlayers()) wanted.add(info.getProfile().id());
 		if (mc.level != null) for (AbstractClientPlayer player : mc.level.players()) wanted.add(player.getUUID());
+		// sich selbst nur nachschlagen, wenn man erkennbar ist: dann meldet der Dienst auch die eigene Rolle
+		boolean ownVisible = HeldixConfig.get().socialVisible;
 		List<UUID> batch = new ArrayList<>();
 		for (UUID uuid : wanted) {
-			if (uuid == null || uuid.equals(own) || PENDING.contains(uuid)) continue;
+			if (uuid == null || (uuid.equals(own) && !ownVisible) || PENDING.contains(uuid)) continue;
 			Lookup lookup = LOOKUP.get(uuid);
 			if (lookup != null && now - lookup.at() < (lookup.heldix() ? LOOKUP_POSITIVE_MS : LOOKUP_NEGATIVE_MS)) continue;
 			batch.add(uuid);
@@ -683,7 +689,7 @@ public final class Social {
 				long at = System.currentTimeMillis();
 				for (UUID uuid : batch) {
 					JsonObject entry = players != null && players.has(compact(uuid)) ? players.getAsJsonObject(compact(uuid)) : null;
-					LOOKUP.put(uuid, entry == null ? new Lookup(false, null, at) : new Lookup(true, blankToNull(string(entry, "cape")), at));
+					LOOKUP.put(uuid, lookupOf(entry, at));
 				}
 			} catch (Exception e) {
 				HeldixClient.LOGGER.debug("Heldix-Dienst: Spieler nicht nachschlagbar ({})", e.toString());
@@ -693,13 +699,30 @@ public final class Social {
 		});
 	}
 
+	/** Eintrag aus der Antwort von /v1/players/lookup (null = kein erkennbarer HeldixClient-Spieler) */
+	private static Lookup lookupOf(JsonObject entry, long at) {
+		if (entry == null) return new Lookup(false, null, null, at);
+		return new Lookup(true, blankToNull(string(entry, "cape")), Badge.Role.of(string(entry, "badge")), at);
+	}
+
 	/** Nutzt dieser Spieler HeldixClient (und will erkennbar sein)? */
 	public static boolean isHeldix(UUID uuid) {
-		if (uuid == null) return false;
-		Minecraft mc = Minecraft.getInstance();
-		if (uuid.equals(mc.getUser().getProfileId())) return online() && HeldixConfig.get().socialVisible;
+		return roleOf(uuid) != null;
+	}
+
+	/**
+	 * Rolle fürs Heldix-Symbol: null = kein (erkennbarer) HeldixClient-Spieler. Nur aus dem Zwischenspeicher, nie eine
+	 * Anfrage – darf also in jedem Bild aufgerufen werden.
+	 */
+	public static Badge.Role roleOf(UUID uuid) {
+		if (uuid == null) return null;
 		Lookup lookup = LOOKUP.get(uuid);
-		return lookup != null && lookup.heldix();
+		if (uuid.equals(Minecraft.getInstance().getUser().getProfileId())) {
+			// sich selbst: die eigene Einstellung gilt sofort, die Rolle kommt vom Dienst, sobald nachgeschlagen
+			if (!online() || !HeldixConfig.get().socialVisible) return null;
+			return lookup != null && lookup.heldix() ? lookup.role() : Badge.Role.PLAYER;
+		}
+		return lookup != null && lookup.heldix() ? lookup.role() : null;
 	}
 
 	/** Heldix-Cape eines anderen Spielers (null = keins oder unbekannt) */
@@ -712,6 +735,15 @@ public final class Social {
 	/** Für Tests und nach dem Verlassen eines Servers */
 	public static void forgetPlayers() {
 		LOOKUP.clear();
+	}
+
+	/**
+	 * Nur für automatische Tests: ein Ergebnis des Nachschlagens vorgeben, als hätte der Dienst {@code entry} für diesen
+	 * Spieler gemeldet (null = kein HeldixClient-Spieler). Läuft durch dieselbe Auswertung wie echte Antworten und wird
+	 * nicht neu nachgeschlagen, bis {@link #forgetPlayers()} oder ein Trennen vom Dienst es löscht.
+	 */
+	public static void testLookup(UUID uuid, JsonObject entry) {
+		LOOKUP.put(uuid, lookupOf(entry, Long.MAX_VALUE / 2));
 	}
 
 	// ======================================================================================

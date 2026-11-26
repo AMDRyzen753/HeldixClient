@@ -18,7 +18,5 @@ include 'heldix-api'
 // (nicht mehr mit dem Launcher). Veröffentlichen: im Ordner launcher `npm run addon -- <id>`, siehe docs/addons.md.
 include 'addons:uhrzeit'
 include 'addons:spotify'
-// Brücke zum offiziellen Minecraft Launcher (Anmeldung von dort, gespielt wird mit HeldixClient)
-include 'launcher-bridge'
 // Automatischer Test im echten Spiel (wird nicht ausgeliefert)
 include 'autotest'

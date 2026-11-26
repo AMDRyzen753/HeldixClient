@@ -9,7 +9,10 @@ import dev.heldixclient.ui.Ui;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BooleanSupplier;
+import java.util.function.DoubleFunction;
+import java.util.function.DoubleSupplier;
 import java.util.function.IntSupplier;
+import java.util.function.Supplier;
 
 /** Modul ohne HUD aus einem Addon (an/aus, ab API 2 mit eigenen Einstellungen). */
 final class AddonToggleModule extends Module implements ModuleHandle {
@@ -74,6 +77,38 @@ final class AddonToggleModule extends Module implements ModuleHandle {
 	@Override
 	public void addAction(String label, String description, String button, Runnable action) {
 		custom.add(AddonSettings.action(addon, name(), label, description, button, action));
+	}
+
+	// --- Einstellungen (API 3) ----------------------------------------------------------------
+
+	@Override
+	public DoubleSupplier addSlider(String key, String label, String description, double min, double max, double step, double defaultValue) {
+		return addSlider(key, label, description, min, max, step, defaultValue, null);
+	}
+
+	@Override
+	public DoubleSupplier addSlider(String key, String label, String description, double min, double max, double step, double defaultValue,
+			DoubleFunction<String> format) {
+		AddonSettings.checkRange(min, max, step);
+		Setting.Slider slider = slider(AddonSettings.key(key), label, AddonSettings.text(description), min, max, step, Math.clamp(defaultValue, min, max),
+				AddonSettings.format(addon, name(), label, step, format));
+		custom.add(slider);
+		return AddonSettings.snapped(slider);
+	}
+
+	@Override
+	public IntSupplier addColor(String key, String label, String description, int defaultColor) {
+		Setting.Color color = color(AddonSettings.key(key), label, AddonSettings.text(description), defaultColor);
+		custom.add(color);
+		return color.get();
+	}
+
+	@Override
+	public Supplier<String> addText(String key, String label, String description, String defaultValue, int maxLength) {
+		Setting.Text text = text(AddonSettings.key(key), label, AddonSettings.text(description), AddonSettings.text(defaultValue),
+				AddonSettings.maxLength(maxLength));
+		custom.add(text);
+		return text.get();
 	}
 
 	@Override

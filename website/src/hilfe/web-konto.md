@@ -19,13 +19,14 @@ Auf heldixclient.com hast du ein Konto mit Profil, Freunden, Nachrichten und Ein
 
 Der Anmelde-Link gilt zwei Minuten und nur ein einziges Mal. Erscheint „Der Anmelde-Link ist abgelaufen oder wurde schon benutzt“, hole dir einfach einen neuen.
 
-> **Hinweis:** Für die Webseite brauchst du ein Microsoft-Konto (auch angemeldet über den Minecraft Launcher). Mit einem Offline-Konto geht es nicht.
+> **Hinweis:** Für die Webseite brauchst du ein Microsoft-Konto. Mit einem Offline-Konto geht es nicht.
 
 ## Was du im Konto findest
 - **Profil:** dein Heldix-Cape und die Schalter, was andere von dir sehen
 - **Freunde:** Anfragen senden, annehmen und ablehnen, Freunde entfernen
 - **Nachrichten:** mit Freunden schreiben, Spieler melden oder blockieren
 - **Support:** Fragen an das HeldixClient-Team – siehe [Support-Anfrage stellen](/hilfe/support-anfrage)
+- **Meine Addons:** eigene Heldix-Addons in den Addon-Store einreichen, den Stand der Prüfung sehen und neue Versionen einreichen – siehe [Addon einreichen](/entwickler/addons#addon-einreichen)
 - **Privatsphäre:** blockierte Spieler und deine Meldungen
 - **Meine Daten:** was gespeichert ist, Datenexport, angemeldete Browser und **Alle Daten löschen**
 

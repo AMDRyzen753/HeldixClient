@@ -119,6 +119,8 @@ export interface SendFileOptions {
   idleTimeoutMs: number;
   /** Nach einem vollständig gesendeten GET der ganzen Datei (200, kein HEAD, kein Teilbereich). */
   onComplete?: () => void;
+  /** `inline` für Bilder, die der Browser anzeigen soll (Standard: `attachment`, also Download). */
+  disposition?: 'attachment' | 'inline';
 }
 
 /**
@@ -155,7 +157,7 @@ export async function sendFile(req: IncomingMessage, res: ServerResponse, real: 
     const headers: Record<string, string> = {
       'Content-Type': options.contentType,
       'Content-Length': String(length),
-      'Content-Disposition': `attachment; filename="${options.name}"`,
+      'Content-Disposition': `${options.disposition ?? 'attachment'}; filename="${options.name}"`,
       'Accept-Ranges': 'bytes',
       'Cache-Control': options.cacheControl,
       'X-Content-Type-Options': 'nosniff',

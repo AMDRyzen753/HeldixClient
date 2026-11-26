@@ -1,11 +1,11 @@
-// Datenbank: Datenbanken älterer Versionen (Schema 1 bis 4) werden beim Start sauber angehoben.
+// Datenbank: Datenbanken älterer Versionen (Schema 1 bis 5) werden beim Start sauber angehoben.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
-import { Store } from '../src/db';
+import { DELETED_OWNER, Store } from '../src/db';
 import { api, connect, startService } from './helpers';
 
 /** Genau das Schema 1, wie es die vorige Version des Dienstes angelegt hat. */
@@ -187,6 +187,28 @@ CREATE TABLE launcher_versions (
 CREATE INDEX launcher_versions_published ON launcher_versions (published_at);
 `;
 
+/** Genau die Stufe 5 (Addon-Store), wie sie Version 1.4.0 angelegt hat. */
+const MIGRATION_V5 = `
+CREATE TABLE addons (
+  id TEXT PRIMARY KEY,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  downloads INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE TABLE addon_versions (
+  id TEXT NOT NULL REFERENCES addons (id) ON DELETE CASCADE,
+  version TEXT NOT NULL,
+  manifest TEXT NOT NULL,
+  signature TEXT NOT NULL,
+  file TEXT NOT NULL UNIQUE,
+  size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  published_at INTEGER NOT NULL,
+  published_by TEXT,
+  PRIMARY KEY (id, version)
+) STRICT, WITHOUT ROWID;
+`;
+
 const ANNA = 'a'.repeat(32);
 const BEN = 'b'.repeat(32);
 
@@ -225,7 +247,7 @@ test('Schema 1 → aktuell: Daten bleiben, neue Einstellung „messages“ ist a
     }
 
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 5);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 6);
     check.close();
 
     // Ein zweiter Start ändert nichts mehr; der Dienst läuft auf der angehobenen Datenbank.
@@ -288,7 +310,7 @@ test('Schema 2 → 3 (Version 1.0.0 auf dem Server): Meldungen bekommen einen St
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 5);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 6);
     check.close();
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -338,7 +360,7 @@ test('Schema 3 → 4 (Version 1.1.0 auf dem Server): Team behält 2FA, Teamprofi
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 5);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 6);
     check.close();
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -389,7 +411,7 @@ test('Schema 4 → 5 (Version 1.3.0 auf dem Server): alle Daten bleiben, der Add
         publishedBy: 'Anna',
       };
       store.insertAddonVersion(row);
-      assert.deepEqual(store.listAddons(), [{ id: 'uhrzeit', hidden: false, downloads: 0, createdAt: now }]);
+      assert.deepEqual(store.listAddons(), [{ id: 'uhrzeit', hidden: false, downloads: 0, createdAt: now, owner: null, screenshots: [] }]);
       assert.deepEqual(store.addonVersionByFile(row.file), row);
       store.countAddonDownload('uhrzeit');
       assert.equal(store.getAddon('uhrzeit')!.downloads, 1);
@@ -402,8 +424,106 @@ test('Schema 4 → 5 (Version 1.3.0 auf dem Server): alle Daten bleiben, der Add
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 5);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 6);
     check.close();
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('Schema 5 → 6 (Version 1.4.0 auf dem Server): Addons, Versionen und Zähler bleiben (offiziell, ohne Besitzer), Einreichungen, Bewertungen und Meldungen sind da', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'heldix-dienst-migration-'));
+  try {
+    const old = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
+    old.exec('PRAGMA journal_mode = WAL;');
+    old.exec(SCHEMA_V1);
+    old.exec(MIGRATION_V2);
+    old.exec(MIGRATION_V3);
+    old.exec(MIGRATION_V4);
+    old.exec(MIGRATION_V5);
+    const now = Date.now();
+    const user = old.prepare('INSERT INTO users (uuid, name, name_lower, name_verified_at, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)');
+    user.run(ANNA, 'Anna', 'anna', now, now, now);
+    user.run(BEN, 'Ben', 'ben', now, now, now);
+    old.prepare("INSERT INTO team (uuid, role, added_at, totp_secret) VALUES (?, 'admin', ?, 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ')").run(ANNA, now);
+    // Ein Addon wie aus 1.4.0: Manifest ohne „official“ und „author“, versteckt, mit Downloads
+    const manifest = JSON.stringify({
+      type: 'heldix-addon',
+      id: 'uhrzeit',
+      name: 'Uhrzeit',
+      version: '1.0.0',
+      summary: 'Zeigt die Uhrzeit.',
+      description: '',
+      authors: ['HeldixClient'],
+      api: 2,
+      icon: 'clock',
+      category: 'hud',
+      platforms: [],
+      file: 'heldix-addon-uhrzeit-1.0.0.jar',
+      size: 3,
+      sha256: '0'.repeat(64),
+      date: '2026-11-25',
+      notes: [],
+    });
+    old.prepare('INSERT INTO addons (id, hidden, downloads, created_at) VALUES (?, 0, 42, ?)').run('uhrzeit', now);
+    old.prepare('INSERT INTO addons (id, hidden, downloads, created_at) VALUES (?, 1, 7, ?)').run('versteckt', now);
+    const version = old.prepare(
+      'INSERT INTO addon_versions (id, version, manifest, signature, file, size, sha256, published_at, published_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    );
+    version.run('uhrzeit', '1.0.0', manifest, 'c2ln', 'heldix-addon-uhrzeit-1.0.0.jar', 3, '0'.repeat(64), now, 'Anna');
+    version.run('versteckt', '2.0.0', manifest.replace(/uhrzeit/g, 'versteckt').replace('1.0.0', '2.0.0'), 'c2ln', 'heldix-addon-versteckt-2.0.0.jar', 3, '0'.repeat(64), now, null);
+    old.exec('PRAGMA user_version = 5');
+    old.close();
+
+    const store = new Store(dataDir);
+    try {
+      assert.deepEqual(
+        store.listAddons().map((a) => [a.id, a.hidden, a.downloads, a.createdAt, a.owner, a.screenshots]),
+        [
+          ['uhrzeit', false, 42, now, null, []],
+          ['versteckt', true, 7, now, null, []],
+        ],
+      );
+      assert.deepEqual(store.addonVersionsOf('uhrzeit').map((v) => [v.version, v.manifest, v.publishedBy]), [['1.0.0', manifest, 'Anna']]);
+      assert.equal(store.getTeamMember(ANNA)!.role, 'admin');
+      // Neue Tabellen sind benutzbar.
+      const sub = store.insertSubmission('s'.repeat(16), BEN, { name: 'X', summary: '', description: '', category: 'hud', icon: 'addons', platforms: [], notes: [] }, now);
+      assert.deepEqual([sub.status, sub.submitterName, sub.screenshots, sub.inspection], ['draft', 'Ben', [], null]);
+      store.saveSubmission({ ...sub, status: 'pending', addonId: 'neu', inspection: { classes: 2, uses: ['netzwerk'] }, submittedAt: now });
+      assert.deepEqual(store.getSubmission(sub.id)!.inspection, { classes: 2, uses: ['netzwerk'] });
+      assert.equal(store.countPendingSubmissions(), 1);
+      store.setAddonRating('uhrzeit', BEN, 4, now);
+      assert.deepEqual(store.addonRatingSummary('uhrzeit'), { average: 4, count: 1 });
+      store.insertAddonReport({ addon: 'uhrzeit', reporter: BEN, reporterName: 'Ben', reason: 'broken', note: '', at: now });
+      assert.equal(store.countOpenAddonReports(), 1);
+      store.setAddonScreenshots('uhrzeit', [{ file: 'uhrzeit-0123456789abcdef.png', type: 'png', width: 1280, height: 720, size: 10 }]);
+      assert.equal(store.getAddon('uhrzeit')!.screenshots.length, 1);
+      const ticket = store.insertTicket(BEN, 'Ben', 'fehler', 'Absturz', 'Hilfe', now);
+      store.addTicketAttachment(ticket, BEN, 'crash.txt', 7, Buffer.from([0x1f, 0x8b]), now);
+      assert.deepEqual(store.ticketAttachments(ticket).map((a) => [a.name, a.size]), [['crash.txt', 7]]);
+      // Konto löschen: Einreichungen, Bewertungen, Meldungen und Anhänge weg
+      store.deleteUser(BEN);
+      assert.deepEqual([store.countPendingSubmissions(), store.addonRatingSummary('uhrzeit').count, store.countOpenAddonReports()], [0, 0, 0]);
+      assert.deepEqual(store.ticketAttachments(ticket), []);
+      assert.equal(DELETED_OWNER, 'geloescht');
+    } finally {
+      store.close();
+    }
+    const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 6);
+    check.close();
+
+    // Der Dienst zeigt das alte Addon weiter, als offiziell gewertet ist es nicht (ohne „official“ gilt false).
+    const service = await startService({ dataDir });
+    try {
+      const list = await api(service.url, 'GET', '/v1/addons');
+      assert.deepEqual(list.body.addons.map((a: { id: string; downloads: number; official: boolean; author: unknown }) => [a.id, a.downloads, a.official, a.author]), [
+        ['uhrzeit', 42, false, null],
+      ]);
+      assert.equal(list.body.addons[0].manifest, manifest);
+    } finally {
+      await service.close();
+    }
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }

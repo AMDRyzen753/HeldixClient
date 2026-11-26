@@ -3,9 +3,15 @@ titel: Absturz und Crash-Log
 beschreibung: Minecraft stürzt ab oder schließt sich plötzlich? So findest du Log und Crash-Report und grenzt die Ursache ein.
 kategorie: probleme
 reihenfolge: 2
-stichworte: absturz, crash, abgestürzt, crash-report, crash-log, log, fehlercode, konsole, mods, logs, schließt sich
+stichworte: absturz, crash, abgestürzt, crash-report, crash-log, log, fehlercode, konsole, mods, logs, schließt sich, absturz-hilfe, support
 ---
-Schließt sich Minecraft unerwartet, meldet der Launcher „Minecraft wurde mit Fehlercode … beendet. Details in der Konsole.“ So findest du heraus, woran es lag.
+Schließt sich Minecraft unerwartet, öffnet der Launcher die **Absturz-Hilfe**. Sie liest Crash-Report und Log, nennt die wahrscheinliche Ursache und schlägt passende Schritte vor.
+
+## Absturz-Hilfe im Launcher
+- **Ursache:** zum Beispiel „Zu wenig Arbeitsspeicher“, „Grafiktreiber abgestürzt“, „Mod-Konflikt“ oder „Ein Mod passt nicht zu dieser Version“ – mit den beteiligten Mods.
+- **Mit einem Klick beheben:** etwa mehr Arbeitsspeicher geben, einen verdächtigen Mod ausschalten, auf OpenGL umstellen oder wieder das automatische Java nutzen. Danach **Erneut starten**.
+- **An den Support senden:** schickt den Bericht mit Crash-Report und Log als Support-Anfrage an das Team. Du siehst vorher genau, was gesendet wird; dein Benutzerordner wird durch `~` ersetzt, Zugangsdaten werden entfernt. Dafür brauchst du ein Microsoft-Konto im Launcher. Die Antwort kommt auf heldixclient.com unter **Konto → Support** und als Einblendung im Spiel.
+- **Später noch einmal ansehen:** in der **Konsole** über **Letzter Absturz**.
 
 ## Log in der Konsole
 1. Öffne im Launcher die **Konsole** in der Seitenleiste. Ein Punkt neben dem Eintrag zeigt, dass es Fehler gab.

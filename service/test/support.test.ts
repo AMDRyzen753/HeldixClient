@@ -6,7 +6,7 @@ import { api, connect, devPlayer, sleep, startService, waitFor, type Player, typ
 import { Clock, teamLogin, webApi, webLogin, WEBSITE } from './web-helpers';
 
 const quiet = { out: () => {}, err: () => {} };
-const TICKET_KEYS = ['at', 'category', 'id', 'messages', 'player', 'status', 'subject', 'unread', 'updatedAt'];
+const TICKET_KEYS = ['at', 'attachments', 'category', 'id', 'messages', 'player', 'status', 'subject', 'unread', 'updatedAt'];
 
 function create(service: TestService, player: Player, body: Record<string, unknown> = {}) {
   return api(service.url, 'POST', '/v1/support', {

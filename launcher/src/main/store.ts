@@ -17,7 +17,7 @@ export interface StoredAccount {
   accessToken?: string;
   refreshToken?: string;
   expiresAt?: number;
-  /** angemeldet über den offiziellen Minecraft Launcher (Brücke): kein Refresh-Token, neue Sitzungen kommen von dort */
+  /** früher über den offiziellen Minecraft Launcher angemeldet (Brücke, bis 0.13): kein Refresh-Token – nach Ablauf neu anmelden */
   source?: 'launcher';
 }
 
@@ -42,8 +42,20 @@ function defaultSettings(): Settings {
     lastSeenVersion: null,
     graphicsApi: 'vulkan',
     jvmTuning: true,
-    developerMode: false,
+    social: true,
+    socialNotifications: true,
+    addonUpdateNotifications: true,
+    addonAutoUpdate: false,
   };
+}
+
+/** Ältere Einstellungsdateien: fehlende oder ungültige Schalter bekommen den Standard. */
+function migrateSettings(stored: Partial<Settings>): Partial<Settings> {
+  const next = { ...stored };
+  for (const key of ['social', 'socialNotifications', 'addonUpdateNotifications', 'addonAutoUpdate'] as const) {
+    if (key in next && typeof next[key] !== 'boolean') delete next[key];
+  }
+  return next;
 }
 
 function encrypt(value: string): string {
@@ -60,14 +72,28 @@ function decrypt(value: string | undefined): string {
 export class Store {
   private readonly settingsFile: string;
   private readonly accountsFile: string;
+  /** Offline-Konten zeigen und nutzen (nur beim Entwickeln; die fertige App blendet alte aus) */
+  private readonly offline: boolean;
 
-  constructor(root: string) {
+  constructor(root: string, options: { offline?: boolean } = {}) {
     this.settingsFile = path.join(root, 'launcher-settings.json');
     this.accountsFile = path.join(root, 'launcher-accounts.json');
+    this.offline = options.offline ?? true;
+  }
+
+  /** Konten, die diese App nutzen darf */
+  private usable(accounts: StoredAccount[]): StoredAccount[] {
+    return this.offline ? accounts : accounts.filter((a) => a.type !== 'offline');
+  }
+
+  /** aktives Konto unter den nutzbaren (sonst das erste) */
+  private activeOf(data: AccountsFile): StoredAccount | null {
+    const usable = this.usable(data.accounts);
+    return usable.find((a) => a.id === data.activeId) ?? usable[0] ?? null;
   }
 
   async getSettings(): Promise<Settings> {
-    return { ...defaultSettings(), ...((await readJson<Partial<Settings>>(this.settingsFile)) ?? {}) };
+    return { ...defaultSettings(), ...migrateSettings((await readJson<Partial<Settings>>(this.settingsFile)) ?? {}) };
   }
 
   async saveSettings(patch: Partial<Settings>): Promise<Settings> {
@@ -86,27 +112,27 @@ export class Store {
 
   async listAccounts(): Promise<AccountInfo[]> {
     const data = await this.readAccounts();
-    return data.accounts.map((a) => ({
+    const activeId = this.activeOf(data)?.id ?? null;
+    return this.usable(data.accounts).map((a) => ({
       id: a.id,
       type: a.type,
       name: a.name,
       uuid: a.uuid,
       skinUrl: a.skinUrl,
       via: a.source,
-      active: a.id === data.activeId,
+      active: a.id === activeId,
     }));
   }
 
   async getActiveAccount(): Promise<StoredAccount | null> {
-    const data = await this.readAccounts();
-    return data.accounts.find((a) => a.id === data.activeId) ?? data.accounts[0] ?? null;
+    return this.activeOf(await this.readAccounts());
   }
 
   /**
    * Fügt ein Microsoft-Konto hinzu oder aktualisiert es (gleiche UUID).
    * Sitzungen über den offiziellen Launcher haben kein Refresh-Token: Hat das Konto schon eins (eigene Anmeldung), bleibt es.
    */
-  async upsertMicrosoft(session: MinecraftSession): Promise<StoredAccount> {
+  async upsertMicrosoft(session: MinecraftSession, activate = true): Promise<StoredAccount> {
     const data = await this.readAccounts();
     const existing = data.accounts.find((a) => a.type === 'microsoft' && a.uuid === session.uuid);
     const keepRefresh = !session.refreshToken && existing?.refreshToken && decrypt(existing.refreshToken);
@@ -123,12 +149,13 @@ export class Store {
       source: session.refreshToken || keepRefresh ? undefined : 'launcher',
     };
     data.accounts = existing ? data.accounts.map((a) => (a.id === existing.id ? account : a)) : [...data.accounts, account];
-    data.activeId = account.id;
+    if (activate || !existing) data.activeId = account.id;
     await this.writeAccounts(data);
     return account;
   }
 
   async addOffline(name: string, uuid: string): Promise<StoredAccount> {
+    if (!this.offline) throw new Error('Offline-Konten gibt es nur in der Entwicklungsversion von HeldixClient.');
     const data = await this.readAccounts();
     const existing = data.accounts.find((a) => a.type === 'offline' && a.name.toLowerCase() === name.toLowerCase());
     if (existing) {
@@ -146,16 +173,26 @@ export class Store {
   async remove(id: string): Promise<void> {
     const data = await this.readAccounts();
     data.accounts = data.accounts.filter((a) => a.id !== id);
-    if (data.activeId === id) data.activeId = data.accounts[0]?.id ?? null;
+    if (data.activeId === id) data.activeId = this.usable(data.accounts)[0]?.id ?? null;
     await this.writeAccounts(data);
   }
 
   async select(id: string): Promise<void> {
     const data = await this.readAccounts();
-    if (data.accounts.some((a) => a.id === id)) {
+    if (this.usable(data.accounts).some((a) => a.id === id)) {
       data.activeId = id;
       await this.writeAccounts(data);
     }
+  }
+
+  /** Neuer aktiver Skin bei Mojang (Skins & Capes): Adresse für die Figur auf der Startseite */
+  async setSkinUrl(id: string, skinUrl: string | null): Promise<void> {
+    const data = await this.readAccounts();
+    const account = data.accounts.find((a) => a.id === id);
+    if (!account) return;
+    if (skinUrl) account.skinUrl = skinUrl;
+    else delete account.skinUrl;
+    await this.writeAccounts(data);
   }
 
   secrets(account: StoredAccount): { accessToken: string; refreshToken: string } {

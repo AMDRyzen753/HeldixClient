@@ -1,16 +1,17 @@
 import { readFileSync } from 'node:fs';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from 'electron';
 import type {
   AccountInfo,
   AppInfo,
-  BridgeState,
+  CrashAnalysis,
+  CrashReportPreview,
   ContentKind,
-  DeveloperStatus,
   FolderKind,
   GameState,
+  HeldixCape,
   InstanceInfo,
   InstancePatch,
   LogLine,
@@ -33,9 +34,9 @@ import {
   MICROSOFT_REDIRECT_URI,
 } from './config';
 import { loginMinecraft, offlineUuid, refreshMicrosoft, sessionFromAccessToken } from './core/auth';
-import { BridgeServer, type BridgeFile, type BridgeReply, type BridgeSession } from './core/bridge';
 import { addContentFiles, countEnabled, listContent, removeContent, setContentEnabled } from './core/content';
-import { applyPendingRemovals, installStoreAddon, storeForInstance } from './core/addonstore';
+import { applyPendingRemovals, installStoreAddon, storeForInstance, uninstallStoreAddon, type OverviewInstance } from './core/addonstore';
+import { AddonStoreService, noticeList, type StoreNotice } from './core/storeservice';
 import { DiscordRpc } from './core/discord';
 import { getFabricGameVersions } from './core/fabric';
 import { ADDON_DIR, InstanceStore, usesHeldixClient, type InstanceConfig } from './core/instances';
@@ -47,23 +48,39 @@ import { createPaths, defaultDataRoot } from './core/paths';
 import { GraphicsWatch, graphicsArguments, tunedJvmArguments } from './core/performance';
 import { prepareGame } from './core/prepare';
 import { SHADERPACK_DIR, addShaderpackFiles, installShaderpack, listShaderpacks, removeShaderpack, searchShaderpacks, setActiveShaderpack } from './core/shaderpacks';
-import { DEV_KEY_FILE, SIGNING_KEY_PATH, checkDevKey, machineCode, matchingSigningKey, signDevKey } from './core/devkey';
-import { DEV_PUBLIC_KEY } from './dev-public-key';
 import { buildActivity, parseStatusLine, type GameStatus } from './core/presence';
 import { listQuickPlay, validateQuickPlay } from './core/quickplay';
 import { loaderLogos } from './core/loaderlogos';
-import { installOfficialProfile, officialLauncherRunning, officialProfileInstalled, openOfficialLauncher } from './core/officiallauncher';
+import { removeOfficialProfile } from './core/officialcleanup';
+import { analyzeCrash, anonymize, collectCrashFiles, tail, type CrashFiles } from './core/crash';
 import { listHeldixNews, listNews, newsBody } from './core/news';
 import { webLoginUrl } from './core/weblogin';
-import { skinFor } from './core/skins';
+import { isLoopback } from './core/heldixservice';
+import { MOJANG_API, MojangApi, ProfileService, loadHeldixCapes } from './core/profile';
+import { SocialClient, joinableServer, pickJoinInstance, type SocialNotice } from './core/social';
+import { allowTestTextureOrigin, skinFor } from './core/skins';
 import { Updater, compareVersions } from './core/updater';
 import { UPDATE_PUBLIC_KEY } from './update-public-key';
 import { Store, type StoredAccount } from './store';
 
 const paths = createPaths(process.env.HELDIX_DATA_DIR ?? defaultDataRoot(DATA_DIR_NAME));
-const store = new Store(paths.root);
+const store = new Store(paths.root, { offline: !app.isPackaged });
 const instances = new InstanceStore(paths);
 const isDev = !app.isPackaged;
+// Tests mit eigenem Datenordner: auch das Electron-Profil (Cache, Speicher der Oberfläche) dorthin, damit ein Testlauf
+// nie das Profil des installierten Launchers (%APPDATA%\HeldixClient) mitbenutzt, auch wenn der gerade läuft
+if (isDev && process.env.HELDIX_DATA_DIR) app.setPath('userData', path.join(process.env.HELDIX_DATA_DIR, 'electron-profil'));
+
+/**
+ * Nur für automatische Tests im Entwicklungsmodus: HELDIX_MOJANG_TEST_URL=<Loopback-Adresse> leitet alle Aufrufe an
+ * Mojang (Profil, Skins, Capes, Texturen, session/minecraft/join) an einen Fake-Server um. Die fertige App ignoriert das.
+ */
+const MOJANG_TEST_URL = isDev && process.env.HELDIX_MOJANG_TEST_URL && isLoopback(process.env.HELDIX_MOJANG_TEST_URL)
+  ? process.env.HELDIX_MOJANG_TEST_URL.replace(/\/+$/, '')
+  : null;
+if (MOJANG_TEST_URL) allowTestTextureOrigin(MOJANG_TEST_URL);
+/** Offline-Konten beim Heldix-Dienst über POST /v1/auth/dev (nur Tests gegen einen lokalen Dienst) */
+const SERVICE_DEV_AUTH = process.env.HELDIX_WEB_LOGIN_DEV === '1';
 
 let mainWindow: BrowserWindow | null = null;
 let game: RunningGame | null = null;
@@ -78,7 +95,6 @@ function resourceDir(name: string): string {
 const clientModsDir = () => resourceDir('client-mods');
 const loaderDir = () => resourceDir('heldix-loader');
 const fabricLoaderDir = () => resourceDir('heldix-loader-fabric');
-const bridgeDir = () => resourceDir('launcher-bridge');
 
 const LOADER_LABELS = { heldix: 'Heldix Loader', fabric: 'Fabric', vanilla: 'Vanilla' } as const;
 
@@ -86,6 +102,13 @@ const LOADER_LABELS = { heldix: 'Heldix Loader', fabric: 'Fabric', vanilla: 'Van
 
 function send(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+}
+
+/** An alle Fenster mit der Oberfläche des Launchers (nicht an das Fenster der Microsoft-Anmeldung) */
+function broadcast(channel: string, payload: unknown): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed() && window.webContents.getURL().startsWith('file:')) window.webContents.send(channel, payload);
+  }
 }
 
 function setGameState(state: GameState): void {
@@ -199,9 +222,27 @@ function applyPresenceSettings(settings: Settings): void {
 }
 
 /** Statuszeilen der Mod aus dem Log fischen (sie erscheinen nicht in der Konsole). */
+/** letzte Zeilen der Spielausgabe (für die Absturz-Hilfe) */
+let gameLines: string[] = [];
+/** Spieler hat „Spiel beenden“ gedrückt: kein Absturz */
+let killedByUser = false;
+
+interface CrashRecord {
+  analysis: CrashAnalysis;
+  files: CrashFiles;
+  minecraft: string;
+  loader: string;
+  modCount: number;
+  memoryMb: number;
+  graphicsApi: string;
+}
+let lastCrash: CrashRecord | null = null;
+
 function handleGameLog(lines: LogLine[]): void {
   const visible: LogLine[] = [];
+  if (gameLines.length > 4000) gameLines = gameLines.slice(-3000);
   for (const line of lines) {
+    gameLines.push(line.text);
     if (graphicsWatch && !graphicsWatch.backend) {
       graphicsWatch.push(line.text);
       if (graphicsWatch.backend) {
@@ -246,76 +287,26 @@ const launcherLog = (text: string, level: LogLine['level'] = 'INFO') => sendLog(
 
 // ---------- Konten ----------
 
-const OFFLINE_LOCKED = 'Offline-Konten gibt es, sobald ein Microsoft-Konto mit Minecraft im Launcher angemeldet ist.';
+const OFFLINE_LOCKED = 'Offline-Konten gibt es nur in der Entwicklungsversion von HeldixClient.';
 
 /**
- * Entwickleroptionen und ob für diesen PC ein gültiger Entwickler-Schlüssel hinterlegt ist.
- * Sind die Optionen an und liegt der passende Signaturschlüssel des Entwicklers auf diesem PC
- * (%USERPROFILE%\.heldixclient-dev\signing-key.pem), erstellt der Launcher den Schlüssel selbst.
+ * Offline-Konten nur beim Entwickeln (npm start). Die fertige App kennt sie nicht: gespielt wird mit dem
+ * Microsoft-Konto, mit dem Minecraft gekauft wurde (die Store-Klasse blendet alte Offline-Konten dort aus).
  */
-async function developerStatus(): Promise<DeveloperStatus> {
-  const settings = await store.getSettings();
-  const keyPath = path.join(paths.root, DEV_KEY_FILE);
-  const pc = machineCode();
-  let check = checkDevKey(await readFile(keyPath, 'utf8').catch(() => null), DEV_PUBLIC_KEY, pc);
-  let autoCreated = false;
-  if (settings.developerMode && !check.valid) {
-    const signingKey = matchingSigningKey(await readFile(SIGNING_KEY_PATH, 'utf8').catch(() => ''), DEV_PUBLIC_KEY);
-    if (signingKey) {
-      const key = signDevKey(signingKey, 'Entwickler', pc);
-      await writeFile(keyPath, `${JSON.stringify(key, null, 2)}\n`);
-      check = checkDevKey(JSON.stringify(key), DEV_PUBLIC_KEY, pc);
-      autoCreated = check.valid;
-    }
-  }
-  return {
-    enabled: settings.developerMode,
-    machineCode: pc,
-    keyValid: check.valid,
-    keyName: check.valid ? check.name : null,
-    reason: check.valid ? null : check.reason,
-    keyPath,
-    autoCreated,
-  };
+function offlineAllowed(): boolean {
+  return isDev;
 }
 
-/** Schlüsseldatei auswählen: Signaturschlüssel des Entwicklers oder ein für diesen PC ausgestellter Entwickler-Schlüssel. */
-async function importDeveloperKey(): Promise<DeveloperStatus | null> {
-  const result = await dialog.showOpenDialog(mainWindow!, {
-    title: 'Entwickler-Schlüssel importieren',
-    properties: ['openFile'],
-    filters: [{ name: 'Entwickler-Schlüssel', extensions: ['pem', 'key'] }],
-  });
-  const file = result.filePaths[0];
-  if (result.canceled || !file) return null;
-  const text = await readFile(file, 'utf8');
-  if (text.includes('PRIVATE KEY')) {
-    if (!matchingSigningKey(text, DEV_PUBLIC_KEY)) throw new Error('Dieser Signaturschlüssel passt nicht zu diesem Build von HeldixClient.');
-    await mkdir(path.dirname(SIGNING_KEY_PATH), { recursive: true });
-    await writeFile(SIGNING_KEY_PATH, text, { mode: 0o600 });
-  } else {
-    const check = checkDevKey(text, DEV_PUBLIC_KEY, machineCode());
-    if (!check.valid) throw new Error(check.reason);
-    await writeFile(path.join(paths.root, DEV_KEY_FILE), text);
-  }
-  await store.saveSettings({ developerMode: true });
-  return developerStatus();
-}
+/** Laufende Erneuerungen je Konto (Spielstart, Freunde und Skins teilen sich eine) */
+const sessionRefreshes = new Map<string, Promise<GameAccount>>();
 
 /**
- * Offline-Konten: im Entwicklungsmodus immer. In der fertigen App erst, wenn ein Microsoft-Konto im Launcher ist –
- * das gibt es nur mit gekauftem Minecraft (loginMinecraft prüft das Profil). So machen es auch Prism Launcher und MultiMC.
- * Ausnahme: eingeschaltete Entwickleroptionen mit gültigem Entwickler-Schlüssel für diesen PC (npm run dev-key).
+ * Gültige Sitzung für ein Konto, bei Bedarf erneuert. interactive = false (Freunde, Skins & Capes im Hintergrund):
+ * nie den Minecraft Launcher öffnen – über ihn angemeldete Konten melden dann nur, dass die Anmeldung abgelaufen ist.
  */
-async function offlineAllowed(): Promise<boolean> {
-  if (isDev || (await store.listAccounts()).some((a) => a.type === 'microsoft')) return true;
-  const developer = await developerStatus();
-  return developer.enabled && developer.keyValid;
-}
-
-async function sessionFor(account: StoredAccount): Promise<GameAccount> {
+async function sessionFor(account: StoredAccount, interactive = true): Promise<GameAccount> {
   if (account.type === 'offline') {
-    if (!(await offlineAllowed())) throw new Error(OFFLINE_LOCKED);
+    if (!offlineAllowed()) throw new Error(OFFLINE_LOCKED);
     return { name: account.name, uuid: account.uuid, accessToken: '0', userType: 'legacy' };
   }
   const secrets = store.secrets(account);
@@ -323,95 +314,27 @@ async function sessionFor(account: StoredAccount): Promise<GameAccount> {
     return { name: account.name, uuid: account.uuid, accessToken: secrets.accessToken, xuid: account.xuid, userType: 'msa' };
   }
   if (!secrets.refreshToken) {
-    // über den offiziellen Minecraft Launcher angemeldet: die neue Sitzung kommt wieder von dort
-    launcherLog('Sitzung abgelaufen – hole eine neue Anmeldung über den Minecraft Launcher …');
-    const fresh = await requestBridgeSession('launch');
-    return { name: fresh.name, uuid: fresh.uuid, accessToken: store.secrets(fresh).accessToken, xuid: fresh.xuid, userType: 'msa' };
+    // früher über den offiziellen Minecraft Launcher angemeldet (ohne Refresh-Token) – diesen Weg gibt es nicht mehr
+    throw new Error(`Die Anmeldung von ${account.name} ist abgelaufen. Bitte unten links mit Microsoft neu anmelden.`);
   }
   if (!MICROSOFT_CLIENT_ID) throw new Error('Microsoft-Client-ID fehlt (siehe README).');
-  launcherLog('Erneuere Microsoft-Anmeldung …');
-  const ms = await refreshMicrosoft(MICROSOFT_CLIENT_ID, secrets.refreshToken);
-  const session = await loginMinecraft(ms);
-  await store.upsertMicrosoft(session);
-  return { name: session.name, uuid: session.uuid, accessToken: session.accessToken, xuid: session.xuid, userType: 'msa' };
+  let refresh = sessionRefreshes.get(account.id);
+  if (!refresh) {
+    refresh = (async (): Promise<GameAccount> => {
+      launcherLog('Erneuere Microsoft-Anmeldung …');
+      const ms = await refreshMicrosoft(MICROSOFT_CLIENT_ID, secrets.refreshToken);
+      const session = await loginMinecraft(ms);
+      // das Konto bleibt dabei, wie es ist (nicht aktiv machen: im Hintergrund könnte inzwischen ein anderes gewählt sein)
+      await store.upsertMicrosoft(session, false);
+      return { name: session.name, uuid: session.uuid, accessToken: session.accessToken, xuid: session.xuid, userType: 'msa' };
+    })().finally(() => sessionRefreshes.delete(account.id));
+    sessionRefreshes.set(account.id, refresh);
+  }
+  return refresh;
 }
 
 function toAccountInfo(account: StoredAccount): AccountInfo {
   return { id: account.id, type: account.type, name: account.name, uuid: account.uuid, skinUrl: account.skinUrl, via: account.source, active: true };
-}
-
-// ---------- Brücke zum offiziellen Minecraft Launcher ----------
-// Der offizielle Launcher meldet an, HeldixClient startet das Spiel (siehe core/bridge.ts und mod/launcher-bridge).
-
-const bridgeFile = path.join(paths.root, 'bridge.json');
-let bridgeServer: BridgeServer | null = null;
-
-interface BridgeWaiter {
-  purpose: 'login' | 'launch';
-  resolve: (account: StoredAccount) => void;
-  reject: (error: Error) => void;
-}
-/** Anmeldung, auf die der Launcher gerade wartet */
-let bridgeWaiter: BridgeWaiter | null = null;
-/** Brücken, die offen bleiben, bis das Spiel endet (der Minecraft Launcher zeigt das Spiel so lange als laufend) */
-let bridgeHolds: (() => void)[] = [];
-
-function holdUntilGameEnds(): Promise<void> {
-  return new Promise((resolve) => bridgeHolds.push(resolve));
-}
-
-function releaseBridgeHolds(): void {
-  const holds = bridgeHolds;
-  bridgeHolds = [];
-  for (const release of holds) release();
-}
-
-async function bridgeJar(): Promise<string> {
-  const jar = (await readdir(bridgeDir()).catch(() => [] as string[])).filter((f) => /^heldix-bridge-.+\.jar$/.test(f)).sort().pop();
-  if (!jar) throw new Error('Die Brücke zum Minecraft Launcher fehlt in dieser Installation.');
-  return path.join(bridgeDir(), jar);
-}
-
-function bridgeIcon(): string | null {
-  const image = nativeImage.createFromPath(path.join(bridgeDir(), 'icon.png'));
-  return image.isEmpty() ? null : image.resize({ width: 128, height: 128, quality: 'best' }).toDataURL();
-}
-
-/** Installation „HeldixClient“ im offiziellen Launcher anlegen bzw. aktuell halten */
-async function setupOfficialLauncher(select: boolean): Promise<void> {
-  const fallbackParent = await getVersionManifest(paths).then((r) => r.manifest.latest.release).catch(() => null);
-  const result = await installOfficialProfile({ bridgeJar: await bridgeJar(), bridgeFile, icon: bridgeIcon(), select, fallbackParent });
-  if (result.changed) launcherLog(`Minecraft Launcher: Installation „HeldixClient“ eingerichtet (auf Basis von Minecraft ${result.parent})`);
-}
-
-function sendBridgeState(state: BridgeState): void {
-  send('bridge:state', state);
-}
-
-/**
- * Anmeldung über den offiziellen Minecraft Launcher: Installation einrichten, den Launcher öffnen und warten,
- * bis der Spieler dort auf „Spielen“ drückt. Die Sitzung kommt dann über die Brücke (onBridgeSession).
- */
-async function requestBridgeSession(purpose: 'login' | 'launch'): Promise<StoredAccount> {
-  if (!bridgeServer) throw new Error('Die Brücke zum Minecraft Launcher konnte nicht gestartet werden.');
-  bridgeWaiter?.reject(new Error('Anmeldung über den Minecraft Launcher abgebrochen.'));
-  const wasRunning = await officialLauncherRunning();
-  await setupOfficialLauncher(true);
-  await openOfficialLauncher();
-  return new Promise<StoredAccount>((resolve, reject) => {
-    const finish = (error: Error | null, account?: StoredAccount) => {
-      clearTimeout(timer);
-      if (bridgeWaiter !== waiter) return;
-      bridgeWaiter = null;
-      sendBridgeState({ waiting: false });
-      if (error) reject(error);
-      else resolve(account!);
-    };
-    const waiter: BridgeWaiter = { purpose, resolve: (account) => finish(null, account), reject: (error) => finish(error) };
-    const timer = setTimeout(() => finish(new Error('Im Minecraft Launcher wurde nicht auf „Spielen“ gedrückt. Versuch es noch mal.')), 15 * 60 * 1000);
-    bridgeWaiter = waiter;
-    sendBridgeState({ waiting: true, purpose, launcherWasRunning: wasRunning });
-  });
 }
 
 function focusWindow(): void {
@@ -424,47 +347,181 @@ function focusWindow(): void {
   mainWindow.focus();
 }
 
-/** Die Brücke hat eine Anmeldung vom offiziellen Launcher übergeben. */
-async function onBridgeSession(raw: BridgeSession): Promise<BridgeReply> {
-  if (!raw.accessToken) throw new Error('Der Minecraft Launcher hat keine Anmeldung übergeben.');
-  const session = await sessionFromAccessToken(raw.accessToken, raw.xuid);
-  const account = await store.upsertMicrosoft(session);
-  launcherLog(`Angemeldet als ${session.name} (über den Minecraft Launcher)`);
-  send('accounts:changed', null);
-
-  const waiter = bridgeWaiter;
-  if (waiter) {
-    waiter.resolve(account);
-    if (waiter.purpose === 'login') focusWindow();
-    // Ein Start wartete auf diese Anmeldung und läuft jetzt weiter
-    return { name: session.name, hold: waiter.purpose === 'launch' ? holdUntilGameEnds() : undefined };
-  }
-  focusWindow();
-  if (gameState.state === 'preparing' || gameState.state === 'running') return { name: session.name };
-  // Im Minecraft Launcher auf „Spielen“ gedrückt: die ausgewählte Instanz starten
-  const hold = holdUntilGameEnds();
-  launch().catch(() => releaseBridgeHolds());
-  return { name: session.name, hold };
-}
-
-/** So startet die Brücke HeldixClient, wenn es nicht läuft */
-function bridgeCommand(): string[] {
-  if (app.isPackaged) return [process.execPath];
-  // Entwicklung: einen schon eingetragenen Befehl (der installierten App) behalten
+/** Frühere Installation „HeldixClient“ im offiziellen Minecraft Launcher entfernen (Brücke gibt es nicht mehr) */
+async function cleanupOfficialLauncher(): Promise<void> {
+  if (process.env.HELDIX_DATA_DIR) return; // Tests mit eigenem Datenordner fassen den echten Minecraft Launcher nicht an
   try {
-    const existing = JSON.parse(readFileSync(bridgeFile, 'utf8')) as BridgeFile;
-    if (Array.isArray(existing.command) && existing.command.length === 1) return existing.command;
-  } catch {
-    // keine Datei
+    if (await removeOfficialProfile()) launcherLog('Minecraft Launcher: alte Installation „HeldixClient“ entfernt (die Anmeldung läuft jetzt direkt über Microsoft).');
+  } catch (error) {
+    console.warn('[Launcher] Minecraft Launcher nicht aufgeräumt:', error);
   }
-  return [process.execPath, app.getAppPath()];
+  await rm(path.join(paths.root, 'bridge.json'), { force: true }).catch(() => undefined);
 }
 
-async function startBridge(): Promise<void> {
-  bridgeServer = new BridgeServer(bridgeFile, bridgeCommand(), onBridgeSession, (message) => console.log(`[Launcher] ${message}`));
-  await bridgeServer.start();
-  // Installation im offiziellen Launcher aktuell halten (neue Brücke, neue Minecraft-Version) – nur mit dem echten Datenordner
-  if (!process.env.HELDIX_DATA_DIR && (await officialProfileInstalled())) await setupOfficialLauncher(false);
+// ---------- Freunde & Nachrichten (Heldix-Dienst, siehe core/social.ts) ----------
+
+function anyWindowVisible(): boolean {
+  return BrowserWindow.getAllWindows().some((w) => !w.isDestroyed() && w.isVisible() && !w.isMinimized());
+}
+
+const social = new SocialClient<StoredAccount>({
+  serviceUrl: HELDIX_SERVICE_URL,
+  devAuth: SERVICE_DEV_AUTH,
+  sessionServer: MOJANG_TEST_URL ?? undefined,
+  enabled: async () => (await store.getSettings()).social,
+  account: () => store.getActiveAccount(),
+  accessToken: async (account) => (await sessionFor(account, false)).accessToken,
+  visible: anyWindowVisible,
+  onUpdate: (overview) => broadcast('social:update', overview),
+  wantNotices: async () => (await store.getSettings()).socialNotifications && BrowserWindow.getFocusedWindow() === null,
+  onNotice: showSocialNotice,
+  skinCacheDir: path.join(paths.cache, 'player-skins'),
+  log: (line) => console.log(`[Launcher] ${line}`),
+});
+
+/** Konto gewechselt, hinzugefügt oder entfernt: Freunde sofort neu laden */
+function accountsChanged(): void {
+  social.refresh().catch(() => undefined);
+}
+
+/** Benachrichtigungen bis zum Klick festhalten (sonst räumt der Garbage Collector sie samt Klick-Handler weg) */
+const notifications = new Set<Notification>();
+
+function showSocialNotice(notice: SocialNotice): void {
+  if (!Notification.isSupported()) return;
+  const notification =
+    notice.kind === 'request'
+      ? new Notification({ title: `${notice.name} möchte mit dir befreundet sein`, body: 'Unter Freunde annehmen oder ablehnen.' })
+      : new Notification({ title: `Neue Nachricht von ${notice.name}`, body: notice.text ?? '' });
+  notifications.add(notification);
+  notification.on('click', () => {
+    notifications.delete(notification);
+    openSocial(notice.kind === 'message' ? notice.uuid : null);
+  });
+  notification.on('close', () => notifications.delete(notification));
+  notification.show();
+}
+
+/** Klick auf eine Benachrichtigung: Fenster nach vorn, Freunde öffnen (mit der Unterhaltung) */
+function openSocial(uuid: string | null): void {
+  sendWhenReady('social:open', uuid);
+}
+
+/** Läuft das Spiel (oder wird es gerade vorbereitet) in dieser Instanz? */
+function instanceBusy(id: string): boolean {
+  return gameInstanceId === id || (gameState.state === 'preparing' && gameState.instanceId === id);
+}
+
+/** Einem Freund auf seinen Server folgen: HeldixClient-Instanz mit Quick Play auf die Serveradresse starten. */
+async function joinFriend(rawUuid: unknown, rawInstanceId?: unknown): Promise<void> {
+  const friend = await social.friend(rawUuid);
+  if (!friend) throw new Error('Dieser Spieler ist nicht in deiner Freundesliste.');
+  const server = joinableServer(friend);
+  if (!server) throw new Error(`${friend.name} spielt gerade auf keinem Server, dem du folgen kannst.`);
+  if (gameRunning()) throw new Error('Es läuft schon ein Spiel – im Spiel über Freunde → Beitreten.');
+  const wanted = typeof rawInstanceId === 'string' && rawInstanceId ? await instances.require(rawInstanceId) : await selectedInstance().catch(() => null);
+  const instance = pickJoinInstance(await instances.list(), wanted, usesHeldixClient);
+  if (!instance) throw new Error('Zum Beitreten brauchst du eine Instanz mit HeldixClient.');
+  launcherLog(`${friend.name} beitreten: ${server}`);
+  await launch(instance.id, { kind: 'server', id: server });
+}
+
+// ---------- Addon-Store (siehe core/storeservice.ts) ----------
+
+async function heldixInstances(): Promise<OverviewInstance[]> {
+  return (await instances.list())
+    .filter((i) => usesHeldixClient(i))
+    .map((i) => ({ id: i.id, name: i.name, minecraft: i.minecraft, loader: i.loader, dir: instances.dir(i.id) }));
+}
+
+const addonStore = new AddonStoreService({
+  serviceUrl: HELDIX_SERVICE_URL,
+  publicKey: UPDATE_PUBLIC_KEY,
+  instances: heldixInstances,
+  busy: instanceBusy,
+  gameRunning,
+  auth: HELDIX_SERVICE_URL ? social : null,
+  settings: () => store.getSettings(),
+  stateFile: path.join(paths.root, 'addon-updates.json'),
+  screenshotDir: path.join(paths.cache, 'addon-screenshots'),
+  onCount: (count) => broadcast('store:changed', count),
+  onNotice: showStoreNotice,
+  log: (line) => launcherLog(line),
+});
+
+/** Zähler fürs Abzeichen nach Installieren oder Entfernen neu berechnen (ohne Netz) */
+function storeChanged(): void {
+  addonStore.recount().catch(() => undefined);
+}
+
+function showStoreNotice(notice: StoreNotice): void {
+  if (!Notification.isSupported() || notice.items.length === 0) return;
+  const notification =
+    notice.kind === 'available'
+      ? new Notification({ title: notice.items.length === 1 ? 'Addon-Update verfügbar' : 'Addon-Updates verfügbar', body: `${noticeList(notice.items)} – im Addon-Store aktualisieren.` })
+      : new Notification({ title: notice.items.length === 1 ? 'Addon aktualisiert' : 'Addons aktualisiert', body: noticeList(notice.items) });
+  notifications.add(notification);
+  notification.on('click', () => {
+    notifications.delete(notification);
+    sendWhenReady('store:open', null);
+  });
+  notification.on('close', () => notifications.delete(notification));
+  notification.show();
+}
+
+/** Fenster nach vorn und dann eine Nachricht an die Oberfläche (auch wenn das Fenster erst entsteht) */
+function sendWhenReady(channel: string, payload: unknown): void {
+  const existed = mainWindow !== null && !mainWindow.isDestroyed();
+  focusWindow();
+  const window = mainWindow;
+  if (!window) return;
+  if (!existed || window.webContents.isLoading()) window.webContents.once('did-finish-load', () => window.webContents.send(channel, payload));
+  else window.webContents.send(channel, payload);
+}
+
+// ---------- Skins & Capes (siehe core/profile.ts) ----------
+
+/** Katalog der Heldix-Capes: capes.json aus der Client-Mod, liegt neben der Oberfläche (scripts/copy-static.mjs) */
+let heldixCapes: Promise<HeldixCape[]> | null = null;
+function loadCapes(): Promise<HeldixCape[]> {
+  heldixCapes ??= loadHeldixCapes(path.join(__dirname, '..', 'renderer', 'capes', 'capes.json')).then((list) => {
+    if (list.length === 0) heldixCapes = null;
+    return list;
+  });
+  return heldixCapes;
+}
+
+const profiles = new ProfileService<StoredAccount>({
+  paths,
+  libraryDir: path.join(paths.root, 'skins'),
+  mojang: new MojangApi(MOJANG_TEST_URL ?? MOJANG_API),
+  account: () => store.getActiveAccount(),
+  accessToken: async (account) => (await sessionFor(account, false)).accessToken,
+  heldix: HELDIX_SERVICE_URL
+    ? { getMe: () => social.getMe(), setCape: (cape) => social.updateMe({ cape }) }
+    : null,
+  heldixForOffline: SERVICE_DEV_AUTH,
+  capes: loadCapes,
+  fallbackSkin: (account) => skinFor(paths, account),
+  onSkinChanged: async (account, url) => {
+    // Figur auf der Startseite: getSkin() lädt den neuen Skin über die neue Adresse
+    await store.setSkinUrl(account.id, url);
+    broadcast('accounts:changed', null);
+  },
+});
+
+async function importSkins(files?: unknown): Promise<import('../shared/api').SavedSkin[]> {
+  let sources = Array.isArray(files) ? files : [];
+  if (sources.length === 0) {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: 'Skins hinzufügen',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Minecraft-Skins', extensions: ['png'] }],
+    });
+    if (result.canceled) return [];
+    sources = result.filePaths;
+  }
+  return profiles.importSkins(sources);
 }
 
 // ---------- Instanzen ----------
@@ -569,6 +626,9 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
     graphicsWatch = new GraphicsWatch(graphics.length ? settings.graphicsApi : 'default');
     if (quickPlay?.singleplayer) launcherLog(`Direktstart in die Welt „${quickPlay.singleplayer}“`);
     if (quickPlay?.multiplayer) launcherLog(`Direktstart auf den Server ${quickPlay.multiplayer}`);
+    gameLines = [];
+    killedByUser = false;
+    const launchedAt = Date.now();
     const running = startGame(prepared.javaPath, args, prepared.gameDir, handleGameLog);
     await new Promise<void>((resolve, reject) => {
       running.process.once('spawn', () => resolve());
@@ -594,23 +654,53 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
           notice = 'Minecraft ist beim Start mit Vulkan abgestürzt. Die Grafik-API steht jetzt auf „Automatisch“ – in den Einstellungen kannst du Vulkan wieder einschalten.';
           launcherLog(notice, 'ERROR');
         }
-        setGameState({ state: 'exited', code, notice });
+        // Absturz-Hilfe: Crash-Report, JVM-Fehler oder Fehlercode → Ursache suchen (nicht nach „Spiel beenden“)
+        let crash: { id: string; title: string } | undefined;
+        if (!killedByUser) {
+          try {
+            const files = await collectCrashFiles({ gameDir: prepared.gameDir, startedAt: launchedAt, logLines: gameLines });
+            if ((code !== 0 && code !== null) || files.crashReportPath || files.jvmErrorPath) {
+              const mods = instance.loader === 'vanilla' ? [] : (await listContent(prepared.gameDir, 'mods', instance.loader))
+                .filter((item) => item.enabled && !item.managed)
+                .map((item) => ({ file: item.file, id: item.id, name: item.name }));
+              const memoryMb = instance.memoryMb ?? settings.memoryMb;
+              const { analysis } = await analyzeCrash({
+                instanceId: instance.id,
+                instanceName: instance.name,
+                gameDir: prepared.gameDir,
+                startedAt: launchedAt,
+                exitCode: code,
+                logLines: gameLines,
+                mods,
+                memoryMb,
+                graphicsApi: graphics.length ? settings.graphicsApi : 'default',
+                customJava: settings.javaPath.trim() !== '',
+              }, files);
+              lastCrash = { analysis, files, minecraft: instance.minecraft, loader: LOADER_LABELS[instance.loader], modCount: mods.length, memoryMb, graphicsApi: settings.graphicsApi };
+              launcherLog(`Absturz-Hilfe: ${analysis.title}${analysis.suspects.length ? ` (verdächtig: ${analysis.suspects.map((m) => m.name).join(', ')})` : ''}`, 'WARN');
+              if (!notice) crash = { id: analysis.id, title: analysis.title };
+            }
+          } catch (error) {
+            console.warn('[Launcher] Absturz-Analyse fehlgeschlagen:', error);
+          }
+        }
+        setGameState({ state: 'exited', code, notice, crash });
       })
       .catch((error: Error) => setGameState({ state: 'error', message: error.message }))
       .finally(() => {
         game = null;
         gameInstanceId = null;
         graphicsWatch = null;
-        releaseBridgeHolds();
         updatePresence({ phase: 'launcher', status: null });
         if (mainWindow && !mainWindow.isVisible()) mainWindow.show();
+        // Addon-Updates, die während des Spiels warten mussten, jetzt automatisch installieren
+        void store.getSettings().then((s) => (s.addonAutoUpdate ? addonStore.check() : undefined)).catch(() => undefined);
       });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     launcherLog(message, 'ERROR');
     setGameState({ state: 'error', message });
     updatePresence({ phase: 'launcher', status: null });
-    releaseBridgeHolds();
     throw error;
   }
 }
@@ -668,9 +758,11 @@ function registerIpc(): void {
   ipcMain.handle('versions:list', () => listVersions());
   ipcMain.handle('settings:get', () => store.getSettings());
   ipcMain.handle('settings:save', async (_e, patch: Partial<Settings>) => {
+    const before = await store.getSettings();
     const next = await store.saveSettings(patch);
     applyPresenceSettings(next);
     autoUpdate = next.autoUpdate;
+    if (next.social !== before.social) social.refresh().catch(() => undefined);
     return next;
   });
   ipcMain.handle('update:state', () => updater.state);
@@ -733,6 +825,7 @@ function registerIpc(): void {
   ipcMain.handle('content:remove', async (_e, id: string, kind: ContentKind, file: string) => {
     if (gameInstanceId === id) throw new Error('Bitte erst das Spiel beenden.');
     await removeContent(instances.dir((await instances.require(id)).id), assertKind(kind), file);
+    if (kind === 'addons') storeChanged();
   });
   ipcMain.handle('content:add', async (_e, id: string, kind: ContentKind, files?: string[]) => {
     const instance = await instances.require(id);
@@ -760,8 +853,53 @@ function registerIpc(): void {
     const instance = await instances.require(id);
     if (!usesHeldixClient(instance)) throw new Error('Heldix-Addons laufen nur in Instanzen mit HeldixClient.');
     await applyPendingRemovals(instances.dir(instance.id));
-    return installStoreAddon(instances.dir(instance.id), HELDIX_SERVICE_URL, UPDATE_PUBLIC_KEY, String(addonId));
+    const name = await installStoreAddon(instances.dir(instance.id), HELDIX_SERVICE_URL, UPDATE_PUBLIC_KEY, String(addonId));
+    storeChanged();
+    return name;
   });
+  // Addon-Store als eigene Seite: eine Abfrage für alle Instanzen mit HeldixClient
+  ipcMain.handle('store:overview', () => addonStore.overview());
+  ipcMain.handle('store:uninstall', async (_e, id: string, addonId: string) => {
+    const instance = await instances.require(String(id));
+    if (instanceBusy(instance.id)) throw new Error('Bitte erst das Spiel beenden – oder im Spiel über Einstellungen → Addons entfernen.');
+    await uninstallStoreAddon(instances.dir(instance.id), String(addonId));
+    storeChanged();
+  });
+  ipcMain.handle('store:details', (_e, addonId: unknown) => addonStore.details(addonId));
+  ipcMain.handle('store:screenshot', (_e, addonId: unknown, index: unknown) => addonStore.screenshot(addonId, index));
+  ipcMain.handle('store:rate', (_e, addonId: unknown, stars: unknown) => addonStore.rate(addonId, stars ?? null));
+  ipcMain.handle('store:report', (_e, addonId: unknown, reason: unknown, note?: unknown) => addonStore.report(addonId, reason, note));
+  ipcMain.handle('store:updateAll', () => addonStore.updateAll());
+
+  // Freunde & Nachrichten
+  ipcMain.handle('social:get', () => social.getOverview());
+  ipcMain.handle('social:refresh', () => social.refresh());
+  ipcMain.handle('social:request', (_e, name: unknown) => social.sendFriendRequest(name));
+  ipcMain.handle('social:accept', (_e, uuid: unknown) => social.acceptFriendRequest(uuid));
+  ipcMain.handle('social:removeRequest', (_e, uuid: unknown) => social.removeFriendRequest(uuid));
+  ipcMain.handle('social:removeFriend', (_e, uuid: unknown) => social.removeFriend(uuid));
+  ipcMain.handle('social:conversations', () => social.listConversations());
+  ipcMain.handle('social:messages', (_e, uuid: unknown, before?: unknown) => social.getMessages(uuid, before));
+  ipcMain.handle('social:send', (_e, uuid: unknown, text: unknown) => social.sendMessage(uuid, text));
+  ipcMain.handle('social:read', (_e, uuid: unknown) => social.markRead(uuid));
+  ipcMain.handle('social:blocked', () => social.listBlocked());
+  ipcMain.handle('social:block', (_e, uuid: unknown) => social.blockPlayer(uuid));
+  ipcMain.handle('social:unblock', (_e, uuid: unknown) => social.unblockPlayer(uuid));
+  ipcMain.handle('social:report', (_e, uuid: unknown, reason: unknown, note?: unknown) => social.reportPlayer(uuid, reason, note));
+  ipcMain.handle('social:privacy', () => social.getPrivacy());
+  ipcMain.handle('social:setPrivacy', (_e, patch: unknown) => social.setPrivacy(patch));
+  ipcMain.handle('social:join', (_e, uuid: unknown, instanceId?: unknown) => joinFriend(uuid, instanceId));
+  ipcMain.handle('social:skin', (_e, uuid: unknown) => social.playerSkin(uuid));
+
+  // Skins & Capes
+  ipcMain.handle('profile:get', (_e, refresh?: unknown) => profiles.state(refresh === true));
+  ipcMain.handle('profile:import', (_e, files?: unknown) => importSkins(files));
+  ipcMain.handle('profile:updateSkin', (_e, id: unknown, patch: unknown) => profiles.updateSavedSkin(id, patch));
+  ipcMain.handle('profile:deleteSkin', (_e, id: unknown) => profiles.deleteSavedSkin(id));
+  ipcMain.handle('profile:applySkin', (_e, id: unknown) => profiles.applySkin(id));
+  ipcMain.handle('profile:resetSkin', () => profiles.resetSkin());
+  ipcMain.handle('profile:mojangCape', (_e, id: unknown) => profiles.setMojangCape(id));
+  ipcMain.handle('profile:heldixCape', (_e, id: unknown) => profiles.setHeldixCape(id));
 
   ipcMain.handle('modrinth:search', async (_e, id: string, query: string, offset: number) => {
     const instance = await instances.require(id);
@@ -831,7 +969,9 @@ function registerIpc(): void {
   // zuerst die Neuigkeiten des HeldixClient-Teams, dann Mojangs Patch Notes
   ipcMain.handle('news:list', async () => [...(await listHeldixNews(HELDIX_SERVICE_URL)), ...(await listNews(paths))]);
   ipcMain.handle('web:open', async (_e, page: unknown) => {
-    if (!['neuigkeiten', 'das-team', 'status', 'download', 'hilfe', 'addons'].includes(String(page))) throw new Error('Unbekannte Seite');
+    const known = ['neuigkeiten', 'das-team', 'status', 'download', 'hilfe', 'addons'].includes(String(page));
+    // Hilfe-Artikel, z. B. „hilfe/grafikprobleme“ aus der Absturz-Hilfe
+    if (!known && !/^hilfe\/[a-z0-9-]{1,60}$/.test(String(page))) throw new Error('Unbekannte Seite');
     await shell.openExternal(`${WEBSITE_URL.replace(/\/+$/, '')}/${page}`);
   });
   ipcMain.handle('whatsnew:get', () => whatsNew());
@@ -847,7 +987,7 @@ function registerIpc(): void {
     const devAuth = process.env.HELDIX_WEB_LOGIN_DEV === '1';
     if (account.type === 'offline' && !devAuth) throw new Error('Für die Webseite brauchst du ein Microsoft-Konto.');
     const session = await sessionFor(account);
-    const url = await webLoginUrl(HELDIX_SERVICE_URL, session, devAuth, target);
+    const url = await webLoginUrl(HELDIX_SERVICE_URL, session, devAuth, target, { sessionServer: MOJANG_TEST_URL ?? undefined });
     await shell.openExternal(url);
   });
   ipcMain.handle('loader:logos', () => loaderLogos(paths));
@@ -855,21 +995,26 @@ function registerIpc(): void {
   ipcMain.handle('accounts:addMicrosoft', async () => {
     if (!MICROSOFT_CLIENT_ID) throw new Error('Microsoft-Login ist noch nicht eingerichtet: Client-ID in src/main/config.ts eintragen (siehe README).');
     const tokens = await interactiveMicrosoftLogin(mainWindow, MICROSOFT_CLIENT_ID, MICROSOFT_REDIRECT_URI);
-    return toAccountInfo(await store.upsertMicrosoft(await loginMinecraft(tokens)));
+    const account = await store.upsertMicrosoft(await loginMinecraft(tokens));
+    accountsChanged();
+    return toAccountInfo(account);
   });
   ipcMain.handle('accounts:addOffline', async (_e, rawName: string) => {
-    if (!(await offlineAllowed())) throw new Error(OFFLINE_LOCKED);
+    if (!offlineAllowed()) throw new Error(OFFLINE_LOCKED);
     const name = String(rawName).trim();
     if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) throw new Error('Name: 3–16 Zeichen, nur Buchstaben, Zahlen und _.');
-    return toAccountInfo(await store.addOffline(name, offlineUuid(name)));
+    const account = await store.addOffline(name, offlineUuid(name));
+    accountsChanged();
+    return toAccountInfo(account);
   });
-  ipcMain.handle('accounts:addViaLauncher', async () => toAccountInfo(await requestBridgeSession('login')));
-  ipcMain.handle('bridge:cancel', () => bridgeWaiter?.reject(new Error('Anmeldung über den Minecraft Launcher abgebrochen.')));
-  ipcMain.handle('bridge:reopen', () => openOfficialLauncher());
-  ipcMain.handle('developer:status', () => developerStatus());
-  ipcMain.handle('developer:import', () => importDeveloperKey());
-  ipcMain.handle('accounts:remove', (_e, id: string) => store.remove(id));
-  ipcMain.handle('accounts:select', (_e, id: string) => store.select(id));
+  ipcMain.handle('accounts:remove', async (_e, id: string) => {
+    await store.remove(id);
+    accountsChanged();
+  });
+  ipcMain.handle('accounts:select', async (_e, id: string) => {
+    await store.select(id);
+    accountsChanged();
+  });
 
   ipcMain.handle('game:launch', (_e, instanceId?: string, target?: { kind?: unknown; id?: unknown }) =>
     launch(typeof instanceId === 'string' ? instanceId : undefined, target && typeof target === 'object' ? target : undefined));
@@ -878,10 +1023,108 @@ function registerIpc(): void {
     return listQuickPlay(instances.dir(instance.id), paths.versions, instance.minecraft);
   });
   ipcMain.handle('game:kill', () => {
+    if (game) killedByUser = true;
     game?.process.kill();
+  });
+
+  // ---------- Absturz-Hilfe ----------
+  ipcMain.handle('crash:last', () => lastCrash?.analysis ?? null);
+  ipcMain.handle('crash:preview', async (_e, id: string, note: string, includeFiles: boolean) => crashPreview(String(id), String(note ?? ''), includeFiles !== false));
+  ipcMain.handle('crash:send', async (_e, id: string, note: string, includeFiles: boolean) => sendCrashReport(String(id), String(note ?? ''), includeFiles !== false));
+  ipcMain.handle('crash:open', async (_e, id: string) => {
+    if (!lastCrash || lastCrash.analysis.id !== id || !lastCrash.files.crashReportPath) throw new Error('Kein Crash-Report vorhanden.');
+    const problem = await shell.openPath(lastCrash.files.crashReportPath);
+    if (problem) throw new Error(problem);
   });
   ipcMain.handle('game:state', () => gameState);
   ipcMain.handle('folder:open', (_e, kind: FolderKind, instanceId?: string) => openFolder(kind, instanceId));
+}
+
+// ---------- Absturz-Hilfe: an den Support senden ----------
+
+const CRASH_NOTE_MAX = 800;
+const CRASH_ATTACHMENT_MAX = 480 * 1024;
+
+function crashRecord(id: string): CrashRecord {
+  if (!lastCrash || lastCrash.analysis.id !== id) throw new Error('Diese Absturz-Analyse gibt es nicht mehr.');
+  return lastCrash;
+}
+
+/** Text der Support-Anfrage und Anhänge – genau das wird gesendet */
+function buildCrashReport(record: CrashRecord, rawNote: string, includeFiles: boolean): Pick<CrashReportPreview, 'subject' | 'message' | 'attachments'> {
+  const { analysis, files } = record;
+  const note = rawNote.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim().slice(0, CRASH_NOTE_MAX);
+  const attachments: CrashReportPreview['attachments'] = [];
+  if (includeFiles) {
+    const add = (name: string, text: string | null) => {
+      if (!text?.trim()) return;
+      const clean = tail(anonymize(text), CRASH_ATTACHMENT_MAX);
+      attachments.push({ name, size: Buffer.byteLength(clean, 'utf8'), text: clean });
+    };
+    add('crash-report.txt', files.crashReport);
+    add('jvm-fehler.log', files.jvmError);
+    add('log.txt', files.log);
+  }
+  const lines = [
+    'Absturz-Bericht aus dem HeldixClient-Launcher',
+    `Erkannte Ursache: ${analysis.title}`,
+    `Instanz: ${analysis.instanceName} · Minecraft ${record.minecraft} · ${record.loader} · ${record.modCount} ${record.modCount === 1 ? 'Mod' : 'Mods'}`,
+    `Arbeitsspeicher: ${(record.memoryMb / 1024).toLocaleString('de-DE', { maximumFractionDigits: 1 })} GB · Grafik-API: ${record.graphicsApi}`,
+    `Launcher ${LAUNCHER_VERSION} · ${process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux'} ${os.release()} (${process.arch})`,
+    `Fehlercode: ${analysis.exitCode ?? '–'}`,
+    analysis.description ? `Minecraft meldet: ${analysis.description}` : '',
+    analysis.detail ? `Fehler: ${anonymize(analysis.detail)}` : '',
+    analysis.suspects.length ? `Verdächtige Mods: ${analysis.suspects.map((m) => m.name).join(', ')}` : '',
+    attachments.length ? `Anhänge: ${attachments.map((a) => a.name).join(', ')}` : 'Ohne Anhänge',
+  ].filter(Boolean);
+  let message = lines.join('\n');
+  if (note) message += `\n\nNotiz:\n${note}`;
+  if (message.length > 2000) message = `${message.slice(0, 1997)}…`;
+  const subject = `Absturz: ${analysis.title}`.replace(/\s+/g, ' ').slice(0, 100);
+  return { subject, message, attachments };
+}
+
+async function crashPreview(id: string, note: string, includeFiles: boolean): Promise<CrashReportPreview> {
+  const record = crashRecord(id);
+  const built = buildCrashReport(record, note, includeFiles);
+  let canSend = true;
+  let reason: string | null = null;
+  if (!HELDIX_SERVICE_URL) {
+    canSend = false;
+    reason = 'In dieser Installation ist kein Heldix-Dienst eingerichtet.';
+  } else if (!(await social.canAuthenticate())) {
+    canSend = false;
+    reason = 'Zum Senden brauchst du ein Microsoft-Konto im Launcher.';
+  }
+  return { ...built, canSend, reason };
+}
+
+async function sendCrashReport(id: string, note: string, includeFiles: boolean): Promise<{ ticketId: number; attached: number; attachmentError: string | null }> {
+  const record = crashRecord(id);
+  const built = buildCrashReport(record, note, includeFiles);
+  const offlineMessage = 'Zum Senden an den Support brauchst du ein Microsoft-Konto.';
+  const created = await social.authed<{ ticket: { id: number } }>('/v1/support', {
+    method: 'POST',
+    body: { category: 'fehler', subject: built.subject, text: built.message },
+  }, { offlineMessage });
+  const ticketId = created.ticket.id;
+  let attached = 0;
+  let attachmentError: string | null = null;
+  for (const attachment of built.attachments) {
+    try {
+      await social.authed(`/v1/support/${ticketId}/attachments?name=${encodeURIComponent(attachment.name)}`, {
+        method: 'POST',
+        rawBody: attachment.text,
+        contentType: 'text/plain; charset=utf-8',
+      }, { offlineMessage });
+      attached++;
+    } catch (error) {
+      attachmentError = error instanceof Error ? error.message : String(error);
+      break;
+    }
+  }
+  launcherLog(`Absturz an den Support gesendet (Anfrage #${ticketId}, ${attached} Anhänge)`);
+  return { ticketId, attached, attachmentError };
 }
 
 // ---------- Fenster ----------
@@ -953,6 +1196,14 @@ function createWindow(): void {
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
   mainWindow.once('ready-to-show', () => mainWindow?.show());
   mainWindow.on('closed', () => (mainWindow = null));
+  // Freunde: wieder sichtbar = gleich im 20-s-Takt weiter (verborgen: alle 60 s)
+  // Abzeichen am Addon-Store: Stand der letzten Prüfung gleich nach dem Laden der Oberfläche
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (addonStore.updates > 0) mainWindow?.webContents.send('store:changed', addonStore.updates);
+  });
+  mainWindow.on('show', () => social.wake());
+  mainWindow.on('restore', () => social.wake());
+  mainWindow.on('focus', () => social.wake());
   void mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
   // Nur für automatische Tests im Entwicklungsmodus:
@@ -964,8 +1215,18 @@ function createWindow(): void {
     const size = /^(\d+)x(\d+)$/.exec(process.env.HELDIX_SCREENSHOT_SIZE ?? '');
     if (size) mainWindow.setSize(Number(size[1]), Number(size[2]));
     mainWindow.webContents.once('did-finish-load', async () => {
-      // HELDIX_SCREENSHOT_BRIDGE=1 zeigt den Dialog „Anmelden über den Minecraft Launcher“ (ohne den Launcher zu öffnen)
-      if (process.env.HELDIX_SCREENSHOT_BRIDGE) sendBridgeState({ waiting: true, purpose: 'launch', launcherWasRunning: true });
+      // HELDIX_SCREENSHOT_CRASH=<Spielordner mit crash-reports/ usw.>: Absturz-Hilfe ohne echtes Spiel zeigen
+      const crashDir = process.env.HELDIX_SCREENSHOT_CRASH;
+      if (crashDir) {
+        const instance = await selectedInstance().catch(() => null);
+        if (instance) {
+          const files = await collectCrashFiles({ gameDir: crashDir, startedAt: 0, logLines: [] });
+          const mods = (await listContent(crashDir, 'mods', 'fabric')).map((item) => ({ file: item.file, id: item.id, name: item.name }));
+          const { analysis } = await analyzeCrash({ instanceId: instance.id, instanceName: instance.name, gameDir: crashDir, startedAt: 0, exitCode: -1, logLines: [], mods, memoryMb: 4096, graphicsApi: 'vulkan', customJava: false }, files);
+          lastCrash = { analysis, files, minecraft: instance.minecraft, loader: LOADER_LABELS[instance.loader], modCount: mods.length, memoryMb: 4096, graphicsApi: 'vulkan' };
+          setGameState({ state: 'exited', code: -1, crash: { id: analysis.id, title: analysis.title } });
+        }
+      }
       const script = process.env.HELDIX_SCREENSHOT_SCRIPT;
       if (script) await mainWindow!.webContents.executeJavaScript(script).catch((e: Error) => console.error(e));
       setTimeout(async () => {
@@ -987,14 +1248,18 @@ if (singleInstance) {
   app.whenReady().then(async () => {
     // macOS braucht ein App-Menü, sonst gehen Kopieren, Einfügen und Beenden (⌘C, ⌘V, ⌘Q) nicht
     Menu.setApplicationMenu(process.platform === 'darwin' ? macMenu() : null);
+    // Windows-Benachrichtigungen brauchen die App-ID (wie appId in package.json, die der Installer der Verknüpfung gibt)
+    if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? 'dev.heldixclient.launcher' : process.execPath);
     registerIpc();
     await ensureInstances().catch((error) => console.error('[Launcher] Instanzen konnten nicht vorbereitet werden', error));
     createWindow();
+    social.start();
+    addonStore.start();
     const settings = await store.getSettings();
     applyPresenceSettings(settings);
     autoUpdate = settings.autoUpdate;
     updater.start(() => autoUpdate);
-    await startBridge().catch((error) => console.error('[Launcher] Brücke zum Minecraft Launcher nicht verfügbar', error));
+    void cleanupOfficialLauncher();
   });
 }
 
@@ -1006,15 +1271,10 @@ app.on('before-quit', (event) => {
     updater.install(false).finally(() => app.quit());
     return;
   }
-  // Discord-Status löschen, Port der Brücke austragen
+  // Discord-Status löschen, Hintergrund-Abfragen beenden
   discord.stop();
-  let current: BridgeFile | null = null;
-  try {
-    current = JSON.parse(readFileSync(bridgeFile, 'utf8')) as BridgeFile;
-  } catch {
-    // keine Datei
-  }
-  bridgeServer?.stopSync(current);
+  social.stop();
+  addonStore.stop();
 });
 
 app.on('window-all-closed', () => {

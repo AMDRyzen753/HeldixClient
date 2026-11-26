@@ -8,7 +8,7 @@ stichworte: anmeldung, login, abgelehnt, fehler, microsoft, xbox, xbox-profil, n
 Die Anmeldung läuft über Microsoft, Xbox und Minecraft. Klappt ein Schritt nicht, zeigt der Launcher eine Meldung. Hier findest du die häufigsten.
 
 ## Microsoft-Anmeldung
-- **„Mojang lässt die Microsoft-Anmeldung dieses Launchers nicht zu („Invalid app registration“) …“** – Mit deinem Konto ist alles in Ordnung. HeldixClient ist von Mojang freigegeben; diese Meldung kommt nur bei selbst gebauten Versionen mit eigener App-ID. Lade HeldixClient von der [Download-Seite](/download) oder melde dich [über den Minecraft Launcher](/hilfe/anmelden-minecraft-launcher) an.
+- **„Mojang lässt die Microsoft-Anmeldung dieses Launchers nicht zu („Invalid app registration“) …“** – Mit deinem Konto ist alles in Ordnung. HeldixClient ist von Mojang freigegeben; diese Meldung kommt nur bei selbst gebauten Versionen mit eigener App-ID. Lade HeldixClient von der [Download-Seite](/download).
 - **„Dieses Microsoft-Konto hat noch kein Xbox-Profil.“** – Melde dich einmal auf der Xbox-Webseite mit diesem Konto an und erstelle ein Profil. Danach klappt es.
 - **„Kinderkonto: Ein Erwachsener muss das Konto erst zu einer Microsoft-Familie hinzufügen.“** – Ein Elternteil muss dein Konto in seiner Microsoft-Familie freigeben.
 - **„Für dieses Konto ist eine Altersverifizierung nötig.“** – Die Verifizierung musst du bei Microsoft erledigen.
@@ -18,13 +18,7 @@ Die Anmeldung läuft über Microsoft, Xbox und Minecraft. Klappt ein Schritt nic
 
 ## Abgelaufene Anmeldung
 - **„Die Anmeldung ist abgelaufen oder ungültig. Bitte noch mal anmelden.“** – Entferne das Konto im Konto-Menü mit **×** und melde dich neu an.
-- **Über den Minecraft Launcher angemeldet:** Nach etwa 24 Stunden öffnet HeldixClient beim Spielstart wieder den Minecraft Launcher. Klicke dort auf **Spielen** – das ist normal.
-
-## Über den Minecraft Launcher
-- **„Der offizielle Minecraft Launcher wurde nicht gefunden.“** – Installiere den offiziellen Minecraft Launcher.
-- **„Der offizielle Minecraft Launcher ist auf diesem PC nicht eingerichtet.“** – Starte den Minecraft Launcher einmal und melde dich dort an.
-- **„Im offiziellen Minecraft Launcher ist noch keine Minecraft-Version installiert.“** – Starte dort einmal Minecraft und versuche es dann erneut.
-- **Die Installation „HeldixClient“ fehlt:** War der Minecraft Launcher schon offen, schließe ihn und klicke im Anleitungsfenster von HeldixClient auf **Launcher öffnen**.
+- **„Die Anmeldung von … ist abgelaufen. Bitte unten links mit Microsoft neu anmelden.“** – Das Konto war früher über den offiziellen Minecraft Launcher angemeldet. Diesen Weg gibt es nicht mehr: Klicke unten links auf dein Konto und dann auf **Mit Microsoft anmelden**.
 
 ## Webseite und Heldix-Dienst
 - **„Für die Webseite brauchst du ein Microsoft-Konto.“** – Mit einem Offline-Konto gibt es kein Konto auf heldixclient.com. Wechsle im Konto-Menü auf dein Microsoft-Konto.

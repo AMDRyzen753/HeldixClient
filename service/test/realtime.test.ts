@@ -1,7 +1,56 @@
 // Echtzeit: WebSocket, Online-Status für Freunde und Nachschlagen von Spielern.
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
+import { Store, type AddonVersionRow } from '../src/db';
 import { api, connect, devPlayer, startService, upgradeStatus, waitFor, type Player, type TestService, type WsClient } from './helpers';
+
+/** Veröffentlichte Version eines Community-Addons (wie nach der Freigabe), direkt für die Datenbank. */
+function communityAddon(id: string, author: Player, manifest?: string): AddonVersionRow {
+  const version = '1.0.0';
+  const file = `heldix-addon-${id}-${version}.jar`;
+  return {
+    id,
+    version,
+    manifest:
+      manifest ??
+      JSON.stringify({
+        type: 'heldix-addon',
+        id,
+        name: 'Test-Addon',
+        version,
+        summary: 'Zeigt etwas im HUD an.',
+        description: '',
+        authors: [author.name],
+        api: 1,
+        icon: 'clock',
+        category: 'hud',
+        platforms: [],
+        file,
+        size: 100,
+        sha256: 'a'.repeat(64),
+        date: '2026-11-25',
+        notes: [],
+        official: false,
+        author: { uuid: author.uuid, name: author.name },
+      }),
+    signature: 'x'.repeat(88),
+    file,
+    size: 100,
+    sha256: 'a'.repeat(64),
+    publishedAt: Date.now(),
+    publishedBy: 'Admin',
+  };
+}
+
+/** Ändert die Datenbank des laufenden Dienstes direkt (wie die CLI). */
+function withStore(service: TestService, change: (store: Store) => void): void {
+  const store = new Store(service.dataDir);
+  try {
+    change(store);
+  } finally {
+    store.close();
+  }
+}
 
 /** Macht zwei Spieler zu Freunden. */
 async function befriend(service: TestService, a: Player, b: Player): Promise<void> {
@@ -292,11 +341,11 @@ describe('Spieler nachschlagen', () => {
       const uuids = [sichtbar.uuid, versteckt.uuid, offline.uuid, 'f'.repeat(32), sichtbar.uuid];
       let res = await api(service.url, 'POST', '/v1/players/lookup', { token: offline.token, body: { uuids } });
       assert.equal(res.status, 200);
-      assert.deepEqual(res.body, { players: { [sichtbar.uuid]: { cape: 'galaxie' } } });
+      assert.deepEqual(res.body, { players: { [sichtbar.uuid]: { cape: 'galaxie', badge: null } } });
 
       // Wer selbst verbunden und sichtbar ist, steht mit drin.
       res = await api(service.url, 'POST', '/v1/players/lookup', { token: sichtbar.token, body: { uuids: [sichtbar.uuid] } });
-      assert.deepEqual(res.body, { players: { [sichtbar.uuid]: { cape: 'galaxie' } } });
+      assert.deepEqual(res.body, { players: { [sichtbar.uuid]: { cape: 'galaxie', badge: null } } });
 
       // Nach dem Trennen nicht mehr (der Dienst bemerkt das Trennen kurz nach dem Client).
       await clients[0]!.close();
@@ -309,7 +358,7 @@ describe('Spieler nachschlagen', () => {
       // Kein Cape: "".
       await api(service.url, 'PUT', '/v1/me', { token: versteckt.token, body: { visible: true, cape: '' } });
       res = await api(service.url, 'POST', '/v1/players/lookup', { token: offline.token, body: { uuids } });
-      assert.deepEqual(res.body, { players: { [versteckt.uuid]: { cape: '' } } });
+      assert.deepEqual(res.body, { players: { [versteckt.uuid]: { cape: '', badge: null } } });
     } finally {
       for (const client of clients) await client.close();
       await service.close();
@@ -329,6 +378,84 @@ describe('Spieler nachschlagen', () => {
       const ok = await api(service.url, 'POST', '/v1/players/lookup', { token: player.token, body: { uuids: exactly } });
       assert.equal(ok.status, 200);
     } finally {
+      await service.close();
+    }
+  });
+
+  test('Rolle fürs Heldix-Symbol: Team nur mit öffentlichem Teamprofil, Entwickler mit sichtbarem Community-Addon', async () => {
+    const service = await startService({ dev: true });
+    const clients: WsClient[] = [];
+    try {
+      const admin = await devPlayer(service.url, 'Admina');
+      const leiseAdmin = await devPlayer(service.url, 'LeiseAdmin');
+      const mod = await devPlayer(service.url, 'Moderata');
+      const leiseMod = await devPlayer(service.url, 'LeiseMod');
+      const dev = await devPlayer(service.url, 'Entwickla');
+      const versteckt = await devPlayer(service.url, 'NurVersteckt');
+      const kaputt = await devPlayer(service.url, 'KaputtesManifest');
+      const spieler = await devPlayer(service.url, 'Spielerin');
+      const fragt = await devPlayer(service.url, 'Fragt');
+      const all = [admin, leiseAdmin, mod, leiseMod, dev, versteckt, kaputt, spieler];
+      withStore(service, (store) => {
+        const now = Date.now();
+        store.setTeamMember(admin.uuid, 'admin', now, null);
+        store.setTeamProfile(admin.uuid, { public: true });
+        store.insertAddonVersion(communityAddon('admin-addon', admin), admin.uuid);
+        // Admin ohne öffentliches Teamprofil, aber mit Addon: nur Entwickler, die Team-Rolle bleibt verborgen
+        store.setTeamMember(leiseAdmin.uuid, 'admin', now, null);
+        store.insertAddonVersion(communityAddon('leise-addon', leiseAdmin), leiseAdmin.uuid);
+        store.setTeamMember(mod.uuid, 'moderator', now, null);
+        store.setTeamProfile(mod.uuid, { public: true });
+        store.setTeamMember(leiseMod.uuid, 'moderator', now, null);
+        store.insertAddonVersion(communityAddon('entwickler-addon', dev), dev.uuid);
+        store.insertAddonVersion(communityAddon('versteckt-addon', versteckt), versteckt.uuid);
+        store.setAddonHidden('versteckt-addon', true);
+        // Manifest unlesbar: das Addon steht nicht im Store, also auch kein Entwickler (wie bei der Entwicklerseite)
+        store.insertAddonVersion(communityAddon('kaputt-addon', kaputt, '{"type":"heldix-addon"}'), kaputt.uuid);
+        // Addons des Teams (owner null) machen niemanden zum Entwickler, auch nicht den Autor im Manifest
+        store.insertAddonVersion(communityAddon('offiziell-addon', spieler));
+      });
+      for (const player of [...all, fragt]) clients.push((await connect(service.wsUrl, player.token)).client);
+
+      const badges = async () => {
+        const res = await api(service.url, 'POST', '/v1/players/lookup', { token: fragt.token, body: { uuids: all.map((p) => p.uuid) } });
+        assert.equal(res.status, 200);
+        return Object.fromEntries(Object.entries(res.body.players as Record<string, { badge: unknown }>).map(([uuid, entry]) => [uuid, entry.badge]));
+      };
+      assert.deepEqual(await badges(), {
+        [admin.uuid]: 'admin',
+        [leiseAdmin.uuid]: 'developer',
+        [mod.uuid]: 'moderator',
+        [leiseMod.uuid]: null,
+        [dev.uuid]: 'developer',
+        [versteckt.uuid]: null,
+        [kaputt.uuid]: null,
+        [spieler.uuid]: null,
+      });
+      // dieselbe Bedingung wie die öffentliche Entwicklerseite
+      assert.equal((await api(service.url, 'GET', `/v1/addon-authors/${dev.uuid}`)).status, 200);
+      assert.equal((await api(service.url, 'GET', `/v1/addon-authors/${versteckt.uuid}`)).status, 404);
+      assert.equal((await api(service.url, 'GET', `/v1/addon-authors/${kaputt.uuid}`)).status, 404);
+
+      // Teamprofil nicht mehr öffentlich, Addon versteckt: sofort ohne Rolle
+      withStore(service, (store) => {
+        store.setTeamProfile(mod.uuid, { public: false });
+        store.setAddonHidden('entwickler-addon', true);
+        store.setTeamProfile(leiseMod.uuid, { public: true });
+      });
+      const after = await badges();
+      assert.equal(after[mod.uuid], null);
+      assert.equal(after[dev.uuid], null);
+      assert.equal(after[leiseMod.uuid], 'moderator');
+
+      // „Für andere erkennbar“ aus: gar nicht in der Antwort, also auch keine Rolle
+      await api(service.url, 'PUT', '/v1/me', { token: admin.token, body: { visible: false } });
+      assert.equal(Object.hasOwn(await badges(), admin.uuid), false);
+      // Wer selbst nachschlägt, sieht die eigene Rolle (für das eigene Symbol in der Tab-Liste)
+      const own = await api(service.url, 'POST', '/v1/players/lookup', { token: leiseMod.token, body: { uuids: [leiseMod.uuid] } });
+      assert.deepEqual(own.body, { players: { [leiseMod.uuid]: { cape: '', badge: 'moderator' } } });
+    } finally {
+      for (const client of clients) await client.close();
       await service.close();
     }
   });

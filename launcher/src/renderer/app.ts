@@ -1,9 +1,11 @@
-import type { AccountInfo, BridgeState, DeveloperStatus, DiscordStatus, InstanceInfo, LogLine, QuickPlayList, QuickPlayTarget, Settings, SkinInfo, UpdateState } from '../shared/api';
+import type { AccountInfo, DiscordStatus, Friend, InstanceInfo, LogLine, QuickPlayList, QuickPlayTarget, Settings, SkinInfo, SocialOverview, UpdateState } from '../shared/api';
 import {
   $,
   api,
+  confirmDialog,
   emit,
   errorMessage,
+  formatCount,
   formatDate,
   formatPlayTime,
   h,
@@ -21,15 +23,28 @@ import {
   uiIcon,
 } from './core.js';
 import { showFigure, setFigureActive } from './figure.js';
+import { UI_ICONS } from './ui-icons.js';
 import { initInstances, launchInstance, openDetail, resetInstancesView, type DetailTab } from './instances.js';
 import { loadNews } from './news.js';
+import { activateFriends, initFriends, openFriendChat } from './friends.js';
+import { activateProfile, initProfile } from './profile.js';
+import { activateStore, initStore } from './store.js';
+import { initCrash, showCrash } from './crash.js';
 
 // Icons im HTML (<svg data-icon="…">) aus dem Heldix-Icon-Set füllen, Logos der Loader einsetzen
 hydrateIcons();
 applyLoaderLogos();
 
 // ---------- Navigation ----------
-const VIEW_TITLES: Record<string, string> = { home: 'Start', instances: 'Instanzen', settings: 'Einstellungen', console: 'Konsole' };
+const VIEW_TITLES: Record<string, string> = {
+  home: 'Start',
+  instances: 'Instanzen',
+  store: 'Addon-Store',
+  friends: 'Freunde',
+  profile: 'Skins & Capes',
+  settings: 'Einstellungen',
+  console: 'Konsole',
+};
 function showView(view: string): void {
   document.body.dataset.view = view;
   document.querySelectorAll<HTMLButtonElement>('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
@@ -40,10 +55,37 @@ function showView(view: string): void {
     scrollLogToEnd();
   }
   if (view === 'instances') resetInstancesView();
+  if (view === 'store') activateStore();
+  if (view === 'friends') activateFriends();
+  if (view === 'profile') activateProfile();
   setFigureActive(view === 'home');
 }
+initStore();
+initFriends();
+initProfile();
+initCrash(showView);
+// Klick auf eine Benachrichtigung (neue Nachricht oder Anfrage)
+api.onSocialOpen((uuid) => {
+  showView('friends');
+  if (uuid) openFriendChat(uuid);
+});
+// Klick auf die Benachrichtigung „Addon-Updates verfügbar“
+api.onStoreOpen(() => showView('store'));
 document.querySelectorAll<HTMLButtonElement>('.nav-item').forEach((button) => {
   button.addEventListener('click', () => showView(button.dataset.view!));
+});
+// Strg+1 … Strg+7 (auf dem Mac ⌘): Seiten in der Reihenfolge der Seitenleiste
+document.addEventListener('keydown', (event) => {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+  const index = Number(event.key) - 1;
+  const items = [...document.querySelectorAll<HTMLButtonElement>('.nav-item')];
+  if (Number.isInteger(index) && index >= 0 && index < items.length) {
+    event.preventDefault();
+    showView(items[index].dataset.view!);
+  }
+});
+document.querySelectorAll<HTMLButtonElement>('.nav-item').forEach((button, index) => {
+  button.title = `${button.dataset.label ?? ''} (${api.platform === 'darwin' ? '⌘' : 'Strg+'}${index + 1})`;
 });
 
 // ---------- Parallax: das Hintergrundbild folgt leicht der Maus ----------
@@ -140,6 +182,7 @@ function renderStage(): void {
   tools.textContent = '';
   if (instance) {
     if (instance.loader !== 'vanilla') tools.append(toolButton(ICONS.blocks, 'Mods', 'Mods verwalten', () => openInstanceTab(instance.id, 'mods')));
+    if (instance.heldixClient) tools.append(toolButton(ICONS.puzzle, 'Addons', 'Heldix-Addons der Instanz', () => openInstanceTab(instance.id, 'addons')));
     tools.append(
       toolButton(ICONS.sparkle, 'Shader', 'Shaderpacks der Instanz', () => openInstanceTab(instance.id, 'shaders')),
       toolButton(ICONS.folder, 'Ordner', 'Instanz-Ordner öffnen', () => void api.openFolder('instance', instance.id)),
@@ -203,6 +246,145 @@ async function playInstance(id: string): Promise<void> {
   }
   await launchInstance(id, showView);
 }
+
+// ---------- Startseite: Freunde online ----------
+let social: SocialOverview | null = null;
+
+/** Was ein Freund gerade macht */
+function activityText(friend: Friend): string {
+  if (!friend.online) return 'Offline';
+  switch (friend.activity) {
+    case 'multiplayer': return friend.server ? `Auf ${friend.server}` : 'Mehrspieler';
+    case 'singleplayer': return 'Einzelspieler';
+    case 'realms': return 'Realms';
+    case 'lan': return 'LAN-Welt';
+    case 'menu': return 'Im Menü';
+    default: return 'Online';
+  }
+}
+
+/** Kopf aus dem Skin (Gesicht + Hut-Ebene), bis er geladen ist ein Farbfeld mit Anfangsbuchstaben */
+const headCache = new Map<string, Promise<string | null>>();
+function playerHead(uuid: string, name: string): HTMLElement {
+  const canvas = h('canvas', { class: 'row-icon head', width: 8, height: 8 }) as HTMLCanvasElement;
+  const ctx = canvas.getContext('2d')!;
+  const hue = parseInt(uuid.slice(0, 6), 16) % 360;
+  ctx.fillStyle = `hsl(${hue} 45% 38%)`;
+  ctx.fillRect(0, 0, 8, 8);
+  canvas.title = name;
+  if (typeof api.getPlayerSkin !== 'function') return canvas;
+  if (!headCache.has(uuid)) headCache.set(uuid, api.getPlayerSkin(uuid).catch(() => null));
+  void headCache.get(uuid)!.then((url) => {
+    if (!url) return;
+    const image = new Image();
+    image.onload = () => {
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, 8, 8);
+      ctx.drawImage(image, 8, 8, 8, 8, 0, 0, 8, 8);
+      ctx.drawImage(image, 40, 8, 8, 8, 0, 0, 8, 8);
+    };
+    image.src = url;
+  });
+  return canvas;
+}
+
+function placeholderIcon(name: string): HTMLElement {
+  return h('span', { class: 'row-icon placeholder' }, uiIcon(name, ''));
+}
+
+async function joinFriend(friend: Friend): Promise<void> {
+  if (!state.accounts.some((a) => a.active)) {
+    openAccounts($('#home-name'));
+    return;
+  }
+  try {
+    await api.joinFriend(friend.uuid);
+    showView('home');
+  } catch (error) {
+    toast(errorMessage(error), 'error');
+  }
+}
+
+function renderHomeFriends(): void {
+  const panel = $('#home-friends-panel');
+  const list = $('#home-friends');
+  const sub = $('#home-friends-sub');
+  list.textContent = '';
+  if (!social || social.status === 'no-service') {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  switch (social.status) {
+    case 'disabled':
+      sub.textContent = 'Im Launcher ausgeschaltet';
+      list.append(rowItem(placeholderIcon('friends'), 'Freunde einschalten', 'Einstellungen → Freunde & Discord', 'Einstellungen öffnen', () => {
+        showView('settings');
+        document.querySelector<HTMLButtonElement>('#settings-nav [data-target="set-freunde"]')?.click();
+      }));
+      return;
+    case 'no-account':
+    case 'offline-account':
+      sub.textContent = 'Nur mit Microsoft-Konto';
+      list.append(rowItem(placeholderIcon('microsoft'), 'Mit Microsoft anmelden', 'Dann siehst du, wer online ist', 'Konto hinzufügen',
+        () => openAccounts($('#home-name'))));
+      return;
+    case 'connecting':
+      sub.textContent = 'Verbinde …';
+      list.append(h('div', { class: 'row-empty', text: 'Verbinde mit dem Heldix-Dienst …' }));
+      return;
+    case 'error':
+      sub.textContent = 'Nicht erreichbar';
+      list.append(rowItem(placeholderIcon('warning'), 'Heldix-Dienst nicht erreichbar', social.error && !/nicht erreichbar/i.test(social.error) ? social.error : 'Klicken, um es erneut zu versuchen', 'Erneut versuchen',
+        () => void api.refreshSocial().then((overview) => {
+          social = overview;
+          renderHomeFriends();
+        }).catch(() => undefined)));
+      return;
+    default:
+      break;
+  }
+  const online = social.friends.filter((friend) => friend.online);
+  sub.textContent = social.friends.length === 0 ? 'Noch keine Freunde' : `${online.length} von ${social.friends.length} online`;
+  if (social.incoming.length > 0) {
+    const names = social.incoming.slice(0, 2).map((r) => r.name).join(', ');
+    list.append(rowItem(placeholderIcon('user-plus'),
+      social.incoming.length === 1 ? '1 Freundschaftsanfrage' : `${social.incoming.length} Freundschaftsanfragen`,
+      social.incoming.length > 2 ? `${names} und weitere` : names, 'Anfragen ansehen', () => showView('friends'),
+      undefined, h('span', { class: 'row-badge', text: String(social.incoming.length) })));
+  }
+  if (social.friends.length === 0) {
+    list.append(rowItem(placeholderIcon('plus'), 'Freunde hinzufügen', 'Über ihren Spielernamen', 'Freunde öffnen', () => showView('friends')));
+    return;
+  }
+  if (online.length === 0) {
+    list.append(h('div', { class: 'row-empty', text: 'Gerade ist niemand online.' }));
+    return;
+  }
+  const busy = state.game.state === 'preparing' || state.game.state === 'running';
+  for (const friend of online.slice(0, 5)) {
+    const open = () => {
+      showView('friends');
+      openFriendChat(friend.uuid);
+    };
+    const canJoin = friend.activity === 'multiplayer' && !!friend.server && !busy;
+    const row = rowItem(playerHead(friend.uuid, friend.name), friend.name, activityText(friend), `Nachricht an ${friend.name}`, open,
+      canJoin ? { icon: ICONS.play, title: `Auf ${friend.server} mitspielen`, run: () => void joinFriend(friend) } : { icon: UI_ICONS.chat, title: 'Nachricht schreiben', run: open },
+      friend.unread > 0 ? h('span', { class: 'row-badge', title: 'Ungelesene Nachrichten', text: String(friend.unread) }) : null);
+    row.querySelector('.row-meta')?.classList.add('online');
+    list.append(row);
+  }
+  if (online.length > 5) list.append(h('div', { class: 'row-empty', text: `und ${online.length - 5} weitere online` }));
+}
+$('#home-friends-all').addEventListener('click', () => showView('friends'));
+void api.getSocial().then((overview) => {
+  social = overview;
+  renderHomeFriends();
+}).catch(() => undefined);
+api.onSocial((overview) => {
+  social = overview;
+  renderHomeFriends();
+});
 
 // ---------- 3D-Figur ----------
 let figureFor = '';
@@ -369,6 +551,7 @@ $('#home-name').addEventListener('click', (event) => {
 function renderHome(): void {
   renderGreeting();
   renderStage();
+  renderHomeFriends();
 }
 
 // ---------- Avatare ----------
@@ -382,7 +565,7 @@ function renderAvatar(el: HTMLElement, account: AccountInfo | undefined): void {
   }
   if (account.skinUrl) {
     // Gesicht (8,8) und Hut-Ebene (40,8) aus der 64x64-Skin-Textur ausschneiden
-    const size = el.getBoundingClientRect().width || (el.classList.contains('small') ? 32 : 38);
+    const size = el.getBoundingClientRect().width || (el.classList.contains('large') ? 44 : el.classList.contains('small') ? 32 : 38);
     const scale = size / 8;
     const url = account.skinUrl.replace(/^http:/, 'https:');
     el.style.backgroundImage = `url("${url}"), url("${url}")`;
@@ -475,12 +658,6 @@ function renderStatus(): void {
     homeSub.textContent = 'Melde dich an, dann kann es losgehen.';
     return;
   }
-  if (active.type === 'offline' && !offlineAllowed()) {
-    play.disabled = true;
-    launchStatus('muted', 'Offline-Konto', 'Offline-Konten gehen, sobald ein Microsoft-Konto mit Minecraft angemeldet ist.');
-    homeSub.textContent = 'Bitte einmal mit einem Microsoft-Konto anmelden.';
-    return;
-  }
   if (game.state === 'error') {
     launchStatus('error', 'Start fehlgeschlagen', game.message);
     homeSub.textContent = 'Der letzte Start hat nicht geklappt – Details stehen in der Konsole.';
@@ -529,6 +706,11 @@ api.onGameState(async (game) => {
     $('#console-dot').hidden = false;
     state.settings = await api.getSettings();
     renderSettings();
+  } else if (game.state === 'exited' && game.crash) {
+    // Absturz-Hilfe: Ursache und passende Schritte
+    $('#crash-last').hidden = false;
+    $('#console-dot').hidden = false;
+    void showCrash(game.crash.id);
   } else if (game.state === 'exited' && game.code !== 0 && game.code !== null) {
     toast(`Minecraft wurde mit Fehlercode ${game.code} beendet. Details in der Konsole.`, 'error');
     $('#console-dot').hidden = false;
@@ -600,20 +782,60 @@ document.addEventListener('keydown', (event) => {
   });
 });
 
+/** Art des Kontos für Listen */
+function accountKind(account: AccountInfo): string {
+  if (account.type === 'offline') return 'Offline-Konto';
+  return account.via === 'launcher' ? 'Microsoft · bitte neu anmelden' : 'Microsoft-Konto';
+}
+
+async function removeAccountAsk(account: AccountInfo): Promise<void> {
+  const ok = await confirmDialog(`${account.name} abmelden?`,
+    'Das Konto wird aus dem Launcher entfernt. Deine Welten, Instanzen und dein Minecraft-Konto bleiben erhalten – anmelden kannst du dich jederzeit wieder.',
+    'Abmelden');
+  if (!ok) return;
+  await api.removeAccount(account.id);
+  await loadAccounts();
+}
+
 function renderAccounts(): void {
   const active = state.accounts.find((a) => a.active);
   renderAvatar($('#account-avatar'), active);
   $('#avatar-status').hidden = !active;
   $('#account-label').textContent = active?.name ?? 'Nicht angemeldet';
-  $('#account-sub').textContent = active ? (active.type === 'microsoft' ? (active.via === 'launcher' ? 'Über Minecraft Launcher' : 'Microsoft-Konto') : 'Offline-Konto') : 'Konto hinzufügen';
+  $('#account-sub').textContent = active ? (active.via === 'launcher' ? 'Bitte neu anmelden' : active.type === 'microsoft' ? 'Microsoft-Konto' : 'Offline-Konto') : 'Konto hinzufügen';
 
+  // Aktives Konto oben, groß
+  const current = $('#account-current');
+  current.textContent = '';
+  current.className = 'account-current';
+  if (active) {
+    const avatar = h('span', { class: 'avatar large' });
+    const legacy = active.via === 'launcher';
+    current.classList.toggle('legacy', legacy);
+    current.append(avatar,
+      h('div', { class: 'account-current-text' },
+        h('div', { class: 'account-current-name', text: active.name }),
+        h('div', { class: 'account-current-sub' }, h('span', { class: 'dot' }),
+          h('span', { text: legacy ? 'Anmeldung läuft ab – bitte mit Microsoft neu anmelden' : active.type === 'microsoft' ? 'Microsoft-Konto · angemeldet' : 'Offline-Konto (Entwicklung)' }))),
+      h('button', { class: 'ghost small', type: 'button', title: 'Dieses Konto aus dem Launcher entfernen', onclick: () => void removeAccountAsk(active) }, 'Abmelden'));
+    renderAvatar(avatar, active);
+  } else {
+    current.classList.add('empty');
+    current.append(h('div', { class: 'account-current-title', text: 'Nicht angemeldet' }),
+      h('p', { text: 'Melde dich mit dem Microsoft-Konto an, mit dem du Minecraft: Java Edition gekauft hast. Dein Passwort siehst nur du im Fenster von Microsoft.' }));
+  }
+  $('#account-links').hidden = !active || active.type !== 'microsoft';
+
+  // Weitere Konten zum Wechseln
+  const others = state.accounts.filter((a) => !a.active);
+  $('#account-others-title').hidden = others.length === 0;
   const list = $('#account-list');
   list.textContent = '';
-  if (state.accounts.length === 0) list.append(h('div', { class: 'account-empty', text: 'Noch kein Konto hinzugefügt.' }));
-  for (const account of state.accounts) {
+  for (const account of others) {
     const avatar = h('span', { class: 'avatar small' });
     list.append(h('div', {
-      class: `account-item${account.active ? ' active' : ''}`,
+      class: 'account-item',
+      title: `Zu ${account.name} wechseln`,
       onclick: async () => {
         await api.selectAccount(account.id);
         await loadAccounts();
@@ -622,87 +844,30 @@ function renderAccounts(): void {
     avatar,
     h('div', { class: 'account-meta' },
       h('div', { class: 'account-name', text: account.name }),
-      h('div', { class: 'account-type', text: account.type === 'microsoft' ? (account.via === 'launcher' ? 'Microsoft · über Minecraft Launcher' : 'Microsoft') : 'Offline' })),
+      h('div', { class: 'account-type', text: accountKind(account) })),
     h('button', {
       class: 'remove-account',
-      title: 'Entfernen',
+      title: 'Abmelden',
       text: '×',
-      onclick: async (event: Event) => {
+      onclick: (event: Event) => {
         event.stopPropagation();
-        await api.removeAccount(account.id);
-        await loadAccounts();
+        void removeAccountAsk(account);
       },
     })));
     renderAvatar(avatar, account);
   }
 
   const info = state.info;
-  $<HTMLButtonElement>('#add-microsoft').disabled = !info?.microsoftConfigured;
+  const add = $<HTMLButtonElement>('#add-microsoft');
+  add.disabled = !info?.microsoftConfigured;
+  add.className = active ? 'ghost full' : 'primary full';
+  $('#add-microsoft-label').textContent = active ? 'Weiteres Microsoft-Konto' : 'Mit Microsoft anmelden';
   $('#ms-hint').hidden = !!info?.microsoftConfigured;
-  const allowed = offlineAllowed();
-  $('#offline-form').classList.toggle('locked', !allowed);
-  $<HTMLInputElement>('#offline-name').disabled = !allowed;
-  $<HTMLButtonElement>('#offline-form button').disabled = !allowed;
-  let hint = 'Offline-Konten gibt es, sobald ein Microsoft-Konto mit Minecraft angemeldet ist.';
-  if (allowed) hint = 'Offline: für Einzelspieler, LAN und Server ohne Online-Modus.';
-  else if (developer?.enabled) hint = 'Entwickleroptionen sind an, aber für diesen PC gilt kein Entwickler-Schlüssel (Einstellungen → Entwickler).';
-  $('#offline-hint').textContent = hint;
+  // Offline-Konten nur in der Entwicklungsversion (npm start)
+  const dev = !!info?.isDev;
+  $('#offline-form').hidden = !dev;
+  $('#offline-hint').hidden = !dev;
 }
-
-/** Entwickleroptionen und Entwickler-Schlüssel dieses PCs */
-let developer: DeveloperStatus | null = null;
-
-/** Wie im Hauptprozess: im Entwicklungsmodus immer, sonst mit einem Microsoft-Konto oder Entwickler-Schlüssel. */
-function offlineAllowed(): boolean {
-  return !!state.info?.isDev || state.accounts.some((a) => a.type === 'microsoft') || (!!developer?.enabled && developer.keyValid);
-}
-
-async function loadDeveloper(): Promise<void> {
-  developer = await api.getDeveloperStatus();
-  if (developer.autoCreated) toast('Entwickler-Schlüssel für diesen PC automatisch erstellt.', 'success');
-  renderDeveloper();
-  renderAccounts();
-  renderHome();
-}
-
-function renderDeveloper(): void {
-  if (!developer) return;
-  $<HTMLInputElement>('#developer-toggle').checked = developer.enabled;
-  $('#dev-panel').hidden = !developer.enabled;
-  $('#dev-machine').textContent = developer.machineCode;
-  const status = $('#dev-status');
-  status.classList.add('dev-status');
-  status.dataset.state = developer.keyValid ? 'ok' : 'missing';
-  $('#dev-status-text').textContent = developer.keyValid
-    ? `Entwickler-Schlüssel gültig (${developer.keyName}) – Offline-Konten sind frei.`
-    : `${developer.reason ?? 'Kein Entwickler-Schlüssel.'} Importiere deinen Signaturschlüssel (signing-key.pem) – danach geht es auf diesem PC automatisch.`;
-  $('#dev-import').hidden = developer.keyValid;
-}
-
-$('#developer-toggle').addEventListener('change', async (e) => {
-  await save({ developerMode: (e.target as HTMLInputElement).checked });
-  await loadDeveloper();
-});
-$('#dev-import').addEventListener('click', async () => {
-  try {
-    const status = await api.importDeveloperKey();
-    if (!status) return;
-    await save({ developerMode: true });
-    await loadDeveloper();
-    if (developer?.keyValid && !developer.autoCreated) toast('Entwickler-Schlüssel ist gültig.', 'success');
-  } catch (error) {
-    toast(errorMessage(error), 'error');
-  }
-});
-$('#dev-recheck').addEventListener('click', async () => {
-  await loadDeveloper();
-  toast(developer?.keyValid ? 'Entwickler-Schlüssel ist gültig.' : developer?.reason ?? 'Kein Entwickler-Schlüssel.', developer?.keyValid ? 'success' : 'error');
-});
-$('#dev-copy').addEventListener('click', async () => {
-  if (!developer) return;
-  await navigator.clipboard.writeText(developer.machineCode);
-  toast('PC-Kennung kopiert.', 'success');
-});
 
 async function loadAccounts(): Promise<void> {
   state.accounts = await api.listAccounts();
@@ -710,6 +875,15 @@ async function loadAccounts(): Promise<void> {
   renderHome();
   void refreshFigure();
 }
+
+$('#account-skins').addEventListener('click', () => {
+  closeAccounts();
+  showView('profile');
+});
+$('#account-friends').addEventListener('click', () => {
+  closeAccounts();
+  showView('friends');
+});
 
 $('#add-microsoft').addEventListener('click', async () => {
   const button = $<HTMLButtonElement>('#add-microsoft');
@@ -725,68 +899,7 @@ $('#add-microsoft').addEventListener('click', async () => {
   }
 });
 
-// ---------- Anmeldung über den offiziellen Minecraft Launcher ----------
-$('#add-launcher').addEventListener('click', async () => {
-  const button = $<HTMLButtonElement>('#add-launcher');
-  button.disabled = true;
-  closeAccounts();
-  try {
-    const account = await api.addAccountViaLauncher();
-    toast(`Angemeldet als ${account.name}`, 'success');
-    await loadAccounts();
-  } catch (error) {
-    const message = errorMessage(error);
-    if (!/abgebrochen/i.test(message)) toast(message, 'error');
-  } finally {
-    button.disabled = false;
-  }
-});
-
-let bridgeDialog: HTMLElement | null = null;
-
-function closeBridgeDialog(): void {
-  bridgeDialog?.remove();
-  bridgeDialog = null;
-}
-
-/** Anleitung, solange der Launcher auf „Spielen“ im Minecraft Launcher wartet */
-function showBridgeDialog(bridge: Extract<BridgeState, { waiting: true }>): void {
-  closeBridgeDialog();
-  const cancel = () => void api.cancelBridge();
-  const steps = h('ol', { class: 'bridge-steps' },
-    h('li', { text: 'Der Minecraft Launcher öffnet sich. Melde dich dort mit deinem Microsoft-Konto an, falls nötig.' }),
-    h('li', { text: 'Unten links ist die Installation „HeldixClient“ ausgewählt. Drücke auf „Spielen“.' }),
-    h('li', { text: bridge.purpose === 'launch'
-      ? 'HeldixClient übernimmt die Anmeldung und startet das Spiel.'
-      : 'HeldixClient übernimmt die Anmeldung. Danach startest du hier mit „Spielen“ – die Anmeldung hält etwa einen Tag.' }));
-  const backdrop = h('div', { class: 'modal-backdrop', id: 'bridge-dialog' },
-    h('div', { class: 'modal' },
-      h('div', { class: 'modal-head' },
-        h('div', {},
-          h('h3', { class: 'modal-title', text: 'Anmelden über den Minecraft Launcher' }),
-          h('p', { class: 'modal-sub', text: 'Der offizielle Launcher meldet dich an, gespielt wird mit HeldixClient.' })),
-        h('button', { class: 'icon-button', title: 'Abbrechen', onclick: cancel }, uiIcon('close'))),
-      steps,
-      bridge.launcherWasRunning
-        ? h('p', { class: 'hint small', text: 'Der Minecraft Launcher war schon offen. Fehlt dort „HeldixClient“, schließe ihn und klicke auf „Launcher öffnen“.' })
-        : null,
-      h('div', { class: 'bridge-wait', text: 'Warte auf den Minecraft Launcher …' }),
-      h('div', { class: 'modal-actions' },
-        h('button', { class: 'ghost', type: 'button', text: 'Launcher öffnen', onclick: () => void api.reopenOfficialLauncher().catch((e: unknown) => toast(errorMessage(e), 'error')) }),
-        h('button', { class: 'ghost', type: 'button', text: 'Abbrechen', onclick: cancel }))));
-  document.body.append(backdrop);
-  bridgeDialog = backdrop;
-}
-
-api.onBridgeState((bridge) => {
-  if (bridge.waiting) showBridgeDialog(bridge);
-  else closeBridgeDialog();
-});
 api.onAccountsChanged(() => void loadAccounts());
-// Escape bricht das Warten ab (der allgemeine Escape-Handler blendet den Dialog nur aus)
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && bridgeDialog) void api.cancelBridge();
-});
 
 $('#offline-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -839,15 +952,56 @@ function renderSettings(): void {
   const loader = info.loaderVersion ? `Heldix Loader ${info.loaderVersion}` : 'Heldix Loader';
   $('#about-text').textContent = info.isDev
     ? `Entwicklungsmodus · Offline-Konten aktiv · ${loader}`
-    : developer?.enabled && developer.keyValid
-    ? `Entwickleroptionen aktiv (${developer.keyName}) · ${loader}`
     : `${loader} · Minecraft-Dateien kommen direkt von Mojang.`;
   $<HTMLInputElement>('#discord-toggle').checked = s.discordPresence;
   $<HTMLInputElement>('#update-toggle').checked = s.autoUpdate;
   $<HTMLInputElement>('#discord-server-toggle').checked = s.discordShowServer;
   $('#discord-server-row').classList.toggle('disabled', !s.discordPresence);
+  $<HTMLInputElement>('#addon-notify-toggle').checked = s.addonUpdateNotifications;
+  $<HTMLInputElement>('#addon-auto-toggle').checked = s.addonAutoUpdate;
+  $<HTMLInputElement>('#social-toggle').checked = s.social;
+  $<HTMLInputElement>('#social-notify-toggle').checked = s.socialNotifications;
+  $('#social-notify-row').classList.toggle('disabled', !s.social);
   renderPerformance(s);
 }
+
+// Bereiche der Einstellungen: Navigation links springt hin, beim Scrollen wandert die Markierung mit
+const settingsPage = $('#settings-page');
+const settingsButtons = [...document.querySelectorAll<HTMLButtonElement>('#settings-nav button')];
+function markSettingsSection(id: string): void {
+  settingsButtons.forEach((button) => button.classList.toggle('active', button.dataset.target === id));
+}
+settingsButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    const target = document.getElementById(button.dataset.target!);
+    if (!target) return;
+    settingsPage.scrollTo({ top: target.offsetTop - settingsPage.offsetTop - 12, behavior: 'smooth' });
+    markSettingsSection(target.id);
+  });
+});
+let settingsScrollFrame = 0;
+settingsPage.addEventListener('scroll', () => {
+  if (settingsScrollFrame) return;
+  settingsScrollFrame = requestAnimationFrame(() => {
+    settingsScrollFrame = 0;
+    const top = settingsPage.scrollTop + settingsPage.offsetTop + 60;
+    let current = settingsButtons[0]?.dataset.target ?? '';
+    for (const button of settingsButtons) {
+      const group = document.getElementById(button.dataset.target!);
+      if (group && group.offsetTop <= top) current = group.id;
+    }
+    markSettingsSection(current);
+  });
+});
+$('#social-toggle').addEventListener('change', async (e) => {
+  await save({ social: (e.target as HTMLInputElement).checked });
+  renderSettings();
+});
+$('#social-notify-toggle').addEventListener('change', (e) => save({ socialNotifications: (e.target as HTMLInputElement).checked }));
+$('#addon-notify-toggle').addEventListener('change', (e) => save({ addonUpdateNotifications: (e.target as HTMLInputElement).checked }));
+$('#addon-auto-toggle').addEventListener('change', (e) => save({ addonAutoUpdate: (e.target as HTMLInputElement).checked }));
+$('#addon-store-open').addEventListener('click', () => showView('store'));
+$('#social-open').addEventListener('click', () => showView('friends'));
 
 // ---------- Leistung ----------
 const GRAPHICS_HINTS: Record<Settings['graphicsApi'], string> = {
@@ -1053,6 +1207,11 @@ const MAX_LOG_LINES = 5000;
 const logEl = $('#log');
 let logLines: LogLine[] = [];
 
+const logFollow = $<HTMLInputElement>('#log-follow');
+const logSearch = $<HTMLInputElement>('#log-search');
+let logQuery = '';
+let logFilter: 'all' | 'problems' | 'launcher' = 'all';
+
 function isNearBottom(): boolean {
   return logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
 }
@@ -1060,13 +1219,60 @@ function scrollLogToEnd(): void {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+/** Zeile passt zu Filter und Suche? (für Kopieren und den Zähler) */
+function logLineVisible(line: LogLine): boolean {
+  if (logFilter === 'problems' && line.level !== 'WARN' && line.level !== 'ERROR' && line.level !== 'FATAL') return false;
+  if (logFilter === 'launcher' && !line.text.startsWith('[Launcher]')) return false;
+  return !logQuery || line.text.toLowerCase().includes(logQuery);
+}
+
+function renderLogLine(line: LogLine): HTMLElement {
+  const el = h('div', { class: `log-line ${line.level}${line.text.startsWith('[Launcher]') ? ' launcher' : ''}` });
+  fillLogLine(el, line.text);
+  return el;
+}
+
+/** Text der Zeile, Suchtreffer markiert (nur Textknoten, nie HTML) */
+function fillLogLine(el: HTMLElement, text: string): void {
+  el.textContent = '';
+  el.classList.toggle('search-miss', logQuery !== '' && !text.toLowerCase().includes(logQuery));
+  if (!logQuery) {
+    el.textContent = text;
+    return;
+  }
+  const lower = text.toLowerCase();
+  let at = 0;
+  for (let hit = lower.indexOf(logQuery); hit >= 0; hit = lower.indexOf(logQuery, at)) {
+    if (hit > at) el.append(text.slice(at, hit));
+    el.append(h('mark', { text: text.slice(hit, hit + logQuery.length) }));
+    at = hit + logQuery.length;
+  }
+  if (at < text.length) el.append(text.slice(at));
+}
+
+function updateLogCount(): void {
+  const visible = logLines.filter(logLineVisible).length;
+  $('#log-count').textContent = logLines.length === 0
+    ? ''
+    : visible === logLines.length
+      ? `${formatCount(logLines.length)} Zeilen`
+      : `${formatCount(visible)} von ${formatCount(logLines.length)} Zeilen`;
+}
+
+function refilterLog(): void {
+  const rows = logEl.querySelectorAll<HTMLElement>('.log-line');
+  rows.forEach((row, index) => {
+    const line = logLines[index];
+    if (line) fillLogLine(row, line.text);
+  });
+  updateLogCount();
+  if (logFollow.checked) scrollLogToEnd();
+}
+
 api.onLog((lines) => {
-  const stick = isNearBottom();
   logEl.querySelector('.log-empty')?.remove();
   const fragment = document.createDocumentFragment();
-  for (const line of lines) {
-    fragment.append(h('div', { class: `log-line ${line.level}${line.text.startsWith('[Launcher]') ? ' launcher' : ''}`, text: line.text }));
-  }
+  for (const line of lines) fragment.append(renderLogLine(line));
   logEl.append(fragment);
   logLines.push(...lines);
   const overflow = logLines.length - MAX_LOG_LINES;
@@ -1077,22 +1283,63 @@ api.onLog((lines) => {
   if (lines.some((l) => l.level === 'ERROR' || l.level === 'FATAL') && !$('#view-console').classList.contains('active')) {
     $('#console-dot').hidden = false;
   }
-  if (stick) scrollLogToEnd();
+  updateLogCount();
+  if (logFollow.checked) scrollLogToEnd();
+});
+
+// Mitlaufen: wer nach oben scrollt, hält die Ausgabe an; ganz unten läuft sie wieder mit
+logEl.addEventListener('scroll', () => {
+  const near = isNearBottom();
+  if (logFollow.checked !== near && logLines.length > 0) logFollow.checked = near;
+});
+logFollow.addEventListener('change', () => {
+  if (logFollow.checked) scrollLogToEnd();
+});
+let logSearchTimer = 0;
+logSearch.addEventListener('input', () => {
+  clearTimeout(logSearchTimer);
+  logSearchTimer = window.setTimeout(() => {
+    logQuery = logSearch.value.trim().toLowerCase();
+    refilterLog();
+  }, 150);
+});
+logSearch.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && logSearch.value) {
+    event.stopPropagation();
+    logSearch.value = '';
+    logQuery = '';
+    refilterLog();
+  }
 });
 
 document.querySelectorAll<HTMLButtonElement>('#log-filter button').forEach((button) => {
   button.addEventListener('click', () => {
     document.querySelectorAll('#log-filter button').forEach((b) => b.classList.toggle('active', b === button));
-    logEl.classList.toggle('problems-only', button.dataset.filter === 'problems');
+    logFilter = (button.dataset.filter as typeof logFilter) ?? 'all';
+    logEl.classList.toggle('problems-only', logFilter === 'problems');
+    logEl.classList.toggle('launcher-only', logFilter === 'launcher');
+    updateLogCount();
+    if (logFollow.checked) scrollLogToEnd();
   });
 });
 $('#copy-log').addEventListener('click', async () => {
-  await navigator.clipboard.writeText(logLines.map((l) => l.text).join('\n'));
-  toast('Log in die Zwischenablage kopiert.', 'success');
+  const visible = logLines.filter(logLineVisible);
+  await navigator.clipboard.writeText(visible.map((l) => l.text).join('\n'));
+  toast(visible.length === logLines.length ? 'Log in die Zwischenablage kopiert.' : `${formatCount(visible.length)} Zeilen kopiert.`, 'success');
 });
 $('#clear-log').addEventListener('click', () => {
   logLines = [];
   logEl.textContent = '';
+  updateLogCount();
+});
+$('#crash-last').addEventListener('click', () => void showCrash());
+$('#log-folder').addEventListener('click', () => {
+  const instance = stageInstance();
+  if (!instance) {
+    toast('Noch keine Instanz – Logs gibt es nach dem ersten Start.');
+    return;
+  }
+  void api.openFolder('logs', instance.id);
 });
 $('#kill-game').addEventListener('click', () => api.killGame());
 
@@ -1104,7 +1351,6 @@ async function init(): Promise<void> {
   initInstances(showView);
   renderSettings();
   await loadAccounts();
-  await loadDeveloper();
   await reloadInstances();
   void loadNews();
   void showWhatsNew();

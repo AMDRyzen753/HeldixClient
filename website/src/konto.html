@@ -1,4 +1,4 @@
-<!--seite {"titel":"Konto","beschreibung":"Dein Konto beim Heldix-Dienst: Cape, Freunde, Nachrichten, Support, Privatsphäre und deine Daten.","noindex":true}-->
+<!--seite {"titel":"Konto","beschreibung":"Dein Konto beim Heldix-Dienst: Cape, Freunde, Nachrichten, Support, eigene Addons, Privatsphäre und deine Daten.","noindex":true}-->
 <!doctype html>
 <html lang="de">
 <head>
@@ -32,7 +32,7 @@
     <div class="gate-head">
       <div class="badge-lg">{{icon:user}}</div>
       <h1>Dein HeldixClient-Konto</h1>
-      <p class="lead">Hier verwaltest du dein Profil beim Heldix-Dienst: Cape, Freunde, Nachrichten, Privatsphäre und deine Daten.</p>
+      <p class="lead">Hier verwaltest du dein Profil beim Heldix-Dienst: Cape, Freunde, Nachrichten, eigene Addons, Privatsphäre und deine Daten.</p>
     </div>
     <p class="notice" id="konto-gast-hinweis" role="alert" hidden></p>
     <h2 class="gate-sub">So meldest du dich an</h2>
@@ -80,6 +80,7 @@
       <button class="tab" type="button" role="tab" id="tab-freunde" data-tab="freunde" aria-controls="panel-freunde" aria-selected="false" tabindex="-1">{{icon:friends}}Freunde<span class="count" id="count-freunde" hidden></span></button>
       <button class="tab" type="button" role="tab" id="tab-nachrichten" data-tab="nachrichten" aria-controls="panel-nachrichten" aria-selected="false" tabindex="-1">{{icon:chat}}Nachrichten<span class="count" id="count-nachrichten" hidden></span></button>
       <button class="tab" type="button" role="tab" id="tab-support" data-tab="support" aria-controls="panel-support" aria-selected="false" tabindex="-1">{{icon:info}}Support<span class="count" id="count-support" hidden></span></button>
+      <button class="tab" type="button" role="tab" id="tab-addons" data-tab="addons" aria-controls="panel-addons" aria-selected="false" tabindex="-1">{{icon:addons}}Meine Addons</button>
       <button class="tab" type="button" role="tab" id="tab-privatsphaere" data-tab="privatsphaere" aria-controls="panel-privatsphaere" aria-selected="false" tabindex="-1">{{icon:shield}}Privatsphäre</button>
       <button class="tab" type="button" role="tab" id="tab-daten" data-tab="daten" aria-controls="panel-daten" aria-selected="false" tabindex="-1">{{icon:file}}Meine Daten</button>
     </div>
@@ -231,6 +232,7 @@
               </div>
             </div>
             <ol class="ticket-messages" id="ticket-verlauf" aria-labelledby="ticket-betreff"></ol>
+            <div id="ticket-anhaenge"></div>
             <form class="ticket-reply" id="ticket-antwort" novalidate>
               <label class="field">
                 <span class="field-row"><span>Antwort</span><span class="counter" id="ticket-zaehler"></span></span>
@@ -245,6 +247,155 @@
             </form>
             <p class="notice small-notice closed-notice" id="ticket-geschlossen" hidden>Diese Anfrage ist geschlossen. Brauchst du noch Hilfe, schreib eine neue Anfrage.</p>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Meine Addons -->
+    <div class="panel" id="panel-addons" role="tabpanel" aria-labelledby="tab-addons" tabindex="0" hidden>
+      <div id="addons-uebersicht">
+        <div class="app-card">
+          <div class="card-head">
+            <div>
+              <h2>Meine Addons</h2>
+              <p>Bring dein eigenes Heldix-Addon in den Addon-Store: JAR hochladen, Store-Angaben ausfüllen, einreichen. Das Team prüft den Code, signiert das Addon und stellt es als Community-Addon auf die Webseite, in den Launcher und ins Spiel.</p>
+            </div>
+            <button class="button small" type="button" id="addon-einreichen">{{icon:plus}}Addon einreichen</button>
+          </div>
+          <ul class="checks compact rules-list">
+            <li>{{icon:code}}<span><strong>Nur die Heldix-API:</strong> kein Zugriff auf Minecraft-Klassen, kein nachgeladener Code.</span></li>
+            <li>{{icon:shield}}<span><strong>Kein Schadcode:</strong> keine fremden Programme starten, keine Daten sammeln oder verschicken, ohne dass es in der Beschreibung steht.</span></li>
+            <li>{{icon:file}}<span><strong>Deine Rechte:</strong> Code, Bilder und Namen sind von dir, oder du darfst sie verwenden.</span></li>
+            <li>{{icon:clock}}<span><strong>Die Prüfung dauert</strong> meist ein paar Tage. Das Team kann ablehnen – die Begründung steht dann hier, und du kannst nachbessern.</span></li>
+          </ul>
+          <p class="hint">Wie du ein Addon baust und was beim Einreichen zählt: <a href="/entwickler/addons#addon-einreichen">Für Entwickler → Addon einreichen</a>.</p>
+        </div>
+        <div class="app-card">
+          <div class="card-head">
+            <h2>Einreichungen <span class="muted" id="einreichungen-anzahl"></span></h2>
+            <span class="hint live-hint">{{icon:refresh}}aktualisiert sich alle 15 Sekunden</span>
+          </div>
+          <div id="einreichungen"></div>
+        </div>
+        <div class="app-card">
+          <div class="card-head">
+            <div>
+              <h2>Im Store</h2>
+              <p>Deine freigegebenen Addons. Für eine neue Version reichst du einfach die neue JAR ein – mit höherer Versionsnummer.</p>
+            </div>
+          </div>
+          <div id="eigene-addons"></div>
+        </div>
+      </div>
+
+      <!-- Assistent: einreichen oder Entwurf bearbeiten -->
+      <div class="app-card wizard" id="assistent" hidden>
+        <div class="detail-top">
+          <button class="icon-button back" type="button" id="assistent-schliessen" aria-label="Zurück zu Meine Addons">{{icon:chevron-left}}</button>
+          <div class="wizard-title">
+            <h2 id="assistent-titel" tabindex="-1">Addon einreichen</h2>
+            <p class="row-meta" id="assistent-untertitel"></p>
+          </div>
+        </div>
+        <div class="review-note" id="assistent-abgelehnt" role="note" hidden></div>
+        <ol class="wizard-steps" id="assistent-schritte" aria-label="Schritte">
+          <li><button type="button" data-step="1"><span class="step-no">1</span><span class="step-label">JAR</span></button></li>
+          <li><button type="button" data-step="2"><span class="step-no">2</span><span class="step-label">Store-Angaben</span></button></li>
+          <li><button type="button" data-step="3"><span class="step-no">3</span><span class="step-label">Screenshots</span></button></li>
+          <li><button type="button" data-step="4"><span class="step-no">4</span><span class="step-label">Einreichen</span></button></li>
+        </ol>
+
+        <section class="wizard-step" data-panel="1" aria-labelledby="schritt-1-titel">
+          <h3 id="schritt-1-titel">JAR hochladen</h3>
+          <p class="muted small">Die fertige Addon-JAR aus <code>build/libs</code>, höchstens 50 MB. Der Dienst liest daraus die <code>heldix.addon.json</code> und sucht in den Klassendateien nach Zugriffen, die sich das Team genauer ansieht. Ausgeführt wird dabei nichts.</p>
+          <div class="file-row">
+            <label class="button small ghost file-button">{{icon:file}}<span id="jar-knopf">JAR wählen …</span><input type="file" id="jar-datei" accept=".jar,application/java-archive" class="visually-hidden"></label>
+            <span class="file-name muted" id="jar-name">Keine Datei gewählt</span>
+          </div>
+          <div class="upload-progress" id="jar-fortschritt" hidden>
+            <div class="progress" role="progressbar" aria-label="JAR hochladen" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="jar-balken"><span></span></div>
+            <div class="progress-row"><span id="jar-fortschritt-text">0 %</span><button class="button tiny ghost" type="button" id="jar-abbrechen">Abbrechen</button></div>
+          </div>
+          <p class="form-error" id="jar-fehler" role="alert" hidden></p>
+          <div id="jar-erkannt"></div>
+        </section>
+
+        <section class="wizard-step" data-panel="2" aria-labelledby="schritt-2-titel" hidden>
+          <h3 id="schritt-2-titel">Store-Angaben</h3>
+          <p class="muted small">So erscheint dein Addon im Store. Name und Kurzbeschreibung kommen zunächst aus der <code>heldix.addon.json</code> – ändern geht hier.</p>
+          <form class="wizard-form" id="angaben-form" novalidate>
+            <label class="field">
+              <span class="field-row"><span>Name</span><span class="counter" id="angabe-name-zaehler"></span></span>
+              <input class="input" id="angabe-name" maxlength="40" autocomplete="off" required>
+            </label>
+            <label class="field">
+              <span class="field-row"><span>Kurzbeschreibung</span><span class="counter" id="angabe-kurz-zaehler"></span></span>
+              <input class="input" id="angabe-kurz" maxlength="200" autocomplete="off" required placeholder="Ein Satz: Was macht dein Addon?">
+            </label>
+            <label class="field">
+              <span class="field-row"><span>Beschreibung</span><span class="counter" id="angabe-beschreibung-zaehler"></span></span>
+              <textarea class="input textarea" id="angabe-beschreibung" maxlength="4000" rows="8" placeholder="Was kann das Addon, wie bedient man es, was sollte man wissen?"></textarea>
+            </label>
+            <p class="hint">Nur Text, kein HTML. Leerzeilen trennen Absätze, Zeilen mit „- “ werden zu Listenpunkten.</p>
+            <div class="field-grid">
+              <label class="field">
+                <span>Kategorie</span>
+                <select class="input select" id="angabe-kategorie">
+                  <option value="hud">HUD</option>
+                  <option value="musik">Musik &amp; Medien</option>
+                  <option value="chat">Chat &amp; Freunde</option>
+                  <option value="werkzeuge">Werkzeuge</option>
+                  <option value="sonstiges">Sonstiges</option>
+                </select>
+              </label>
+              <fieldset class="field system-choices" id="angabe-systeme">
+                <legend>Läuft unter</legend>
+                <div class="system-row">
+                  <label class="check-row"><input type="checkbox" value="windows"><span>Windows</span></label>
+                  <label class="check-row"><input type="checkbox" value="mac"><span>Mac</span></label>
+                  <label class="check-row"><input type="checkbox" value="linux"><span>Linux</span></label>
+                </div>
+                <span class="hint">Nichts angehakt heißt: läuft überall.</span>
+              </fieldset>
+            </div>
+            <div class="field">
+              <span class="field-row"><span id="icon-titel">Icon</span><span class="muted small" id="icon-gewaehlt"></span></span>
+              <span class="input-icon">{{icon:search}}<input class="input" type="search" id="icon-suche" autocomplete="off" placeholder="Icon suchen, z. B. music" aria-label="Icons durchsuchen"></span>
+              <div class="icon-picker" id="icon-auswahl" role="radiogroup" aria-labelledby="icon-titel"></div>
+            </div>
+            <label class="field">
+              <span class="field-row"><span>Was ist neu?</span><span class="counter" id="angabe-neu-zaehler"></span></span>
+              <textarea class="input textarea small-textarea" id="angabe-neu" rows="4" placeholder="Eine Zeile pro Punkt, z. B. „Erste Version“"></textarea>
+            </label>
+            <p class="hint">Bis 20 Punkte mit je bis zu 300 Zeichen. Erscheint im Store unter „Neu in Version …“.</p>
+          </form>
+        </section>
+
+        <section class="wizard-step" data-panel="3" aria-labelledby="schritt-3-titel" hidden>
+          <h3 id="schritt-3-titel">Screenshots</h3>
+          <p class="muted small">Bis zu 4 Bilder, PNG oder JPEG, je höchstens 2 MB und zwischen 320 × 180 und 3840 × 2160 Pixeln. Zeig dein Addon im Spiel, am besten im Format 16:9. Freiwillig – aber Addons mit Bildern werden öfter ausprobiert.</p>
+          <div class="shot-slots" id="screenshots"></div>
+          <p class="form-error" id="screenshot-fehler" role="alert" hidden></p>
+        </section>
+
+        <section class="wizard-step" data-panel="4" aria-labelledby="schritt-4-titel" hidden>
+          <h3 id="schritt-4-titel">Prüfen und einreichen</h3>
+          <div id="zusammenfassung"></div>
+          <fieldset class="rules-confirm" id="regeln">
+            <legend>Bitte bestätigen</legend>
+            <label class="check-row"><input type="checkbox" data-regel="api"><span>Mein Addon nutzt nur die Heldix-API – keine Minecraft-Klassen, kein nachgeladener Code.</span></label>
+            <label class="check-row"><input type="checkbox" data-regel="schadcode"><span>Es enthält keinen Schadcode und sammelt oder verschickt keine Daten, ohne dass es in der Beschreibung steht.</span></label>
+            <label class="check-row"><input type="checkbox" data-regel="rechte"><span>Code, Bilder und Namen sind von mir, oder ich darf sie verwenden.</span></label>
+          </fieldset>
+          <p class="info-box small">{{icon:info}}<span>Während der Prüfung kannst du nichts ändern, aber jederzeit zurückziehen. Die Prüfung dauert meist ein paar Tage. Lehnt das Team ab, steht die Begründung unter Meine Addons, und du kannst nachbessern und erneut einreichen.</span></p>
+        </section>
+
+        <p class="form-error" id="assistent-fehler" role="alert" hidden></p>
+        <div class="wizard-nav">
+          <button class="button small ghost" type="button" id="assistent-zurueck">{{icon:chevron-left}}Zurück</button>
+          <span class="wizard-spacer"></span>
+          <button class="button small" type="button" id="assistent-weiter">Weiter{{icon:chevron-right}}</button>
+          <button class="button small" type="button" id="assistent-einreichen" hidden>{{icon:send}}Zur Prüfung einreichen</button>
         </div>
       </div>
     </div>
@@ -284,13 +435,14 @@
             <li>{{icon:chat}}<span>Nachrichten an Freunde, höchstens 30 Tage</span></li>
             <li>{{icon:ban}}<span>Spieler, die du blockiert hast, und deine Meldungen (90 Tage)</span></li>
             <li>{{icon:info}}<span>Support-Anfragen mit deinen Nachrichten und den Antworten des Teams</span></li>
+            <li>{{icon:addons}}<span>Addon-Einreichungen samt JAR und Screenshots, deine Bewertungen und Addon-Meldungen</span></li>
             <li>{{icon:clock}}<span>Anmeldungen von Launcher und Browser, bis sie ablaufen</span></li>
           </ul>
           <p class="muted small">Kein Passwort, keine E-Mail-Adresse. Alles Weitere steht in der <a href="/datenschutz">Datenschutzerklärung</a>.</p>
           <div class="card-actions">
             <button class="button small" type="button" id="export">{{icon:download}}Daten herunterladen (JSON)</button>
           </div>
-          <p class="hint">Eine Datei mit allem, was der Dienst über dich gespeichert hat – auch deine Support-Anfragen. Höchstens fünfmal pro Stunde.</p>
+          <p class="hint">Eine Datei mit allem, was der Dienst über dich gespeichert hat – auch deine Support-Anfragen, Addon-Einreichungen, Bewertungen und Addon-Meldungen. Höchstens fünfmal pro Stunde.</p>
         </div>
         <div class="app-card">
           <div class="card-head">
@@ -307,7 +459,7 @@
       </div>
       <div class="app-card danger-zone">
         <h2>Alle Daten löschen</h2>
-        <p>Löscht sofort alles, was der Heldix-Dienst über dich gespeichert hat: Profil, Einstellungen, Freundschaften und Anfragen in beide Richtungen, Nachrichten, Blockierte, deine Meldungen, deine Support-Anfragen und alle Anmeldungen – auch diese hier. Eine Sperre bleibt bestehen; Meldungen über dich bleiben bis zum Ablauf der 90 Tage.</p>
+        <p>Löscht sofort alles, was der Heldix-Dienst über dich gespeichert hat: Profil, Einstellungen, Freundschaften und Anfragen in beide Richtungen, Nachrichten, Blockierte, deine Meldungen, deine Support-Anfragen, Addon-Einreichungen, Bewertungen und Addon-Meldungen und alle Anmeldungen – auch diese hier. Eine Sperre bleibt bestehen; Meldungen über dich bleiben bis zum Ablauf der 90 Tage. Schon veröffentlichte Addons bleiben im Store, als Entwickler steht dann „Gelöschter Spieler“.</p>
         <p class="muted small">Verbindet sich HeldixClient danach wieder mit dem Dienst, legt er dich mit Standardwerten neu an. Willst du das nicht, schalte vorher im Spiel unter Heldix-Menü → Freunde → Privatsphäre „Heldix-Dienst nutzen“ aus.</p>
         <div class="card-actions">
           <button class="button small danger" type="button" id="loeschen">{{icon:trash}}Alle Daten löschen …</button>
@@ -317,7 +469,7 @@
   </div>
 </main>
 
-{{include:icons.html}}
+{{ICONS_ALLE_HTML}}
 {{include:footer.html}}
 </body>
 </html>

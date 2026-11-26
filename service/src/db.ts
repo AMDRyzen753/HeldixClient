@@ -161,6 +161,14 @@ export interface TicketMessageRow {
   text: string;
 }
 
+/** Anhang einer Support-Anfrage (ohne Inhalt). `size`: Größe entpackt in Byte. */
+export interface TicketAttachmentRow {
+  id: number;
+  name: string;
+  size: number;
+  at: number;
+}
+
 export interface LauncherVersionRow {
   version: string;
   date: string;
@@ -168,12 +176,87 @@ export interface LauncherVersionRow {
   publishedAt: number;
 }
 
-/** Addon im Store. `downloads`: vollständige Downloads, nur eine Zahl (ohne IP oder sonstige Daten). */
+/** Besitzer eines Addons, dessen Konto gelöscht (oder gesperrt) wurde: Die ID bleibt vergeben, ohne UUID. */
+export const DELETED_OWNER = 'geloescht';
+
+/** Screenshot eines Addons oder einer Einreichung (Datei im jeweiligen Ordner, Größe aus dem Dateikopf). */
+export interface AddonScreenshot {
+  file: string;
+  type: 'png' | 'jpeg';
+  width: number;
+  height: number;
+  size: number;
+}
+
+/**
+ * Addon im Store. `downloads`: vollständige Downloads, nur eine Zahl (ohne IP oder sonstige Daten).
+ * `owner`: UUID des Einreichers; null = Team (offiziell); `DELETED_OWNER` = Konto des Einreichers gelöscht.
+ */
 export interface AddonRow {
   id: string;
   hidden: boolean;
   downloads: number;
   createdAt: number;
+  owner: string | null;
+  screenshots: AddonScreenshot[];
+}
+
+export type SubmissionStatus = 'draft' | 'pending' | 'approved' | 'rejected' | 'withdrawn';
+
+export interface SubmissionInspection {
+  classes: number;
+  uses: string[];
+}
+
+/** Einreichung eines Addons durch einen Spieler. */
+export interface SubmissionRow {
+  id: string;
+  /** Einreicher */
+  uuid: string;
+  /** aktueller Name des Einreichers */
+  submitterName: string;
+  status: SubmissionStatus;
+  /** aus heldix.addon.json der hochgeladenen JAR (null: noch keine JAR) */
+  addonId: string | null;
+  version: string | null;
+  name: string;
+  summary: string;
+  description: string;
+  category: string;
+  icon: string;
+  platforms: string[];
+  notes: string[];
+  authors: string[];
+  api: number | null;
+  size: number | null;
+  sha256: string | null;
+  inspection: SubmissionInspection | null;
+  screenshots: AddonScreenshot[];
+  /** Vom Dienst erzeugtes Manifest (genau der Text, der signiert wird); null, solange nicht eingereicht */
+  manifest: string | null;
+  createdAt: number;
+  updatedAt: number;
+  submittedAt: number | null;
+  reviewedAt: number | null;
+  reviewNote: string | null;
+  /** Name und UUID des Team-Mitglieds, das geprüft hat */
+  reviewer: string | null;
+  reviewerUuid: string | null;
+}
+
+export type AddonReportStatus = 'open' | 'done';
+
+export interface AddonReportRow {
+  id: number;
+  addon: string;
+  reporter: string;
+  reporterName: string;
+  reason: string;
+  note: string;
+  at: number;
+  status: AddonReportStatus;
+  doneAt: number | null;
+  doneBy: string | null;
 }
 
 /** Veröffentlichte Version eines Addons. `manifest` ist genau der signierte Text. */
@@ -443,6 +526,88 @@ CREATE TABLE addon_versions (
   PRIMARY KEY (id, version)
 ) STRICT, WITHOUT ROWID;
 `,
+  // 6: Addons von Spielern (Besitzer, Einreichungen mit Prüfung), Screenshots, Bewertungen, Meldungen zu Addons;
+  //    Anhänge an Support-Anfragen
+  `
+-- owner: UUID des Einreichers; NULL = Team (offiziell); 'geloescht' = Konto des Einreichers gelöscht
+ALTER TABLE addons ADD COLUMN owner TEXT;
+-- screenshots: JSON-Liste [{ file, type, width, height, size }] (Dateien im Ordner screenshots)
+ALTER TABLE addons ADD COLUMN screenshots TEXT NOT NULL DEFAULT '[]';
+CREATE INDEX addons_owner ON addons (owner);
+
+-- Einreichungen; platforms, notes, authors, inspection, screenshots als JSON. Mit dem Konto gelöscht.
+CREATE TABLE addon_submissions (
+  id TEXT PRIMARY KEY,
+  uuid TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  addon_id TEXT,
+  version TEXT,
+  name TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT 'sonstiges',
+  icon TEXT NOT NULL DEFAULT 'addons',
+  platforms TEXT NOT NULL DEFAULT '[]',
+  notes TEXT NOT NULL DEFAULT '[]',
+  authors TEXT NOT NULL DEFAULT '[]',
+  api INTEGER,
+  size INTEGER,
+  sha256 TEXT,
+  inspection TEXT,
+  screenshots TEXT NOT NULL DEFAULT '[]',
+  manifest TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  submitted_at INTEGER,
+  reviewed_at INTEGER,
+  review_note TEXT,
+  reviewer TEXT,
+  reviewer_uuid TEXT
+) STRICT, WITHOUT ROWID;
+CREATE INDEX addon_submissions_uuid ON addon_submissions (uuid, created_at);
+CREATE INDEX addon_submissions_status ON addon_submissions (status, submitted_at);
+CREATE INDEX addon_submissions_addon ON addon_submissions (addon_id, status);
+
+-- Bewertungen 1–5: eine pro Spieler und Addon, mit Konto oder Addon gelöscht
+CREATE TABLE addon_ratings (
+  addon TEXT NOT NULL REFERENCES addons (id) ON DELETE CASCADE,
+  uuid TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  stars INTEGER NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (addon, uuid)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX addon_ratings_uuid ON addon_ratings (uuid);
+
+-- Meldungen zu Addons: ohne Fremdschlüssel (bleiben bis zum Ablauf, auch wenn das Addon gelöscht wird)
+CREATE TABLE addon_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  addon TEXT NOT NULL,
+  reporter TEXT NOT NULL,
+  reporter_name TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  note TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  done_at INTEGER,
+  done_by TEXT
+) STRICT;
+CREATE INDEX addon_reports_status ON addon_reports (status, id);
+CREATE INDEX addon_reports_reporter ON addon_reports (reporter, addon, status);
+CREATE INDEX addon_reports_at ON addon_reports (at);
+
+-- Anhänge von Support-Anfragen (Textdateien wie Absturzberichte, gzip-komprimiert), mit der Anfrage gelöscht
+CREATE TABLE ticket_attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket INTEGER NOT NULL REFERENCES tickets (id) ON DELETE CASCADE,
+  uuid TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  data BLOB NOT NULL,
+  at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX ticket_attachments_ticket ON ticket_attachments (ticket, id);
+CREATE INDEX ticket_attachments_uuid ON ticket_attachments (uuid, at);
+`,
 ];
 
 const SCHEMA_VERSION = MIGRATIONS.length;
@@ -457,7 +622,11 @@ const TICKET_COLUMNS = `t.id, t.uuid, u.name, t.category, t.subject, t.status, t
   (SELECT coalesce(max(m.id), 0) FROM ticket_messages m WHERE m.ticket = t.id AND m.from_team = 1) AS last_team_id,
   (SELECT m.from_team FROM ticket_messages m WHERE m.ticket = t.id ORDER BY m.id DESC LIMIT 1) AS last_from_team`;
 const NEWS_COLUMNS = 'id, title, text, author_uuid, author_name, published, created_at, published_at, updated_at';
-const ADDON_COLUMNS = 'id, hidden, downloads, created_at';
+const ADDON_COLUMNS = 'id, hidden, downloads, created_at, owner, screenshots';
+const SUBMISSION_COLUMNS = `s.id, s.uuid, u.name AS submitter_name, s.status, s.addon_id, s.version, s.name, s.summary, s.description,
+  s.category, s.icon, s.platforms, s.notes, s.authors, s.api, s.size, s.sha256, s.inspection, s.screenshots, s.manifest,
+  s.created_at, s.updated_at, s.submitted_at, s.reviewed_at, s.review_note, s.reviewer, s.reviewer_uuid`;
+const ADDON_REPORT_COLUMNS = 'id, addon, reporter, reporter_name, reason, note, at, status, done_at, done_by';
 const ADDON_VERSION_COLUMNS = 'id, version, manifest, signature, file, size, sha256, published_at, published_by';
 /** Größer als jede vergebene Nachrichten-ID (für „von der neuesten an“). */
 const NEWEST = Number.MAX_SAFE_INTEGER;
@@ -571,8 +740,97 @@ function toNews(row: Row): NewsRow {
   };
 }
 
+/** JSON aus einer Spalte; bei kaputtem Inhalt `fallback`. */
+function parseJson<T>(value: unknown, check: (parsed: unknown) => boolean, fallback: T): T {
+  if (typeof value !== 'string') return fallback;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return check(parsed) ? (parsed as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const stringList = (value: unknown) => parseJson<string[]>(value, (p) => Array.isArray(p) && p.every((x) => typeof x === 'string'), []);
+
+function isScreenshot(value: unknown): boolean {
+  const s = value as Record<string, unknown> | null;
+  return (
+    typeof s === 'object' &&
+    s !== null &&
+    typeof s.file === 'string' &&
+    (s.type === 'png' || s.type === 'jpeg') &&
+    typeof s.width === 'number' &&
+    typeof s.height === 'number' &&
+    typeof s.size === 'number'
+  );
+}
+
+const screenshotList = (value: unknown) => parseJson<AddonScreenshot[]>(value, (p) => Array.isArray(p) && p.every(isScreenshot), []);
+
 function toAddon(row: Row): AddonRow {
-  return { id: String(row.id), hidden: Number(row.hidden) === 1, downloads: Number(row.downloads), createdAt: Number(row.created_at) };
+  return {
+    id: String(row.id),
+    hidden: Number(row.hidden) === 1,
+    downloads: Number(row.downloads),
+    createdAt: Number(row.created_at),
+    owner: nullableString(row.owner),
+    screenshots: screenshotList(row.screenshots),
+  };
+}
+
+const SUBMISSION_STATUSES: readonly SubmissionStatus[] = ['draft', 'pending', 'approved', 'rejected', 'withdrawn'];
+
+function toSubmission(row: Row): SubmissionRow {
+  const status = String(row.status) as SubmissionStatus;
+  return {
+    id: String(row.id),
+    uuid: String(row.uuid),
+    submitterName: String(row.submitter_name ?? ''),
+    status: SUBMISSION_STATUSES.includes(status) ? status : 'draft',
+    addonId: nullableString(row.addon_id),
+    version: nullableString(row.version),
+    name: String(row.name),
+    summary: String(row.summary),
+    description: String(row.description),
+    category: String(row.category),
+    icon: String(row.icon),
+    platforms: stringList(row.platforms),
+    notes: stringList(row.notes),
+    authors: stringList(row.authors),
+    api: nullableNumber(row.api),
+    size: nullableNumber(row.size),
+    sha256: nullableString(row.sha256),
+    inspection: parseJson<SubmissionInspection | null>(
+      row.inspection,
+      (p) => typeof p === 'object' && p !== null && typeof (p as SubmissionInspection).classes === 'number' && Array.isArray((p as SubmissionInspection).uses),
+      null,
+    ),
+    screenshots: screenshotList(row.screenshots),
+    manifest: nullableString(row.manifest),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+    submittedAt: nullableNumber(row.submitted_at),
+    reviewedAt: nullableNumber(row.reviewed_at),
+    reviewNote: nullableString(row.review_note),
+    reviewer: nullableString(row.reviewer),
+    reviewerUuid: nullableString(row.reviewer_uuid),
+  };
+}
+
+function toAddonReport(row: Row): AddonReportRow {
+  return {
+    id: Number(row.id),
+    addon: String(row.addon),
+    reporter: String(row.reporter),
+    reporterName: String(row.reporter_name),
+    reason: String(row.reason),
+    note: String(row.note),
+    at: Number(row.at),
+    status: row.status === 'done' ? 'done' : 'open',
+    doneAt: nullableNumber(row.done_at),
+    doneBy: nullableString(row.done_by),
+  };
 }
 
 function toAddonVersion(row: Row): AddonVersionRow {
@@ -790,6 +1048,7 @@ function prepareStatements(db: DatabaseSync) {
       ORDER BY CASE t.role WHEN 'admin' THEN 0 ELSE 1 END, u.name_lower`),
     isPublicTeamMember: db.prepare('SELECT 1 AS x FROM team WHERE uuid = ? AND public = 1'),
     publicTeamUuids: db.prepare('SELECT uuid FROM team WHERE public = 1'),
+    publicTeamRolesIn: db.prepare('SELECT uuid, role FROM team WHERE public = 1 AND uuid IN (SELECT value FROM json_each(?))'),
 
     // Support
     insertTicket: db.prepare(`
@@ -812,6 +1071,12 @@ function prepareStatements(db: DatabaseSync) {
       DELETE FROM tickets WHERE (status = 'closed' AND closed_at < ?) OR (status <> 'closed' AND updated_at < ?)`),
     deleteTicketsOf: db.prepare('DELETE FROM tickets WHERE uuid = ?'),
     forgetTicketAuthor: db.prepare('UPDATE ticket_messages SET author_uuid = NULL WHERE author_uuid = ? AND from_team = 1'),
+    insertTicketAttachment: db.prepare('INSERT INTO ticket_attachments (ticket, uuid, name, size, data, at) VALUES (?, ?, ?, ?, ?, ?)'),
+    reopenTicket: db.prepare("UPDATE tickets SET status = 'open', updated_at = ? WHERE id = ? AND status <> 'closed'"),
+    ticketAttachments: db.prepare('SELECT id, name, size, at FROM ticket_attachments WHERE ticket = ? ORDER BY id'),
+    ticketAttachment: db.prepare('SELECT id, name, size, at, data FROM ticket_attachments WHERE ticket = ? AND id = ?'),
+    countTicketAttachments: db.prepare('SELECT count(*) AS n FROM ticket_attachments WHERE ticket = ?'),
+    attachmentsSince: db.prepare('SELECT count(*) AS n, min(at) AS oldest FROM ticket_attachments WHERE uuid = ? AND at > ?'),
 
     // Versionsverlauf des Launchers
     recordVersion: db.prepare('INSERT OR IGNORE INTO launcher_versions (version, date, notes, published_at) VALUES (?, ?, ?, ?)'),
@@ -820,13 +1085,66 @@ function prepareStatements(db: DatabaseSync) {
     // Addon-Store
     listAddons: db.prepare(`SELECT ${ADDON_COLUMNS} FROM addons ORDER BY id`),
     getAddon: db.prepare(`SELECT ${ADDON_COLUMNS} FROM addons WHERE id = ?`),
-    insertAddon: db.prepare('INSERT OR IGNORE INTO addons (id, created_at) VALUES (?, ?)'),
+    addonsOwnedBy: db.prepare(`SELECT ${ADDON_COLUMNS} FROM addons WHERE owner = ? ORDER BY id`),
+    insertAddon: db.prepare('INSERT OR IGNORE INTO addons (id, created_at, owner) VALUES (?, ?, ?)'),
+    setAddonScreenshots: db.prepare('UPDATE addons SET screenshots = ? WHERE id = ?'),
+    forgetAddonOwner: db.prepare('UPDATE addons SET owner = ? WHERE owner = ?'),
+
+    // Bewertungen
+    setAddonRating: db.prepare(`
+      INSERT INTO addon_ratings (addon, uuid, stars, at) VALUES (?, ?, ?, ?)
+      ON CONFLICT (addon, uuid) DO UPDATE SET stars = excluded.stars, at = excluded.at`),
+    getAddonRating: db.prepare('SELECT stars FROM addon_ratings WHERE addon = ? AND uuid = ?'),
+    deleteAddonRating: db.prepare('DELETE FROM addon_ratings WHERE addon = ? AND uuid = ?'),
+    addonRatingSummary: db.prepare('SELECT avg(stars) AS average, count(*) AS n FROM addon_ratings WHERE addon = ?'),
+    allAddonRatings: db.prepare('SELECT addon, avg(stars) AS average, count(*) AS n FROM addon_ratings GROUP BY addon'),
+    addonRatingsBy: db.prepare('SELECT addon, stars, at FROM addon_ratings WHERE uuid = ? ORDER BY addon'),
+
+    // Meldungen zu Addons
+    insertAddonReport: db.prepare(`
+      INSERT INTO addon_reports (addon, reporter, reporter_name, reason, note, at) VALUES (?, ?, ?, ?, ?, ?)`),
+    openAddonReportOf: db.prepare("SELECT id FROM addon_reports WHERE reporter = ? AND addon = ? AND status = 'open' LIMIT 1"),
+    addonReportsSince: db.prepare('SELECT count(*) AS n, min(at) AS oldest FROM addon_reports WHERE reporter = ? AND at > ?'),
+    listAddonReports: db.prepare(`SELECT ${ADDON_REPORT_COLUMNS} FROM addon_reports WHERE status IN (SELECT value FROM json_each(?)) ORDER BY id DESC`),
+    getAddonReport: db.prepare(`SELECT ${ADDON_REPORT_COLUMNS} FROM addon_reports WHERE id = ?`),
+    markAddonReportDone: db.prepare("UPDATE addon_reports SET status = 'done', done_at = ?, done_by = ? WHERE id = ? AND status = 'open'"),
+    countOpenAddonReports: db.prepare("SELECT count(*) AS n FROM addon_reports WHERE status = 'open'"),
+    addonReportsBy: db.prepare(`SELECT ${ADDON_REPORT_COLUMNS} FROM addon_reports WHERE reporter = ? ORDER BY id DESC`),
+    deleteAddonReportsBy: db.prepare('DELETE FROM addon_reports WHERE reporter = ?'),
+    deleteOldAddonReports: db.prepare('DELETE FROM addon_reports WHERE at < ?'),
+
+    // Einreichungen
+    insertSubmission: db.prepare(`
+      INSERT INTO addon_submissions (id, uuid, status, name, summary, description, category, icon, platforms, notes, created_at, updated_at)
+      VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    saveSubmission: db.prepare(`
+      UPDATE addon_submissions SET status = ?, addon_id = ?, version = ?, name = ?, summary = ?, description = ?, category = ?,
+        icon = ?, platforms = ?, notes = ?, authors = ?, api = ?, size = ?, sha256 = ?, inspection = ?, screenshots = ?,
+        manifest = ?, updated_at = ?, submitted_at = ?, reviewed_at = ?, review_note = ?, reviewer = ?,
+        reviewer_uuid = ?
+      WHERE id = ?`),
+    getSubmission: db.prepare(`SELECT ${SUBMISSION_COLUMNS} FROM addon_submissions s JOIN users u ON u.uuid = s.uuid WHERE s.id = ?`),
+    submissionsOf: db.prepare(`
+      SELECT ${SUBMISSION_COLUMNS} FROM addon_submissions s JOIN users u ON u.uuid = s.uuid WHERE s.uuid = ? ORDER BY s.created_at DESC, s.id`),
+    submissionsIn: db.prepare(`
+      SELECT ${SUBMISSION_COLUMNS} FROM addon_submissions s JOIN users u ON u.uuid = s.uuid
+      WHERE s.status IN (SELECT value FROM json_each(?)) ORDER BY coalesce(s.submitted_at, s.created_at) DESC, s.id`),
+    pendingSubmissionsFor: db.prepare(`
+      SELECT ${SUBMISSION_COLUMNS} FROM addon_submissions s JOIN users u ON u.uuid = s.uuid WHERE s.addon_id = ? AND s.status = 'pending'`),
+    countSubmissionsWith: db.prepare('SELECT count(*) AS n FROM addon_submissions WHERE uuid = ? AND status = ?'),
+    countPendingSubmissions: db.prepare("SELECT count(*) AS n FROM addon_submissions WHERE status = 'pending'"),
+    deleteSubmission: db.prepare('DELETE FROM addon_submissions WHERE id = ?'),
+    deleteOldSubmissions: db.prepare("DELETE FROM addon_submissions WHERE status IN ('rejected', 'withdrawn') AND updated_at < ?"),
+    submissionIds: db.prepare('SELECT id FROM addon_submissions'),
     setAddonHidden: db.prepare('UPDATE addons SET hidden = ? WHERE id = ? AND hidden <> ?'),
     countAddonDownload: db.prepare('UPDATE addons SET downloads = downloads + 1 WHERE id = ?'),
     deleteAddon: db.prepare('DELETE FROM addons WHERE id = ?'),
     countVisibleAddons: db.prepare(
       'SELECT count(*) AS n FROM addons a WHERE a.hidden = 0 AND EXISTS (SELECT 1 FROM addon_versions v WHERE v.id = a.id)',
     ),
+    visibleAddonOwnersIn: db.prepare(`
+      SELECT DISTINCT a.owner AS owner FROM addons a
+      WHERE a.hidden = 0 AND a.owner IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM addon_versions v WHERE v.id = a.id)`),
     insertAddonVersion: db.prepare(`
       INSERT INTO addon_versions (id, version, manifest, signature, file, size, sha256, published_at, published_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -1000,13 +1318,15 @@ export class Store {
 
   /**
    * Löscht den Spieler mit allen Tokens, Web-Sitzungen, Freundschaften, Anfragen, Nachrichten und Blockierungen
-   * (in beide Richtungen), der Team-Mitgliedschaft und den Meldungen, die er gemacht hat.
-   * Meldungen über ihn, das Protokoll und eine Sperre bleiben; seine Neuigkeiten behalten nur den Namen.
+   * (in beide Richtungen), der Team-Mitgliedschaft, den Meldungen, die er gemacht hat (auch zu Addons), seinen
+   * Addon-Einreichungen und Bewertungen. Meldungen über ihn, das Protokoll und eine Sperre bleiben; seine Neuigkeiten
+   * behalten nur den Namen, seine veröffentlichten Addons bleiben (Besitzer `DELETED_OWNER`).
    * Liefert die UUIDs der Spieler, deren Freundesliste oder Anfragen sich dadurch ändern.
    */
   deleteUser(uuid: string): string[] {
     const related = this.transaction(() => {
       this.sql.deleteReportsBy.run(uuid);
+      this.sql.deleteAddonReportsBy.run(uuid);
       return this.wipeUser(uuid);
     });
     this.checkpoint();
@@ -1027,6 +1347,9 @@ export class Store {
     this.sql.forgetNewsAuthor.run(uuid);
     this.sql.deleteTicketsOf.run(uuid);
     this.sql.forgetTicketAuthor.run(uuid);
+    // Eigene Addons bleiben veröffentlicht (signiert), die ID bleibt vergeben, aber ohne UUID als Besitzer.
+    this.sql.forgetAddonOwner.run(DELETED_OWNER, uuid);
+    // Bewertungen und Einreichungen gehen mit dem Konto (Fremdschlüssel).
     this.sql.deleteUser.run(uuid);
     return others.filter((other) => other !== uuid);
   }
@@ -1514,6 +1837,12 @@ export class Store {
     return new Set((this.sql.publicTeamUuids.all() as Row[]).map((row) => String(row.uuid)));
   }
 
+  /** Rollen der Team-Mitglieder unter `uuids`, die auf der öffentlichen Teamseite stehen (`public`); andere fehlen. */
+  publicTeamRolesIn(uuids: string[]): Map<string, TeamRole> {
+    if (uuids.length === 0) return new Map();
+    return new Map((this.sql.publicTeamRolesIn.all(JSON.stringify(uuids)) as Row[]).map((row) => [String(row.uuid), String(row.role) as TeamRole]));
+  }
+
   // ---------- Support ----------
 
   /** Neue Anfrage mit erster Nachricht des Spielers. Liefert die Nummer. */
@@ -1579,6 +1908,44 @@ export class Store {
     return { count: Number(row.n), oldest: nullableNumber(row.oldest) };
   }
 
+  /**
+   * Neuer Anhang (Inhalt schon gzip-komprimiert, `size` entpackt). Wie eine Nachricht des Spielers: Die Anfrage ist
+   * danach wieder offen und gilt als aktiv.
+   */
+  addTicketAttachment(ticket: number, uuid: string, name: string, size: number, gzipped: Buffer, now: number): number {
+    return this.transaction(() => {
+      const id = Number(this.sql.insertTicketAttachment.run(ticket, uuid, name, size, gzipped, now).lastInsertRowid);
+      this.sql.reopenTicket.run(now, ticket);
+      return id;
+    });
+  }
+
+  ticketAttachments(ticket: number): TicketAttachmentRow[] {
+    return (this.sql.ticketAttachments.all(ticket) as Row[]).map((row) => ({
+      id: Number(row.id),
+      name: String(row.name),
+      size: Number(row.size),
+      at: Number(row.at),
+    }));
+  }
+
+  /** Anhang mit Inhalt (gzip), nur wenn er zu dieser Anfrage gehört. */
+  ticketAttachment(ticket: number, id: number): (TicketAttachmentRow & { data: Buffer }) | undefined {
+    const row = this.sql.ticketAttachment.get(ticket, id) as Row | undefined;
+    if (!row) return undefined;
+    return { id: Number(row.id), name: String(row.name), size: Number(row.size), at: Number(row.at), data: Buffer.from(row.data as Uint8Array) };
+  }
+
+  countTicketAttachments(ticket: number): number {
+    return Number((this.sql.countTicketAttachments.get(ticket) as Row).n);
+  }
+
+  /** Anhänge eines Spielers nach `since`: Anzahl und Zeitpunkt des ältesten. */
+  ticketAttachmentsSince(uuid: string, since: number): { count: number; oldest: number | null } {
+    const row = this.sql.attachmentsSince.get(uuid, since) as Row;
+    return { count: Number(row.n), oldest: nullableNumber(row.oldest) };
+  }
+
   /** Löscht geschlossene Anfragen, die vor `closedCutoff` geschlossen wurden, und andere ohne Nachricht seit `idleCutoff`. */
   deleteOldTickets(closedCutoff: number, idleCutoff: number): number {
     return Number(this.sql.deleteOldTickets.run(closedCutoff, idleCutoff).changes);
@@ -1630,12 +1997,195 @@ export class Store {
     return row ? toAddonVersion(row) : undefined;
   }
 
-  /** Neue Version; ein neues Addon wird dabei sichtbar angelegt. */
-  insertAddonVersion(row: AddonVersionRow): void {
+  /** Addons eines Einreichers (auch versteckte). */
+  addonsOwnedBy(uuid: string): AddonRow[] {
+    return (this.sql.addonsOwnedBy.all(uuid) as Row[]).map(toAddon);
+  }
+
+  /** Neue Version; ein neues Addon wird dabei sichtbar angelegt, mit `owner` (null = Team). */
+  insertAddonVersion(row: AddonVersionRow, owner: string | null = null): void {
     this.transaction(() => {
-      this.sql.insertAddon.run(row.id, row.publishedAt);
+      this.sql.insertAddon.run(row.id, row.publishedAt, owner);
       this.sql.insertAddonVersion.run(row.id, row.version, row.manifest, row.signature, row.file, row.size, row.sha256, row.publishedAt, row.publishedBy);
     });
+  }
+
+  setAddonScreenshots(id: string, screenshots: AddonScreenshot[]): void {
+    this.sql.setAddonScreenshots.run(JSON.stringify(screenshots), id);
+  }
+
+  // ---------- Bewertungen ----------
+
+  /** Setzt oder ändert die Bewertung (1–5) eines Spielers. */
+  setAddonRating(addon: string, uuid: string, stars: number, now: number): void {
+    this.sql.setAddonRating.run(addon, uuid, stars, now);
+  }
+
+  getAddonRating(addon: string, uuid: string): number | null {
+    const row = this.sql.getAddonRating.get(addon, uuid) as Row | undefined;
+    return row ? Number(row.stars) : null;
+  }
+
+  deleteAddonRating(addon: string, uuid: string): boolean {
+    return Number(this.sql.deleteAddonRating.run(addon, uuid).changes) > 0;
+  }
+
+  /** Durchschnitt (ungerundet, 0 ohne Bewertungen) und Anzahl. */
+  addonRatingSummary(addon: string): { average: number; count: number } {
+    const row = this.sql.addonRatingSummary.get(addon) as Row;
+    return { average: Number(row.average ?? 0), count: Number(row.n) };
+  }
+
+  allAddonRatings(): Map<string, { average: number; count: number }> {
+    const map = new Map<string, { average: number; count: number }>();
+    for (const row of this.sql.allAddonRatings.all() as Row[]) map.set(String(row.addon), { average: Number(row.average), count: Number(row.n) });
+    return map;
+  }
+
+  /** Bewertungen eines Spielers (Datenauskunft, eigene Sterne im Launcher). */
+  addonRatingsBy(uuid: string): { addon: string; stars: number; at: number }[] {
+    return (this.sql.addonRatingsBy.all(uuid) as Row[]).map((row) => ({ addon: String(row.addon), stars: Number(row.stars), at: Number(row.at) }));
+  }
+
+  // ---------- Meldungen zu Addons ----------
+
+  insertAddonReport(report: Omit<AddonReportRow, 'id' | 'status' | 'doneAt' | 'doneBy'>): number {
+    const result = this.sql.insertAddonReport.run(report.addon, report.reporter, report.reporterName, report.reason, report.note, report.at);
+    return Number(result.lastInsertRowid);
+  }
+
+  /** Hat der Spieler schon eine offene Meldung zu diesem Addon? */
+  hasOpenAddonReport(reporter: string, addon: string): boolean {
+    return this.sql.openAddonReportOf.get(reporter, addon) !== undefined;
+  }
+
+  addonReportsSince(reporter: string, since: number): { count: number; oldest: number | null } {
+    const row = this.sql.addonReportsSince.get(reporter, since) as Row;
+    return { count: Number(row.n), oldest: nullableNumber(row.oldest) };
+  }
+
+  /** Meldungen mit dem Status, neueste zuerst. */
+  listAddonReports(status: AddonReportStatus | 'all'): AddonReportRow[] {
+    const statuses = status === 'all' ? ['open', 'done'] : [status];
+    return (this.sql.listAddonReports.all(JSON.stringify(statuses)) as Row[]).map(toAddonReport);
+  }
+
+  getAddonReport(id: number): AddonReportRow | undefined {
+    const row = this.sql.getAddonReport.get(id) as Row | undefined;
+    return row ? toAddonReport(row) : undefined;
+  }
+
+  markAddonReportDone(id: number, now: number, by: string | null): boolean {
+    return Number(this.sql.markAddonReportDone.run(now, by, id).changes) > 0;
+  }
+
+  countOpenAddonReports(): number {
+    return Number((this.sql.countOpenAddonReports.get() as Row).n);
+  }
+
+  addonReportsBy(uuid: string): AddonReportRow[] {
+    return (this.sql.addonReportsBy.all(uuid) as Row[]).map(toAddonReport);
+  }
+
+  deleteAddonReportsBefore(cutoff: number): number {
+    return Number(this.sql.deleteOldAddonReports.run(cutoff).changes);
+  }
+
+  // ---------- Einreichungen ----------
+
+  /** Neuer Entwurf mit den Store-Angaben (Rest kommt mit der JAR). */
+  insertSubmission(
+    id: string,
+    uuid: string,
+    fields: { name: string; summary: string; description: string; category: string; icon: string; platforms: string[]; notes: string[] },
+    now: number,
+  ): SubmissionRow {
+    this.sql.insertSubmission.run(
+      id,
+      uuid,
+      fields.name,
+      fields.summary,
+      fields.description,
+      fields.category,
+      fields.icon,
+      JSON.stringify(fields.platforms),
+      JSON.stringify(fields.notes),
+      now,
+      now,
+    );
+    return this.getSubmission(id)!;
+  }
+
+  getSubmission(id: string): SubmissionRow | undefined {
+    const row = this.sql.getSubmission.get(id) as Row | undefined;
+    return row ? toSubmission(row) : undefined;
+  }
+
+  /** Schreibt alle änderbaren Felder einer Einreichung. */
+  saveSubmission(s: SubmissionRow): void {
+    this.sql.saveSubmission.run(
+      s.status,
+      s.addonId,
+      s.version,
+      s.name,
+      s.summary,
+      s.description,
+      s.category,
+      s.icon,
+      JSON.stringify(s.platforms),
+      JSON.stringify(s.notes),
+      JSON.stringify(s.authors),
+      s.api,
+      s.size,
+      s.sha256,
+      s.inspection === null ? null : JSON.stringify(s.inspection),
+      JSON.stringify(s.screenshots),
+      s.manifest,
+      s.updatedAt,
+      s.submittedAt,
+      s.reviewedAt,
+      s.reviewNote,
+      s.reviewer,
+      s.reviewerUuid,
+      s.id,
+    );
+  }
+
+  /** Einreichungen eines Spielers, neueste zuerst. */
+  submissionsOf(uuid: string): SubmissionRow[] {
+    return (this.sql.submissionsOf.all(uuid) as Row[]).map(toSubmission);
+  }
+
+  /** Einreichungen mit einem der Status, zuletzt eingereichte zuerst. */
+  submissions(statuses: SubmissionStatus[]): SubmissionRow[] {
+    return (this.sql.submissionsIn.all(JSON.stringify(statuses)) as Row[]).map(toSubmission);
+  }
+
+  /** Einreichungen eines Addons, die auf Prüfung warten (alle Spieler). */
+  pendingSubmissionsFor(addonId: string): SubmissionRow[] {
+    return (this.sql.pendingSubmissionsFor.all(addonId) as Row[]).map(toSubmission);
+  }
+
+  countSubmissions(uuid: string, status: SubmissionStatus): number {
+    return Number((this.sql.countSubmissionsWith.get(uuid, status) as Row).n);
+  }
+
+  countPendingSubmissions(): number {
+    return Number((this.sql.countPendingSubmissions.get() as Row).n);
+  }
+
+  deleteSubmission(id: string): boolean {
+    return Number(this.sql.deleteSubmission.run(id).changes) > 0;
+  }
+
+  /** Löscht abgelehnte und zurückgezogene Einreichungen, die seit `cutoff` nicht mehr geändert wurden. */
+  deleteOldSubmissions(cutoff: number): number {
+    return Number(this.sql.deleteOldSubmissions.run(cutoff).changes);
+  }
+
+  /** IDs aller Einreichungen (zum Aufräumen verwaister Dateien). */
+  submissionIds(): Set<string> {
+    return new Set((this.sql.submissionIds.all() as Row[]).map((row) => String(row.id)));
   }
 
   /** Aus dem Store nehmen bzw. wieder zeigen. true, wenn sich etwas geändert hat. */
@@ -1662,5 +2212,11 @@ export class Store {
   /** Sichtbare Addons mit mindestens einer Version. */
   countVisibleAddons(): number {
     return Number((this.sql.countVisibleAddons.get() as Row).n);
+  }
+
+  /** Einreicher unter `uuids` mit mindestens einem sichtbaren Addon, das eine Version hat (Vorauswahl, ohne Manifest-Prüfung). */
+  visibleAddonOwnersIn(uuids: string[]): string[] {
+    if (uuids.length === 0) return [];
+    return (this.sql.visibleAddonOwnersIn.all(JSON.stringify(uuids)) as Row[]).map((row) => String(row.owner));
   }
 }

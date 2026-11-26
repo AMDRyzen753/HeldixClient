@@ -35,6 +35,7 @@ import org.spongepowered.asm.mixin.Mixin;
 		Targets.CHAT_COMPONENT,
 		Targets.CHAT_SCREEN,
 		Targets.PLAYER_TAB_OVERLAY,
+		Targets.ENTITY_RENDERER,
 		Targets.LEVEL_LOADING_SCREEN,
 		Targets.CONNECT_SCREEN,
 }, priority = 100000)

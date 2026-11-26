@@ -130,7 +130,7 @@
       <button class="tab" type="button" role="tab" id="tab-sperren" data-tab="sperren" aria-controls="panel-sperren" aria-selected="false" tabindex="-1">{{icon:ban}}Sperren</button>
       <button class="tab" type="button" role="tab" id="tab-neuigkeiten" data-tab="neuigkeiten" aria-controls="panel-neuigkeiten" aria-selected="false" tabindex="-1">{{icon:news}}Neuigkeiten</button>
       <button class="tab" type="button" role="tab" id="tab-updates" data-tab="updates" data-admin aria-controls="panel-updates" aria-selected="false" tabindex="-1" hidden>{{icon:download}}Updates</button>
-      <button class="tab" type="button" role="tab" id="tab-addons" data-tab="addons" data-admin aria-controls="panel-addons" aria-selected="false" tabindex="-1" hidden>{{icon:addons}}Addons</button>
+      <button class="tab" type="button" role="tab" id="tab-addons" data-tab="addons" aria-controls="panel-addons" aria-selected="false" tabindex="-1">{{icon:addons}}Addons<span class="count" id="count-addons" hidden></span></button>
       <button class="tab" type="button" role="tab" id="tab-team" data-tab="team" data-admin aria-controls="panel-team" aria-selected="false" tabindex="-1" hidden>{{icon:friends}}Team</button>
       <button class="tab" type="button" role="tab" id="tab-protokoll" data-tab="protokoll" data-admin aria-controls="panel-protokoll" aria-selected="false" tabindex="-1" hidden>{{icon:clock}}Protokoll</button>
       <button class="tab" type="button" role="tab" id="tab-profil" data-tab="profil" aria-controls="panel-profil" aria-selected="false" tabindex="-1">{{icon:user}}Mein Teamprofil</button>
@@ -316,7 +316,46 @@
 
     <!-- Addons -->
     <div class="panel" id="panel-addons" role="tabpanel" aria-labelledby="tab-addons" tabindex="0" hidden>
-      <p class="notice small-notice key-notice" id="addon-schluessel-fehlt" role="alert" hidden>Im Heldix-Dienst ist kein Update-Schlüssel eingerichtet (<code>HELDIX_DIENST_UPDATE_KEY</code>). Ohne ihn kann der Dienst keine Signatur prüfen und nimmt kein Addon an. Hochladen geht trotzdem.</p>
+      <p class="notice small-notice key-notice" id="addon-schluessel-fehlt" role="alert" hidden>Im Heldix-Dienst ist kein Update-Schlüssel eingerichtet (<code>HELDIX_DIENST_UPDATE_KEY</code>). Ohne ihn kann der Dienst keine Signatur prüfen und nimmt kein Addon an – weder Team-Uploads noch Freigaben. Hochladen geht trotzdem.</p>
+      <div class="subtabs" role="tablist" aria-label="Addons" id="addon-unterreiter">
+        <button class="subtab" type="button" role="tab" id="unterreiter-einreichungen" data-tab="einreichungen" aria-controls="addons-einreichungen" aria-selected="true">{{icon:file}}Einreichungen<span class="count" id="count-einreichungen" hidden></span></button>
+        <button class="subtab" type="button" role="tab" id="unterreiter-veroeffentlicht" data-tab="veroeffentlicht" data-admin aria-controls="addons-veroeffentlicht" aria-selected="false" tabindex="-1" hidden>{{icon:addons}}Veröffentlicht</button>
+        <button class="subtab" type="button" role="tab" id="unterreiter-meldungen" data-tab="meldungen" aria-controls="addons-meldungen" aria-selected="false" tabindex="-1">{{icon:flag}}Meldungen<span class="count" id="count-addon-meldungen" hidden></span></button>
+      </div>
+
+      <!-- Einreichungen von Spielern -->
+      <div class="subpanel" id="addons-einreichungen" role="tabpanel" aria-labelledby="unterreiter-einreichungen" tabindex="-1">
+        <div class="toolbar">
+          <div class="segmented" role="group" aria-label="Einreichungen filtern" id="einreichungen-filter">
+            <button type="button" data-status="pending" aria-pressed="true">Zu prüfen</button>
+            <button type="button" data-status="all" aria-pressed="false">Alle</button>
+          </div>
+          <button class="button tiny ghost" type="button" id="einreichungen-neu">{{icon:refresh}}Aktualisieren</button>
+        </div>
+        <div class="split review-split">
+          <div class="app-card">
+            <div id="einreichungen-liste" aria-live="polite"></div>
+          </div>
+          <div class="app-card detail review-detail" id="einreichung-detail" tabindex="-1">
+            <div class="empty placeholder">{{icon:addons}}<p>Wähle links eine Einreichung, um Code-Hinweise, Store-Angaben und Screenshots zu prüfen.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Addon-Meldungen -->
+      <div class="subpanel" id="addons-meldungen" role="tabpanel" aria-labelledby="unterreiter-meldungen" tabindex="-1" hidden>
+        <div class="toolbar">
+          <div class="segmented" role="group" aria-label="Addon-Meldungen filtern" id="addon-meldungen-filter">
+            <button type="button" data-status="open" aria-pressed="true">Offen</button>
+            <button type="button" data-status="all" aria-pressed="false">Alle</button>
+          </div>
+          <button class="button tiny ghost" type="button" id="addon-meldungen-neu">{{icon:refresh}}Aktualisieren</button>
+        </div>
+        <div id="addon-meldungen" class="stack"></div>
+      </div>
+
+      <!-- Veröffentlichte Addons (nur Admins) -->
+      <div class="subpanel" id="addons-veroeffentlicht" role="tabpanel" aria-labelledby="unterreiter-veroeffentlicht" tabindex="-1" hidden>
       <div class="panel-grid">
         <div class="app-card">
           <h2>Addon veröffentlichen</h2>
@@ -353,7 +392,7 @@
             <li><span>Veröffentlichen: Das Addon steht sofort im Store – auf der Webseite, im Launcher und im Spiel.</span></li>
           </ol>
           <p class="info-box small">{{icon:shield}}<span>Der Dienst prüft die Signatur mit dem öffentlichen Update-Schlüssel, Größe und SHA-256 der JAR und dass die Version höher ist als jede vorhandene. Ohne gültige Signatur kommt nichts in den Store – auch nicht von einem übernommenen Team-Konto.</span></p>
-          <p class="hint">Addons von anderen kommen über eine Support-Anfrage. Erst den Code prüfen, dann bauen und signieren.</p>
+          <p class="hint">Hier stehen die offiziellen Addons des Teams. Addons von Spielern kommen als Einreichung (Unterreiter „Einreichungen“) und werden dort geprüft und im Browser signiert.</p>
         </div>
       </div>
       <div class="app-card">
@@ -374,6 +413,7 @@
           </div>
         </div>
         <div id="addon-offen"></div>
+      </div>
       </div>
     </div>
 
@@ -397,7 +437,7 @@
           <button class="button small" type="submit">{{icon:user-plus}}Hinzufügen</button>
         </form>
         <p class="form-error" id="mitglied-fehler" role="alert" hidden></p>
-        <p class="hint"><strong>Moderatoren</strong> sehen Meldungen, Spieler und Sperren und schreiben Neuigkeiten. <strong>Admins</strong> zusätzlich: Updates, Addons, Team, Protokoll, Cape zurücksetzen und Spielerdaten löschen.</p>
+        <p class="hint"><strong>Moderatoren</strong> sehen Meldungen, Spieler und Sperren, schreiben Neuigkeiten, prüfen Addon-Einreichungen (ablehnen) und bearbeiten Addon-Meldungen. <strong>Admins</strong> zusätzlich: Addons freigeben und veröffentlichen, Updates, Team, Protokoll, Cape zurücksetzen und Spielerdaten löschen.</p>
       </div>
       <div class="app-card">
         <div class="card-head"><h2>Mitglieder <span class="muted" id="mitglieder-anzahl"></span></h2></div>

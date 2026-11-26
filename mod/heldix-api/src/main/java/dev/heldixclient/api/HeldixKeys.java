@@ -2,7 +2,8 @@ package dev.heldixclient.api;
 
 /**
  * Tastencodes für {@link HeldixApi#registerKey(String, String, int, Runnable)} (dieselben Werte wie GLFW).
- * Buchstaben und Ziffern entsprechen ihrem Zeichen, z. B. {@code 'K'} oder {@code '7'}.
+ * Buchstaben und Ziffern entsprechen ihrem Zeichen, z. B. {@code 'K'} oder {@code '7'}. Die Werte bleiben fest;
+ * HeldixClient übersetzt sie in die Tasten der jeweiligen Minecraft-Version (seit 26.x SDL-Scancodes).
  *
  * @since 2
  */

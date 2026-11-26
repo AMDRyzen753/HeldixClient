@@ -1,122 +1,166 @@
 package dev.heldixclient.addons.spotify;
 
+import dev.heldixclient.api.CommandContext;
 import dev.heldixclient.api.HeldixAddon;
 import dev.heldixclient.api.HeldixApi;
-import dev.heldixclient.api.HeldixColors;
 import dev.heldixclient.api.HeldixKeys;
-import dev.heldixclient.api.HudCanvas;
-import dev.heldixclient.api.HudCanvas.TextStyle;
 import dev.heldixclient.api.ModuleHandle;
 import dev.heldixclient.api.ModuleSpec;
 
 import java.nio.file.Path;
-import java.util.Locale;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
+import java.util.function.IntSupplier;
 
 /**
- * Spotify-Addon für HeldixClient:
+ * Spotify-Addon für HeldixClient (API 3):
  * <ul>
- *   <li>HUD-Element mit Cover, Titel, Künstler und Fortschritt des laufenden Songs</li>
- *   <li>Tasten für Abspielen/Pause, nächsten und vorherigen Song (Pos1, Bild ab, Bild auf)</li>
- *   <li>kurze Einblendung bei jedem Songwechsel</li>
+ *   <li>HUD-Element in drei Darstellungen (Kompakt, Groß mit Cover, Nur Titel) mit Fortschritt und Akzentfarbe</li>
+ *   <li>Tasten für Abspielen/Pause, Songwechsel, Spulen, Zufallswiedergabe, Wiederholen und Teilen</li>
+ *   <li>Chat-Befehle {@code .np} und {@code .spotify …}</li>
+ *   <li>Einblendung bei jedem Songwechsel (einstellbar)</li>
  * </ul>
- * Die Daten kommen aus der Windows-Mediensteuerung (siehe {@link MediaBridge}) – keine Anmeldung nötig.
+ * Die Daten kommen vom System (Windows-Mediensteuerung, AppleScript, MPRIS) – siehe {@link Player}. Keine Anmeldung.
  */
 public final class SpotifyAddon implements HeldixAddon {
 	static final int GREEN = 0xFF1DB954;
-	private static final int GREEN_SOFT = 0x2E1DB954;
-	private static final int CARD = 0xDC0E131E;
-	private static final int WIDTH = 172;
-	private static final int COVER = 32;
+	/** Spulen per Taste und Befehl */
+	private static final long SEEK_MS = 10_000;
+	/** „Bei Pause ausblenden“: so lange pausiert, bis das Element verschwindet */
+	static final long HIDE_PAUSED_MS = 10_000;
 
-	private HeldixApi api;
-	private MediaBridge bridge;
-	private ModuleHandle module;
-	private boolean windows;
+	HeldixApi api;
+	Player player;
+	Player.Os os;
+	ModuleHandle module;
 
-	private BooleanSupplier onlySpotify;
-	private BooleanSupplier showHud;
-	private BooleanSupplier showCover;
-	private BooleanSupplier showProgress;
-	private BooleanSupplier announce;
-	private BooleanSupplier hideIdle;
+	IntSupplier layout;
+	BooleanSupplier showHud;
+	BooleanSupplier showCover;
+	BooleanSupplier showProgress;
+	IntSupplier accentMode;
+	IntSupplier accentColor;
+	IntSupplier overflow;
+	BooleanSupplier hideIdle;
+	BooleanSupplier hidePaused;
+	BooleanSupplier announce;
+	BooleanSupplier announceHiddenOnly;
+	BooleanSupplier onlySpotify;
 
+	/** seit wann pausiert (0 = spielt bzw. kein Song) */
+	volatile long pausedSince;
 	/** Songwechsel erkennen (erst nach der ersten Antwort, damit beim Start keine Einblendung kommt) */
 	private boolean primed;
 	private String lastKey;
 	private String announcedKey;
 	private Path announcedCover;
 	private long announcedAt;
+	private SpotifyHud hud;
 
 	@Override
 	public void onEnable(HeldixApi api) {
 		this.api = api;
-		this.windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows");
-		this.bridge = new MediaBridge(api.logger(), api.dataDirectory());
+		this.os = Player.Os.current();
+		this.player = Player.create(os, api.logger(), api.dataDirectory(), api::notify, task -> api.scheduler().runAsync(task));
+		this.hud = new SpotifyHud(this);
 
-		module = api.registerHudModule(ModuleSpec.of("spotify", "Spotify", "Song im HUD, Musik per Taste").at(4, 140).withIcon("music"), this::render);
+		module = api.registerHudModule(ModuleSpec.of("spotify", "Spotify", "Song im HUD, Musik per Taste").at(4, 140).withIcon("music"), hud::render);
+		layout = module.addChoice("layout", "Darstellung", "Wie das HUD-Element aussieht", List.of("Kompakt", "Groß mit Cover", "Nur Titel"), 0);
 		showHud = module.addToggle("show-hud", "Im HUD anzeigen", "Aus: nur Tasten und Einblendungen, kein HUD-Element", true);
-		showCover = module.addToggle("cover", "Cover anzeigen", "Album-Cover links im HUD-Element", true);
+		showCover = module.addToggle("cover", "Cover anzeigen", "Album-Cover im HUD-Element", true);
 		showProgress = module.addToggle("progress", "Fortschritt anzeigen", "Zeitleiste mit Spielzeit und Länge des Songs", true);
-		announce = module.addToggle("announce", "Songwechsel einblenden", "Kurze Einblendung oben rechts bei jedem neuen Song", true);
+		accentMode = module.addChoice("accent", "Akzentfarbe", "Farbe von Fortschritt und Equalizer", List.of("Spotify-Grün", "Aus dem Cover", "Eigene Farbe"), 0);
+		accentColor = module.addColor("accent-color", "Eigene Farbe", "Gilt, wenn die Akzentfarbe auf „Eigene Farbe“ steht", GREEN);
+		overflow = module.addChoice("overflow", "Lange Titel", "Laufschrift oder mit „…“ abkürzen", List.of("Laufschrift", "Abkürzen"), 0);
 		hideIdle = module.addToggle("hide-idle", "Ohne Musik ausblenden", "HUD-Element nur zeigen, wenn ein Song geladen ist", false);
+		hidePaused = module.addToggle("hide-paused", "Bei Pause ausblenden", "Nach 10 Sekunden Pause verschwindet das HUD-Element", false);
+		announce = module.addToggle("announce", "Songwechsel einblenden", "Kurze Einblendung mit Cover oben rechts bei jedem neuen Song", true);
+		announceHiddenOnly = module.addToggle("announce-hidden-only", "Einblendung nur ohne HUD-Element",
+				"Nur einblenden, wenn das HUD-Element aus oder ausgeblendet ist (auch mit F1)", false);
 		onlySpotify = module.addToggle("only-spotify", "Nur Spotify", "Aus: auch andere Player steuern, z. B. Browser oder VLC", true);
 		module.addAction("Abspielen / Pause", "Standardtaste: Pos1", "Umschalten", this::playPause);
-		module.addAction("Nächster Song", "Standardtaste: Bild ab", "Weiter", () -> command(bridge::next));
-		module.addAction("Vorheriger Song", "Standardtaste: Bild auf", "Zurück", () -> command(bridge::previous));
+		module.addAction("Nächster Song", "Standardtaste: Bild ab", "Weiter", () -> command(() -> player.next()));
+		module.addAction("Vorheriger Song", "Standardtaste: Bild auf", "Zurück", () -> command(() -> player.previous()));
+		module.addAction("Player wechseln", "Wenn mehrere Player laufen (Windows, „Nur Spotify“ aus)", "Wechseln", () -> command(() -> player.nextPlayer()));
 
 		api.registerKey("play-pause", "Abspielen/Pause", HeldixKeys.HOME, this::playPause);
-		api.registerKey("next", "Nächster Song", HeldixKeys.PAGE_DOWN, () -> command(bridge::next));
-		api.registerKey("previous", "Vorheriger Song", HeldixKeys.PAGE_UP, () -> command(bridge::previous));
+		api.registerKey("next", "Nächster Song", HeldixKeys.PAGE_DOWN, () -> command(() -> player.next()));
+		api.registerKey("previous", "Vorheriger Song", HeldixKeys.PAGE_UP, () -> command(() -> player.previous()));
+		api.registerKey("seek-forward", "10 Sekunden vor", HeldixKeys.NONE, () -> seek(SEEK_MS));
+		api.registerKey("seek-back", "10 Sekunden zurück", HeldixKeys.NONE, () -> seek(-SEEK_MS));
+		api.registerKey("shuffle", "Zufallswiedergabe", HeldixKeys.NONE, this::shuffle);
+		api.registerKey("repeat", "Wiederholen", HeldixKeys.NONE, this::repeat);
+		api.registerKey("share", "Song im Chat teilen", HeldixKeys.NONE, this::share);
+
+		api.registerCommand("np", "[teilen]", "Zeigt den laufenden Song (teilen: für alle im Chat)", this::nowPlaying);
+		api.registerCommand("spotify", "play|pause|next|prev|+10|-10|shuffle|repeat|player", "Musik steuern", this::spotifyCommand);
 
 		module.onToggle(enabled -> {
-			if (enabled) startBridge(); else bridge.stop();
+			if (enabled) startPlayer();
+			else if (player != null) player.stop();
 		});
 		api.events().onTick(this::tick);
-		if (module.isEnabled()) startBridge();
+		if (module.isEnabled()) startPlayer();
 
-		if (!windows) api.logger().warn("Das Spotify-Addon braucht die Windows-Mediensteuerung und ist auf diesem System inaktiv.");
+		if (player == null) api.logger().warn("Das Spotify-Addon läuft nur unter Windows, macOS und Linux und ist auf diesem System inaktiv.");
 	}
 
 	@Override
 	public void onDisable() {
-		if (bridge != null) bridge.stop();
+		if (player != null) player.stop();
 	}
 
-	private void startBridge() {
-		if (!windows) return;
-		bridge.setAnyPlayer(!onlySpotify.getAsBoolean());
-		bridge.start();
+	private void startPlayer() {
+		if (player == null) return;
+		player.setAnyPlayer(!onlySpotify.getAsBoolean());
+		player.start();
+	}
+
+	// --- Zustand ------------------------------------------------------------------------------
+
+	/** aktueller Song oder null */
+	Track track() {
+		return player != null && module.isEnabled() ? player.track() : null;
+	}
+
+	boolean playing(Track track, long now) {
+		return player != null && player.playing(track, now);
+	}
+
+	long position(Track track, long now) {
+		return player != null ? player.position(track, now) : track.positionMs();
+	}
+
+	/** Text, wenn kein Song angezeigt werden kann */
+	String idleMessage() {
+		if (player == null) return "Nur unter Windows, macOS und Linux (mit playerctl)";
+		if (!module.isEnabled()) return "Spotify-Modul ist aus";
+		String problem = player.problem();
+		if (problem != null) return problem;
+		if (player.failures() >= 2) {
+			return switch (os) {
+				case WINDOWS -> "Windows-Mediensteuerung nicht erreichbar";
+				case MAC -> "Spotify-Steuerung nicht erreichbar";
+				default -> "playerctl antwortet nicht";
+			};
+		}
+		if (!player.connected()) return "Verbinde …";
+		return player.idleText();
+	}
+
+	/** Wird das HUD-Element gerade gezeigt? (für „Einblendung nur ohne HUD-Element“ und Rückmeldungen) */
+	boolean hudVisible(Track track, long now) {
+		if (!module.isEnabled() || !showHud.getAsBoolean() || api.game().hudHidden()) return false;
+		if (track == null) return !hideIdle.getAsBoolean();
+		return !(hidePaused.getAsBoolean() && pausedSince > 0 && now - pausedSince > HIDE_PAUSED_MS);
 	}
 
 	// --- Steuerung ----------------------------------------------------------------------------
 
-	private void playPause() {
-		if (!ready()) return;
-		MediaBridge.Track track = bridge.track();
-		if (track == null) {
-			api.notify("Spotify", "Spotify öffnen und einen Song starten");
-			return;
-		}
-		boolean willPlay = !bridge.playing(track, System.currentTimeMillis());
-		bridge.playPause();
-		// ohne HUD-Element ist die Einblendung die einzige Rückmeldung
-		if (!showHud.getAsBoolean()) api.notify(willPlay ? "Wiedergabe" : "Pausiert", track.title(), track.cover());
-	}
-
-	private void command(Runnable action) {
-		if (!ready()) return;
-		if (bridge.track() == null) {
-			api.notify("Spotify", "Spotify öffnen und einen Song starten");
-			return;
-		}
-		action.run();
-	}
-
 	private boolean ready() {
-		if (!windows) {
-			api.notify("Spotify", "Nur unter Windows verfügbar");
+		if (player == null) {
+			api.notify("Spotify", "Nur unter Windows, macOS und Linux (mit playerctl)");
 			return false;
 		}
 		if (!module.isEnabled()) {
@@ -126,152 +170,146 @@ public final class SpotifyAddon implements HeldixAddon {
 		return true;
 	}
 
-	private void tick() {
-		if (!module.isEnabled() || !bridge.running()) return;
-		bridge.setAnyPlayer(!onlySpotify.getAsBoolean());
-		if (!bridge.connected()) return;
+	/** Befehl, der einen geladenen Song braucht */
+	private boolean command(Runnable action) {
+		if (!ready()) return false;
+		if (player.track() == null) {
+			api.notify("Spotify", idleMessage());
+			return false;
+		}
+		action.run();
+		return true;
+	}
 
-		MediaBridge.Track track = bridge.track();
-		String key = track != null ? track.key() : null;
+	private void playPause() {
+		if (!ready()) return;
+		Track track = player.track();
+		if (track == null) {
+			api.notify("Spotify", idleMessage());
+			return;
+		}
 		long now = System.currentTimeMillis();
+		boolean willPlay = !player.playing(track, now);
+		player.playPause();
+		// ohne sichtbares HUD-Element ist die Einblendung die einzige Rückmeldung
+		if (!hudVisible(track, now)) api.notify(willPlay ? "Wiedergabe" : "Pausiert", track.title(), track.cover());
+	}
+
+	private void seek(long delta) {
+		command(() -> player.seek(delta));
+	}
+
+	private void shuffle() {
+		command(() -> {
+			Track track = player.track();
+			player.toggleShuffle();
+			if (track.shuffle() != null) api.notify(track.shuffle() ? "Zufallswiedergabe aus" : "Zufallswiedergabe an", track.title(), track.cover());
+		});
+	}
+
+	private void repeat() {
+		command(() -> {
+			Track track = player.track();
+			player.cycleRepeat();
+			if (track.repeat() != null) api.notify(track.repeat().next(os != Player.Os.MAC).label(), track.title(), track.cover());
+		});
+	}
+
+	/** „🎵 Titel – Künstler“ an alle im Chat (nur als Aktion des Spielers erlaubt) */
+	private void share() {
+		Track track = track();
+		if (track == null) {
+			api.notify("Spotify", "Gerade läuft kein Song");
+			return;
+		}
+		if (!api.sendChatMessage("🎵 " + track.line())) api.notify("Spotify", "Teilen geht nur in einer Welt");
+	}
+
+	// --- Chat-Befehle (API 3) ------------------------------------------------------------------
+
+	private void nowPlaying(CommandContext command) {
+		Track track = track();
+		if (track == null) {
+			command.reply("Gerade läuft nichts – " + idleMessage());
+			return;
+		}
+		if (command.arg(0).equals("teilen") || command.arg(0).equals("share")) {
+			if (!api.sendChatMessage("🎵 " + track.line())) command.reply("Teilen geht nur in einer Welt");
+			return;
+		}
+		long now = System.currentTimeMillis();
+		String time = track.durationMs() > 0 ? " (" + SpotifyHud.time(position(track, now)) + " / " + SpotifyHud.time(track.durationMs()) + ")" : "";
+		String app = "Spotify".equals(track.app()) ? "" : " · " + track.app();
+		command.reply("♪ " + track.line() + time + (playing(track, now) ? "" : " – pausiert") + app);
+	}
+
+	private void spotifyCommand(CommandContext command) {
+		String what = command.arg(0);
+		if (what.isEmpty() || what.equals("hilfe") || what.equals("help")) {
+			command.reply("So geht's: .spotify play | pause | next | prev | +10 | -10 | shuffle | repeat | player");
+			return;
+		}
+		if (!ready()) return;
+		Track track = player.track();
+		long now = System.currentTimeMillis();
+		switch (what) {
+			case "play", "pause" -> {
+				if (track == null) {
+					command.reply(idleMessage());
+					return;
+				}
+				boolean playing = player.playing(track, now);
+				if (playing == what.equals("play")) {
+					command.reply(playing ? "Läuft schon" : "Ist schon pausiert");
+					return;
+				}
+				player.playPause();
+				command.reply((playing ? "Pausiert: " : "Weiter: ") + track.line());
+			}
+			case "next", "weiter" -> reply(command, () -> player.next(), "Nächster Song");
+			case "prev", "previous", "zurück", "zurueck" -> reply(command, () -> player.previous(), "Vorheriger Song");
+			case "+10", "vor" -> reply(command, () -> player.seek(SEEK_MS), "10 Sekunden vor");
+			case "-10" -> reply(command, () -> player.seek(-SEEK_MS), "10 Sekunden zurück");
+			case "shuffle", "zufall" -> shuffle();
+			case "repeat", "wiederholen" -> repeat();
+			case "player" -> player.nextPlayer();
+			default -> command.reply("Unbekannt: „" + what + "“. So geht's: .spotify play | pause | next | prev | +10 | -10 | shuffle | repeat | player");
+		}
+	}
+
+	private void reply(CommandContext command, Runnable action, String done) {
+		if (command(action)) command.reply(done);
+	}
+
+	// --- Songwechsel ----------------------------------------------------------------------------
+
+	private void tick() {
+		if (player == null || !module.isEnabled() || !player.running()) return;
+		player.setAnyPlayer(!onlySpotify.getAsBoolean());
+		if (!player.connected()) return;
+
+		Track track = player.track();
+		long now = System.currentTimeMillis();
+		if (track == null || player.playing(track, now)) pausedSince = 0;
+		else if (pausedSince == 0) pausedSince = now;
+
+		String key = track != null ? track.key() : null;
 		if (!Objects.equals(key, lastKey)) {
-			if (primed && track != null && announce.getAsBoolean()) announce(track, now);
+			if (primed && track != null && announce.getAsBoolean() && !(announceHiddenOnly.getAsBoolean() && hudVisible(track, now))) {
+				announce(track, now);
+			}
 			lastKey = key;
 		} else if (track != null && key.equals(announcedKey) && now - announcedAt < 4000 && !Objects.equals(track.cover(), announcedCover)) {
-			// Windows liefert das Cover oft erst kurz nach dem Titel: Einblendung damit auffrischen
+			// Das Cover kommt oft erst kurz nach dem Titel: Einblendung damit auffrischen
 			announce(track, announcedAt);
 		}
 		primed = true;
 	}
 
-	private void announce(MediaBridge.Track track, long at) {
-		api.notify(track.title(), byline(track), track.cover());
+	private void announce(Track track, long at) {
+		api.notify(track.title(), track.byline(), track.cover());
 		announcedKey = track.key();
 		announcedCover = track.cover();
 		announcedAt = at;
-	}
-
-	private static String byline(MediaBridge.Track track) {
-		if (!track.artist().isEmpty()) return track.artist();
-		if (!track.album().isEmpty()) return track.album();
-		return track.app();
-	}
-
-	// --- HUD ----------------------------------------------------------------------------------
-
-	private void render(HudCanvas canvas) {
-		boolean preview = canvas.isPreview();
-		if (!showHud.getAsBoolean() && !preview) return;
-		long now = System.currentTimeMillis();
-		MediaBridge.Track track = windows ? bridge.track() : null;
-		if (track == null && preview) {
-			// Beispiel im HUD-Editor, damit man die echte Größe sieht
-			track = new MediaBridge.Track("Spotify", "Playing", "Songtitel", "Künstler", "Album", 74_000, 196_000, now, null);
-		}
-		if (track == null) {
-			if (!hideIdle.getAsBoolean()) drawIdle(canvas);
-			return;
-		}
-		drawTrack(canvas, track, now, preview);
-	}
-
-	private void drawIdle(HudCanvas c) {
-		String message;
-		if (!windows) {
-			message = "Nur unter Windows verfügbar";
-		} else if (bridge.failures() >= 2) {
-			message = "Windows-Mediensteuerung nicht erreichbar";
-		} else if (!bridge.connected()) {
-			message = "Verbinde …";
-		} else if (onlySpotify.getAsBoolean()) {
-			// ohne laufende Sitzung kann Windows Spotify nicht fernsteuern: erst in Spotify selbst starten
-			message = "Spotify öffnen und Musik starten";
-		} else {
-			message = "Kein Player aktiv";
-		}
-		int h = 30;
-		c.roundedRect(0, 0, WIDTH, h, 8, CARD);
-		c.roundedOutline(0, 0, WIDTH, h, 8, HeldixColors.LINE);
-		c.roundedRect(6, 6, 18, 18, 5, GREEN_SOFT);
-		c.icon("music", 9, 9, 12, GREEN);
-		c.text("Spotify", 30, 6, HeldixColors.TEXT, TextStyle.BOLD);
-		c.text(c.ellipsize(message, WIDTH - 30 - 8, TextStyle.SMALL), 30, 17, HeldixColors.MUTED, TextStyle.SMALL);
-	}
-
-	private void drawTrack(HudCanvas c, MediaBridge.Track track, long now, boolean preview) {
-		boolean playing = preview && bridge.track() == null || bridge.playing(track, now);
-		boolean cover = showCover.getAsBoolean();
-		boolean progress = showProgress.getAsBoolean() && track.durationMs() > 0;
-		int h = progress ? 44 : 36;
-		int coverSize = progress ? COVER : 24;
-		c.roundedRect(0, 0, WIDTH, h, 9, CARD);
-		c.roundedOutline(0, 0, WIDTH, h, 9, HeldixColors.LINE);
-
-		int tx = 9;
-		if (cover) {
-			int cy = (h - coverSize) / 2;
-			boolean drawn = track.cover() != null && c.image(track.cover(), 6, cy, coverSize, coverSize);
-			if (!drawn) {
-				c.roundedRect(6, cy, coverSize, coverSize, 5, GREEN_SOFT);
-				int icon = coverSize / 2;
-				c.icon("music", 6 + (coverSize - icon) / 2, cy + (coverSize - icon) / 2, icon, GREEN);
-			}
-			if (!playing) {
-				c.roundedRect(6, cy, coverSize, coverSize, 5, 0x99000000);
-				int icon = coverSize >= 30 ? 14 : 12;
-				c.icon("pause", 6 + (coverSize - icon) / 2, cy + (coverSize - icon) / 2, icon, 0xFFFFFFFF);
-			}
-			tx = 6 + coverSize + 7;
-		}
-
-		// Equalizer-Balken rechts oben: bewegen sich, solange Musik läuft
-		int barsX = WIDTH - 8 - 9;
-		equalizer(c, barsX, progress ? 7 : 8, playing, now);
-		int textWidth = barsX - 5 - tx;
-		int titleY = progress ? 7 : 8;
-		c.text(c.ellipsize(track.title(), textWidth, TextStyle.BOLD), tx, titleY, HeldixColors.TEXT, TextStyle.BOLD);
-		c.text(c.ellipsize(byline(track), WIDTH - 8 - tx, TextStyle.SMALL), tx, titleY + 12, HeldixColors.MUTED, TextStyle.SMALL);
-
-		if (progress) {
-			long position = bridge.track() == null ? track.positionMs() : bridge.position(track, now);
-			String elapsed = time(position);
-			String total = time(track.durationMs());
-			int elapsedWidth = c.textWidth(elapsed, TextStyle.SMALL);
-			int totalWidth = c.textWidth(total, TextStyle.SMALL);
-			int y = 31;
-			c.text(elapsed, tx, y, HeldixColors.FAINT, TextStyle.SMALL);
-			c.text(total, WIDTH - 8 - totalWidth, y, HeldixColors.FAINT, TextStyle.SMALL);
-			float barX = tx + elapsedWidth + 5;
-			float barWidth = WIDTH - 8 - totalWidth - 5 - barX;
-			if (barWidth > 8) {
-				float fraction = Math.max(0f, Math.min(1f, position / (float) track.durationMs()));
-				c.roundedRect(barX, y + 2.5f, barWidth, 3, 1.5f, 0x2EFFFFFF);
-				if (fraction > 0) c.roundedRect(barX, y + 2.5f, Math.max(3, barWidth * fraction), 3, 1.5f, playing ? GREEN : 0xFF7A8496);
-			}
-		}
-	}
-
-	/** drei kleine Balken, die sich im Takt (ungefähr) bewegen; bei Pause flach */
-	private static void equalizer(HudCanvas c, int x, int y, boolean playing, long now) {
-		int height = 8;
-		for (int i = 0; i < 3; i++) {
-			float h;
-			if (playing) {
-				double t = now / 1000.0;
-				double wave = Math.sin(t * (5.1 + i * 1.7) + i * 1.9) * 0.5 + Math.sin(t * (2.3 + i * 0.9) + i) * 0.5;
-				h = (float) (2.5 + (wave * 0.5 + 0.5) * (height - 2.5));
-			} else {
-				h = 2;
-			}
-			c.roundedRect(x + i * 3.5f, y + height - h, 2, h, 1, playing ? GREEN : HeldixColors.FAINT);
-		}
-	}
-
-	private static String time(long millis) {
-		long seconds = Math.max(0, millis / 1000);
-		long hours = seconds / 3600;
-		long minutes = (seconds % 3600) / 60;
-		long secs = seconds % 60;
-		return hours > 0 ? String.format("%d:%02d:%02d", hours, minutes, secs) : String.format("%d:%02d", minutes, secs);
 	}
 }

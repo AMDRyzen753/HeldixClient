@@ -15,7 +15,6 @@ Klappt der Start nicht, steht unter dem **Spielen**-Knopf „Start fehlgeschlage
 
 ## Häufige Meldungen
 - **„Bitte zuerst ein Konto hinzufügen.“** – Melde dich unten links im Konto-Menü an, siehe [Mit dem Microsoft-Konto anmelden](/hilfe/anmelden-microsoft).
-- **„Offline-Konto“, der Spielen-Knopf ist ausgegraut** – Offline-Konten gehen erst, wenn ein Microsoft-Konto mit Minecraft im Launcher angemeldet ist. Siehe [Konten wechseln und Offline-Konten](/hilfe/konten-und-offline).
 - **„Für Minecraft … gibt es noch keine HeldixClient-Mod.“** – Für diese Version gibt es HeldixClient noch nicht. Wähle eine andere Version oder lege für diese Version eine Fabric- oder Vanilla-Instanz an.
 - **„Fabric unterstützt Minecraft … nicht.“** – Für diese Version gibt es Fabric (noch) nicht. Lege eine Vanilla-Instanz an.
 - **„Das Spiel läuft bereits.“** – Es kann immer nur ein Spiel gleichzeitig laufen. Beende das laufende Spiel zuerst – im Notfall mit **Spiel beenden** in der Konsole.
@@ -24,8 +23,8 @@ Klappt der Start nicht, steht unter dem **Spielen**-Knopf „Start fehlgeschlage
 - **„Minecraft wurde mit Fehlercode … beendet.“** – Minecraft ist abgestürzt. Siehe [Absturz und Crash-Log](/hilfe/absturz).
 - **„Minecraft ist beim Start mit Vulkan abgestürzt.“** – Der Launcher hat die Grafik-API schon auf „Automatisch“ gestellt. Starte einfach noch einmal. Mehr unter [Grafikfehler und Treiber](/hilfe/grafikprobleme).
 
-## Über den Minecraft Launcher angemeldet?
-Nach etwa 24 Stunden läuft diese Anmeldung ab. Dann öffnet HeldixClient beim Drücken auf **Spielen** den offiziellen Minecraft Launcher – dort einmal auf **Spielen** klicken, und das Spiel startet. Drückst du dort nicht innerhalb von 15 Minuten auf **Spielen**, bricht HeldixClient ab: „Im Minecraft Launcher wurde nicht auf „Spielen“ gedrückt. Versuch es noch mal.“
+## Anmeldung abgelaufen?
+Meldet der Launcher „Die Anmeldung von … ist abgelaufen“, war das Konto früher über den offiziellen Minecraft Launcher angemeldet. Melde dich unten links einmal mit **Mit Microsoft anmelden** neu an.
 
 ## Fabric-Instanz mit vielen Mods?
 Schalte unter **Instanzen → Instanz → Mods** die zuletzt hinzugefügten Mods mit ihrem Schalter aus und versuche es erneut. Der Launcher prüft vor jedem Start, ob die Mods zusammenpassen, und schreibt Konflikte in die Konsole.

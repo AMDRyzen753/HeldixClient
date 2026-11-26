@@ -1,33 +1,23 @@
 ---
-titel: Konten wechseln und Offline-Konten
-beschreibung: Mehrere Konten nutzen, Konten entfernen und Offline-Konten für Einzelspieler, LAN und Server ohne Online-Modus anlegen.
+titel: Konten wechseln
+beschreibung: Mehrere Microsoft-Konten nutzen, zwischen ihnen wechseln und Konten abmelden.
 kategorie: erste-schritte
 reihenfolge: 6
-stichworte: konto wechseln, konten, account, offline, offline-konto, lan, einzelspieler, spielername, entwickleroptionen, entwickler-schlüssel
+stichworte: konto wechseln, konten, account, mehrere konten, abmelden, offline, offline-konto, spielername
 ---
-Alle Konten verwaltest du im Konto-Menü unten links in der Seitenleiste des Launchers.
+Alle Konten verwaltest du im Konto-Menü unten links in der Seitenleiste des Launchers. Oben siehst du das Konto, mit dem du gerade spielst, darunter **Weitere Konten**.
+
+## Konto hinzufügen
+Klicke im Konto-Menü auf **Weiteres Microsoft-Konto** und melde dich im Fenster von Microsoft an. Das neue Konto wird gleich aktiv.
 
 ## Konto wechseln
 1. Klicke unten links auf dein Konto.
-2. Klicke in der Liste **Konten** auf das Konto, mit dem du spielen möchtest.
+2. Klicke unter **Weitere Konten** auf das Konto, mit dem du spielen möchtest.
 
-Das gewählte Konto gilt für alle Instanzen.
+Das gewählte Konto gilt für alle Instanzen. Freunde, Nachrichten und Skins & Capes zeigen danach die Daten dieses Kontos.
 
-## Konto entfernen
-Klicke im Konto-Menü auf das **×** neben dem Konto. Die gespeicherte Anmeldung wird aus dem Launcher gelöscht.
+## Konto abmelden
+Klicke beim aktiven Konto auf **Abmelden** oder bei einem anderen Konto auf das **×**. Die gespeicherte Anmeldung wird aus dem Launcher gelöscht; Welten, Instanzen und dein Minecraft-Konto bleiben erhalten.
 
 ## Offline-Konten
-Mit einem Offline-Konto spielst du unter einem frei gewählten Namen – für **Einzelspieler, LAN und Server ohne Online-Modus**. Für normale Server mit Online-Modus brauchst du eine echte Anmeldung.
-
-Offline-Konten gibt es, sobald ein Microsoft-Konto mit Minecraft im Launcher angemeldet ist – auch eines, das [über den Minecraft Launcher](/hilfe/anmelden-minecraft-launcher) angemeldet wurde. So legst du eins an:
-1. Öffne das Konto-Menü.
-2. Gib unten im Feld **Spielername** einen Namen ein: 3 bis 16 Zeichen, nur Buchstaben, Zahlen und `_`.
-3. Klicke auf **Offline**.
-
-> **Hinweis:** Ist das Feld ausgegraut, ist noch kein Microsoft-Konto mit Minecraft im Launcher angemeldet.
-
-## Was mit Offline-Konten nicht geht
-Freunde, Nachrichten, dein Heldix-Cape für andere und das Konto auf heldixclient.com brauchen eine Microsoft-Anmeldung. Mit einem Offline-Konto bleibt der Heldix-Dienst deshalb aus. Alles andere – Module, HUD, Shader, Wegpunkte – funktioniert wie gewohnt.
-
-## Entwickleroptionen
-Unter **Einstellungen → Entwickler** gibt es die **Entwickleroptionen**. Sie sind für die Entwicklung von HeldixClient gedacht: Damit gehen Offline-Konten auch ohne Microsoft-Konto, aber nur auf PCs mit einem gültigen Entwickler-Schlüssel vom Entwicklerteam. Zum normalen Spielen brauchst du sie nicht.
+Offline-Konten gibt es in HeldixClient nicht mehr. Gespielt wird mit dem Microsoft-Konto, mit dem Minecraft: Java Edition gekauft wurde – auch im Einzelspieler und im LAN. Offline-Konten aus älteren Versionen blendet der Launcher aus.

@@ -30,28 +30,9 @@ Bis zur Freigabe klappt die Anmeldung bei Microsoft zwar, danach antwortet Minec
 
 **Stand HeldixClient:** Die App-ID in [config.ts](../launcher/src/main/config.ts) ist seit November 2026 von Mojang freigegeben.
 
-Für eigene Builds bis zur Freigabe geht die [Anmeldung über den offiziellen Minecraft Launcher](#anmeldung-über-den-offiziellen-minecraft-launcher). Zum Testen ohne Konto: den Launcher aus dem Quellcode starten (`npm start`) oder in der .exe die [Entwickleroptionen mit Entwickler-Schlüssel](entwicklung.md#entwickleroptionen-in-der-fertigen-app) nutzen. Dann gehen Offline-Konten ohne Microsoft-Konto, also Einzelspieler, LAN und Server ohne Online-Modus. Für Server mit Online-Modus braucht es eine echte Anmeldung.
+Zum Testen ohne freigegebene App-ID: den Launcher aus dem Quellcode starten (`npm start`). In dieser Entwicklungsversion gehen Offline-Konten, also Einzelspieler, LAN und Server ohne Online-Modus. Für Server mit Online-Modus braucht es eine echte Anmeldung. Die fertige App kennt keine Offline-Konten.
 
-### Anmeldung über den offiziellen Minecraft Launcher
-
-Diese Anmeldung braucht keine Freigabe von Mojang, weil der offizielle Launcher anmeldet. Sie funktioniert so:
-
-1. Im Konten-Menü auf **Über Minecraft Launcher anmelden** klicken.
-2. HeldixClient legt im offiziellen Launcher die Installation **HeldixClient** an, wählt sie aus und öffnet den Launcher.
-3. Dort auf **Spielen** drücken. Der offizielle Launcher startet dann statt Minecraft ein kleines Java-Programm, die Brücke ([mod/launcher-bridge](../mod/launcher-bridge)), und gibt ihr wie jedem Spiel die Anmeldung mit.
-4. Die Brücke reicht die Anmeldung an HeldixClient weiter. HeldixClient prüft sie bei Mojang, speichert das Konto und startet Minecraft selbst, mit Instanzen, Mods, Konsole und Discord-Status wie gewohnt.
-
-**Gut zu wissen**
-
-- **Gültigkeit:** Eine Anmeldung gilt etwa 24 Stunden. Danach öffnet HeldixClient beim Drücken auf **Spielen** wieder den offiziellen Launcher, ein Klick auf **Spielen** dort genügt.
-- **Start im offiziellen Launcher:** Wer die Installation **HeldixClient** direkt dort startet, bekommt die gerade ausgewählte HeldixClient-Instanz. Läuft HeldixClient nicht, startet die Brücke es.
-- **Installation:** Sie erbt von einer im offiziellen Launcher schon installierten Minecraft-Version. Deshalb muss der offizielle Launcher nichts herunterladen. Bei jedem Start hält HeldixClient sie auf dem neuesten Stand.
-
-**Sicherheit**
-
-- Die Brücke spricht nur über `127.0.0.1` mit HeldixClient. Port und ein Geheimnis stehen in `bridge.json` im Datenordner.
-- Beide Seiten weisen per HMAC-SHA256 über Zufallszahlen nach, dass sie das Geheimnis kennen. Erst danach geht die Anmeldung über die Leitung, also nie an ein fremdes Programm auf dem Port.
-- Den Code dazu gibt es in [core/bridge.ts](../launcher/src/main/core/bridge.ts) und [core/officiallauncher.ts](../launcher/src/main/core/officiallauncher.ts).
+> Bis Version 0.13 gab es zusätzlich eine Anmeldung über den offiziellen Minecraft Launcher („Brücke“). Seit der Freigabe durch Mojang ist sie entfernt. Ab 0.13 entfernt der Launcher beim Start die alte Installation „HeldixClient“ aus dem offiziellen Launcher ([core/officialcleanup.ts](../launcher/src/main/core/officialcleanup.ts)); Konten, die darüber angemeldet waren, melden sich nach Ablauf einmal neu mit Microsoft an.
 
 ### So läuft die Anmeldung ab
 

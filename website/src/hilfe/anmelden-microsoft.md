@@ -18,9 +18,9 @@ Zum Spielen meldest du dich mit dem Microsoft-Konto an, mit dem du Minecraft: Ja
 - ein Xbox-Profil zu diesem Konto – fehlt es, sagt dir der Launcher Bescheid
 
 ## Von Mojang freigegeben
-Apps dürfen die Anmeldung von Minecraft erst nutzen, wenn Mojang sie geprüft und freigegeben hat. HeldixClient ist seit November 2026 freigegeben – die Anmeldung mit Microsoft klappt also direkt im Launcher.
+Apps dürfen die Anmeldung von Minecraft erst nutzen, wenn Mojang sie geprüft und freigegeben hat. HeldixClient ist seit November 2026 freigegeben – die Anmeldung mit Microsoft klappt direkt im Launcher.
 
-Möchtest du lieber den offiziellen Minecraft Launcher die Anmeldung erledigen lassen, geht das weiterhin: [Über den Minecraft Launcher anmelden](/hilfe/anmelden-minecraft-launcher).
+> **Früher über den Minecraft Launcher angemeldet?** Diesen Umweg gibt es nicht mehr. Läuft so eine Anmeldung ab, meldest du dich einmal mit **Mit Microsoft anmelden** neu an – Welten, Instanzen und Einstellungen bleiben, wie sie sind.
 
 ## Sicher gespeichert
 - Dein Passwort gibst du nur im Anmeldefenster von Microsoft ein. HeldixClient bekommt es nie zu sehen.
@@ -28,6 +28,6 @@ Möchtest du lieber den offiziellen Minecraft Launcher die Anmeldung erledigen l
 - Läuft die Anmeldung ab, erneuert der Launcher sie beim nächsten Spielstart von selbst.
 
 ## Konto wechseln oder entfernen
-Klicke unten links auf dein Konto. In der Liste wechselst du mit einem Klick das Konto, das **×** entfernt ein Konto aus dem Launcher. Mehr dazu unter [Konten wechseln und Offline-Konten](/hilfe/konten-und-offline).
+Klicke unten links auf dein Konto. Unter **Weitere Konten** wechselst du mit einem Klick, **Abmelden** bzw. das **×** entfernt ein Konto aus dem Launcher. Mehr dazu unter [Konten wechseln](/hilfe/konten-und-offline).
 
 Klappt die Anmeldung nicht? Die häufigsten Meldungen und Lösungen stehen unter [Anmeldung abgelehnt](/hilfe/anmeldung-abgelehnt).

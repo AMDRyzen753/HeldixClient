@@ -8,6 +8,9 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="instances.css">
   <link rel="stylesheet" href="home.css">
+  <link rel="stylesheet" href="store.css">
+  <link rel="stylesheet" href="friends.css">
+  <link rel="stylesheet" href="profile.css">
 </head>
 <body>
 <div class="splash" id="splash">
@@ -32,6 +35,14 @@
     <div class="nav-section">Spielen</div>
     <button class="nav-item active" data-view="home" data-label="Start"><svg data-icon="home"></svg><span>Start</span></button>
     <button class="nav-item" data-view="instances" data-label="Instanzen"><svg data-icon="modules"></svg><span>Instanzen</span></button>
+    <button class="nav-item" data-view="store" data-label="Addon-Store"><svg data-icon="addons"></svg><span>Addon-Store</span>
+      <span class="nav-badge" id="store-badge" hidden></span>
+    </button>
+    <div class="nav-section">Profil</div>
+    <button class="nav-item" data-view="friends" data-label="Freunde"><svg data-icon="friends"></svg><span>Freunde</span>
+      <span class="nav-badge" id="friends-badge" hidden></span>
+    </button>
+    <button class="nav-item" data-view="profile" data-label="Skins &amp; Capes"><svg data-icon="cape"></svg><span>Skins &amp; Capes</span></button>
     <div class="nav-section">Launcher</div>
     <button class="nav-item" data-view="settings" data-label="Einstellungen"><svg data-icon="settings"></svg><span>Einstellungen</span></button>
     <button class="nav-item" data-view="console" data-label="Konsole">
@@ -149,6 +160,7 @@
         </div>
 
         <div class="home-grid">
+          <div class="home-col">
           <section class="panel" id="stage-continue" hidden>
             <div class="panel-head">
               <div class="panel-icon"><svg data-icon="play"></svg></div>
@@ -164,6 +176,16 @@
               <button class="ghost small" id="home-instances-all" type="button">Alle</button>
             </div>
             <div class="row-list" id="home-instances"></div>
+          </section>
+          </div>
+
+          <section class="panel" id="home-friends-panel" hidden>
+            <div class="panel-head">
+              <div class="panel-icon"><svg data-icon="friends"></svg></div>
+              <div class="panel-title"><h3>Freunde</h3><span id="home-friends-sub">Heldix-Dienst</span></div>
+              <button class="ghost small" id="home-friends-all" type="button">Alle</button>
+            </div>
+            <div class="row-list" id="home-friends"></div>
           </section>
 
           <section class="panel" id="news-panel" hidden>
@@ -187,6 +209,27 @@
               <p class="page-sub">Jede Instanz hat eigene Welten, Mods, Addons und Einstellungen.</p>
             </div>
             <button class="primary" id="new-instance"><svg data-icon="plus" class="btn-icon"></svg>Neue Instanz</button>
+          </div>
+          <div class="instances-toolbar" id="instances-toolbar">
+            <div class="search-field">
+              <svg data-icon="search"></svg>
+              <input type="text" id="instance-search" placeholder="Instanzen durchsuchen …" spellcheck="false">
+            </div>
+            <div class="chip-toggle" id="instance-filter">
+              <button data-filter="all" class="active">Alle</button>
+              <button data-filter="heldix">HeldixClient</button>
+              <button data-filter="fabric">Fabric</button>
+              <button data-filter="vanilla">Vanilla</button>
+            </div>
+            <label class="instances-sort">
+              <span>Sortieren</span>
+              <select id="instance-sort">
+                <option value="recent">Zuletzt gespielt</option>
+                <option value="name">Name</option>
+                <option value="version">Minecraft-Version</option>
+                <option value="created">Neueste zuerst</option>
+              </select>
+            </label>
           </div>
           <div class="instance-grid" id="instance-grid"></div>
         </div>
@@ -285,148 +328,210 @@
       </div>
     </section>
 
+    <!-- ============ Addon-Store (store.ts) ============ -->
+    <section class="view" id="view-store">
+      <div class="page" id="store-root"></div>
+    </section>
+
+    <!-- ============ Freunde & Nachrichten (friends.ts) ============ -->
+    <section class="view" id="view-friends">
+      <div class="page friends-page" id="friends-root"></div>
+    </section>
+
+    <!-- ============ Skins & Capes (profile.ts) ============ -->
+    <section class="view" id="view-profile">
+      <div class="page" id="profile-root"></div>
+    </section>
+
     <!-- ============ Einstellungen ============ -->
     <section class="view" id="view-settings">
-      <div class="page">
+      <div class="page settings-page" id="settings-page">
         <div class="page-head">
           <h2 class="page-title">Einstellungen</h2>
           <p class="page-sub">Gelten für alle Instanzen. Änderungen werden sofort gespeichert.</p>
         </div>
-        <div class="cards">
-          <div class="card">
-            <div class="card-head">
-              <div class="card-icon"><svg data-icon="chip"></svg></div>
-              <div><h3>Arbeitsspeicher</h3><p class="hint">Standard für alle Instanzen.</p></div>
-            </div>
-            <div class="memory-display"><output id="memory-value">4 GB</output><span class="memory-badge" id="memory-badge">Empfohlen</span></div>
-            <input type="range" id="memory-range" min="1024" step="512">
-            <div class="range-scale"><span>1 GB</span><span id="memory-max-label"></span></div>
-          </div>
-
-          <div class="card">
-            <div class="card-head">
-              <div class="card-icon"><svg data-icon="performance"></svg></div>
-              <div><h3>Leistung</h3><p class="hint">Grafik-API und Java-Einstellungen für mehr FPS.</p></div>
-            </div>
-            <div class="stack">
-              <span>Grafik-API</span>
-              <div class="chip-toggle segmented" id="graphics-api">
-                <button data-api="vulkan">Vulkan</button>
-                <button data-api="default">Automatisch</button>
-                <button data-api="opengl">OpenGL</button>
+        <div class="settings-layout">
+          <nav class="settings-nav" id="settings-nav" aria-label="Bereiche der Einstellungen">
+            <button type="button" data-target="set-spiel" class="active"><svg data-icon="monitor"></svg><span>Spiel</span></button>
+            <button type="button" data-target="set-leistung"><svg data-icon="performance"></svg><span>Leistung &amp; Java</span></button>
+            <button type="button" data-target="set-freunde"><svg data-icon="friends"></svg><span>Freunde &amp; Discord</span></button>
+            <button type="button" data-target="set-updates"><svg data-icon="download"></svg><span>Updates &amp; Daten</span></button>
+            <button type="button" data-target="set-erweitert"><svg data-icon="info"></svg><span>Über HeldixClient</span></button>
+          </nav>
+          <div class="settings-content">
+            <section class="settings-group" id="set-spiel">
+              <h3 class="settings-group-title">Spiel</h3>
+              <div class="cards">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-icon"><svg data-icon="chip"></svg></div>
+                  <div><h3>Arbeitsspeicher</h3><p class="hint">Standard für alle Instanzen.</p></div>
+                </div>
+                <div class="memory-display"><output id="memory-value">4 GB</output><span class="memory-badge" id="memory-badge">Empfohlen</span></div>
+                <input type="range" id="memory-range" min="1024" step="512">
+                <div class="range-scale"><span>1 GB</span><span id="memory-max-label"></span></div>
               </div>
-              <p class="hint" id="graphics-hint"></p>
-            </div>
-            <label class="toggle-row">
-              <span>Optimierte Java-Einstellungen<small class="toggle-sub">G1 mit kurzen Pausen, kompakte Objekt-Header ab Java 25</small></span>
-              <input type="checkbox" class="switch" id="jvm-tuning-toggle">
-            </label>
-          </div>
 
-          <div class="card">
-            <div class="card-head">
-              <div class="card-icon"><svg data-icon="monitor"></svg></div>
-              <div><h3>Spiel</h3><p class="hint">Fenster und Verhalten beim Start.</p></div>
-            </div>
-            <label class="toggle-row">
-              <span>Eigene Fenstergröße</span>
-              <input type="checkbox" class="switch" id="resolution-toggle">
-            </label>
-            <div class="inline-inputs" id="resolution-inputs">
-              <input type="number" id="res-width" min="320" max="7680" placeholder="1280"> <span>×</span>
-              <input type="number" id="res-height" min="240" max="4320" placeholder="720">
-            </div>
-            <label class="toggle-row">
-              <span>Launcher beim Spielstart ausblenden</span>
-              <input type="checkbox" class="switch" id="hide-toggle">
-            </label>
-          </div>
-
-          <div class="card">
-            <div class="card-head">
-              <div class="card-icon discord"><svg data-icon="chat"></svg></div>
-              <div><h3>Discord</h3><p class="hint">Zeigt Freunden in Discord, was du gerade spielst.</p></div>
-            </div>
-            <label class="toggle-row">
-              <span>Discord-Status anzeigen</span>
-              <input type="checkbox" class="switch" id="discord-toggle">
-            </label>
-            <label class="toggle-row" id="discord-server-row">
-              <span>Server anzeigen<small class="toggle-sub">nur öffentliche Server wie hypixel.net, nie IP-Adressen</small></span>
-              <input type="checkbox" class="switch" id="discord-server-toggle">
-            </label>
-            <div class="discord-status" id="discord-status"><span class="discord-dot"></span><span id="discord-status-text"></span></div>
-          </div>
-
-          <div class="card">
-            <div class="card-head">
-              <div class="card-icon"><svg data-icon="download"></svg></div>
-              <div><h3>Updates</h3><p class="hint">Neue Versionen des Launchers kommen über heldixclient.com.</p></div>
-            </div>
-            <label class="toggle-row">
-              <span>Automatisch aktualisieren<small class="toggle-sub">im Hintergrund laden, beim Beenden installieren</small></span>
-              <input type="checkbox" class="switch" id="update-toggle">
-            </label>
-            <div class="discord-status" id="update-status"><span class="discord-dot"></span><span id="update-status-text"></span></div>
-            <ul class="update-notes" id="update-notes" hidden></ul>
-            <div class="button-row">
-              <button class="ghost" id="update-check" type="button"><svg data-icon="refresh" class="btn-icon"></svg>Nach Updates suchen</button>
-              <button class="primary" id="update-install" type="button" hidden><svg data-icon="download" class="btn-icon"></svg>Neu starten und installieren</button>
-              <button class="ghost" id="open-versions" type="button"><svg data-icon="external" class="btn-icon"></svg>Versionsverlauf</button>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-head">
-              <div class="card-icon"><svg data-icon="cup"></svg></div>
-              <div><h3>Java</h3><p class="hint">Leer lassen: Der Launcher nimmt automatisch die passende Version.</p></div>
-            </div>
-            <label class="stack">
-              <span>Java-Pfad</span>
-              <input type="text" id="java-path" placeholder="Automatisch (empfohlen)" spellcheck="false">
-            </label>
-            <label class="stack">
-              <span>Zusätzliche JVM-Argumente</span>
-              <input type="text" id="jvm-args" placeholder="-XX:+UseZGC" spellcheck="false">
-            </label>
-          </div>
-
-          <div class="card">
-            <div class="card-head">
-              <div class="card-icon"><svg data-icon="code"></svg></div>
-              <div><h3>Entwickler</h3><p class="hint">Werkzeuge für die Entwicklung von HeldixClient.</p></div>
-            </div>
-            <label class="toggle-row">
-              <span>Entwickleroptionen<small class="toggle-sub">Offline-Konten ohne Microsoft-Konto – nur auf PCs mit Entwickler-Schlüssel</small></span>
-              <input type="checkbox" class="switch" id="developer-toggle">
-            </label>
-            <div class="dev-panel" id="dev-panel" hidden>
-              <div class="discord-status" id="dev-status"><span class="discord-dot"></span><span id="dev-status-text"></span></div>
-              <div class="dev-code">
-                <span>PC-Kennung</span>
-                <code id="dev-machine"></code>
-                <button class="ghost small" id="dev-copy" type="button">Kopieren</button>
-                <button class="ghost small" id="dev-recheck" type="button">Neu prüfen</button>
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-icon"><svg data-icon="monitor"></svg></div>
+                  <div><h3>Spiel</h3><p class="hint">Fenster und Verhalten beim Start.</p></div>
+                </div>
+                <label class="toggle-row">
+                  <span>Eigene Fenstergröße</span>
+                  <input type="checkbox" class="switch" id="resolution-toggle">
+                </label>
+                <div class="inline-inputs" id="resolution-inputs">
+                  <input type="number" id="res-width" min="320" max="7680" placeholder="1280"> <span>×</span>
+                  <input type="number" id="res-height" min="240" max="4320" placeholder="720">
+                </div>
+                <label class="toggle-row">
+                  <span>Launcher beim Spielstart ausblenden</span>
+                  <input type="checkbox" class="switch" id="hide-toggle">
+                </label>
               </div>
-              <button class="ghost" id="dev-import" type="button">Schlüssel importieren …</button>
-            </div>
-          </div>
+              </div>
+            </section>
 
-          <div class="card wide">
-            <div class="card-head">
-              <div class="card-icon"><svg data-icon="folder"></svg></div>
-              <div><h3>Launcher-Daten</h3><p class="hint">Minecraft-Dateien, Java und alle Instanzen.</p></div>
-              <button class="ghost card-head-action" data-folder="data"><svg data-icon="external" class="btn-icon"></svg>Datenordner öffnen</button>
-            </div>
-            <p class="hint mono" id="data-dir"></p>
-          </div>
-        </div>
+            <section class="settings-group" id="set-leistung">
+              <h3 class="settings-group-title">Leistung &amp; Java</h3>
+              <div class="cards">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-icon"><svg data-icon="performance"></svg></div>
+                  <div><h3>Leistung</h3><p class="hint">Grafik-API und Java-Einstellungen für mehr FPS.</p></div>
+                </div>
+                <div class="stack">
+                  <span>Grafik-API</span>
+                  <div class="chip-toggle segmented" id="graphics-api">
+                    <button data-api="vulkan">Vulkan</button>
+                    <button data-api="default">Automatisch</button>
+                    <button data-api="opengl">OpenGL</button>
+                  </div>
+                  <p class="hint" id="graphics-hint"></p>
+                </div>
+                <label class="toggle-row">
+                  <span>Optimierte Java-Einstellungen<small class="toggle-sub">G1 mit kurzen Pausen, kompakte Objekt-Header ab Java 25</small></span>
+                  <input type="checkbox" class="switch" id="jvm-tuning-toggle">
+                </label>
+              </div>
 
-        <div class="about">
-          <img src="logo.svg" alt="" class="about-logo">
-          <div>
-            <div class="about-name">HeldixClient <span id="about-version"></span></div>
-            <div class="about-text" id="about-text"></div>
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-icon"><svg data-icon="cup"></svg></div>
+                  <div><h3>Java</h3><p class="hint">Leer lassen: Der Launcher nimmt automatisch die passende Version.</p></div>
+                </div>
+                <label class="stack">
+                  <span>Java-Pfad</span>
+                  <input type="text" id="java-path" placeholder="Automatisch (empfohlen)" spellcheck="false">
+                </label>
+                <label class="stack">
+                  <span>Zusätzliche JVM-Argumente</span>
+                  <input type="text" id="jvm-args" placeholder="-XX:+UseZGC" spellcheck="false">
+                </label>
+              </div>
+              </div>
+            </section>
+
+            <section class="settings-group" id="set-freunde">
+              <h3 class="settings-group-title">Freunde &amp; Discord</h3>
+              <div class="cards">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-icon"><svg data-icon="friends"></svg></div>
+                  <div><h3>Freunde &amp; Nachrichten</h3><p class="hint">Über den Heldix-Dienst, nur mit Microsoft-Konto.</p></div>
+                </div>
+                <label class="toggle-row">
+                  <span>Freunde im Launcher<small class="toggle-sub">Freundesliste, Anfragen und Chat; aktualisiert sich alle 20 Sekunden</small></span>
+                  <input type="checkbox" class="switch" id="social-toggle">
+                </label>
+                <label class="toggle-row" id="social-notify-row">
+                  <span>Benachrichtigungen<small class="toggle-sub">bei neuen Nachrichten und Anfragen, wenn der Launcher im Hintergrund ist</small></span>
+                  <input type="checkbox" class="switch" id="social-notify-toggle">
+                </label>
+                <div class="button-row">
+                  <button class="ghost" id="social-open" type="button"><svg data-icon="shield" class="btn-icon"></svg>Freunde &amp; Privatsphäre</button>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-icon discord"><svg data-icon="chat"></svg></div>
+                  <div><h3>Discord</h3><p class="hint">Zeigt Freunden in Discord, was du gerade spielst.</p></div>
+                </div>
+                <label class="toggle-row">
+                  <span>Discord-Status anzeigen</span>
+                  <input type="checkbox" class="switch" id="discord-toggle">
+                </label>
+                <label class="toggle-row" id="discord-server-row">
+                  <span>Server anzeigen<small class="toggle-sub">nur öffentliche Server wie hypixel.net, nie IP-Adressen</small></span>
+                  <input type="checkbox" class="switch" id="discord-server-toggle">
+                </label>
+                <div class="discord-status" id="discord-status"><span class="discord-dot"></span><span id="discord-status-text"></span></div>
+              </div>
+              </div>
+            </section>
+
+            <section class="settings-group" id="set-updates">
+              <h3 class="settings-group-title">Updates &amp; Daten</h3>
+              <div class="cards">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-icon"><svg data-icon="addons"></svg></div>
+                  <div><h3>Heldix-Addons</h3><p class="hint">Updates aus dem Addon-Store für alle Instanzen.</p></div>
+                </div>
+                <label class="toggle-row">
+                  <span>Addon-Updates melden<small class="toggle-sub">Benachrichtigung, wenn es für installierte Addons eine neue Version gibt</small></span>
+                  <input type="checkbox" class="switch" id="addon-notify-toggle">
+                </label>
+                <label class="toggle-row">
+                  <span>Automatisch aktualisieren<small class="toggle-sub">installiert Addon-Updates, sobald kein Spiel läuft</small></span>
+                  <input type="checkbox" class="switch" id="addon-auto-toggle">
+                </label>
+                <div class="button-row">
+                  <button class="ghost" id="addon-store-open" type="button"><svg data-icon="addons" class="btn-icon"></svg>Zum Addon-Store</button>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-icon"><svg data-icon="download"></svg></div>
+                  <div><h3>Updates</h3><p class="hint">Neue Versionen des Launchers kommen über heldixclient.com.</p></div>
+                </div>
+                <label class="toggle-row">
+                  <span>Automatisch aktualisieren<small class="toggle-sub">im Hintergrund laden, beim Beenden installieren</small></span>
+                  <input type="checkbox" class="switch" id="update-toggle">
+                </label>
+                <div class="discord-status" id="update-status"><span class="discord-dot"></span><span id="update-status-text"></span></div>
+                <ul class="update-notes" id="update-notes" hidden></ul>
+                <div class="button-row">
+                  <button class="ghost" id="update-check" type="button"><svg data-icon="refresh" class="btn-icon"></svg>Nach Updates suchen</button>
+                  <button class="primary" id="update-install" type="button" hidden><svg data-icon="download" class="btn-icon"></svg>Neu starten und installieren</button>
+                  <button class="ghost" id="open-versions" type="button"><svg data-icon="external" class="btn-icon"></svg>Versionsverlauf</button>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-icon"><svg data-icon="folder"></svg></div>
+                  <div><h3>Launcher-Daten</h3><p class="hint">Minecraft-Dateien, Java und alle Instanzen.</p></div>
+                  <button class="ghost card-head-action" data-folder="data"><svg data-icon="external" class="btn-icon"></svg>Datenordner öffnen</button>
+                </div>
+                <p class="hint mono" id="data-dir"></p>
+              </div>
+              </div>
+            </section>
+
+            <section class="settings-group" id="set-erweitert">
+              <h3 class="settings-group-title">Über HeldixClient</h3>
+              <div class="about">
+                <img src="logo.svg" alt="" class="about-logo">
+                <div>
+                  <div class="about-name">HeldixClient <span id="about-version"></span></div>
+                  <div class="about-text" id="about-text"></div>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
       </div>
@@ -438,17 +543,30 @@
         <div class="console-header">
           <div class="page-head">
             <h2 class="page-title">Konsole</h2>
-            <p class="page-sub">Ausgabe von Launcher und Spiel.</p>
+            <p class="page-sub" id="console-sub">Ausgabe von Launcher und Spiel.</p>
           </div>
           <div class="button-row">
-            <div class="chip-toggle" id="log-filter">
-              <button data-filter="all" class="active">Alles</button>
-              <button data-filter="problems">Warnungen &amp; Fehler</button>
-            </div>
-            <button class="ghost icon-text" id="copy-log"><svg data-icon="copy" class="btn-icon"></svg>Kopieren</button>
-            <button class="ghost" id="clear-log"><svg data-icon="trash" class="btn-icon"></svg>Leeren</button>
+            <button class="ghost" id="crash-last" type="button" hidden><svg data-icon="warning" class="btn-icon"></svg>Letzter Absturz</button>
+            <button class="ghost" id="log-folder" type="button" title="Logs-Ordner der Instanz öffnen"><svg data-icon="folder" class="btn-icon"></svg>Logs-Ordner</button>
             <button class="danger" id="kill-game" disabled><svg data-icon="close" class="btn-icon"></svg>Spiel beenden</button>
           </div>
+        </div>
+        <div class="console-toolbar">
+          <div class="search-field">
+            <svg data-icon="search"></svg>
+            <input type="text" id="log-search" placeholder="Im Log suchen …" spellcheck="false">
+          </div>
+          <div class="chip-toggle" id="log-filter">
+            <button data-filter="all" class="active">Alles</button>
+            <button data-filter="problems">Warnungen &amp; Fehler</button>
+            <button data-filter="launcher">Launcher</button>
+          </div>
+          <span class="content-count" id="log-count"></span>
+          <label class="console-follow" title="Bei neuen Zeilen automatisch ans Ende springen">
+            <input type="checkbox" class="switch" id="log-follow" checked><span>Mitlaufen</span>
+          </label>
+          <button class="ghost icon-text" id="copy-log" title="Sichtbare Zeilen kopieren"><svg data-icon="copy" class="btn-icon"></svg>Kopieren</button>
+          <button class="ghost" id="clear-log"><svg data-icon="trash" class="btn-icon"></svg>Leeren</button>
         </div>
         <div class="log" id="log"><div class="log-empty">
           <svg data-icon="terminal"></svg>
@@ -564,21 +682,25 @@
   </div>
 
   <!-- ============ Konten ============ -->
-  <div class="popover" id="account-popover" hidden>
-    <div class="popover-title">Konten</div>
+  <div class="popover account-popover" id="account-popover" hidden>
+    <div class="account-current" id="account-current"></div>
+    <div class="popover-links" id="account-links" hidden>
+      <button class="ghost small" id="account-skins" type="button"><svg data-icon="cape" class="btn-icon"></svg>Skins &amp; Capes</button>
+      <button class="ghost small" id="account-friends" type="button"><svg data-icon="friends" class="btn-icon"></svg>Freunde</button>
+      <button class="ghost small" id="open-web-account" type="button" title="Profil, Freunde und Nachrichten auf heldixclient.com – ohne Passwort"><svg data-icon="external" class="btn-icon"></svg>Web-Konto</button>
+    </div>
+    <div class="popover-title" id="account-others-title" hidden>Weitere Konten</div>
     <div class="account-list" id="account-list"></div>
-    <button class="ghost full" id="open-web-account" type="button"><svg data-icon="external" class="btn-icon"></svg>Auf heldixclient.com anmelden</button>
-    <p class="hint small">Profil, Freunde und Nachrichten im Browser – ohne Passwort.</p>
-    <button class="ghost full" id="open-support" type="button"><svg data-icon="chat" class="btn-icon"></svg>Hilfe &amp; Support</button>
-    <button class="primary full" id="add-microsoft"><svg data-icon="microsoft" class="btn-icon"></svg>Mit Microsoft anmelden</button>
+    <button class="primary full" id="add-microsoft" type="button"><svg data-icon="microsoft" class="btn-icon"></svg><span id="add-microsoft-label">Mit Microsoft anmelden</span></button>
     <p class="hint small" id="ms-hint" hidden>Für den Microsoft-Login fehlt noch die Azure-Client-ID (siehe README).</p>
-    <button class="ghost full" id="add-launcher"><svg data-icon="external" class="btn-icon"></svg>Über Minecraft Launcher anmelden</button>
-    <p class="hint small launcher-hint">Alternative: Der offizielle Minecraft Launcher meldet dich an, gespielt wird mit HeldixClient.</p>
-    <form class="offline-form" id="offline-form">
+    <form class="offline-form" id="offline-form" hidden>
       <input type="text" id="offline-name" placeholder="Spielername" maxlength="16" spellcheck="false">
       <button class="ghost" type="submit">Offline</button>
     </form>
-    <p class="hint small offline-hint" id="offline-hint"></p>
+    <p class="hint small offline-hint" id="offline-hint" hidden>Nur in der Entwicklungsversion: Offline-Konten für Einzelspieler, LAN und Server ohne Online-Modus.</p>
+    <div class="popover-footer">
+      <button class="popover-link" id="open-support" type="button"><svg data-icon="chat" class="btn-icon"></svg>Hilfe &amp; Support</button>
+    </div>
   </div>
 
   <div class="toasts" id="toasts"></div>

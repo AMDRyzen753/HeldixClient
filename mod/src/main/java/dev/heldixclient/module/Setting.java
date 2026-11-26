@@ -44,6 +44,26 @@ public sealed interface Setting {
 	record Action(String label, String description, String button, Runnable run) implements Setting {
 	}
 
+	/** Farbe (ARGB): Klick klappt eine Palette auf; die Standardfarbe steht immer darin. */
+	record Color(String label, String description, int defaultColor, IntSupplier get, IntConsumer set) implements Setting {
+		/** Heldix-Farben und ein paar kräftige Töne (deckend) */
+		public static final List<Integer> PALETTE = List.of(0xFF3B82F6, 0xFF93C5FD, 0xFF22D3EE, 0xFF2DD4BF, 0xFF34D399, 0xFF1DB954,
+				0xFFA3E635, 0xFFFBBF24, 0xFFFB923C, 0xFFF87171, 0xFFF472B6, 0xFFC084FC, 0xFF8B5CF6, 0xFFFFFFFF, 0xFF9BA6B8, 0xFF4B5563);
+
+		/** Palette mit der Standardfarbe vorne (falls sie nicht ohnehin darin vorkommt) */
+		public List<Integer> palette() {
+			if (PALETTE.contains(defaultColor)) return PALETTE;
+			List<Integer> colors = new java.util.ArrayList<>(PALETTE.size() + 1);
+			colors.add(defaultColor);
+			colors.addAll(PALETTE);
+			return colors;
+		}
+	}
+
+	/** Eine Zeile Text (Eingabefeld unter der Beschriftung). */
+	record Text(String label, String description, int maxLength, java.util.function.Supplier<String> get, Consumer<String> set) implements Setting {
+	}
+
 	/** Prozentanzeige für Regler von 0 bis 1. */
 	static String percent(double value) {
 		return Math.round(value * 100) + " %";

@@ -8,7 +8,7 @@ const from = path.join(root, 'src', 'renderer');
 const to = path.join(root, 'dist', 'renderer');
 
 await mkdir(to, { recursive: true });
-for (const file of ['index.html', 'styles.css', 'instances.css', 'home.css', 'logo.svg', 'background.svg']) {
+for (const file of ['index.html', 'styles.css', 'instances.css', 'home.css', 'store.css', 'friends.css', 'profile.css', 'logo.svg', 'background.svg']) {
   await cp(path.join(from, file), path.join(to, file));
 }
 
@@ -26,3 +26,8 @@ await cp(path.join(root, 'node_modules', 'skinview3d', 'bundles', 'skinview3d.bu
 // Lizenztexte der eingebetteten Bibliotheken (MIT verlangt, dass sie mitgeliefert werden)
 await cp(path.join(root, 'node_modules', 'skinview3d', 'LICENSE'), path.join(to, 'vendor', 'skinview3d.LICENSE.txt'));
 await cp(path.join(root, 'node_modules', 'three', 'LICENSE'), path.join(to, 'vendor', 'three.LICENSE.txt'));
+
+// Heldix-Capes für „Skins & Capes“ (dieselben Bilder wie in der Client-Mod, siehe scripts/render-capes.mjs)
+const capesFrom = path.join(root, '..', 'mod', 'src', 'main', 'resources', 'assets', 'heldixclient', 'textures', 'cape');
+await mkdir(path.join(to, 'capes'), { recursive: true });
+await cp(capesFrom, path.join(to, 'capes'), { recursive: true });

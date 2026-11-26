@@ -1,10 +1,10 @@
 // Spotify-Addon: zeigt den laufenden Song im HUD und steuert die Wiedergabe per Taste.
-// Braucht nur die Heldix-API (ab Version 2), kein Minecraft und kein Spotify-Konto.
+// Braucht nur die Heldix-API (ab Version 3), kein Minecraft und kein Spotify-Konto.
 plugins {
 	id 'java'
 }
 
-version = '1.0.0'
+version = '2.0.0'
 
 base {
 	archivesName = 'heldix-addon-spotify'

@@ -248,10 +248,69 @@ public final class Hooks {
 		return ModuleManager.chat != null && ModuleManager.chat.click(event);
 	}
 
-	/** PlayerTabOverlay.getNameForDisplay: Heldix-Symbol vor HeldixClient-Spielern. */
+	/** ChatScreen.handleChatInput: true = Addon-Befehl („.np“) ausgeführt, nichts an den Server senden. */
+	public static boolean chatInput(String message, boolean addToHistory) {
+		try {
+			return dev.heldixclient.addon.AddonManager.handleChatInput(message, addToHistory);
+		} catch (RuntimeException e) {
+			HeldixClient.LOGGER.warn("Addon-Befehl fehlgeschlagen", e);
+			// lieber nichts senden als einen halben Befehl öffentlich in den Chat
+			return message != null && message.strip().startsWith(dev.heldixclient.addon.AddonCommands.PREFIX);
+		}
+	}
+
+	/** ChatScreen.keyPressed: Tab ergänzt Addon-Befehle. true = Taste verbraucht. */
+	public static boolean chatKey(net.minecraft.client.gui.components.EditBox input, net.minecraft.client.input.KeyEvent event) {
+		if (event.key() != InputConstants.KEY_TAB || input == null) return false;
+		try {
+			String completed = dev.heldixclient.addon.AddonCommands.complete(input.getValue());
+			if (completed == null) return false;
+			input.setValue(completed);
+			return true;
+		} catch (RuntimeException e) {
+			HeldixClient.LOGGER.warn("Ergänzen im Chat fehlgeschlagen", e);
+			return false;
+		}
+	}
+
+	/** ChatScreen.extractRenderState: passende Addon-Befehle über dem Eingabefeld. */
+	public static void chatHints(net.minecraft.client.gui.components.EditBox input, GuiGraphicsExtractor g) {
+		if (input == null) return;
+		try {
+			dev.heldixclient.addon.AddonCommands.hints(g, input.getValue(), input.getX() - 2, input.getY() - 2);
+		} catch (RuntimeException e) {
+			HeldixClient.LOGGER.debug("Befehls-Vorschläge im Chat fehlgeschlagen", e);
+		}
+	}
+
+	/** PlayerTabOverlay.getNameForDisplay: Heldix-Symbol (je nach Rolle) vor HeldixClient-Spielern. */
 	public static net.minecraft.network.chat.Component tabName(net.minecraft.network.chat.Component name, net.minecraft.client.multiplayer.PlayerInfo info) {
-		if (name == null || info == null || !dev.heldixclient.social.Social.isHeldix(info.getProfile().id())) return name;
-		return dev.heldixclient.social.Badge.prefix(name);
+		try {
+			return dev.heldixclient.social.BadgeDisplay.tabName(name, info);
+		} catch (RuntimeException e) {
+			HeldixClient.LOGGER.debug("Heldix-Symbol in der Tab-Liste fehlgeschlagen", e);
+			return name;
+		}
+	}
+
+	/** PlayerTabOverlay.extractRenderState (beide Lesezugriffe auf footer): Zeile „HeldixClient: … Spieler hier“ anhängen. */
+	public static net.minecraft.network.chat.Component tabFooter(net.minecraft.network.chat.Component footer) {
+		try {
+			return dev.heldixclient.social.BadgeDisplay.tabFooter(footer);
+		} catch (RuntimeException e) {
+			HeldixClient.LOGGER.debug("Fußzeile der Tab-Liste fehlgeschlagen", e);
+			return footer;
+		}
+	}
+
+	/** EntityRenderer.getNameTag: Heldix-Symbol (je nach Rolle) im Namensschild über dem Kopf anderer Spieler. */
+	public static net.minecraft.network.chat.Component nameTag(net.minecraft.network.chat.Component name, net.minecraft.world.entity.Entity entity) {
+		try {
+			return dev.heldixclient.social.BadgeDisplay.nameTag(name, entity);
+		} catch (RuntimeException e) {
+			HeldixClient.LOGGER.debug("Heldix-Symbol im Namensschild fehlgeschlagen", e);
+			return name;
+		}
 	}
 
 	/** LevelLoadingScreen/ConnectScreen: Tipp-Karte mit Spielfigur unten. */

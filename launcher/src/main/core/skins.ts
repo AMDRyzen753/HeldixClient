@@ -67,26 +67,84 @@ async function defaultSkin(paths: LauncherPaths, uuid: string): Promise<SkinInfo
   return skin;
 }
 
-/** Skin eines Kontos: eigener Skin, wenn vorhanden, sonst der passende Standard-Skin. */
-export async function skinFor(paths: LauncherPaths, account: { uuid: string; skinUrl?: string }): Promise<SkinInfo | null> {
-  if (account.skinUrl && /^https?:\/\/textures\.minecraft\.net\//.test(account.skinUrl)) {
-    const url = account.skinUrl.replace(/^http:/, 'https:');
-    const file = path.join(paths.cache, 'skins', `${createHash('sha1').update(url).digest('hex')}.png`);
+const TEXTURE_HOST = 'textures.minecraft.net';
+const MAX_TEXTURE_BYTES = 256 * 1024;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+/** Nur für Tests: zusätzlich erlaubte Loopback-Adresse für Texturen (Fake-Server statt textures.minecraft.net) */
+let testTextureOrigin: string | null = null;
+
+/** Nur Tests (Entwicklungsmodus): Texturen auch von dieser Loopback-Adresse laden, z. B. http://127.0.0.1:4567 */
+export function allowTestTextureOrigin(origin: string | null): void {
+  if (!origin) {
+    testTextureOrigin = null;
+    return;
+  }
+  const url = new URL(origin);
+  if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) throw new Error('Test-Texturen nur von einer Loopback-Adresse');
+  testTextureOrigin = url.origin;
+}
+
+/** Adresse einer Textur von Mojang (immer über HTTPS, Mojang nennt http://) oder null, wenn der Host nicht erlaubt ist. */
+export function textureUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (testTextureOrigin && url.origin === testTextureOrigin) return url.toString();
+  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.hostname !== TEXTURE_HOST || url.username || url.password) return null;
+  if (url.port !== '' && url.port !== '80' && url.port !== '443') return null;
+  url.protocol = 'https:';
+  url.port = '';
+  return url.toString();
+}
+
+export function isPng(data: Buffer): boolean {
+  return data.length > PNG_SIGNATURE.length && data.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE);
+}
+
+/**
+ * Textur von textures.minecraft.net mit Zwischenspeicher (cache/skins/<sha1(url)>.png). Texturen ändern sich unter
+ * derselben Adresse nicht; maxAgeMs bestimmt nur, wann neu geladen wird. Offline: auch ein älterer Stand. null = nicht ladbar.
+ */
+export async function cachedTexture(paths: LauncherPaths, rawUrl: string, maxAgeMs = SKIN_MAX_AGE_MS): Promise<Buffer | null> {
+  const url = textureUrl(rawUrl);
+  if (!url) return null;
+  const file = path.join(paths.cache, 'skins', `${createHash('sha1').update(url).digest('hex')}.png`);
+  const info = await stat(file).catch(() => null);
+  if (!info || Date.now() - info.mtimeMs > maxAgeMs) {
     try {
-      const info = await stat(file).catch(() => null);
-      if (!info || Date.now() - info.mtimeMs > SKIN_MAX_AGE_MS) {
-        const res = await request(url);
-        if (res.ok) {
+      const res = await request(url, { redirect: 'error', signal: AbortSignal.timeout(15_000) }, 2);
+      if (res.ok) {
+        const data = Buffer.from(await res.arrayBuffer());
+        if (data.length <= MAX_TEXTURE_BYTES && isPng(data)) {
           await mkdir(path.dirname(file), { recursive: true });
-          await writeFile(file, Buffer.from(await res.arrayBuffer()));
+          await writeFile(file, data);
+          return data;
         }
       }
-      const data = await readFile(file);
-      // Modell (schmal/breit) erkennt die 3D-Ansicht selbst am Bild
-      return { dataUrl: `data:image/png;base64,${data.toString('base64')}`, slim: null, source: 'account' };
     } catch {
-      // offline und noch nicht zwischengespeichert: Standard-Skin
+      // offline: älteren Stand nehmen, falls vorhanden
     }
   }
+  const data = await readFile(file).catch(() => null);
+  return data && isPng(data) ? data : null;
+}
+
+/** Skin eines Kontos: eigener Skin, wenn vorhanden, sonst der passende Standard-Skin. */
+export async function skinFor(paths: LauncherPaths, account: { uuid: string; skinUrl?: string }): Promise<SkinInfo | null> {
+  if (account.skinUrl) {
+    const data = await cachedTexture(paths, account.skinUrl).catch(() => null);
+    // Modell (schmal/breit) erkennt die 3D-Ansicht selbst am Bild
+    if (data) return { dataUrl: `data:image/png;base64,${data.toString('base64')}`, slim: null, source: 'account' };
+    // offline und noch nicht zwischengespeichert: Standard-Skin
+  }
   return defaultSkin(paths, account.uuid);
+}
+
+/** Standard-Skin für eine UUID (aus der installierten Minecraft-JAR) */
+export async function defaultSkinInfo(paths: LauncherPaths, uuid: string): Promise<SkinInfo | null> {
+  return defaultSkin(paths, uuid);
 }

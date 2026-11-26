@@ -121,4 +121,20 @@ public abstract class Module {
 		return new Setting.Choice(label, description, options, () -> (int) option(key, (double) fallback),
 				value -> setOption(key, value));
 	}
+
+	/** Farbe, gespeichert als "#AARRGGBB" */
+	protected Setting.Color color(String key, String label, String description, int fallback) {
+		return new Setting.Color(label, description, fallback, () -> {
+			String value = state.options.get(key);
+			if (value == null || !value.matches("#[0-9A-Fa-f]{8}")) return fallback;
+			return (int) Long.parseLong(value.substring(1), 16);
+		}, value -> setOption(key, String.format("#%08X", value)));
+	}
+
+	protected Setting.Text text(String key, String label, String description, String fallback, int maxLength) {
+		return new Setting.Text(label, description, maxLength, () -> {
+			String value = state.options.get(key);
+			return value == null ? fallback : value;
+		}, value -> setOption(key, value.length() > maxLength ? value.substring(0, maxLength) : value));
+	}
 }

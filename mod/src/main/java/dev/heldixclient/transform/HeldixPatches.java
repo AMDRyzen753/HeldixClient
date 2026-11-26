@@ -3,11 +3,15 @@ package dev.heldixclient.transform;
 import dev.heldixclient.loader.api.transform.ClassTransformer;
 import dev.heldixclient.loader.api.transform.Code;
 import dev.heldixclient.loader.api.transform.Patches;
+import dev.heldixclient.loader.api.transform.PatchException;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -45,7 +49,9 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 	private static final String CHAT = "net/minecraft/client/gui/components/ChatComponent";
 	private static final String CHAT_SCREEN = "net/minecraft/client/gui/screens/ChatScreen";
 	private static final String TAB_LIST = "net/minecraft/client/gui/components/PlayerTabOverlay";
+	private static final String ENTITY_RENDERER = "net/minecraft/client/renderer/entity/EntityRenderer";
 	private static final String COMPONENT = "Lnet/minecraft/network/chat/Component;";
+	private static final String EDIT_BOX = "Lnet/minecraft/client/gui/components/EditBox;";
 	private static final String LEVEL_LOADING = "net/minecraft/client/gui/screens/LevelLoadingScreen";
 	private static final String CONNECT = "net/minecraft/client/gui/screens/ConnectScreen";
 	private static final String DELTA = "Lnet/minecraft/client/DeltaTracker;";
@@ -58,7 +64,7 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 	@Override
 	public Set<String> targets() {
 		return Set.of(CAMERA, MINECRAFT, MOUSE, GRAPHICS, SELECTION_LIST, TITLE, GAME_RENDERER, DEBUG_OVERLAY, FRAMERATE, LOADING, GUI, CLIENT_PLAYER, CAPE_LAYER,
-				HUD, ENTITY, KEYBOARD_INPUT, CHAT, CHAT_SCREEN, TAB_LIST, LEVEL_LOADING, CONNECT);
+				HUD, ENTITY, KEYBOARD_INPUT, CHAT, CHAT_SCREEN, TAB_LIST, ENTITY_RENDERER, LEVEL_LOADING, CONNECT);
 	}
 
 	@Override
@@ -129,21 +135,51 @@ public final class HeldixPatches implements ClassTransformer, Opcodes {
 						.invokeStatic(HOOKS, "chatMessage", "(L" + CHAT + ";" + COMPONENT + ")" + COMPONENT)
 						.add(new VarInsnNode(ASTORE, 1)));
 			}
-			// Chat: Strg+Klick kopiert eine Nachricht
+			// Chat: Strg+Klick kopiert eine Nachricht; Addon-Befehle („.np“) statt Senden, Tab und Vorschläge dafür
 			case CHAT_SCREEN -> {
 				MethodNode click = Patches.method(node, "mouseClicked", "(Lnet/minecraft/client/input/MouseButtonEvent;Z)Z");
 				Patches.head(click, Code.begin().loadArg(click, 0)
 						.invokeStatic(HOOKS, "chatClick", "(Lnet/minecraft/client/input/MouseButtonEvent;)Z")
 						.ifTrue(Code.begin().insn(ICONST_1).insn(IRETURN)));
+				MethodNode input = Patches.method(node, "handleChatInput", "(Ljava/lang/String;Z)V");
+				Patches.cancelAtHead(input, Code.begin().loadArgs(input, 0, 1).invokeStatic(HOOKS, "chatInput", "(Ljava/lang/String;Z)Z"));
+				MethodNode key = Patches.method(node, "keyPressed", "(Lnet/minecraft/client/input/KeyEvent;)Z");
+				Patches.head(key, Code.begin().loadThis().getField(CHAT_SCREEN, "input", EDIT_BOX).loadArg(key, 0)
+						.invokeStatic(HOOKS, "chatKey", "(" + EDIT_BOX + "Lnet/minecraft/client/input/KeyEvent;)Z")
+						.ifTrue(Code.begin().insn(ICONST_1).insn(IRETURN)));
+				MethodNode render = Patches.method(node, "extractRenderState", "(" + G + "IIF)V");
+				Patches.tail(render, Code.begin().loadThis().getField(CHAT_SCREEN, "input", EDIT_BOX).loadArg(render, 0)
+						.invokeStatic(HOOKS, "chatHints", "(" + EDIT_BOX + G + ")V"));
 			}
-			// Tab-Liste: Heldix-Symbol vor dem Namen von HeldixClient-Spielern
-			case TAB_LIST -> {
-				MethodNode name = Patches.method(node, "getNameForDisplay", "(Lnet/minecraft/client/multiplayer/PlayerInfo;)" + COMPONENT);
-				Patches.beforeReturns(name, () -> Code.begin().loadArg(name, 0)
-						.invokeStatic(HOOKS, "tabName", "(" + COMPONENT + "Lnet/minecraft/client/multiplayer/PlayerInfo;)" + COMPONENT));
+			case TAB_LIST -> tabList(node);
+			// Namensschild über dem Kopf: Heldix-Symbol vor dem Namen. getNameTag wird nur gefragt, wenn Minecraft das
+			// Schild überhaupt zeigt (nicht unsichtbar, nicht vom Server über Teams ausgeblendet); mit F1 lässt der Hook
+			// das Symbol weg. Schleichen macht Minecraft das ganze Schild blass, das Symbol eingeschlossen.
+			case ENTITY_RENDERER -> {
+				MethodNode nameTag = Patches.method(node, "getNameTag", "(L" + ENTITY + ";)" + COMPONENT);
+				Patches.beforeReturns(nameTag, () -> Code.begin().loadArg(nameTag, 0)
+						.invokeStatic(HOOKS, "nameTag", "(" + COMPONENT + "L" + ENTITY + ";)" + COMPONENT));
 			}
 			default -> {
 			}
+		}
+	}
+
+	/**
+	 * Tab-Liste: Heldix-Symbol vor dem Namen von HeldixClient-Spielern und die Zeile „HeldixClient: … Spieler hier“
+	 * unter der Fußzeile des Servers (jedes Lesen von {@code footer} beim Zeichnen geht durch den Hook).
+	 */
+	private static void tabList(ClassNode node) {
+		MethodNode name = Patches.method(node, "getNameForDisplay", "(Lnet/minecraft/client/multiplayer/PlayerInfo;)" + COMPONENT);
+		Patches.beforeReturns(name, () -> Code.begin().loadArg(name, 0)
+				.invokeStatic(HOOKS, "tabName", "(" + COMPONENT + "Lnet/minecraft/client/multiplayer/PlayerInfo;)" + COMPONENT));
+		MethodNode render = Patches.method(node, "extractRenderState",
+				"(" + G + "ILnet/minecraft/world/scores/Scoreboard;Lnet/minecraft/world/scores/Objective;)V");
+		List<AbstractInsnNode> reads = Patches.find(render, insn -> insn instanceof FieldInsnNode field && field.getOpcode() == GETFIELD
+				&& field.owner.equals(TAB_LIST) && field.name.equals("footer"));
+		if (reads.isEmpty()) throw new PatchException(TAB_LIST + ".extractRenderState liest footer nicht");
+		for (AbstractInsnNode read : reads) {
+			render.instructions.insert(read, Code.begin().invokeStatic(HOOKS, "tabFooter", "(" + COMPONENT + ")" + COMPONENT).build());
 		}
 	}
 

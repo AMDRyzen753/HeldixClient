@@ -50,3 +50,39 @@ export class RateLimiter {
     }
   }
 }
+
+/**
+ * Höchstens `max` Dinge gleichzeitig (z. B. Uploads oder das Prüfen von JARs). `tryAcquire` sagt sofort nein,
+ * `acquire` wartet auf einen freien Platz. Beide liefern eine Funktion zum Freigeben (einmal aufrufen).
+ */
+export class Slots {
+  private used = 0;
+  private readonly waiting: (() => void)[] = [];
+
+  constructor(private readonly max: number) {}
+
+  tryAcquire(): (() => void) | null {
+    if (this.used >= this.max) return null;
+    this.used++;
+    return this.releaser();
+  }
+
+  async acquire(): Promise<() => void> {
+    const release = this.tryAcquire();
+    if (release) return release;
+    await new Promise<void>((resolve) => this.waiting.push(resolve));
+    // Der Platz wurde beim Freigeben direkt weitergegeben.
+    return this.releaser();
+  }
+
+  private releaser(): () => void {
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      const next = this.waiting.shift();
+      if (next) next();
+      else this.used--;
+    };
+  }
+}

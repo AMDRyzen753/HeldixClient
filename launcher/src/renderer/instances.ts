@@ -21,6 +21,7 @@ import {
   toast,
   uiIcon,
 } from './core.js';
+import { openStoreAddon } from './store.js';
 
 const COLORS = ['#3b82f6', '#06b6d4', '#10b981', '#8b5cf6', '#f59e0b', '#f43f5e'];
 export type DetailTab = 'mods' | 'addons' | 'shaders' | 'settings';
@@ -44,7 +45,10 @@ export function initInstances(showView: (view: string) => void): void {
     button.addEventListener('click', () => switchTab(button.dataset.tab as DetailTab)));
   $('#content-filter').addEventListener('input', renderContent);
   $('#content-add-file').addEventListener('click', () => addFiles());
-  $('#content-browse').addEventListener('click', () => openModrinth('mods'));
+  $('#content-browse').addEventListener('click', () => {
+    if (detailTab === 'addons') showView('store');
+    else openModrinth('mods');
+  });
   $('#content-perf').addEventListener('click', () => void installPerformance());
   $('#shader-browse').addEventListener('click', () => openModrinth('shaders'));
   $('#shader-folder').addEventListener('click', () => detailId && api.openFolder('shaderpacks', detailId));
@@ -62,6 +66,7 @@ export function initInstances(showView: (view: string) => void): void {
   setupNewInstanceModal();
   setupModrinthModal();
   setupSettingsTab();
+  setupInstancesToolbar();
   on('instances', () => {
     renderGrid();
     if (detailId) renderDetailHead();
@@ -89,10 +94,98 @@ export async function launchInstance(
 
 // ---------- Übersicht ----------
 
+type InstanceFilter = 'all' | 'heldix' | 'fabric' | 'vanilla';
+type InstanceSort = 'recent' | 'name' | 'version' | 'created';
+let instanceFilter: InstanceFilter = 'all';
+let instanceQuery = '';
+let instanceSort: InstanceSort = (() => {
+  try {
+    const saved = localStorage.getItem('heldix.instanceSort');
+    return saved === 'name' || saved === 'version' || saved === 'created' ? saved : 'recent';
+  } catch {
+    return 'recent';
+  }
+})();
+
+/** Minecraft-Versionen wie 26.3 oder 1.21.11 zahlenweise vergleichen (neueste zuerst) */
+function compareMinecraft(a: string, b: string): number {
+  const x = a.split(/[.\-]/).map((p) => Number.parseInt(p, 10) || 0);
+  const y = b.split(/[.\-]/).map((p) => Number.parseInt(p, 10) || 0);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const diff = (y[i] ?? 0) - (x[i] ?? 0);
+    if (diff) return diff;
+  }
+  return 0;
+}
+
+function filteredInstances(): InstanceInfo[] {
+  const query = instanceQuery.toLowerCase();
+  const list = state.instances.filter((instance) => {
+    if (instanceFilter === 'heldix' && !instance.heldixClient) return false;
+    if ((instanceFilter === 'fabric' || instanceFilter === 'vanilla') && instance.loader !== instanceFilter) return false;
+    return !query || instance.name.toLowerCase().includes(query) || instance.minecraft.includes(query) || LOADER_LABELS[instance.loader].toLowerCase().includes(query);
+  });
+  return list.sort((a, b) => {
+    switch (instanceSort) {
+      case 'name': return a.name.localeCompare(b.name, 'de');
+      case 'version': return compareMinecraft(a.minecraft, b.minecraft) || a.name.localeCompare(b.name, 'de');
+      case 'created': return b.created - a.created;
+      default: return (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0) || b.created - a.created;
+    }
+  });
+}
+
+function setupInstancesToolbar(): void {
+  const search = $<HTMLInputElement>('#instance-search');
+  search.addEventListener('input', () => {
+    instanceQuery = search.value.trim();
+    renderGrid();
+  });
+  document.querySelectorAll<HTMLButtonElement>('#instance-filter button').forEach((button) => {
+    button.addEventListener('click', () => {
+      instanceFilter = button.dataset.filter as InstanceFilter;
+      document.querySelectorAll('#instance-filter button').forEach((b) => b.classList.toggle('active', b === button));
+      renderGrid();
+    });
+  });
+  const sort = $<HTMLSelectElement>('#instance-sort');
+  sort.value = instanceSort;
+  sort.addEventListener('change', () => {
+    instanceSort = sort.value as InstanceSort;
+    try {
+      localStorage.setItem('heldix.instanceSort', instanceSort);
+    } catch {
+      // nur Komfort
+    }
+    renderGrid();
+  });
+}
+
 function renderGrid(): void {
   const grid = $('#instance-grid');
   grid.textContent = '';
-  for (const instance of state.instances) {
+  // Werkzeugleiste erst ab zwei Instanzen; Filter mit Anzahl, leere Filter ausblenden
+  $('#instances-toolbar').hidden = state.instances.length < 2;
+  const counts: Record<InstanceFilter, number> = {
+    all: state.instances.length,
+    heldix: state.instances.filter((i) => i.heldixClient).length,
+    fabric: state.instances.filter((i) => i.loader === 'fabric').length,
+    vanilla: state.instances.filter((i) => i.loader === 'vanilla').length,
+  };
+  document.querySelectorAll<HTMLButtonElement>('#instance-filter button').forEach((button) => {
+    const key = button.dataset.filter as InstanceFilter;
+    button.hidden = key !== 'all' && counts[key] === 0;
+    button.textContent = `${{ all: 'Alle', heldix: 'HeldixClient', fabric: 'Fabric', vanilla: 'Vanilla' }[key]} ${counts[key]}`;
+  });
+  if (instanceFilter !== 'all' && counts[instanceFilter] === 0) {
+    instanceFilter = 'all';
+    document.querySelectorAll('#instance-filter button').forEach((b) => b.classList.toggle('active', (b as HTMLElement).dataset.filter === 'all'));
+  }
+  const shown = filteredInstances();
+  if (shown.length === 0 && state.instances.length > 0) {
+    grid.append(h('div', { class: 'instance-empty', text: 'Keine Instanz passt zur Suche.' }));
+  }
+  for (const instance of shown) {
     const selected = instance.id === state.settings?.selectedInstanceId;
     const card = h('div', { class: `instance-card${selected ? ' selected' : ''}`, onclick: () => openDetail(instance.id) },
       h('div', { class: 'instance-card-top' },
@@ -192,7 +285,8 @@ function switchTab(tab: DetailTab): void {
     $<HTMLInputElement>('#content-filter').value = '';
     $<HTMLInputElement>('#content-filter').placeholder = isMods ? 'Installierte Mods durchsuchen …' : 'Installierte Addons durchsuchen …';
     // Modrinth liefert Fabric-Mods – die laufen nur in Fabric-Instanzen
-    $('#content-browse').hidden = !isMods || heldix;
+    $('#content-browse').hidden = isMods && heldix;
+    $('#content-browse').lastChild!.textContent = isMods ? 'Mods entdecken' : 'Addon-Store';
     $('#content-perf').hidden = !isMods || current()?.loader !== 'fabric';
     $('#content-add-file').lastChild!.textContent = isMods ? 'Mod-Datei hinzufügen' : 'Addon-Datei hinzufügen';
     $('#content-hint').textContent = !isMods
@@ -306,7 +400,9 @@ function storeCard(instanceId: string, addon: StoreAddon): HTMLElement {
   const version = update && addon.installedVersion ? `${addon.installedVersion} → ${addon.version}` : addon.version;
   const chips = h('div', { class: 'store-chips' },
     h('span', { class: 'store-chip', text: CATEGORY_LABELS[addon.category] ?? 'Sonstiges' }),
-    addon.platforms.length ? h('span', { class: 'store-chip', text: `Nur ${addon.platforms.map((p) => PLATFORM_LABELS[p]).join(' & ')}` }) : null,
+    addon.platforms.length && !(Object.keys(PLATFORM_LABELS) as StoreAddon['platforms']).every((p) => addon.platforms.includes(p))
+      ? h('span', { class: 'store-chip', text: `Nur ${addon.platforms.map((p) => PLATFORM_LABELS[p]).join(' & ')}` })
+      : null,
     h('span', { class: 'store-chip', text: addon.downloads === 1 ? '1 Download' : `${formatCount(addon.downloads)} Downloads` }),
     installed && addon.installedEnabled === false ? h('span', { class: 'store-chip warn', text: 'Ausgeschaltet' }) : null,
     unsupported && addon.reason ? h('span', { class: 'store-chip warn', text: addon.reason }) : null);
@@ -321,7 +417,15 @@ function storeCard(instanceId: string, addon: StoreAddon): HTMLElement {
     ? h('div', { class: 'store-details' },
       addon.description ? plainText(addon.description) : null,
       addon.notes.length ? h('div', { class: 'store-notes' }, h('strong', { text: `Neu in ${addon.version}` }), h('ul', {}, ...addon.notes.map((note) => h('li', { text: note })))) : null,
-      h('div', { class: 'store-meta', text: `von ${addon.authors.join(', ')} · Addon-API ${addon.api}${Number.isFinite(date) ? ` · ${formatDate(date)}` : ''}` }))
+      h('div', { class: 'store-meta', text: `von ${addon.authors.join(', ')} · Addon-API ${addon.api}${Number.isFinite(date) ? ` · ${formatDate(date)}` : ''}` }),
+      h('button', {
+        class: 'link-button',
+        type: 'button',
+        onclick: () => {
+          document.querySelector<HTMLButtonElement>('.nav-item[data-view="store"]')?.click();
+          openStoreAddon(addon.id);
+        },
+      }, 'Im Addon-Store öffnen (Screenshots, Bewertungen, Versionen)'))
     : null;
   return h('div', { class: `bundled-card store-card bundled-${addon.id}${open ? ' open' : ''}` },
     h('div', { class: 'store-row' },

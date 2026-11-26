@@ -3,6 +3,10 @@
 	"icon": "clock",
 	"kategorie": "hud",
 	"plattformen": [],
-	"beschreibung": "Zwei HUD-Elemente und eine kleine Begrüßung:\n\n- Uhrzeit: die echte Uhrzeit, auf Wunsch mit Sekunden.\n- Spielzeit: wie lange du schon in der aktuellen Welt bist.\n- Begrüßung: ein Gruß im Chat, wenn du eine Welt betrittst – mit Zähler, wie oft du schon da warst.\n\nDas Addon ist gleichzeitig die Vorlage für eigene Addons (siehe „Für Entwickler“ auf heldixclient.com).",
-	"hinweise": ["Jetzt im Addon-Store statt im Launcher"]
+	"beschreibung": "Zwei HUD-Elemente und eine kleine Begrüßung:\n\n- Uhrzeit: die echte Uhrzeit, auf Wunsch mit Sekunden, in deiner Farbe und mit eigener Beschriftung.\n- Spielzeit: wie lange du schon in der aktuellen Welt bist, auf Wunsch mit Erinnerung an eine Pause.\n- Begrüßung: ein Gruß im Chat, wenn du eine Welt betrittst – mit Zähler, wie oft du schon da warst.\n- Im Chat zeigt .uhr Uhrzeit und Spielzeit nur dir, .uhr teilen schreibt die Uhrzeit für alle in den Chat.\n\nDas Addon ist gleichzeitig die Vorlage für eigene Addons (siehe „Für Entwickler“ auf heldixclient.com).",
+	"hinweise": [
+		"Uhrzeit: Farbe und Beschriftung einstellbar",
+		"Spielzeit: Erinnerung an eine Pause (alle 15 bis 120 Minuten)",
+		"Chat-Befehl .uhr und .uhr teilen"
+	]
 }

@@ -9,8 +9,10 @@ public interface HeldixApi {
 	 * Version der API. Addons geben in heldix.addon.json an, für welche sie gebaut sind.
 	 * Neuere Versionen erweitern die API nur; Addons für eine ältere Version laufen weiter.
 	 * Version 2: Tasten, Einblendungen, Modul-Einstellungen, Bilder und Heldix-Schrift im HUD.
+	 * Version 3: weitere Events, Spiel- und Spielerdaten, Scheduler, Chat-Befehle, Chat an den Server,
+	 * Regler/Farbe/Text als Einstellungen, neue Zeichenhilfen im HUD.
 	 */
-	int API_VERSION = 2;
+	int API_VERSION = 3;
 
 	/** Informationen über das eigene Addon (aus heldix.addon.json). */
 	AddonInfo addon();
@@ -82,4 +84,58 @@ public interface HeldixApi {
 	 * @since 2
 	 */
 	Path dataDirectory();
+
+	// --- ab API 3 ---------------------------------------------------------------------------
+
+	/**
+	 * Momentaufnahme des Spiels: FPS, Ping, Server, Tageszeit, Wetter, offenes Menü usw. Gibt es immer, auch im
+	 * Hauptmenü (dann sind die Werte leer bzw. -1). Aus einem anderen Thread kommt der Stand des letzten Ticks.
+	 *
+	 * @since 3
+	 */
+	GameInfo game();
+
+	/**
+	 * Ausführliche Momentaufnahme des eigenen Spielers (Blickrichtung, Tempo, Rüstung, Erfahrung, Items in Hand und
+	 * Rüstung, Trank-Effekte …), falls gerade eine Welt geladen ist. Aus einem anderen Thread kommt der Stand des
+	 * letzten Ticks.
+	 *
+	 * @since 3
+	 */
+	Optional<PlayerState> playerState();
+
+	/**
+	 * Aufgaben später, wiederholt oder im Hintergrund ausführen. Alles, was noch geplant ist, wird abgebrochen,
+	 * wenn das Addon abgeschaltet wird oder das Spiel endet.
+	 *
+	 * @since 3
+	 */
+	Scheduler scheduler();
+
+	/**
+	 * Eigener Chat-Befehl: Tippt der Spieler „.name …“ in den Chat, läuft der Handler im Haupt-Thread und der Text
+	 * geht <b>nicht</b> an den Server. „.hilfe“ listet alle Addon-Befehle, Tab ergänzt den Namen. Belegt schon ein
+	 * anderes Addon den Namen, ist der Befehl nur als „.&lt;addon-id&gt;:name“ erreichbar.
+	 *
+	 * @param name        a-z, 0-9, _ und -, ohne Punkt, z. B. "np"
+	 * @param usage       was nach dem Namen kommen kann, z. B. "[teilen]" (leer = nichts); steht in „.hilfe“
+	 * @param description kurz, z. B. "Zeigt den laufenden Song"
+	 * @return zum Abmelden des Befehls
+	 * @since 3
+	 */
+	Registration registerCommand(String name, String usage, String description, CommandHandler handler);
+
+	/**
+	 * Schickt eine Chatnachricht an den Server – alle Spieler sehen sie. Das geht nur als direkte Folge einer
+	 * Aktion des Spielers: in einer Taste ({@link #registerKey}), einem Chat-Befehl ({@link #registerCommand}) oder
+	 * einem Knopf im Untermenü ({@link ModuleHandle#addAction}), und dort höchstens einmal. Überall sonst (Ticks,
+	 * Events, Scheduler, HUD) wirft der Aufruf eine {@link IllegalStateException}, damit Addons nicht spammen können;
+	 * der Fehler zählt dann wie jeder Addon-Fehler.
+	 *
+	 * <p>Befehle mit „/“ sind nicht erlaubt. Farbcodes (§) und Steuerzeichen werden entfernt, höchstens 256 Zeichen.
+	 *
+	 * @return false, wenn keine Welt geladen ist oder nach dem Bereinigen nichts übrig bleibt
+	 * @since 3
+	 */
+	boolean sendChatMessage(String message);
 }

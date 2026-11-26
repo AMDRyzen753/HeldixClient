@@ -26,6 +26,7 @@ public class SearchField extends AbstractWidget {
 	private float hover;
 	private String icon = "search";
 	private Runnable onEnter;
+	private boolean clearOnEscape = true;
 
 	public SearchField(int x, int y, int width, int height, String hint) {
 		super(x, y, width, height, Component.literal(hint));
@@ -53,6 +54,12 @@ public class SearchField extends AbstractWidget {
 	/** höchstens so viele Zeichen (Standard 48) */
 	public SearchField withMaxLength(int maxLength) {
 		this.maxLength = maxLength;
+		return this;
+	}
+
+	/** Esc leert das Feld nicht (z. B. für gespeicherte Einstellungen) */
+	public SearchField keepOnEscape() {
+		this.clearOnEscape = false;
 		return this;
 	}
 
@@ -152,7 +159,7 @@ public class SearchField extends AbstractWidget {
 			onEnter.run();
 			return true;
 		}
-		if (key == InputConstants.KEY_ESCAPE && !value.isEmpty()) {
+		if (key == InputConstants.KEY_ESCAPE && !value.isEmpty() && clearOnEscape) {
 			changed("");
 			return true;
 		}

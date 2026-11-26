@@ -39,7 +39,7 @@ Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Laun
 - **HeldixClient auch in Fabric-Instanzen** (HUD, Menü, Addons zusammen mit Sodium, Iris & Co.) und ein **Leistungs-Paket** mit einem Klick: Sodium, Lithium, FerriteCore, ImmediatelyFast, Entity Culling, More Culling
 - Prüfung vor jedem Start, ob die Fabric-Mods zusammenpassen; unverträgliche Zusatz-Mods schaltet der Launcher mit Hinweis ab
 - Microsoft-Login; Tokens werden mit Windows-DPAPI verschlüsselt
-- Offline-Konten mit eigenem Namen (für Einzelspieler, LAN und Offline-Server), sobald ein Microsoft-Konto mit Minecraft angemeldet ist – oder mit Entwickleroptionen und [Entwickler-Schlüssel](docs/entwicklung.md#entwickleroptionen-in-der-fertigen-app)
+- Mehrere Microsoft-Konten, Wechsel mit einem Klick (Offline-Konten gibt es nur in der Entwicklungsversion)
 - passende Java-Version (8 bis 25) wird automatisch geladen
 - **Vulkan als Standard** für Heldix-Instanzen ab Minecraft 26.x (mit automatischem Rückfall auf OpenGL) und abgestimmte Java-Einstellungen
 - **Gleiches Design wie im Spiel:** Schrift Inter, dieselben Icons, ruhiges Dunkel mit Blau; Seitenleiste mit Text (in schmalen Fenstern nur Icons)
@@ -66,7 +66,7 @@ Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Laun
 - **Fadenkreuz-Editor:** sechs Formen, acht Farben, Größe, Dicke, Lücke, Deckkraft, Umrandung und Rot beim Zielen auf Lebewesen
 - **Chat:** Uhrzeit vor jeder Nachricht, gleiche Nachrichten hintereinander als „(3×)“ zusammengefasst, Strg+Klick kopiert eine Nachricht
 - **Wegpunkte** (**B** setzt einen): Markierung mit Name und Entfernung, auch durch Wände; automatischer Todespunkt; Verwalten unter Heldix-Menü → Wegpunkte (Farbe, Ausblenden, Löschen)
-- **Freunde, Capes für alle und Heldix-Symbol** über den [Heldix-Dienst](docs/dienst.md): Freundesliste mit Anfragen und Online-Status (auf Wunsch mit Server), andere HeldixClient-Spieler sehen dein Heldix-Cape, und in der Tab-Liste steht das Heldix-Logo vor ihrem Namen
+- **Freunde, Capes für alle und Heldix-Symbol** über den [Heldix-Dienst](docs/dienst.md): Freundesliste mit Anfragen und Online-Status (auf Wunsch mit Server), andere HeldixClient-Spieler sehen dein Heldix-Cape, und in der Tab-Liste und über ihren Köpfen steht das Heldix-Logo vor ihrem Namen (eigenes Symbol für Team und Addon-Entwickler)
 - **Beitreten:** Spielt ein Freund auf einem öffentlichen Server, bringt dich „Beitreten“ in der Freundesliste direkt dorthin (aus einer Welt heraus nach einer Rückfrage)
 - **Nachrichten** zwischen Freunden im Heldix-Menü (Freunde → Nachrichten), mit Einblendung im Spiel und Zahl der ungelesenen in der Seitenleiste; Nachrichten liegen höchstens 30 Tage beim Dienst. Dazu **Blockieren** (Chat, Anfragen) und **Melden** (mit den letzten Nachrichten an den Betreiber)
 - **Konto auf heldixclient.com** ohne Passwort: Im Launcher (Konto-Menü) oder im Heldix-Menü „Auf heldixclient.com anmelden“ öffnet die Webseite schon angemeldet. Dort: Profil und Cape, Privatsphäre, Freunde und Nachrichten, Blockierte und eigene Meldungen, alle Daten als Datei und Konto löschen
@@ -122,7 +122,7 @@ Wer Fabric-Mods wie Sodium oder Shaderpacks wie BSL nutzen möchte, legt im Laun
 3. Anmelden und spielen wie unter Windows. Unterschiede: Vulkan gibt es auf dem Mac nicht (Minecraft wählt die Grafik selbst), Updates meldet der Launcher nur und lädt sie nicht selbst, und das Spotify-Addon braucht Windows.
 
 > [!NOTE]
-> Die Anmeldung mit Microsoft-Konten braucht eine App-ID, die Mojang freigeschaltet hat. Die App-ID von HeldixClient ist seit November 2026 freigegeben. Als Alternative gibt es **Über Minecraft Launcher anmelden**: Der offizielle Minecraft Launcher meldet an, gespielt wird mit HeldixClient. Wer einen eigenen Build mit eigener App-ID ausliefert, muss sie selbst freischalten lassen, siehe [docs/einrichtung.md](docs/einrichtung.md).
+> Die Anmeldung mit Microsoft-Konten braucht eine App-ID, die Mojang freigeschaltet hat. Die App-ID von HeldixClient ist seit November 2026 freigegeben. Wer einen eigenen Build mit eigener App-ID ausliefert, muss sie selbst freischalten lassen, siehe [docs/einrichtung.md](docs/einrichtung.md).
 
 ## Selbst bauen
 
@@ -159,7 +159,6 @@ mod/                     Java-Projekte (Gradle, Minecraft 26.3, Java 25)
 ├── heldix-api/          API für Heldix-Addons (ohne Minecraft-Abhängigkeit)
 ├── addons/uhrzeit/      Addon „Uhrzeit & Spielzeit“ (auch Vorlage), kommt über den Addon-Store
 ├── addons/spotify/      Spotify-Addon (Windows-Mediensteuerung), kommt über den Addon-Store
-├── launcher-bridge/     Brücke: Anmeldung über den offiziellen Minecraft Launcher
 service/                 Heldix-Dienst: Freunde, Capes für alle, Heldix-Symbol (Node.js) und Server-Installer
 website/                 Webseite (Startseite, Download, Impressum, Datenschutz)
 └── autotest/            automatischer Test im echten Spiel

@@ -53,7 +53,7 @@ describe('Konto löschen', () => {
       try {
         // Vorher: Der Spieler ist verbunden und sichtbar.
         let lookup = await api(service.url, 'POST', '/v1/players/lookup', { token: fremd.token, body: { uuids: [weg.uuid] } });
-        assert.deepEqual(lookup.body, { players: { [weg.uuid]: { cape: 'glut' } } });
+        assert.deepEqual(lookup.body, { players: { [weg.uuid]: { cape: 'glut', badge: null } } });
 
         for (const client of [freundWs, fragtAnWs, angefragtWs, fremdWs]) {
           await client.sync();

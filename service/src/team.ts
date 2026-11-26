@@ -55,7 +55,8 @@ export interface TeamOptions {
   uploadIdleTimeoutMs: number;
 }
 
-function textError(field: string, max: number, problem: TextProblem): string {
+/** Deutscher Fehlertext zu einem Problem mit einem Textfeld. */
+export function textError(field: string, max: number, problem: TextProblem): string {
   switch (problem) {
     case 'type':
       return `„${field}“ muss ein Text sein.`;
@@ -391,6 +392,14 @@ export class Team {
     return this.profile(this.store.getTeamMember(member.uuid)!);
   }
 
+  /**
+   * Rollen für das Heldix-Symbol beim Nachschlagen: nur Team-Mitglieder, die auf der öffentlichen Teamseite stehen
+   * (`public`). Wer nicht zugestimmt hat, fehlt – seine Rolle bleibt verborgen.
+   */
+  publicRolesOf(uuids: string[]): Map<string, TeamRole> {
+    return this.store.publicTeamRolesIn(uuids);
+  }
+
   /** `GET /v1/public/team`: nur wer zugestimmt hat (`public`), Admins zuerst, dann nach Name. */
   publicTeam() {
     return {
@@ -526,8 +535,9 @@ export class Team {
 
   // ---------- Addons ----------
 
+  /** Mit öffentlichem Schlüssel (PEM): Die Seite prüft damit die gewählte Schlüsseldatei, bevor sie signiert. */
   addonsOverview() {
-    return this.addons.overview(this.options.updateKey !== null);
+    return this.addons.overview(this.options.updateKey);
   }
 
   async uploadAddon(actor: Actor, req: IncomingMessage, file: string) {

@@ -5,6 +5,7 @@
 //   textures/gui/heldix/background.png          – Hintergrund des Hauptmenüs (gleiches Motiv wie im Launcher)
 //   textures/gui/heldix/logo.png                – HeldixClient-Symbol
 //   font/ui_<stil>_<skalierung>.json            – Schrift Inter je GUI-Skalierung (scharf ohne Skalieren)
+//   font/badge.json + textures/font/badge*.png  – Heldix-Symbol als Schriftzeichen (U+E000–U+E003, je Rolle eins)
 // Aufruf: npm run ui-assets
 import { app, BrowserWindow } from 'electron';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -151,6 +152,66 @@ const previewHtml = `<!doctype html><html><body style="margin:0;overflow:hidden;
 ${NAMES.map((n) => `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 0;background:rgba(255,255,255,0.04);border-radius:10px">
 <div style="width:32px;height:32px">${iconSvg(n).replace(`width="${CELL}" height="${CELL}"`, 'width="32" height="32"').replaceAll('#fff', '#e8edf5')}</div>${n}</div>`).join('\n')}
 </div></body></html>`;
+
+// ---------------------------------------------------------------------------------------------
+// Heldix-Symbol je Rolle (Tab-Liste und Namensschild): Sechseck des Logos in der Farbe der Rolle, weißes Zeichen darin.
+// U+E000 ist das Logo selbst (alle HeldixClient-Spieler); die Rollen meldet der Heldix-Dienst (siehe docs/dienst.md).
+// ---------------------------------------------------------------------------------------------
+
+const BADGE_HEXAGON = 'M82.68 22 Q100 12 117.32 22 L158.89 46 Q176.21 56 176.21 76 L176.21 124 Q176.21 144 158.89 154 L117.32 178 Q100 188 82.68 178 L41.11 154 Q23.79 144 23.79 124 L23.79 76 Q23.79 56 41.11 46 Z';
+const BADGE_ROLES = [
+  {
+    // Team-Admin: rot, Krone
+    name: 'admin',
+    char: '\uE001',
+    colors: ['#991b1b', '#dc2626', '#fb923c'],
+    shadow: '#450a0a',
+    symbol: '<path d="M52 136 L52 78 L77 101 L100 60 L123 101 L148 78 L148 136 Z" stroke="#fff" stroke-width="10" stroke-linejoin="round"/>',
+  },
+  {
+    // Moderator: grün, Schild mit Haken
+    name: 'moderator',
+    char: '\uE002',
+    colors: ['#047857', '#10b981', '#6ee7b7'],
+    shadow: '#022c22',
+    symbol: '<path d="M100 52 L146 68 V100 C146 128 127 146 100 157 C73 146 54 128 54 100 V68 Z"/>'
+      + '<path d="M78 104 L94 120 L123 89" fill="none" stroke="#0d9466" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>',
+  },
+  {
+    // Addon-Entwickler: violett, „</>“
+    name: 'developer',
+    char: '\uE003',
+    colors: ['#5b21b6', '#8b5cf6', '#e879f9'],
+    shadow: '#2e1065',
+    symbol: '<path d="M77 68 L45 100 L77 132 M123 68 L155 100 L123 132 M111 60 L89 140" fill="none" stroke="#fff" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>',
+  },
+];
+
+/** Symbol einer Rolle als SVG (gleicher Aufbau wie logo.svg: Verlauf, Glanz, Kante, Zeichen mit Schatten) */
+function badgeSvg(role) {
+  const [c0, c1, c2] = role.colors;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="256" height="256">
+  <defs>
+    <linearGradient id="fill" x1="0.15" y1="1" x2="0.85" y2="0">
+      <stop offset="0" stop-color="${c0}"/><stop offset="0.55" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.32"/><stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/><stop offset="0.6" stop-color="#ffffff" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.15"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="${role.shadow}" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <path d="${BADGE_HEXAGON}" fill="url(#fill)"/>
+  <path d="${BADGE_HEXAGON}" fill="url(#sheen)"/>
+  <path d="${BADGE_HEXAGON}" fill="none" stroke="url(#edge)" stroke-width="2"/>
+  <g filter="url(#shadow)" fill="#ffffff">${role.symbol}</g>
+</svg>`;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Ecken, Schatten (direkt berechnet, ohne Browser)
@@ -372,13 +433,19 @@ app.whenReady().then(async () => {
   const logoImage = await render(logoHtml, 256, 256);
   await writeFile(path.join(out, 'logo.png'), logoImage.resize({ width: 128, height: 128, quality: 'best' }).toPNG());
 
-  // Heldix-Symbol als Schriftzeichen (U+E000) – steht in der Tab-Liste vor dem Namen von HeldixClient-Spielern
+  // Heldix-Symbol als Schriftzeichen – steht in der Tab-Liste und im Namensschild vor dem Namen von HeldixClient-Spielern:
+  // U+E000 das Logo (alle), U+E001 Team-Admin, U+E002 Moderator, U+E003 Addon-Entwickler
   const fontTextures = path.join(assets, 'textures', 'font');
   await mkdir(fontTextures, { recursive: true });
   await writeFile(path.join(fontTextures, 'badge.png'), logoImage.resize({ width: 32, height: 32, quality: 'best' }).toPNG());
-  await writeFile(path.join(fontDir, 'badge.json'), `${JSON.stringify({
-    providers: [{ type: 'bitmap', file: 'heldixclient:font/badge.png', ascent: 7, height: 8, chars: [''] }],
-  }, null, 2)}\n`);
+  const badgeProviders = [{ type: 'bitmap', file: 'heldixclient:font/badge.png', ascent: 7, height: 8, chars: ['\uE000'] }];
+  for (const role of BADGE_ROLES) {
+    const html = `<!doctype html><html><body style="margin:0;background:transparent;overflow:hidden"><div style="width:256px;height:256px">${badgeSvg(role)}</div></body></html>`;
+    const image = await render(html, 256, 256);
+    await writeFile(path.join(fontTextures, `badge_${role.name}.png`), image.resize({ width: 32, height: 32, quality: 'best' }).toPNG());
+    badgeProviders.push({ type: 'bitmap', file: `heldixclient:font/badge_${role.name}.png`, ascent: 7, height: 8, chars: [role.char] });
+  }
+  await writeFile(path.join(fontDir, 'badge.json'), `${JSON.stringify({ providers: badgeProviders }, null, 2)}\n`);
 
   await writeFonts();
 

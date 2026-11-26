@@ -20,7 +20,7 @@ Im Spiel steht der Status im Heldix-Menü unter **Freunde → Privatsphäre → 
 ## Was du tun kannst
 - **„Nicht erreichbar“ / „Keine Verbindung zum Heldix-Dienst“:** HeldixClient versucht es von selbst gleich noch einmal. Unter **Freunde** und **Anfragen** gibt es außerdem den Knopf **Verbinden**. Prüfe deine Internetverbindung und schau auf die [Statusseite](/status).
 - **„Ausgeschaltet“:** Schalte unter **Freunde → Privatsphäre** den Schalter **Heldix-Dienst nutzen** wieder ein.
-- **„Nur mit Microsoft-Konto“:** Mit einem Offline-Konto gibt es den Heldix-Dienst nicht. Wechsle im Launcher auf ein Microsoft-Konto, siehe [Konten wechseln und Offline-Konten](/hilfe/konten-und-offline).
+- **„Nur mit Microsoft-Konto“:** Der Heldix-Dienst braucht ein Microsoft-Konto. Melde dich im Launcher unten links mit Microsoft an, siehe [Konten wechseln](/hilfe/konten-und-offline).
 - **„Dieses Konto ist für den Heldix-Dienst gesperrt.“:** Bei Missbrauch kann das Team ein Konto für den Dienst sperren. Minecraft und HeldixClient selbst funktionieren weiter.
 
 ## Capes anderer werden nicht angezeigt?

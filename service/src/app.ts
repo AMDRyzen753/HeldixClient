@@ -6,17 +6,19 @@ import { dirname, join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
 import { exportData, myReports } from './account';
+import { AddonFeedback } from './addon-feedback';
 import { ADDON_MANIFEST_BODY_LIMIT, Addons, MAX_ADDON_SIZE } from './addons';
 import { Challenges, hashToken, hasJoined, isLoopback, newToken, parseBearer } from './auth';
 import { Blocks } from './blocks';
 import { Store, type SettingsPatch, type TeamMemberRow, type TeamRole, type UserRow, type WebSessionRow } from './db';
 import { Friends } from './friends';
 import { HttpError, readJsonObject, rejectUpgrade, sendError, sendJson } from './http';
-import { RateLimiter } from './limits';
+import { RateLimiter, Slots } from './limits';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Messages } from './messages';
 import { Realtime } from './realtime';
 import { Reports } from './reports';
 import { DEFAULT_SKIN_HOSTS, Skins } from './skins';
+import { AddonSubmissions, SUBMISSION_BODY_LIMIT } from './submissions';
 import { Support } from './support';
 import { playerLabel, Team, writeAudit, type Actor } from './team';
 import { DOWNLOAD_TARGETS, MAX_SETUP_SIZE, NOTHING_PUBLISHED, Updates, type DownloadTarget } from './updates';
@@ -26,6 +28,12 @@ import { checkCsrf, checkOrigin, clearSessionCookie, NOT_SIGNED_IN, readSessionC
 export const DEFAULT_SESSION_SERVER = 'https://sessionserver.mojang.com';
 /** Höchstgröße für Anfragekörper und WebSocket-Nachrichten. */
 export const BODY_LIMIT = 16 * 1024;
+
+/**
+ * Rolle beim Nachschlagen (Heldix-Symbol): Team-Rolle nur bei öffentlichem Teamprofil, `developer` mit sichtbarem
+ * Community-Addon, sonst null.
+ */
+export type PlayerBadge = TeamRole | 'developer' | null;
 
 export interface ServiceOptions {
   /** Ordner für die Datenbank. */
@@ -80,8 +88,20 @@ export interface ServiceOptions {
   downloadRateLimit?: number;
   /** Downloads von Addon-Dateien pro IP und Zeitraum (rateWindowMs). */
   addonDownloadRateLimit?: number;
+  /** Screenshots von Addons pro IP und Zeitraum (rateWindowMs). */
+  addonScreenshotRateLimit?: number;
   /** Kommt so lange nichts beim Client an, wird ein Download abgebrochen. */
   downloadIdleTimeoutMs?: number;
+  /** Addons von Spielern: Uploads (JAR, Screenshots) pro Spieler und Zeitraum, gleichzeitige Uploads insgesamt. */
+  addonUploadRateLimit?: number;
+  addonUploadWindowMs?: number;
+  maxPlayerUploads?: number;
+  /** Bewertungen (setzen, löschen) pro Spieler und Zeitraum (rateWindowMs). */
+  addonRatingRateLimit?: number;
+  /** Meldungen zu Addons pro Spieler und Zeitraum (reportWindowMs, Standard 24 Stunden). */
+  addonReportLimit?: number;
+  /** Abgelehnte und zurückgezogene Einreichungen werden nach dieser Zeit gelöscht (Meldungen zu Addons wie reportTtlMs). */
+  addonSubmissionTtlMs?: number;
   /** Web-Anmeldung: Einmal-Code, Sitzung (ab Anmeldung, ohne Nutzung), 2FA-Bestätigung der Sitzung. */
   webCodeTtlMs?: number;
   webSessionTtlMs?: number;
@@ -167,7 +187,9 @@ function isPublicPath(path: string): boolean {
     path.startsWith('/v1/launcher/') ||
     path.startsWith('/v1/public/') ||
     path === '/v1/addons' ||
-    path.startsWith('/v1/addons/') ||
+    // Bewerten und Melden gehen nur angemeldet: ohne CORS.
+    (path.startsWith('/v1/addons/') && !/\/(?:rating|reports)$/.test(path)) ||
+    path.startsWith('/v1/addon-authors/') ||
     path === '/v1/news' ||
     path === '/v1/status'
   );
@@ -247,6 +269,9 @@ export function createService(options: ServiceOptions): Service {
   const messageLimiter = new RateLimiter(options.messageRateLimit ?? 20, rateWindowMs);
   const downloadLimiter = new RateLimiter(options.downloadRateLimit ?? 30, rateWindowMs);
   const addonDownloadLimiter = new RateLimiter(options.addonDownloadRateLimit ?? 60, rateWindowMs);
+  const screenshotLimiter = new RateLimiter(options.addonScreenshotRateLimit ?? 300, rateWindowMs);
+  const addonUploadLimiter = new RateLimiter(options.addonUploadRateLimit ?? 30, options.addonUploadWindowMs ?? 60 * 60_000);
+  const ratingLimiter = new RateLimiter(options.addonRatingRateLimit ?? 30, rateWindowMs);
   const skinLimiter = new RateLimiter(options.skinRateLimit ?? 300, rateWindowMs);
   const linkLimiter = new RateLimiter(options.webLinkRateLimit ?? 10, rateWindowMs);
   const totpLimiter = new RateLimiter(options.totpRateLimit ?? 5, options.totpWindowMs ?? 10 * 60_000);
@@ -287,6 +312,13 @@ export function createService(options: ServiceOptions): Service {
   };
   const updates = new Updates(updatesDir, log, recordVersion);
   const addons = new Addons(store, addonsDir, log);
+  const addonFeedback = new AddonFeedback(
+    store,
+    addons,
+    { reportsPerWindow: options.addonReportLimit ?? 10, windowMs: options.reportWindowMs ?? 24 * 60 * 60 * 1000 },
+    log,
+  );
+  const addonSubmissionTtlMs = options.addonSubmissionTtlMs ?? 90 * 24 * 60 * 60 * 1000;
   const skins = new Skins({
     sessionServer,
     hosts: options.skinHosts ?? DEFAULT_SKIN_HOSTS,
@@ -316,6 +348,20 @@ export function createService(options: ServiceOptions): Service {
     maxAddonUploadBytes: Math.min(options.maxAddonUploadBytes ?? MAX_ADDON_SIZE, MAX_ADDON_SIZE),
     uploadIdleTimeoutMs: options.uploadIdleTimeoutMs ?? 60_000,
   });
+  const submissions = new AddonSubmissions(
+    store,
+    addons,
+    realtime,
+    {
+      maxJarBytes: Math.min(options.maxAddonUploadBytes ?? MAX_ADDON_SIZE, MAX_ADDON_SIZE),
+      uploadIdleTimeoutMs: options.uploadIdleTimeoutMs ?? 60_000,
+      uploadLimiter: addonUploadLimiter,
+      uploadSlots: new Slots(options.maxPlayerUploads ?? 4),
+      inspectSlots: new Slots(2),
+      updateKey,
+    },
+    log,
+  );
 
   let closed = false;
   let closing: Promise<void> | undefined;
@@ -490,13 +536,14 @@ export function createService(options: ServiceOptions): Service {
   }
 
   /** `DELETE /v1/me`: alles löschen, was der Dienst über den Spieler gespeichert hat (DSGVO). */
-  function deleteMe(ctx: Context) {
+  async function deleteMe(ctx: Context) {
     const { uuid } = ctx.user;
     const related = store.deleteUser(uuid);
     realtime.disconnectUser(uuid, 4001, 'Konto gelöscht');
     // Frühere Freunde und Spieler mit offenen Anfragen sehen die neue Liste sofort.
     for (const other of related) realtime.pushFriends(other);
     if (ctx.session) ctx.res.setHeader('Set-Cookie', clearSessionCookie(ctx.req));
+    await sweepSubmissionFiles();
     return { deleted: true };
   }
 
@@ -504,7 +551,19 @@ export function createService(options: ServiceOptions): Service {
   function exportMe(ctx: Context) {
     rateLimit(exportLimiter, ctx.user.uuid, 'Höchstens 5 Datenexporte pro Stunde. Bitte später noch einmal.');
     const user = store.getUser(ctx.user.uuid)!;
-    const text = JSON.stringify({ ...exportData(store, user, me(user)), support: support.exportFor(user) }, null, 2);
+    const text = JSON.stringify(
+      {
+        ...exportData(store, user, me(user)),
+        support: support.exportFor(user),
+        addonStore: {
+          submissions: submissions.exportFor(user),
+          ...addonFeedback.exportFor(user),
+          addons: store.addonsOwnedBy(user.uuid).map((a) => ({ id: a.id, hidden: a.hidden, downloads: a.downloads, createdAt: a.createdAt })),
+        },
+      },
+      null,
+      2,
+    );
     ctx.res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',
       'Content-Disposition': `attachment; filename="heldix-daten-${user.name}.json"`,
@@ -654,9 +713,17 @@ export function createService(options: ServiceOptions): Service {
     for (const uuid of uuids) uuidParam(uuid);
     // Nur wer gerade verbunden ist, kommt überhaupt in Frage.
     const connected = [...new Set(uuids as string[])].filter((uuid) => realtime.isConnected(uuid));
-    const players: Record<string, { cape: string }> = {};
-    for (const user of store.getUsers(connected)) {
-      if (user.visible) players[user.uuid] = { cape: capes.has(user.cape) ? user.cape : '' };
+    const visible = store.getUsers(connected).filter((user) => user.visible);
+    const found = visible.map((user) => user.uuid);
+    // Rolle fürs Heldix-Symbol: Team nur mit öffentlichem Teamprofil, sonst Entwickler eines sichtbaren Community-Addons.
+    const roles = found.length > 0 ? team.publicRolesOf(found) : new Map<string, TeamRole>();
+    const developers = found.length > 0 ? addons.developersAmong(found.filter((uuid) => !roles.has(uuid))) : new Set<string>();
+    const players: Record<string, { cape: string; badge: PlayerBadge }> = {};
+    for (const user of visible) {
+      players[user.uuid] = {
+        cape: capes.has(user.cape) ? user.cape : '',
+        badge: roles.get(user.uuid) ?? (developers.has(user.uuid) ? 'developer' : null),
+      };
     }
     return { players };
   }
@@ -737,11 +804,37 @@ export function createService(options: ServiceOptions): Service {
 
   // ---------- Addon-Store (öffentlich) ----------
 
-  /** `GET /v1/addons`: sichtbare Addons mit der neuesten Version. */
+  /** `GET /v1/addons` (auf Wunsch `?author=<uuid>`): sichtbare Addons mit der neuesten Version. */
   function addonList(ctx: Context) {
-    sendJson(ctx.res, 200, addons.list(), { 'Cache-Control': 'max-age=60' });
+    const author = textQuery(ctx, 'author');
+    if (author !== null && !isUuid(author)) throw new HttpError(400, 'Ungültige UUID (erwartet: 32 kleine Hex-Zeichen ohne Bindestriche).');
+    sendJson(ctx.res, 200, addons.list(author ?? undefined), { 'Cache-Control': 'max-age=60' });
     return RESPONDED;
   }
+
+  /** `GET /v1/addons/<id>/screenshots/<n>`: Bild eines sichtbaren Addons (n = 1–4). */
+  async function addonScreenshot(ctx: Context) {
+    rateLimit(screenshotLimiter, clientIp(ctx.req), 'Zu viele Bilder. Bitte kurz warten.');
+    await addons.serveScreenshot(ctx.req, ctx.res, ctx.params[0] ?? '', ctx.params[1] ?? '', downloadIdleTimeoutMs);
+    return RESPONDED;
+  }
+
+  /** `GET /v1/addon-authors/<uuid>`: Entwicklerseite (nur sichtbare Addons). */
+  function addonAuthor(ctx: Context) {
+    sendJson(ctx.res, 200, addons.authorPage(ctx.params[0] ?? ''), { 'Cache-Control': 'max-age=60' });
+    return RESPONDED;
+  }
+
+  /** Dateien gelöschter Einreichungen (Konto gelöscht oder gesperrt) gleich wegräumen; übrige beim regelmäßigen Aufräumen. */
+  async function sweepSubmissionFiles(): Promise<void> {
+    try {
+      await submissions.sweepFiles();
+    } catch (err) {
+      log(`Aufräumen der Einreichungen fehlgeschlagen: ${(err as Error).message}`);
+    }
+  }
+
+  const submissionBody = (ctx: Context) => readJsonObject(ctx.req, SUBMISSION_BODY_LIMIT);
 
   /** `GET /v1/addons/<id>`: ein Addon mit allen Versionen. */
   function addonDetail(ctx: Context) {
@@ -780,6 +873,15 @@ export function createService(options: ServiceOptions): Service {
     { method: 'GET', pattern: /^\/v1\/team\/support$/, kind: 'team', handler: (ctx) => support.teamList(textQuery(ctx, 'status')) },
     { method: 'GET', pattern: /^\/v1\/team\/support\/([^/]+)$/, kind: 'team', handler: (ctx) => support.teamGet(idParam(ctx.params[0])) },
     {
+      method: 'GET',
+      pattern: /^\/v1\/team\/support\/([^/]+)\/attachments\/([^/]+)$/,
+      kind: 'team',
+      handler: (ctx) => {
+        Support.sendAttachment(ctx.res, support.teamAttachment(idParam(ctx.params[0]), idParam(ctx.params[1])));
+        return RESPONDED;
+      },
+    },
+    {
       method: 'POST',
       pattern: /^\/v1\/team\/support\/([^/]+)\/messages$/,
       kind: 'team',
@@ -799,7 +901,16 @@ export function createService(options: ServiceOptions): Service {
       handler: (ctx) => team.markDone(actor(ctx), idParam(ctx.params[0])),
     },
     { method: 'GET', pattern: /^\/v1\/team\/bans$/, kind: 'team', handler: () => team.bans() },
-    { method: 'POST', pattern: /^\/v1\/team\/bans$/, kind: 'team', handler: async (ctx) => team.ban(actor(ctx), await body(ctx)) },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/team\/bans$/,
+      kind: 'team',
+      handler: async (ctx) => {
+        const result = team.ban(actor(ctx), await body(ctx));
+        await sweepSubmissionFiles();
+        return result;
+      },
+    },
     {
       method: 'DELETE',
       pattern: /^\/v1\/team\/bans\/([^/]+)$/,
@@ -820,7 +931,11 @@ export function createService(options: ServiceOptions): Service {
       pattern: /^\/v1\/team\/players\/([^/]+)$/,
       kind: 'team',
       role: 'admin',
-      handler: (ctx) => team.deletePlayer(actor(ctx), uuidParam(ctx.params[0])),
+      handler: async (ctx) => {
+        const result = team.deletePlayer(actor(ctx), uuidParam(ctx.params[0]));
+        await sweepSubmissionFiles();
+        return result;
+      },
     },
     { method: 'GET', pattern: /^\/v1\/team\/news$/, kind: 'team', handler: () => team.news() },
     { method: 'POST', pattern: /^\/v1\/team\/news$/, kind: 'team', handler: async (ctx) => team.createNews(actor(ctx), await body(ctx)) },
@@ -897,6 +1012,53 @@ export function createService(options: ServiceOptions): Service {
       kind: 'team',
       role: 'admin',
       handler: (ctx) => team.deleteAddonVersion(actor(ctx), ctx.params[0] ?? '', ctx.params[1] ?? ''),
+    },
+    // Einreichungen von Spielern: ansehen und ablehnen (jede Rolle), freigeben = signieren (nur Admin).
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/addon-submissions$/,
+      kind: 'team',
+      handler: (ctx) => submissions.teamList(textQuery(ctx, 'status')),
+    },
+    { method: 'GET', pattern: /^\/v1\/team\/addon-submissions\/([^/]+)$/, kind: 'team', handler: (ctx) => submissions.teamGet(ctx.params[0]) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/addon-submissions\/([^/]+)\/jar$/,
+      kind: 'team',
+      handler: async (ctx) => {
+        await submissions.teamJar(ctx.params[0], ctx.req, ctx.res, downloadIdleTimeoutMs);
+        return RESPONDED;
+      },
+    },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/addon-submissions\/([^/]+)\/screenshots\/([^/]+)$/,
+      kind: 'team',
+      handler: async (ctx) => {
+        await submissions.teamScreenshot(ctx.params[0], ctx.params[1], ctx.req, ctx.res, downloadIdleTimeoutMs);
+        return RESPONDED;
+      },
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/team\/addon-submissions\/([^/]+)\/approve$/,
+      kind: 'team',
+      role: 'admin',
+      // Die Seite darf das signierte Manifest zur Kontrolle mitschicken (bis 64 KB).
+      handler: async (ctx) => submissions.approve(actor(ctx), ctx.params[0], await readJsonObject(ctx.req, ADDON_MANIFEST_BODY_LIMIT)),
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/team\/addon-submissions\/([^/]+)\/reject$/,
+      kind: 'team',
+      handler: async (ctx) => submissions.reject(actor(ctx), ctx.params[0], await body(ctx)),
+    },
+    { method: 'GET', pattern: /^\/v1\/team\/addon-reports$/, kind: 'team', handler: (ctx) => addonFeedback.teamReports(textQuery(ctx, 'status')) },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/team\/addon-reports\/([^/]+)\/done$/,
+      kind: 'team',
+      handler: (ctx) => addonFeedback.reportDone(actor(ctx), idParam(ctx.params[0])),
     },
     { method: 'GET', pattern: /^\/v1\/team\/members$/, kind: 'team', role: 'admin', handler: () => team.members() },
     {
@@ -1012,6 +1174,22 @@ export function createService(options: ServiceOptions): Service {
       kind: 'user',
       handler: (ctx) => support.close(ctx.user, idParam(ctx.params[0])),
     },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/support\/([^/]+)\/attachments$/,
+      kind: 'user',
+      // Roher Text bis 512 KiB (eigene Grenze statt BODY_LIMIT), z. B. Absturzbericht aus dem Launcher.
+      handler: (ctx) => support.attach(ctx.user, idParam(ctx.params[0]), textQuery(ctx, 'name'), ctx.req),
+    },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/support\/([^/]+)\/attachments\/([^/]+)$/,
+      kind: 'user',
+      handler: (ctx) => {
+        Support.sendAttachment(ctx.res, support.ownAttachment(ctx.user, idParam(ctx.params[0]), idParam(ctx.params[1])));
+        return RESPONDED;
+      },
+    },
     // Öffentlich: Teamseite, Skins, Versionsverlauf, Status
     {
       method: 'GET',
@@ -1043,6 +1221,75 @@ export function createService(options: ServiceOptions): Service {
     { method: 'HEAD', pattern: /^\/v1\/addons\/([^/]+)\/download$/, kind: 'public', handler: addonDownloadLatest },
     { method: 'GET', pattern: /^\/v1\/addons\/([^/]+)\/files\/([^/]+)$/, kind: 'public', handler: addonFile },
     { method: 'HEAD', pattern: /^\/v1\/addons\/([^/]+)\/files\/([^/]+)$/, kind: 'public', handler: addonFile },
+    { method: 'GET', pattern: /^\/v1\/addons\/([^/]+)\/screenshots\/([^/]+)$/, kind: 'public', handler: addonScreenshot },
+    { method: 'HEAD', pattern: /^\/v1\/addons\/([^/]+)\/screenshots\/([^/]+)$/, kind: 'public', handler: addonScreenshot },
+    { method: 'GET', pattern: /^\/v1\/addon-authors\/([^/]+)$/, kind: 'public', handler: addonAuthor },
+    // Bewerten und Melden (angemeldet: Bearer-Token oder Cookie)
+    { method: 'GET', pattern: /^\/v1\/addons\/([^/]+)\/rating$/, kind: 'user', handler: (ctx) => addonFeedback.rating(ctx.user, ctx.params[0] ?? '') },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/addons\/([^/]+)\/rating$/,
+      kind: 'user',
+      handler: async (ctx) => {
+        rateLimit(ratingLimiter, ctx.user.uuid, 'Zu viele Bewertungen. Bitte kurz warten.');
+        return addonFeedback.rate(ctx.user, ctx.params[0] ?? '', await body(ctx));
+      },
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/addons\/([^/]+)\/rating$/,
+      kind: 'user',
+      handler: (ctx) => {
+        rateLimit(ratingLimiter, ctx.user.uuid, 'Zu viele Bewertungen. Bitte kurz warten.');
+        return addonFeedback.unrate(ctx.user, ctx.params[0] ?? '');
+      },
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/addons\/([^/]+)\/reports$/,
+      kind: 'user',
+      handler: async (ctx) => addonFeedback.report(ctx.user, ctx.params[0] ?? '', await body(ctx)),
+    },
+    { method: 'GET', pattern: /^\/v1\/me\/addon-ratings$/, kind: 'user', handler: (ctx) => addonFeedback.myRatings(ctx.user) },
+    // Addons einreichen (angemeldet: Bearer-Token oder Cookie)
+    { method: 'GET', pattern: /^\/v1\/addon-submissions$/, kind: 'user', handler: (ctx) => submissions.list(ctx.user) },
+    { method: 'POST', pattern: /^\/v1\/addon-submissions$/, kind: 'user', handler: async (ctx) => submissions.create(ctx.user, await submissionBody(ctx)) },
+    {
+      method: 'PATCH',
+      pattern: /^\/v1\/addon-submissions\/([^/]+)$/,
+      kind: 'user',
+      handler: async (ctx) => submissions.update(ctx.user, ctx.params[0], await submissionBody(ctx)),
+    },
+    { method: 'DELETE', pattern: /^\/v1\/addon-submissions\/([^/]+)$/, kind: 'user', handler: (ctx) => submissions.remove(ctx.user, ctx.params[0]) },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/addon-submissions\/([^/]+)\/jar$/,
+      kind: 'user',
+      // Roher, gestreamter Körper bis 50 MiB: ohne BODY_LIMIT, ohne JSON.
+      handler: (ctx) => submissions.uploadJar(ctx.user, ctx.params[0], ctx.req),
+    },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/addon-submissions\/([^/]+)\/screenshots\/([^/]+)$/,
+      kind: 'user',
+      handler: async (ctx) => {
+        await submissions.ownScreenshot(ctx.user, ctx.params[0], ctx.params[1], ctx.req, ctx.res, downloadIdleTimeoutMs);
+        return RESPONDED;
+      },
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/addon-submissions\/([^/]+)\/screenshots\/([^/]+)$/,
+      kind: 'user',
+      handler: (ctx) => submissions.putScreenshot(ctx.user, ctx.params[0], ctx.params[1], ctx.req),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/addon-submissions\/([^/]+)\/screenshots\/([^/]+)$/,
+      kind: 'user',
+      handler: (ctx) => submissions.deleteScreenshot(ctx.user, ctx.params[0], ctx.params[1]),
+    },
+    { method: 'POST', pattern: /^\/v1\/addon-submissions\/([^/]+)\/submit$/, kind: 'user', handler: (ctx) => submissions.submit(ctx.user, ctx.params[0]) },
     {
       method: 'GET',
       pattern: /^\/v1\/ws$/,
@@ -1159,6 +1406,9 @@ export function createService(options: ServiceOptions): Service {
     messageLimiter.sweep(now);
     downloadLimiter.sweep(now);
     addonDownloadLimiter.sweep(now);
+    screenshotLimiter.sweep(now);
+    addonUploadLimiter.sweep(now);
+    ratingLimiter.sweep(now);
     linkLimiter.sweep(now);
     totpLimiter.sweep(now);
     exportLimiter.sweep(now);
@@ -1169,9 +1419,14 @@ export function createService(options: ServiceOptions): Service {
       store.deleteExpiredWebSessions(now, now - web.options.sessionIdleMs);
       store.deleteAuditBefore(now - auditTtlMs);
       store.deleteOldTickets(now - supportClosedTtlMs, now - supportIdleTtlMs);
+      store.deleteOldSubmissions(now - addonSubmissionTtlMs);
+      store.deleteAddonReportsBefore(now - reportTtlMs);
     } catch (err) {
       log(`Aufräumen fehlgeschlagen: ${(err as Error).message}`);
     }
+    // Dateien: Einreichungen, die es nicht mehr gibt, und nicht mehr verwendete Screenshots.
+    void sweepSubmissionFiles();
+    addons.sweepScreenshots(now).catch((err: Error) => log(`Aufräumen der Screenshots fehlgeschlagen: ${err.message}`));
   }, options.sweepIntervalMs ?? 10 * 60_000);
   sweepTimer.unref();
 

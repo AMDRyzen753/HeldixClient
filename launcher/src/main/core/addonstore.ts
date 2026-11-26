@@ -10,13 +10,13 @@ import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promise
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import type { StoreAddon } from '../../shared/api';
+import type { AddonDetails, ContentItem, InstanceLoader, StoreAddon, StoreListing, StoreOverview } from '../../shared/api';
 import { LAUNCHER_NAME, LAUNCHER_VERSION } from '../config';
 import { compareVersions, contentDir, listContent, readAddonMeta } from './content';
 
 export const ADDON_SIGNATURE_PREFIX = 'heldix-addon\n';
 /** Höchste Heldix-API-Stufe, die die mitgelieferte HeldixClient-Mod kann (HeldixApi.API_VERSION, geprüft beim Bauen) */
-export const HELDIX_ADDON_API = 2;
+export const HELDIX_ADDON_API = 3;
 /** Dateien, die das Spiel beim nächsten Start entfernen soll (gesperrte JARs unter Windows), eine pro Zeile */
 export const PENDING_REMOVALS = '.entfernen';
 /** Ersatz für eine im Spiel gesperrte JAR gleichen Namens (legt das Spiel an) */
@@ -47,6 +47,10 @@ export interface AddonManifest {
   sha256: string;
   date: string;
   notes: string[];
+  /** vom HeldixClient-Team (npm run addon); fehlt in alten Manifesten = false */
+  official: boolean;
+  /** Einreicher eines Community-Addons, null bei offiziellen */
+  author: { uuid: string; name: string } | null;
 }
 
 function text(value: unknown, field: string, min: number, max: number): string {
@@ -77,6 +81,15 @@ export function parseAddonManifest(raw: unknown): AddonManifest {
   if (typeof m.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(m.sha256)) throw new Error('Addon-Manifest: „sha256“ ist ungültig');
   if (m.file !== `heldix-addon-${id}-${version}.jar`) throw new Error('Addon-Manifest: Dateiname passt nicht zu ID und Version');
   const icon = typeof m.icon === 'string' && /^[a-z0-9-]{1,30}$/.test(m.icon) ? m.icon : 'addons';
+  if (m.official !== undefined && typeof m.official !== 'boolean') throw new Error('Addon-Manifest: „official“ ist ungültig');
+  let author: AddonManifest['author'] = null;
+  if (m.author !== undefined && m.author !== null) {
+    const a = m.author as { uuid?: unknown; name?: unknown };
+    if (typeof a !== 'object' || typeof a.uuid !== 'string' || !/^[0-9a-f]{32}$/.test(a.uuid) || typeof a.name !== 'string' || !/^[A-Za-z0-9_]{1,16}$/.test(a.name)) {
+      throw new Error('Addon-Manifest: „author“ ist ungültig');
+    }
+    author = { uuid: a.uuid, name: a.name };
+  }
   return {
     type: 'heldix-addon',
     id,
@@ -94,6 +107,8 @@ export function parseAddonManifest(raw: unknown): AddonManifest {
     sha256: m.sha256,
     date: text(m.date, 'date', 1, 40),
     notes: notes.map((n) => text(n, 'notes', 1, 300)),
+    official: m.official === true,
+    author,
   };
 }
 
@@ -117,34 +132,134 @@ export function currentPlatform(): AddonPlatform {
 export interface StoreEntry {
   manifest: AddonManifest;
   downloads: number;
+  /** Anzeige-Daten vom Dienst (nicht signiert): Bewertung und Screenshots */
+  rating: { average: number; count: number };
+  screenshots: number;
+  /** ändert sich, wenn die Screenshots ersetzt werden (Schlüssel für den Zwischenspeicher) */
+  screenshotsVersion: string;
 }
 
-async function request(url: string): Promise<Response> {
+const STORE_UNREACHABLE = 'Der Addon-Store ist gerade nicht erreichbar. Bitte später noch einmal versuchen.';
+
+async function request(url: string, accept = 'application/json'): Promise<Response> {
   try {
-    return await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': `${LAUNCHER_NAME}/${LAUNCHER_VERSION}` }, signal: AbortSignal.timeout(20_000) });
+    return await fetch(url, { headers: { Accept: accept, 'User-Agent': `${LAUNCHER_NAME}/${LAUNCHER_VERSION}` }, signal: AbortSignal.timeout(20_000), redirect: 'error' });
   } catch {
-    throw new Error('Der Addon-Store ist gerade nicht erreichbar. Bitte später noch einmal versuchen.');
+    throw new Error(STORE_UNREACHABLE);
   }
+}
+
+function storeBase(serviceUrl: string): string {
+  if (!serviceUrl) throw new Error('Kein Heldix-Dienst eingerichtet – der Addon-Store ist aus.');
+  return serviceUrl.replace(/\/+$/, '');
+}
+
+/** Bewertung vom Dienst prüfen (Durchschnitt 0–5 mit einer Nachkommastelle, Anzahl ≥ 0) */
+export function parseRating(raw: unknown): { average: number; count: number } {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as { average?: unknown; count?: unknown };
+  const count = Number.isSafeInteger(r.count) && (r.count as number) > 0 ? (r.count as number) : 0;
+  const average = count > 0 && typeof r.average === 'number' && Number.isFinite(r.average) ? Math.round(Math.min(5, Math.max(0, r.average)) * 10) / 10 : 0;
+  return { average, count };
 }
 
 /** Liste des Stores; Einträge mit ungültiger Signatur fallen heraus. */
 export async function fetchStore(serviceUrl: string, publicKey: string | null): Promise<StoreEntry[]> {
-  if (!serviceUrl) throw new Error('Kein Heldix-Dienst eingerichtet – der Addon-Store ist aus.');
+  const base = storeBase(serviceUrl);
   if (!publicKey) throw new Error('Dieser Launcher kennt keinen Signatur-Schlüssel – der Addon-Store ist aus.');
-  const response = await request(`${serviceUrl.replace(/\/+$/, '')}/v1/addons`);
+  const response = await request(`${base}/v1/addons`);
   if (!response.ok) throw new Error(`Der Addon-Store antwortet nicht richtig (${response.status}).`);
-  const data = (await response.json()) as { addons?: unknown };
+  const data = (await response.json().catch(() => ({}))) as { addons?: unknown };
   const result: StoreEntry[] = [];
   for (const entry of Array.isArray(data.addons) ? data.addons : []) {
-    const e = entry as { manifest?: unknown; signature?: unknown; downloads?: unknown };
+    const e = entry as { manifest?: unknown; signature?: unknown; downloads?: unknown; rating?: unknown; screenshots?: unknown; screenshotsVersion?: unknown };
     try {
       const manifest = verifyAddonManifest(String(e.manifest), String(e.signature), publicKey);
-      result.push({ manifest, downloads: Number.isFinite(e.downloads) ? Number(e.downloads) : 0 });
+      result.push({
+        manifest,
+        downloads: Number.isFinite(e.downloads) ? Number(e.downloads) : 0,
+        rating: parseRating(e.rating),
+        screenshots: Number.isInteger(e.screenshots) ? Math.min(4, Math.max(0, e.screenshots as number)) : 0,
+        screenshotsVersion: typeof e.screenshotsVersion === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(e.screenshotsVersion) ? e.screenshotsVersion : '',
+      });
     } catch (error) {
       console.warn('Addon-Store: Eintrag verworfen –', error instanceof Error ? error.message : error);
     }
   }
   return result;
+}
+
+/** Versionsverlauf eines Addons (GET /v1/addons/<id>), neueste zuerst. Anzeige-Daten, nicht signiert. */
+export async function fetchAddonDetails(serviceUrl: string, id: string): Promise<AddonDetails> {
+  if (typeof id !== 'string' || !ID_RE.test(id)) throw new Error('Ungültige Addon-ID');
+  const response = await request(`${storeBase(serviceUrl)}/v1/addons/${encodeURIComponent(id)}`);
+  const data = (await response.json().catch(() => ({}))) as { versions?: unknown; error?: unknown };
+  if (!response.ok) throw new Error(typeof data.error === 'string' && data.error ? data.error : `Der Addon-Store antwortet nicht richtig (${response.status}).`);
+  const versions = (Array.isArray(data.versions) ? (data.versions as Record<string, unknown>[]) : [])
+    .filter((v) => v && typeof v.version === 'string' && VERSION_RE.test(v.version))
+    .map((v) => ({
+      version: String(v.version),
+      date: typeof v.date === 'string' ? v.date.slice(0, 40) : '',
+      notes: Array.isArray(v.notes) ? v.notes.filter((n): n is string => typeof n === 'string').map((n) => n.slice(0, 300)).slice(0, 20) : [],
+    }))
+    .sort((a, b) => compareVersions(b.version, a.version));
+  return { versions };
+}
+
+const MAX_SCREENSHOT = 2 * 1024 * 1024;
+const screenshotMemory = new Map<string, string | null>();
+
+function imageType(data: Buffer): 'image/png' | 'image/jpeg' | null {
+  if (data.length > 8 && data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+  if (data.length > 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'image/jpeg';
+  return null;
+}
+
+/**
+ * Screenshot 1–4 eines Addons als data:-URL. Zwischengespeichert nach Addon, Nummer und screenshotsVersion
+ * (Speicher und cacheDir). Nur PNG und JPEG bis 2 MiB; sonst null.
+ */
+export async function fetchAddonScreenshot(serviceUrl: string, id: string, index: number, version: string, cacheDir: string | null): Promise<string | null> {
+  if (typeof id !== 'string' || !ID_RE.test(id) || !Number.isInteger(index) || index < 1 || index > 4) return null;
+  const safeVersion = /^[A-Za-z0-9_-]{1,64}$/.test(version) ? version : 'x';
+  const key = `${id}.${index}.${safeVersion}`;
+  if (screenshotMemory.has(key)) return screenshotMemory.get(key)!;
+  const remember = (value: string | null) => {
+    screenshotMemory.set(key, value);
+    while (screenshotMemory.size > 64) screenshotMemory.delete(screenshotMemory.keys().next().value!);
+    return value;
+  };
+  const toUrl = (data: Buffer) => {
+    const type = imageType(data);
+    return type ? `data:${type};base64,${data.toString('base64')}` : null;
+  };
+  const file = cacheDir ? path.join(cacheDir, `${key}.img`) : null;
+  if (file) {
+    const cached = await readFile(file).catch(() => null);
+    if (cached && cached.length <= MAX_SCREENSHOT && imageType(cached)) return remember(toUrl(cached));
+  }
+  let response: Response;
+  try {
+    response = await request(`${storeBase(serviceUrl)}/v1/addons/${encodeURIComponent(id)}/screenshots/${index}`, 'image/png, image/jpeg');
+  } catch {
+    return null; // offline: beim nächsten Mal noch einmal
+  }
+  const type = (response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+  const declared = Number(response.headers.get('content-length') ?? '0');
+  if (!response.ok || (type !== 'image/png' && type !== 'image/jpeg') || declared > MAX_SCREENSHOT) {
+    await response.body?.cancel().catch(() => undefined);
+    return response.status === 404 || response.ok ? remember(null) : null;
+  }
+  const data = Buffer.from(await response.arrayBuffer());
+  if (data.length > MAX_SCREENSHOT || imageType(data) !== type) return remember(null);
+  if (file && cacheDir) {
+    await mkdir(cacheDir, { recursive: true });
+    // ältere Stände desselben Bildes aufräumen
+    for (const old of (await readdir(cacheDir).catch(() => [] as string[])).filter((f) => f.startsWith(`${id}.${index}.`) && f !== `${key}.img`)) {
+      await rm(path.join(cacheDir, old), { force: true }).catch(() => undefined);
+    }
+    await writeFile(file, data).catch(() => undefined);
+  }
+  return remember(toUrl(data));
 }
 
 const PLATFORM_LABEL: Record<AddonPlatform, string> = { windows: 'Windows', mac: 'macOS', linux: 'Linux' };
@@ -158,20 +273,30 @@ function incompatibility(manifest: AddonManifest): { state: 'unsupported-api' | 
   return null;
 }
 
+/** Zustand eines Store-Eintrags in einer Instanz (installierte Addons aus listContent) */
+function stateIn(manifest: AddonManifest, installed: ContentItem[]): { state: StoreAddon['state']; present: ContentItem | null; problem: ReturnType<typeof incompatibility> } {
+  const present = installed
+    .filter((item) => item.id === manifest.id)
+    .sort((a, b) => compareVersions(b.version, a.version))[0] ?? null;
+  const problem = incompatibility(manifest);
+  const state: StoreAddon['state'] = present
+    ? compareVersions(manifest.version, present.version) > 0 && !problem
+      ? 'update'
+      : 'installed'
+    : (problem?.state ?? 'available');
+  return { state, present, problem };
+}
+
+async function installedAddons(gameDir: string): Promise<ContentItem[]> {
+  return (await listContent(gameDir, 'addons', 'heldix')).filter((item) => item.id);
+}
+
 /** Store-Liste mit dem Zustand in einer Instanz (installiert, Update, …). */
 export async function storeForInstance(gameDir: string, serviceUrl: string, publicKey: string | null): Promise<StoreAddon[]> {
   const entries = await fetchStore(serviceUrl, publicKey);
-  const installed = (await listContent(gameDir, 'addons', 'heldix')).filter((item) => item.id);
+  const installed = await installedAddons(gameDir);
   return entries.map(({ manifest, downloads }) => {
-    const present = installed
-      .filter((item) => item.id === manifest.id)
-      .sort((a, b) => compareVersions(b.version, a.version))[0];
-    const problem = incompatibility(manifest);
-    const state: StoreAddon['state'] = present
-      ? compareVersions(manifest.version, present.version) > 0 && !problem
-        ? 'update'
-        : 'installed'
-      : (problem?.state ?? 'available');
+    const { state, present, problem } = stateIn(manifest, installed);
     return {
       id: manifest.id,
       name: manifest.name,
@@ -195,10 +320,120 @@ export async function storeForInstance(gameDir: string, serviceUrl: string, publ
   });
 }
 
-/** Lädt ein Addon aus dem Store, prüft es und legt es in die Instanz (ältere Versionen werden ersetzt). Gibt den Namen zurück. */
-export async function installStoreAddon(gameDir: string, serviceUrl: string, publicKey: string | null, id: string): Promise<string> {
+export interface OverviewInstance {
+  id: string;
+  name: string;
+  minecraft: string;
+  loader: InstanceLoader;
+  /** Spielordner */
+  dir: string;
+}
+
+/**
+ * Addon-Store als eigene Seite: eine Abfrage des Stores, Zustand in jeder Instanz mit HeldixClient.
+ * Ist der Store nicht erreichbar, steht die Meldung in error (addons ist dann leer).
+ */
+export async function storeOverview(
+  instances: OverviewInstance[],
+  serviceUrl: string,
+  publicKey: string | null,
+  options: {
+    /** eigene Bewertungen (Addon-ID → 1–5 oder null); Fehler zählen als „keine“ */
+    myRatings?: (ids: string[]) => Promise<Map<string, number | null>>;
+    /** die Liste des Stores, wie sie geladen wurde (für Update-Zähler und Screenshots) */
+    onEntries?: (entries: StoreEntry[]) => void;
+  } = {},
+): Promise<StoreOverview> {
+  const list = instances.map(({ id, name, minecraft, loader }) => ({ id, name, minecraft, loader }));
+  let entries: StoreEntry[];
+  try {
+    entries = await fetchStore(serviceUrl, publicKey);
+  } catch (error) {
+    return { addons: [], instances: list, error: error instanceof Error ? error.message : String(error) };
+  }
+  options.onEntries?.(entries);
+  const [installed, ratings] = await Promise.all([
+    Promise.all(instances.map((instance) => installedAddons(instance.dir))),
+    options.myRatings ? options.myRatings(entries.map((e) => e.manifest.id)).catch(() => new Map<string, number | null>()) : Promise.resolve(new Map<string, number | null>()),
+  ]);
+  const addons: StoreListing[] = entries.map(({ manifest, downloads, rating, screenshots }) => ({
+    id: manifest.id,
+    name: manifest.name,
+    version: manifest.version,
+    summary: manifest.summary,
+    description: manifest.description,
+    authors: manifest.authors,
+    icon: manifest.icon,
+    category: manifest.category,
+    platforms: manifest.platforms,
+    api: manifest.api,
+    size: manifest.size,
+    sha256: manifest.sha256,
+    date: manifest.date,
+    notes: manifest.notes,
+    downloads,
+    // Offiziell/Community und Autor nur aus dem signierten Manifest, Bewertung und Screenshots vom Dienst
+    official: manifest.official,
+    author: manifest.author,
+    rating,
+    myRating: ratings.get(manifest.id) ?? null,
+    screenshots,
+    problem: incompatibility(manifest)?.reason ?? null,
+    installs: instances.map((instance, i) => {
+      const { state, present } = stateIn(manifest, installed[i]);
+      return { instanceId: instance.id, state, installedVersion: present?.version ?? null };
+    }),
+  }));
+  return { addons, instances: list, error: null };
+}
+
+export interface PendingUpdate {
+  instanceId: string;
+  instanceName: string;
+  addonId: string;
+  name: string;
+  /** neue Version im Store */
+  version: string;
+  installedVersion: string | null;
+}
+
+/** Alle installierten Addons (in allen Instanzen), für die der Store eine neuere Version hat. Ohne Netz. */
+export async function pendingUpdates(instances: OverviewInstance[], entries: StoreEntry[]): Promise<PendingUpdate[]> {
+  const updates: PendingUpdate[] = [];
+  for (const instance of instances) {
+    const installed = await installedAddons(instance.dir);
+    if (installed.length === 0) continue;
+    for (const { manifest } of entries) {
+      const { state, present } = stateIn(manifest, installed);
+      if (state === 'update') {
+        updates.push({ instanceId: instance.id, instanceName: instance.name, addonId: manifest.id, name: manifest.name, version: manifest.version, installedVersion: present?.version ?? null });
+      }
+    }
+  }
+  return updates;
+}
+
+/** Entfernt alle Dateien eines Addons (auch ausgeschaltete .jar.disabled) aus der Instanz. Gibt die Zahl zurück. */
+export async function uninstallStoreAddon(gameDir: string, id: string): Promise<number> {
   if (typeof id !== 'string' || !ID_RE.test(id)) throw new Error('Ungültige Addon-ID');
-  const entry = (await fetchStore(serviceUrl, publicKey)).find((e) => e.manifest.id === id);
+  // Ersatz-JARs und vorgemerkte Löschungen aus dem Spiel zuerst erledigen
+  await applyPendingRemovals(gameDir);
+  const dir = contentDir(gameDir, 'addons');
+  let removed = 0;
+  for (const item of await listContent(gameDir, 'addons', 'heldix')) {
+    if (item.id !== id) continue;
+    await rm(path.join(dir, item.file), { force: true });
+    await dropPendingRemoval(gameDir, item.file);
+    removed++;
+  }
+  return removed;
+}
+
+/** Lädt ein Addon aus dem Store, prüft es und legt es in die Instanz (ältere Versionen werden ersetzt). Gibt den Namen zurück. */
+export async function installStoreAddon(gameDir: string, serviceUrl: string, publicKey: string | null, id: string, entries?: StoreEntry[]): Promise<string> {
+  if (typeof id !== 'string' || !ID_RE.test(id)) throw new Error('Ungültige Addon-ID');
+  // entries: schon geladene (und geprüfte) Liste, z. B. beim Aktualisieren aller Addons
+  const entry = (entries ?? (await fetchStore(serviceUrl, publicKey))).find((e) => e.manifest.id === id);
   if (!entry) throw new Error('Dieses Addon gibt es im Store nicht (mehr).');
   const { manifest } = entry;
   const problem = incompatibility(manifest);

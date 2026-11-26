@@ -1,5 +1,6 @@
 // HeldixClient – Webseite: Konto-Bereich (/konto). Anmeldung per Einmal-Link aus Launcher oder Spiel (#code=…),
-// danach Profil, Freunde, Nachrichten, Support, Privatsphäre und Meine Daten über die Cookie-Sitzung beim Heldix-Dienst.
+// danach Profil, Freunde, Nachrichten, Support, Meine Addons (konto-addons.js), Privatsphäre und Meine Daten über die
+// Cookie-Sitzung beim Heldix-Dienst.
 // Ein Ziel im Link (#code=…&ziel=support) öffnet nach der Anmeldung den passenden Reiter, ziel=team die Seite /team.
 import {
   $,
@@ -37,6 +38,8 @@ import {
   toast,
   uid,
 } from './app-common.js';
+import { initMyAddons } from './konto-addons.js';
+import { attachmentList, normalizeAttachments } from './support-attachments.js';
 
 // Alle Spielerbilder auf dieser Seite: Minecraft-Köpfe über die Cookie-Sitzung (sonst Initialen).
 setSkinSource('auth');
@@ -64,10 +67,11 @@ const state = {
 };
 
 let tabs = null;
+let myAddons = null;
 const refresher = poller(refreshLive, POLL_MS);
 const supportRefresher = poller(() => refreshSupport(), 15_000);
 /** Ziele aus dem Einmal-Link (#code=…&ziel=…), siehe Spezifikation 2 §6. */
-const TARGETS = new Set(['profil', 'freunde', 'nachrichten', 'privatsphaere', 'daten', 'support', 'team']);
+const TARGETS = new Set(['profil', 'freunde', 'nachrichten', 'privatsphaere', 'daten', 'support', 'addons', 'team']);
 
 // ---------------------------------------------------------------------------------------------------------
 // Anfragen mit Sitzung: 401 heißt abgemeldet (abgelaufen, anderswo beendet oder Daten gelöscht)
@@ -87,6 +91,7 @@ function sessionEnded(message) {
   state.ended = true;
   refresher.stop();
   supportRefresher.stop();
+  myAddons?.stop();
   for (const dialog of document.querySelectorAll('dialog.modal')) dialog.remove();
   showGuest(message);
 }
@@ -194,6 +199,7 @@ function onTab(name) {
     loadReports().catch(showError);
   }
   if (name === 'daten') loadSessions().catch(showError);
+  myAddons.onTab(name);
   if (name === 'support') {
     refreshSupportList().catch(showError);
     if (state.support.ticket?.id) refreshOpenTicket().catch(() => {});
@@ -1003,6 +1009,8 @@ async function openTicket(id) {
   $('#ticket-meta').textContent = '';
   $('#ticket-verlauf').dataset.signature = '';
   $('#ticket-verlauf').replaceChildren(loadingState());
+  $('#ticket-anhaenge').dataset.signature = '';
+  $('#ticket-anhaenge').replaceChildren();
   $('#ticket-antwort').hidden = true;
   $('#ticket-geschlossen').hidden = true;
   if (!window.matchMedia('(min-width: 901px)').matches) $('#support').scrollIntoView({ block: 'start' });
@@ -1046,6 +1054,9 @@ function showTicket(ticket, { focus = false, fresh = false } = {}) {
       );
     }),
   );
+  // Anhänge (Absturzberichte und Logs aus dem Launcher): Liste mit Download
+  const attachments = normalizeAttachments(ticket.attachments);
+  rerender($('#ticket-anhaenge'), JSON.stringify([ticket.id, attachments]), () => attachmentList(ticket.id, attachments, { base: '/v1/support' }));
   const closed = ticket.status === 'closed';
   $('#ticket-antwort').hidden = closed;
   $('#ticket-geschlossen').hidden = !closed;
@@ -1362,6 +1373,7 @@ async function deleteEverything() {
 
 function init() {
   tabs = setupTabs($('#konto-tabs'), onTab);
+  myAddons = initMyAddons({ call, onUnauthorized: () => sessionEnded('Deine Anmeldung ist abgelaufen oder wurde beendet. Melde dich über den Launcher oder im Spiel erneut an.') });
   $('#konto-erneut').addEventListener('click', start);
   $('#konto-abmelden').addEventListener('click', logout);
   $('#cape-grid').addEventListener('change', onCapeChange);

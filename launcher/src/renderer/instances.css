@@ -46,6 +46,14 @@
 .loader-badge.vanilla { color: #a7f3d0; background: rgba(52, 211, 153, 0.12); box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.25); }
 
 /* ---------- Übersicht ---------- */
+.instances-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; max-width: 1120px; margin-bottom: 14px; }
+.instances-toolbar .search-field { max-width: 280px; }
+.instances-toolbar .chip-toggle { margin-right: 0; }
+.instances-sort { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; color: var(--faint); font-size: 12.5px; font-weight: 600; }
+.instances-sort select { height: 36px; padding: 0 30px 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239ba6b8' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center / 14px; color: var(--text); font-size: 13px; outline: none; appearance: none; cursor: pointer; }
+.instances-sort select:focus { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+.instances-sort select option { background: var(--panel-2); color: var(--text); }
+.instance-empty { grid-column: 1 / -1; padding: 28px 10px; color: var(--faint); font-size: 13px; text-align: center; }
 .instance-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; max-width: 1120px; }
 .instance-card {
   position: relative;

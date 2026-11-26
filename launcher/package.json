@@ -1,7 +1,7 @@
 {
   "name": "heldixclient-launcher",
   "productName": "HeldixClient",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "description": "Minecraft-Launcher mit eigenem Mod-Loader (Heldix Loader), Client-Mod und Addon-System",
   "license": "MIT",
   "author": "HeldixClient contributors",
@@ -24,12 +24,15 @@
     "dist": "npm run mod && npm run build && electron-builder --win",
     "test:launch": "npm run build && node dist/scripts/test-launch.js",
     "test:discord": "npm run build && node dist/scripts/test-discord.js",
-    "dev-key": "npm run build && node dist/scripts/dev-key.js",
     "capes": "electron scripts/render-capes.mjs",
     "update-key": "npm run build && node dist/scripts/release.js --init",
     "release": "npm run dist && node dist/scripts/release.js",
     "addon": "npm run build && node dist/scripts/addon-release.js",
     "test:update": "npm run build && node dist/scripts/test-update.js",
+    "test:crash": "npm run build && node dist/scripts/test-crash.js",
+    "test:social": "npm run build && node dist/scripts/test-social.js",
+    "test:profile": "npm run build && node dist/scripts/test-profile.js",
+    "test:store": "npm run build && node dist/scripts/test-store.js",
     "dist:mac": "npm run mod && npm run build && electron-builder --mac"
   },
   "build": {
@@ -66,14 +69,6 @@
         "to": "heldix-loader-fabric",
         "filter": [
           "*.jar"
-        ]
-      },
-      {
-        "from": "resources/launcher-bridge",
-        "to": "launcher-bridge",
-        "filter": [
-          "*.jar",
-          "*.png"
         ]
       }
     ],
