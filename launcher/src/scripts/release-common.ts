@@ -1,12 +1,31 @@
 // Gemeinsames für die Release-Skripte (release.ts für Windows, release-mac.ts für den Mac) – ohne Seiteneffekte beim
 // Import, damit scripts/test-update.ts das Mac-Manifest mit einem Test-Schlüssel prüfen kann.
 
-import { createHash, createPublicKey, sign, type KeyObject } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createHash, createPrivateKey, createPublicKey, sign, type KeyObject } from 'node:crypto';
+import { createReadStream, existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { MAC_ARCHES, MAC_ARTIFACT_RE, macArchLabel, macFileName, verifyMacManifest, type MacArch, type MacUpdateManifest } from '../main/core/mac-update';
+
+/**
+ * Privater Update-Schlüssel: aus envValue (GitHub Actions: Geheimnis HELDIX_UPDATE_KEY mit dem Inhalt der PEM-Datei,
+ * auch einzeilig mit „\n“), sonst aus der Datei. Fehlermeldungen enthalten den Schlüssel nie.
+ */
+export async function loadUpdateKey(envValue: string | undefined, file: string): Promise<KeyObject> {
+  const fromEnv = envValue?.trim();
+  if (!fromEnv && !existsSync(file)) throw new Error(`Kein Update-Schlüssel unter ${file}. Einmalig "npm run update-key" ausführen.`);
+  const pem = fromEnv ? `${fromEnv.replace(/\\n/g, '\n').replace(/\r/g, '')}\n` : await readFile(file, 'utf8');
+  const where = fromEnv ? 'HELDIX_UPDATE_KEY' : file;
+  let key: KeyObject;
+  try {
+    key = createPrivateKey(pem);
+  } catch {
+    throw new Error(`${where} ist kein gültiger privater Schlüssel${fromEnv ? ' (kompletten Inhalt von update-key.pem einfügen)' : ''}.`);
+  }
+  if (key.asymmetricKeyType !== 'ed25519') throw new Error(`${where} ist kein Ed25519-Schlüssel.`);
+  return key;
+}
 
 /** SHA-512 einer Datei (Base64) */
 export async function sha512File(file: string): Promise<string> {

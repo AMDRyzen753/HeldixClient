@@ -1,5 +1,6 @@
 # Baut Heldix Loader, Client-Mod, Addons, den Windows-Installer und die macOS-App (Apple Silicon und Intel).
-# Bei einem Tag wie v0.7.0 werden Installer und Mac-Downloads zusätzlich als GitHub-Release veröffentlicht.
+# Bei einem Tag wie v0.7.0 werden Installer und Mac-Downloads zusätzlich als GitHub-Release veröffentlicht, und
+# update-mac.json (Mac-Updates über den Heldix-Dienst) wird mit dem Geheimnis HELDIX_UPDATE_KEY signiert.
 name: Build
 
 on:
@@ -110,10 +111,73 @@ jobs:
             launcher/release/*.zip
           if-no-files-found: error
 
+  # Signiert die Mac-Updates (update-mac.json) mit dem Update-Schlüssel – nur bei Versions-Tags und in einem eigenen,
+  # kleinen Job: Der Schlüssel liegt als Geheimnis HELDIX_UPDATE_KEY in der Umgebung „release“ (Einstellungen →
+  # Environments, am besten mit „Required reviewers“) und ist nur im Schritt „update-mac.json signieren“ sichtbar.
+  # Signiert werden genau die ZIPs aus dem Job „build-mac“ – also diese ZIPs hochladen, nicht neu gebaute.
+  sign-mac:
+    name: Mac-Updates signieren
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-mac
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Node.js einrichten
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: launcher/package-lock.json
+
+      # ohne Installationsskripte der Pakete (und ohne Electron-Download) – hier wird nur TypeScript übersetzt
+      - name: Abhängigkeiten installieren
+        working-directory: launcher
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: npm ci --ignore-scripts
+
+      - name: Launcher-Skripte übersetzen
+        working-directory: launcher
+        run: npm run build
+
+      - name: Tag und Version vergleichen
+        working-directory: launcher
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME passt nicht zur Version $version in launcher/package.json."
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: HeldixClient-macOS
+          path: launcher/mac-artifacts
+
+      - name: update-mac.json signieren
+        working-directory: launcher
+        env:
+          HELDIX_UPDATE_KEY: ${{ secrets.HELDIX_UPDATE_KEY }}
+        run: |
+          if [ -z "$HELDIX_UPDATE_KEY" ]; then
+            echo "::error::Geheimnis HELDIX_UPDATE_KEY fehlt (Einstellungen → Environments → release, Inhalt von update-key.pem)."
+            exit 1
+          fi
+          node dist/scripts/release-mac.js mac-artifacts
+
+      - name: update-mac.json hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: HeldixClient-macOS-Update
+          path: launcher/release/update/update-mac*.json
+          if-no-files-found: error
+
   release:
     name: Release veröffentlichen
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, build-mac]
+    needs: [build, build-mac, sign-mac]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -128,11 +192,16 @@ jobs:
           name: HeldixClient-macOS
           path: release
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: HeldixClient-macOS-Update
+          path: release
+
       - name: GitHub-Release mit Installer und Mac-Downloads anlegen
         env:
           GH_TOKEN: ${{ github.token }}
         run: >
-          gh release create "${{ github.ref_name }}" release/*.exe release/*.dmg release/*.zip
+          gh release create "${{ github.ref_name }}" release/*.exe release/*.dmg release/*.zip release/update-mac.json
           --repo "${{ github.repository }}"
           --title "HeldixClient ${{ github.ref_name }}"
           --generate-notes

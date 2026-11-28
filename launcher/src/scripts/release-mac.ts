@@ -8,14 +8,15 @@
 // (%USERPROFILE%\.heldixclient-dev\update-key.pem) und schreibt release/update/update-mac.json (+ Kopie
 // update-mac-<version>.json). Hinweise wie bei npm run release aus release-notes.md (Zeilen mit „- “).
 // Hochladen: zuerst ZIPs und DMGs, update-mac.json zuletzt.
+// In GitHub Actions (Versions-Tag v*): Schlüssel aus dem Geheimnis HELDIX_UPDATE_KEY der Umgebung „release“, Ordner
+// release/ – update-mac.json landet dann mit im Artefakt (siehe .github/workflows/build.yml).
 
-import { createPrivateKey, createPublicKey } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { createPublicKey } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { LAUNCHER_VERSION } from '../main/config';
-import { findMacArtifacts, readReleaseNotes, signMacManifest, writeMacUpdate } from './release-common';
+import { findMacArtifacts, loadUpdateKey, readReleaseNotes, signMacManifest, writeMacUpdate } from './release-common';
 
 const UPDATE_KEY_PATH = path.join(os.homedir(), '.heldixclient-dev', 'update-key.pem');
 const ROOT = path.join(__dirname, '..', '..');
@@ -33,8 +34,9 @@ async function main(): Promise<void> {
   for (const warning of found.warnings) console.log(`Hinweis: ${warning}`);
   if (found.errors.length) throw new Error(`Die Mac-Dateien passen nicht:\n  ${found.errors.join('\n  ')}`);
 
-  if (!existsSync(UPDATE_KEY_PATH)) throw new Error(`Kein Update-Schlüssel unter ${UPDATE_KEY_PATH}. Einmalig "npm run update-key" ausführen.`);
-  const privateKey = createPrivateKey(await readFile(UPDATE_KEY_PATH, 'utf8'));
+  // GitHub Actions: Schlüssel aus dem Geheimnis HELDIX_UPDATE_KEY (Inhalt der PEM-Datei); sonst die Datei auf diesem PC.
+  // Der Schlüssel wird nie ausgegeben.
+  const privateKey = await loadUpdateKey(process.env.HELDIX_UPDATE_KEY, UPDATE_KEY_PATH);
   const publicPem = createPublicKey(privateKey).export({ type: 'spki', format: 'pem' }).toString();
   const embedded = await readFile(PUBLIC_KEY_TS, 'utf8').catch(() => '');
   if (!embedded.includes(JSON.stringify(publicPem))) {

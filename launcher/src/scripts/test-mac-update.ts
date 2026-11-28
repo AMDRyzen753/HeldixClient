@@ -4,7 +4,7 @@
 // Test-Schlüssel und der Updater gegen den Test-Server. Nichts davon braucht einen Mac oder den echten Update-Schlüssel.
 
 import { spawnSync } from 'node:child_process';
-import { createHash, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
+import { createHash, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -27,7 +27,8 @@ import {
 } from '../main/core/mac-update';
 import { Updater } from '../main/core/updater';
 import { decideStartupUpdate, startupPlan, type StartupInput } from '../main/core/startup-update';
-import { findMacArtifacts, readReleaseNotes, signMacManifest, writeMacUpdate } from './release-common';
+import { findMacArtifacts, loadUpdateKey, readReleaseNotes, signMacManifest, writeMacUpdate } from './release-common';
+import { LAUNCHER_VERSION } from '../main/config';
 
 type Check = (label: string, ok: boolean, detail?: string) => void;
 
@@ -286,6 +287,40 @@ export async function macUpdateTests(check: Check, base: { serve: (route: string
     // Hinweise aus release-notes.md: nur aktive Zeilen mit „- “
     await writeFile(path.join(artifact, 'release-notes.md'), '# Kopf\n# ---------- 0.14.0 ----------\n- Neu A\n#- alt\n# - auch alt\n- Neu B\n');
     check('Release: Hinweise ohne auskommentierte Zeilen', JSON.stringify(await readReleaseNotes(artifact, [])) === JSON.stringify(['Neu A', 'Neu B']));
+
+    // Update-Schlüssel aus HELDIX_UPDATE_KEY (GitHub Actions) oder aus der Datei
+    const keyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const publicOf = (key: KeyObject) => createPublicKey(key).export({ type: 'spki', format: 'pem' }).toString();
+    const noFile = path.join(artifact, 'fehlt.pem');
+    check('Schlüssel: aus HELDIX_UPDATE_KEY (mehrzeilig)', publicOf(await loadUpdateKey(keyPem, noFile)) === pem);
+    check('Schlüssel: einzeilig mit \\n, Windows-Zeilenenden und Leerzeilen', publicOf(await loadUpdateKey(`\n ${keyPem.trim().replace(/\n/g, '\\n')} \n`, noFile)) === pem
+      && publicOf(await loadUpdateKey(keyPem.replace(/\n/g, '\r\n'), noFile)) === pem);
+    const keyFile = path.join(artifact, 'update-key.pem');
+    await writeFile(keyFile, keyPem);
+    check('Schlüssel: ohne HELDIX_UPDATE_KEY (oder leer) aus der Datei', publicOf(await loadUpdateKey(undefined, keyFile)) === pem && publicOf(await loadUpdateKey('  ', keyFile)) === pem);
+    await expectThrow(check, 'Schlüssel: weder Geheimnis noch Datei → Hinweis auf npm run update-key', () => loadUpdateKey(undefined, noFile), /npm run update-key/);
+    const secretJunk = 'GEHEIM-abc123-nicht-ausgeben';
+    try {
+      await loadUpdateKey(secretJunk, keyFile);
+      check('Schlüssel: Unsinn im Geheimnis → Fehler ohne den Inhalt', false);
+    } catch (error) {
+      const message = (error as Error).message;
+      check('Schlüssel: Unsinn im Geheimnis → Fehler ohne den Inhalt', /HELDIX_UPDATE_KEY ist kein gültiger/.test(message) && !message.includes(secretJunk), message);
+    }
+    const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    await expectThrow(check, 'Schlüssel: RSA statt Ed25519 → abgelehnt', () => loadUpdateKey(rsa, noFile), /kein Ed25519/);
+
+    // Das echte Skript mit Test-Schlüssel im Geheimnis: liest ihn, bricht aber am öffentlichen Schlüssel im Quellcode ab
+    // (passt nur zum echten Update-Schlüssel) – es wird also nichts signiert und nichts nach release/update geschrieben.
+    const ciDir = path.join(artifact, 'ci');
+    await mkdir(ciDir);
+    await writeFile(path.join(ciDir, macFileName(LAUNCHER_VERSION, 'arm64')), zipArm);
+    await writeFile(path.join(ciDir, macFileName(LAUNCHER_VERSION, 'x64')), zipIntel);
+    const runScript = (key: string) => spawnSync(process.execPath, [path.join(__dirname, 'release-mac.js'), ciDir], { encoding: 'utf8', env: { ...process.env, HELDIX_UPDATE_KEY: key } });
+    let run = runScript(keyPem);
+    check('Skript in CI: liest HELDIX_UPDATE_KEY, fremder Schlüssel → Abbruch am öffentlichen Schlüssel', run.status === 1 && /öffentliche Schlüssel im Quellcode passt nicht/.test(run.stderr), `${run.status} ${run.stderr}`);
+    run = runScript(secretJunk);
+    check('Skript in CI: kaputtes Geheimnis → Abbruch, Inhalt nicht in der Ausgabe', run.status === 1 && /HELDIX_UPDATE_KEY ist kein gültiger/.test(run.stderr) && !`${run.stdout}${run.stderr}`.includes(secretJunk), `${run.status} ${run.stderr}`);
   } finally {
     await rm(artifact, { recursive: true, force: true });
   }
