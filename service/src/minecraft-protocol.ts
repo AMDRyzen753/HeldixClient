@@ -163,7 +163,8 @@ export interface StatusInfo {
   protocol: number;
   online: number;
   max: number;
-  description: Record<string, string>;
+  /** Text-Komponente (JSON), auch mit `extra` */
+  description: Record<string, unknown>;
 }
 
 /** Status-Antwort (Paket 0x00 im Zustand Status). */

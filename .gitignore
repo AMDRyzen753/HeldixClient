@@ -29,6 +29,9 @@ desktop.ini
 # Entwickler-Schlüssel (npm run dev-key) – nie einchecken
 developer*.key
 *.pem
+# Ausnahme: der ÖFFENTLICHE Schlüssel für Store-Addons und Cosmetics gehört in die Mod (ohne ihn bricht der Bau in
+# GitHub Actions ab: build-mod.mjs vergleicht ihn mit src/main/update-public-key.ts). Private Schlüssel liegen nie im Projekt.
+!mod/src/main/resources/heldix-store-key.pem
 
 # Heldix-Dienst
 service/node_modules/

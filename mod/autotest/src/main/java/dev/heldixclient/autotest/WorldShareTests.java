@@ -295,6 +295,27 @@ final class WorldShareTests {
 		JsonObject players = status.has("players") && status.get("players").isJsonObject() ? status.getAsJsonObject("players") : new JsonObject();
 		String description = text(status.get("description"));
 		t.check("Relay: Status mit unserem MOTD (" + description + ")", !description.isBlank() && description.contains(motd));
+		// Werbung in der Serverliste: Beschreibung mit Welt und „Geteilt mit HeldixClient“, Symbol mit Heldix-Logo
+		String worldName = t.compute(mc -> mc.getSingleplayerServer().getWorldData().getLevelName());
+		// ohne Minecraft-Farbcodes (§x) vergleichen
+		String plain = description.replaceAll("§.", "");
+		t.check("Serverliste: Beschreibung „… von <Gastgeber>“ und „Geteilt mit HeldixClient“ (" + plain.replace('\n', '/') + ")",
+				plain.contains("Geteilt mit HeldixClient") && plain.contains(" von ")
+						&& plain.contains(worldName.length() > 22 ? worldName.substring(0, 10) : worldName));
+		String favicon = status.has("favicon") && status.get("favicon").isJsonPrimitive() ? status.get("favicon").getAsString() : "";
+		int[] icon = {0, 0, 0};
+		if (favicon.startsWith("data:image/png;base64,")) {
+			byte[] png = java.util.Base64.getMimeDecoder().decode(favicon.substring("data:image/png;base64,".length()));
+			try (com.mojang.blaze3d.platform.NativeImage image = com.mojang.blaze3d.platform.NativeImage.read(png)) {
+				icon[0] = image.getWidth();
+				icon[1] = image.getHeight();
+				// oberer Rand der Plakette unten rechts: Heldix-Blau
+				icon[2] = image.getWidth() == 64 ? image.getPixel(49, 36) : 0;
+			}
+		}
+		int badge = icon[2];
+		t.check("Serverliste: Symbol 64×64 mit Heldix-Plakette (" + icon[0] + "×" + icon[1] + ", Rand " + Integer.toHexString(badge) + ")",
+				icon[0] == 64 && icon[1] == 64 && (badge & 0xFF) > ((badge >> 16) & 0xFF) + 40);
 		t.check("Relay: Spielerzahl 1/8 (" + players + ")", players.has("online") && players.get("online").getAsInt() == 1
 				&& players.has("max") && players.get("max").getAsInt() == 8);
 
@@ -390,6 +411,8 @@ final class WorldShareTests {
 		t.clickWidget(ShareWorldScreen.STOP_LABEL);
 		t.waitSoft(mc -> !WorldShare.active(), 10);
 		t.check("Welt teilen: beendet, LAN wieder zu", t.compute(mc -> !WorldShare.active() && !mc.getSingleplayerServer().isPublished()));
+		t.check("Welt teilen: Beschreibung der Welt wieder wie vorher (ohne Werbung)",
+				t.compute(mc -> !mc.getSingleplayerServer().getMotd().contains("HeldixClient")));
 		if (port <= 0) return;
 		String description = "";
 		// höchstens 8 Versuche: das Relay lässt je IP nur 20 neue Verbindungen pro Minute zu
@@ -398,6 +421,8 @@ final class WorldShareTests {
 			if (!description.contains("nicht geöffnet")) TestContext.sleep(500);
 		}
 		t.check("Relay: nach dem Beenden „nicht geöffnet“ (" + description + ")", description.contains("nicht geöffnet"));
+		// Dienst ab 1.12.1: auch die geschlossene Welt wirbt in der Serverliste
+		t.check("Relay: geschlossene Welt mit „Geteilt mit HeldixClient“ in der Serverliste", description.contains("Geteilt mit HeldixClient"));
 	}
 
 	// ======================================================================================

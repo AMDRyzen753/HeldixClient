@@ -265,7 +265,7 @@ final class AddonContext implements HeldixApi {
 		// HeldixKeys sind GLFW-Codes; Minecraft nimmt seit 26.x SDL-Scancodes (NONE = -1 würde sonst abstürzen)
 		InputConstants.Key key = AddonKeys.toMinecraft(defaultKey);
 		KeyMapping mapping = KeyMappings.register(new KeyMapping(label, InputConstants.Type.KEYBOARD, key.getValue(), keyCategory));
-		AddonManager.KEYS.add(new AddonManager.Key(addon, mapping, onPress, defaultKey));
+		AddonManager.KEYS.add(new AddonManager.Key(addon, id, mapping, onPress, defaultKey));
 		return new AddonKey(mapping);
 	}
 

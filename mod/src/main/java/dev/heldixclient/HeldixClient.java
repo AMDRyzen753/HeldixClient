@@ -159,6 +159,7 @@ public class HeldixClient implements HeldixModInitializer {
 		dev.heldixclient.player.PlayerMenu.tick(mc);
 		dev.heldixclient.share.WorldShare.tick(mc);
 		dev.heldixclient.voice.VoiceLink.tick(mc);
+		dev.heldixclient.ui.SecureChatNotice.tick(mc);
 		ModuleManager.tick(mc);
 		DebugOverlay.seed(mc);
 	}

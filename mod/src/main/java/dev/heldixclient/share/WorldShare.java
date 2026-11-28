@@ -118,6 +118,8 @@ public final class WorldShare {
 		volatile String address;
 		volatile int lanPort;
 		volatile boolean publishedByUs;
+		/** Beschreibung und Symbol der Welt vor dem Teilen (Werbung in der Serverliste, siehe ShareBranding) */
+		volatile ShareBranding.Original branding;
 		volatile WorldTunnel tunnel;
 		volatile Path backup;
 
@@ -431,6 +433,8 @@ public final class WorldShare {
 			s.publishedByUs = true;
 		}
 		s.lanPort = port;
+		// Serverliste der Mitspieler: „Geteilt mit HeldixClient“ und das Heldix-Logo am Bild der Welt
+		if (s.branding == null) s.branding = ShareBranding.apply(server, s.hostName);
 		applyWorldSettings(server, s.settings);
 		refreshPermissions(server);
 		state = State.CONNECTING;
@@ -479,6 +483,8 @@ public final class WorldShare {
 		IntegratedServer server = s.server;
 		if (touchServer && mc.getSingleplayerServer() == server && server != null && server.isRunning()) {
 			try {
+				ShareBranding.restore(server, s.branding);
+				s.branding = null;
 				if (s.publishedByUs && server.isPublished()) {
 					Component message = Component.literal(reason != null ? reason : "Der Gastgeber hat das Teilen beendet.");
 					for (ServerPlayer player : List.copyOf(server.getPlayerList().getPlayers())) {

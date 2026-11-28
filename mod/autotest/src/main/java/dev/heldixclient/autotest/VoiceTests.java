@@ -292,6 +292,27 @@ final class VoiceTests {
 			t.check("Voice Chat: Signalton beim Stummschalten", ((Number) invoke(instance, "cuesPlayed")).intValue() > cuesBefore);
 			t.screenshot("voicechat-03-selbst-stumm");
 			t.run(mc -> invoke(instance, "toggleMute"));
+			t.waitSoft(mc -> !VoiceLink.selfMuted(), 3);
+
+			// --- Pausemenü (zweispaltig): Schalter Mikrofon und Ton lösen die Tasten des Voice Chats aus ----------
+			AutoTest.bigWindow(t, "Voice im Pausemenü", () -> {
+				t.setScreen(() -> new net.minecraft.client.gui.screens.PauseScreen(true));
+				t.waitTicks(8);
+				java.util.List<dev.heldixclient.screen.ToggleChip> chips = t.compute(mc -> mc.gui.screen() instanceof dev.heldixclient.screen.PauseMenuScreen pause
+						? pause.voiceToggles() : java.util.List.<dev.heldixclient.screen.ToggleChip>of());
+				t.check("Pausemenü: Schalter Mikrofon und Ton bei verbundenem Voice Chat (" + chips.size() + ")", chips.size() == 2);
+				if (chips.size() == 2) {
+					dev.heldixclient.screen.ToggleChip mic = chips.getFirst();
+					t.check("Pausemenü: Mikrofon zuerst an", mic.isOn() && !t.compute(mc -> VoiceLink.selfMuted()));
+					t.click(mic.getX() + mic.getWidth() / 2.0, mic.getY() + mic.getHeight() / 2.0);
+					boolean muted = t.waitSoft(mc -> VoiceLink.selfMuted(), 3);
+					t.check("Pausemenü: Schalter Mikrofon schaltet stumm (wie die Taste)", muted && !mic.isOn());
+					t.screenshot("voicechat-03b-pausemenue");
+					t.click(mic.getX() + mic.getWidth() / 2.0, mic.getY() + mic.getHeight() / 2.0);
+					t.check("Pausemenü: Schalter Mikrofon wieder an", t.waitSoft(mc -> !VoiceLink.selfMuted(), 3));
+				}
+				t.setScreen(() -> null);
+			});
 
 			// --- Gruppe: sie geht in den Nether (ohne Position) und hört uns trotzdem ------------
 			Setting.Text group = t.compute(mc -> voice.settings().stream().filter(s -> s.label().equals("Gruppe")).map(s -> (Setting.Text) s)

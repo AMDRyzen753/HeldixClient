@@ -46,8 +46,8 @@ public final class AddonManager {
 	record Listener<T>(LoadedAddon addon, T callback) {
 	}
 
-	/** Taste eines Addons (API 2); apiCode = Standardtaste als Code aus HeldixKeys */
-	record Key(LoadedAddon addon, net.minecraft.client.KeyMapping mapping, Runnable onPress, int apiCode) {
+	/** Taste eines Addons (API 2); id = Tasten-ID des Addons, apiCode = Standardtaste als Code aus HeldixKeys */
+	record Key(LoadedAddon addon, String id, net.minecraft.client.KeyMapping mapping, Runnable onPress, int apiCode) {
 	}
 
 	/** Falsch übersetzte Tasten aus options.txt einmal nach dem Laden der Optionen reparieren */
@@ -457,6 +457,29 @@ public final class AddonManager {
 				userAction(key.addon(), "Taste " + key.mapping().getName(), key.onPress());
 			}
 		}
+	}
+
+	/** Gibt es die Taste {@code keyId} des aktiven Addons {@code addonId}? (z. B. Voice Chat → „mute“) */
+	public static boolean hasKey(String addonId, String keyId) {
+		return findKey(addonId, keyId) != null;
+	}
+
+	/**
+	 * Löst die Taste eines aktiven Addons aus wie ein Tastendruck des Spielers (Knöpfe im Pausemenü, z. B. Mikrofon stumm im
+	 * Voice Chat). Nur im Haupt-Thread. false, wenn es Addon oder Taste nicht (aktiv) gibt.
+	 */
+	public static boolean runKey(String addonId, String keyId) {
+		Key key = findKey(addonId, keyId);
+		if (key == null) return false;
+		userAction(key.addon(), "Knopf " + key.mapping().getName(), key.onPress());
+		return true;
+	}
+
+	private static Key findKey(String addonId, String keyId) {
+		for (Key key : KEYS) {
+			if (key.addon().isActive() && key.addon().id().equals(addonId) && key.id().equals(keyId)) return key;
+		}
+		return null;
 	}
 
 	// --- Aktionen des Spielers (API 3): nur hier darf ein Addon an den Server chatten ----------

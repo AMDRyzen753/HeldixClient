@@ -27,6 +27,8 @@ public class ActionButton extends AbstractButton {
 	private final Runnable action;
 	private String icon;
 	private String tooltip;
+	/** Icon oben, kleine Beschriftung darunter (schmale Knöpfe, z. B. im Hauptmenü kleiner Fenster) */
+	private boolean stacked;
 	private float hover;
 
 	public ActionButton(int x, int y, int width, int height, String label, boolean primary, Runnable action) {
@@ -70,6 +72,16 @@ public class ActionButton extends AbstractButton {
 	public ActionButton withTooltip(String tooltip) {
 		this.tooltip = tooltip;
 		return this;
+	}
+
+	/** Icon oben, Beschriftung klein darunter (braucht mindestens 26 Pixel Höhe) */
+	public ActionButton withStackedLabel() {
+		this.stacked = true;
+		return this;
+	}
+
+	public boolean stacked() {
+		return stacked;
 	}
 
 	/** Blau hervorheben (z. B. für eingeschaltete Optionen) */
@@ -132,15 +144,23 @@ public class ActionButton extends AbstractButton {
 		int iconSize = h >= 18 ? 11 : 10;
 		if (iconOnly) {
 			Ui.icon(g, icon, x + (w - iconSize) / 2f, y + (h - iconSize) / 2f, iconSize, Ui.withAlpha(text, alpha));
+		} else if (stacked && icon != null && h >= 26) {
+			// Icon oben, kleine Beschriftung darunter – beides mittig
+			String shown = Ui.ellipsize(label, w - 6, Ui.Font.SMALL);
+			int top = y + (h - (iconSize + 3 + 8)) / 2;
+			Ui.icon(g, icon, x + (w - iconSize) / 2f, top, iconSize, Ui.withAlpha(text, alpha));
+			Ui.text(g, shown, x + (w - Ui.width(shown, Ui.Font.SMALL)) / 2, top + iconSize + 3, Ui.withAlpha(text, alpha), Ui.Font.SMALL);
 		} else {
-			int textW = Ui.width(label, Ui.Font.LABEL);
-			int contentW = textW + (icon != null ? iconSize + 5 : 0);
+			// passt der Text nicht, wird er gekürzt – und erst danach mittig gesetzt
+			int room = w - 8 - (icon != null ? iconSize + 5 : 0);
+			String shown = Ui.ellipsize(label, room, Ui.Font.LABEL);
+			int contentW = Ui.width(shown, Ui.Font.LABEL) + (icon != null ? iconSize + 5 : 0);
 			int cx = x + (w - contentW) / 2;
 			if (icon != null) {
 				Ui.icon(g, icon, cx, y + (h - iconSize) / 2f, iconSize, Ui.withAlpha(text, alpha));
 				cx += iconSize + 5;
 			}
-			Ui.text(g, Ui.ellipsize(label, w - 8, Ui.Font.LABEL), cx, y + (h - 8) / 2, Ui.withAlpha(text, alpha), Ui.Font.LABEL);
+			Ui.text(g, shown, cx, y + (h - 8) / 2, Ui.withAlpha(text, alpha), Ui.Font.LABEL);
 		}
 		if (tooltip != null && isHovered()) Ui.requestTooltip(tooltip, mouseX, mouseY);
 		if (Ui.keyboardFocus(isFocused())) Ui.focusRing(g, x, y, w, h, r, alpha);

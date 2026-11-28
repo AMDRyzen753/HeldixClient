@@ -23,9 +23,9 @@ public class FriendsStrip extends AbstractButton {
 		this.action = action;
 	}
 
-	/** Gibt es etwas zu zeigen? */
+	/** Gibt es etwas zu zeigen? (mit Verbindung zum Heldix-Dienst immer: ohne Freunde lädt die Zeile zum Einladen ein) */
 	public static boolean hasContent() {
-		return Social.online() && !Social.friends().isEmpty();
+		return Social.online();
 	}
 
 	@Override
@@ -47,8 +47,9 @@ public class FriendsStrip extends AbstractButton {
 		int x = getX();
 		int y = getY();
 		int h = getHeight();
-		String text = online.isEmpty() ? "Keine Freunde online" : online.size() == 1 ? online.getFirst().shownName() + " ist online"
-				: online.size() + " Freunde online";
+		String text = friends.isEmpty() ? "Noch keine Freunde  ·  Freunde einladen"
+				: online.isEmpty() ? "Keine Freunde online  ·  Freunde einladen"
+				: online.size() == 1 ? online.getFirst().shownName() + " ist online" : online.size() + " Freunde online";
 		// Party (ab Heldix-Dienst 1.12.0) bzw. eine Einladung vorne
 		dev.heldixclient.social.Party.State party = dev.heldixclient.social.Party.party();
 		if (party != null) text = "Party " + party.members().size() + "/" + party.max() + "  ·  " + text;

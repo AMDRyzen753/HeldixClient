@@ -226,8 +226,18 @@ public final class AutoTest implements HeldixModInitializer {
 		t.screenshot("heldix-01-hauptmenue");
 		t.check("Hauptmenü zeigt die Spielfigur mit Cape", t.compute(mc -> mc.gui.screen().children().stream()
 				.anyMatch(w -> w instanceof dev.heldixclient.screen.FigureWidget)));
-		t.check("Hauptmenü hat den Knopf Cape", t.compute(mc -> mc.gui.screen().children().stream()
-				.anyMatch(w -> w instanceof net.minecraft.client.gui.components.AbstractWidget a && "Cape".equals(a.getMessage().getString()))));
+		t.check("Hauptmenü hat den Knopf Cosmetics", t.compute(mc -> mc.gui.screen().children().stream()
+				.anyMatch(w -> w instanceof net.minecraft.client.gui.components.AbstractWidget a && "Cosmetics".equals(a.getMessage().getString()))));
+		titleLayoutChecks(t, "854×480");
+		bigWindow(t, "Hauptmenü", () -> {
+			t.setScreen(TitleScreen::new);
+			t.waitForScreen(TitleScreen.class, 10);
+			t.waitTicks(10);
+			titleLayoutChecks(t, "groß");
+			t.screenshot("heldix-01d-hauptmenue-gross");
+		});
+		t.waitForScreen(TitleScreen.class, 10);
+		t.waitTicks(6);
 
 		// Weg 1: Hauptmenü → Knopf "Module" → Karte anklicken
 		t.clickWidget("Module");
@@ -259,6 +269,16 @@ public final class AutoTest implements HeldixModInitializer {
 		t.run(mc -> dev.heldixclient.hud.Notifications.show("autotest", "Einblendung", "So sehen Addon-Einblendungen aus", null));
 		t.waitTicks(8);
 		t.screenshot("heldix-02b-einblendung");
+		// Minecrafts Hinweis „Chatnachrichten können nicht überprüft werden“ läge als Toast über der Kopfzeile der
+		// Heldix-Menüs: mit dem Heldix-Design kommt er als eigene Einblendung
+		String unsecureTitle = t.compute(mc -> Component.translatable("multiplayer.unsecureserver.toast.title").getString());
+		t.run(mc -> net.minecraft.client.gui.components.toasts.SystemToast.add(mc.gui.toastManager(),
+				net.minecraft.client.gui.components.toasts.SystemToast.SystemToastId.UNSECURE_SERVER_WARNING,
+				Component.translatable("multiplayer.unsecureserver.toast.title"), Component.translatable("multiplayer.unsecureserver.toast")));
+		boolean noticeShown = t.waitSoft(mc -> dev.heldixclient.hud.Notifications.current().stream().anyMatch(n -> n.startsWith(unsecureTitle)), 5);
+		t.check("Hinweis „" + unsecureTitle + "“ als Heldix-Einblendung statt Toast über den Menüs", noticeShown);
+		t.waitTicks(4);
+		t.screenshot("heldix-02c-hinweis-chat");
 
 		t.serverCommand("tellraw @a \"Heldix-Autotest System\"");
 		t.serverCommand("say Heldix-Autotest Say");
@@ -811,14 +831,96 @@ public final class AutoTest implements HeldixModInitializer {
 		t.click(card[0], card[1]);
 	}
 
-	/** Pausemenü: in breiten Fenstern Karten mit Freunden, Wegpunkten und Schnellschaltern */
+	/** Pausemenü: im kleinen Testfenster einspaltig; dann groß mit Karten (Freunde, Wegpunkte, Schnellschalter) */
 	private static void pauseTest(TestContext t) {
 		t.check("Pausemenü ist das Heldix-Pausemenü (neu)", t.compute(mc -> mc.gui.screen() instanceof PauseMenuScreen));
-		java.util.List<dev.heldixclient.screen.ToggleChip> toggles = t.compute(mc -> ((PauseMenuScreen) mc.gui.screen()).toggles());
-		if (toggles.isEmpty()) {
-			t.log("Pausemenü ohne Schnellschalter (sehr kleines Fenster)");
-			return;
+		java.util.List<dev.heldixclient.screen.ToggleChip> small = t.compute(mc -> ((PauseMenuScreen) mc.gui.screen()).toggles());
+		if (small.isEmpty()) t.log("Pausemenü ohne Schnellschalter (kleines Fenster)");
+		else pauseChecks(t, small);
+		bigWindow(t, "Pausemenü", () -> {
+			t.setScreen(() -> new PauseScreen(true));
+			t.waitTicks(8);
+			int gap = t.compute(mc -> ((PauseMenuScreen) mc.gui.screen()).leftGap());
+			boolean capped = t.compute(mc -> ((PauseMenuScreen) mc.gui.screen()).rowsCapped());
+			t.check("Pausemenü groß: zwei Spalten mit Karten", gap >= 0);
+			t.check("Pausemenü groß: links keine Lücke unter den Knöpfen (" + gap + " px" + (capped ? ", Knöpfe schon maximal hoch" : "") + ")",
+					gap >= 0 && (gap <= 16 || capped));
+			if (t.compute(mc -> dev.heldixclient.social.Social.online())) {
+				t.check("Pausemenü groß: „" + PauseMenuScreen.INVITE_BUTTON + "“ im Fuß der Freunde-Karte", t.compute(mc -> mc.gui.screen().children().stream()
+						.anyMatch(w -> w instanceof net.minecraft.client.gui.components.AbstractWidget a && a.visible
+								&& PauseMenuScreen.INVITE_BUTTON.equals(a.getMessage().getString()))));
+			}
+			java.util.List<dev.heldixclient.screen.ToggleChip> big = t.compute(mc -> ((PauseMenuScreen) mc.gui.screen()).toggles());
+			if (small.isEmpty()) pauseChecks(t, big);
+			t.screenshot("heldix-05c-pausemenue-gross");
+		});
+		t.setScreen(() -> new PauseScreen(true));
+		t.waitTicks(6);
+	}
+
+	/**
+	 * Fenster für {@code body} vergrößern (GUI-Skalierung 2), danach zurück. Im kleinen Testfenster sind Pausemenü und
+	 * Hauptmenü einspaltig; die Karten-Ansicht gibt es nur in größeren Fenstern.
+	 */
+	static void bigWindow(TestContext t, String what, Runnable body) {
+		int[] window = t.compute(mc -> new int[] {mc.getWindow().getScreenWidth(), mc.getWindow().getScreenHeight()});
+		int scale = t.compute(mc -> mc.options.guiScale().get());
+		t.run(mc -> {
+			mc.options.guiScale().set(2);
+			mc.getWindow().setWindowed(window[0] + 600, window[1] + 420);
+		});
+		boolean resized = t.waitSoft(mc -> mc.getWindow().getScreenWidth() != window[0], 5);
+		t.waitTicks(6);
+		try {
+			if (!resized) t.log(what + ": Fenster ließ sich nicht vergrößern");
+			body.run();
+		} finally {
+			t.run(mc -> {
+				mc.getWindow().setWindowed(window[0], window[1]);
+				mc.options.guiScale().set(scale);
+			});
+			t.waitSoft(mc -> mc.getWindow().getScreenWidth() == window[0], 5);
+			t.waitTicks(6);
 		}
+	}
+
+	/** Hauptmenü: Namen der Kacheln und der Heldix-Knöpfe ganz lesbar, Spielfigur groß genug */
+	private static void titleLayoutChecks(TestContext t, String size) {
+		String tiles = t.compute(mc -> mc.gui.screen().children().stream()
+				.filter(c -> c instanceof StartCard card && !"Weiterspielen".equals(card.getMessage().getString()))
+				.map(c -> (StartCard) c)
+				.map(card -> {
+					String label = card.getMessage().getString();
+					boolean fits = card.isCentered() ? dev.heldixclient.ui.Ui.width(label, dev.heldixclient.ui.Ui.Font.LABEL) <= card.getWidth() - 8
+							: StartCard.inlineWidth(label) <= card.getWidth();
+					return label + (fits ? "" : " abgeschnitten");
+				}).toList().toString());
+		t.check("Hauptmenü " + size + ": Namen der Kacheln passen ganz " + tiles, !tiles.contains("abgeschnitten") && tiles.split(",").length == 4);
+		java.util.List<String> labels = java.util.List.of("Module", "Cosmetics", "Grafik", "HUD-Editor", "Einstellungen");
+		String pills = t.compute(mc -> labels.stream().map(label -> mc.gui.screen().children().stream()
+				.filter(c -> c instanceof dev.heldixclient.screen.ActionButton b && label.equals(b.getMessage().getString()))
+				.map(c -> (dev.heldixclient.screen.ActionButton) c)
+				.findFirst()
+				.map(b -> label + ((b.stacked() ? dev.heldixclient.ui.Ui.width(label, dev.heldixclient.ui.Ui.Font.SMALL) <= b.getWidth() - 6
+						: dev.heldixclient.ui.Ui.width(label, dev.heldixclient.ui.Ui.Font.LABEL) + 24 <= b.getWidth()) ? "" : " abgeschnitten"))
+				.orElse(label + " fehlt")).toList().toString());
+		t.check("Hauptmenü " + size + ": Heldix-Knöpfe ganz beschriftet " + pills, !pills.contains("abgeschnitten") && !pills.contains("fehlt"));
+		int[] figure = t.compute(mc -> {
+			dev.heldixclient.screen.FigureWidget fig = null;
+			StartCard hero = null;
+			for (var child : mc.gui.screen().children()) {
+				if (child instanceof dev.heldixclient.screen.FigureWidget f) fig = f;
+				if (child instanceof StartCard card && "Weiterspielen".equals(card.getMessage().getString())) hero = card;
+			}
+			if (fig == null || hero == null) return new int[] {0, 0};
+			return new int[] {fig.getHeight(), fig.getX() >= hero.getX() + hero.getWidth() ? 1 : 0};
+		});
+		t.check("Hauptmenü " + size + ": Spielfigur groß genug (" + figure[0] + " px, " + (figure[1] == 1 ? "neben" : "über") + " der Karte)",
+				figure[0] >= (figure[1] == 1 ? 60 : 40));
+	}
+
+	/** Schnellschalter und „Wegpunkt hier setzen“ im Pausemenü */
+	private static void pauseChecks(TestContext t, java.util.List<dev.heldixclient.screen.ToggleChip> toggles) {
 		t.check("Pausemenü: mindestens vier Schnellschalter (" + toggles.size() + ")", toggles.size() >= 4);
 		dev.heldixclient.screen.ToggleChip first = toggles.getFirst();
 		boolean before = first.isOn();

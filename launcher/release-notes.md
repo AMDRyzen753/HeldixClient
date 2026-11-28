@@ -2,26 +2,36 @@
 # Jede Zeile mit "- " erscheint im Launcher unter „Was ist neu“ und im Versionsverlauf auf heldixclient.com.
 # Vor jedem "npm run release" anpassen. Zeilen mit # werden ignoriert.
 
-# ---------- 0.13.8 ----------
-- Neu: Welt teilen – öffne deine Einzelspielerwelt im Pausenmenü mit einem Klick für Freunde, kostenlos und ohne Portfreigabe. Jede Welt hat eine feste Adresse, und auch Freunde ohne HeldixClient können beitreten
-- Neu im Hauptmenü: Heldix-Welten – offene Welten deiner Freunde mit „Beitreten“, deine eigenen Welten mit Mitgliedern und Rollen, Anklopfen (Erlauben mit H, Ablehnen mit N) und automatischen Sicherungen
-- Neue animierte Cosmetics: 8 Flügel und Rückenteile, 9 Begleiter (Mochi in vier Fellfarben) und 6 Auren, die sich beim Laufen, Schleichen, Schwimmen und Fliegen mitbewegen und teils leuchten
-- Der Cosmetics-Platz „Partikel“ heißt jetzt „Aura“
-- Neue Webseite: Freunde, Nachrichten und Party gibt es jetzt auch im Browser unter Konto, dazu „Meine Welten“
-- Neu: Einrichtung beim ersten Start – Willkommen, Microsoft-Anmeldung und offizielle Addons wie Voice Chat und Minimap mit einem Klick; der Windows-Installer kommt im HeldixClient-Design und auf Deutsch
-- Neuer Discord-Status: zeigt Dimension und Spielmodus („Im Nether · Überleben“), Spielerzahl, Voice, „Teilt seine Welt“ bzw. „In der Welt von …“ und „Abwesend“, dazu passende Bilder, deinen Minecraft-Kopf und die Zeit seit dem Betreten des Servers
-- Einstellungen → Discord: jeden Teil einzeln abschalten, „Nur ‚Spielt HeldixClient‘“ und eine Vorschau, wie dein Status gerade aussieht – verbindet sich von selbst, sobald Discord läuft
-- Startseite: „Offene Welten deiner Freunde“ und Freunde online mit „Beitreten“ – auch in geteilte Welten, mit der passenden Instanz
-- Geteilten Welten beitreten per Link (heldixclient://welt/…) und mit „Mitspielen“ im Discord-Status, wenn die Welt für alle offen ist
-- Neu: Glocke oben rechts mit allen Benachrichtigungen – Anfragen, Nachrichten, Einladungen, Freischaltungen, geöffnete Welten und Updates
-- Neu: Schließt du den Launcher während des Spiels, bleibt er im Infobereich – mit Freunden online und Benachrichtigungen; nach dem Spiel beendet er sich
-- Freunde 2.0: Nachrichten, Anfragen und Einladungen kommen im Launcher jetzt sofort an – ohne dass du dadurch bei deinen Freunden als „online“ erscheinst
-- Neu: Party – lade bis zu 7 Freunde ein, seht, wo jeder spielt, schreibt im Party-Chat und folgt dem Leiter mit „Beitreten“ (oder automatisch, wenn gerade kein Spiel läuft)
-- Im Chat: auf Nachrichten antworten, mit Emojis reagieren, eigene Nachrichten löschen, „schreibt …“ sehen und Server oder Welten als Karte mit „Beitreten“ teilen
-- Freunde als Favoriten oben anheften, Spitznamen und Notizen nur für dich, eigener Status mit „Nicht stören“, „zuletzt online“ und eine Profilkarte mit 3D-Skin und gemeinsamen Freunden
-- Neu: Freundesvorschläge (Freunde deiner Freunde, nur wer zustimmt) und „Ist online“-Hinweise wahlweise nur für Favoriten
-- Neue Abzeichen für Team und Community – Entwickler, Supporter, Designer, Tester, Partner, Creator und Botschafter – in der Freundesliste, auf der Profilkarte und an deinem Konto
-- Die Glocke zeigt jetzt auch Einladungen in Welten und Partys; der Discord-Status zeigt in einer Party „(2 von 8)“
+# ---------- 0.13.9 ----------
+- Neues Hauptmenü: „Weiterspielen“ zeigt den Live-Stand deines letzten Servers – wie viele Spieler online sind und deinen Ping
+- In kleinen Fenstern sind die Kacheln und Knöpfe im Hauptmenü nicht mehr abgeschnitten, alle Knöpfe sind beschriftet, und deine Spielfigur steht größer neben den Kacheln
+- Neu im Hauptmenü: Cosmetics mit einem Klick; die Freunde-Zeile lädt zum Einladen ein, wenn gerade niemand online ist
+- Pausemenü: oben Servername und Adresse, die Adresse mit einem Klick kopieren und der echte Ping – auch auf Servern, die in der Tab-Liste 0 ms melden
+- Pausemenü: „Freunde einladen“ groß in der Freunde-Karte – im Mehrspieler kommen deine Freunde damit direkt auf deinen Server; die Party ist einen Klick entfernt
+- Pausemenü: Mikrofon und Ton des Voice Chats direkt schalten, bis zu 12 Schnellschalter für Module und keine Lücke mehr unter den Knöpfen
+- Geteilte Welten werben in der Serverliste deiner Mitspieler für HeldixClient: „Geteilt mit HeldixClient“ unter dem Namen der Welt und das Heldix-Logo am Bild der Welt – auch wenn die Welt gerade zu ist
+- Minecrafts Hinweis „Chatnachrichten können nicht überprüft werden“ verdeckt die Menüs nicht mehr – er erscheint als Heldix-Einblendung
+
+# ---------- 0.13.8 (gebaut 28.11., steht in update-0.13.8.json – vor 0.13.9 veröffentlichen, nicht noch einmal ausliefern) ----------
+# - Neu: Welt teilen – öffne deine Einzelspielerwelt im Pausenmenü mit einem Klick für Freunde, kostenlos und ohne Portfreigabe. Jede Welt hat eine feste Adresse, und auch Freunde ohne HeldixClient können beitreten
+# - Neu im Hauptmenü: Heldix-Welten – offene Welten deiner Freunde mit „Beitreten“, deine eigenen Welten mit Mitgliedern und Rollen, Anklopfen (Erlauben mit H, Ablehnen mit N) und automatischen Sicherungen
+# - Neue animierte Cosmetics: 8 Flügel und Rückenteile, 9 Begleiter (Mochi in vier Fellfarben) und 6 Auren, die sich beim Laufen, Schleichen, Schwimmen und Fliegen mitbewegen und teils leuchten
+# - Der Cosmetics-Platz „Partikel“ heißt jetzt „Aura“
+# - Neue Webseite: Freunde, Nachrichten und Party gibt es jetzt auch im Browser unter Konto, dazu „Meine Welten“
+# - Neu: Einrichtung beim ersten Start – Willkommen, Microsoft-Anmeldung und offizielle Addons wie Voice Chat und Minimap mit einem Klick; der Windows-Installer kommt im HeldixClient-Design und auf Deutsch
+# - Neuer Discord-Status: zeigt Dimension und Spielmodus („Im Nether · Überleben“), Spielerzahl, Voice, „Teilt seine Welt“ bzw. „In der Welt von …“ und „Abwesend“, dazu passende Bilder, deinen Minecraft-Kopf und die Zeit seit dem Betreten des Servers
+# - Einstellungen → Discord: jeden Teil einzeln abschalten, „Nur ‚Spielt HeldixClient‘“ und eine Vorschau, wie dein Status gerade aussieht – verbindet sich von selbst, sobald Discord läuft
+# - Startseite: „Offene Welten deiner Freunde“ und Freunde online mit „Beitreten“ – auch in geteilte Welten, mit der passenden Instanz
+# - Geteilten Welten beitreten per Link (heldixclient://welt/…) und mit „Mitspielen“ im Discord-Status, wenn die Welt für alle offen ist
+# - Neu: Glocke oben rechts mit allen Benachrichtigungen – Anfragen, Nachrichten, Einladungen, Freischaltungen, geöffnete Welten und Updates
+# - Neu: Schließt du den Launcher während des Spiels, bleibt er im Infobereich – mit Freunden online und Benachrichtigungen; nach dem Spiel beendet er sich
+# - Freunde 2.0: Nachrichten, Anfragen und Einladungen kommen im Launcher jetzt sofort an – ohne dass du dadurch bei deinen Freunden als „online“ erscheinst
+# - Neu: Party – lade bis zu 7 Freunde ein, seht, wo jeder spielt, schreibt im Party-Chat und folgt dem Leiter mit „Beitreten“ (oder automatisch, wenn gerade kein Spiel läuft)
+# - Im Chat: auf Nachrichten antworten, mit Emojis reagieren, eigene Nachrichten löschen, „schreibt …“ sehen und Server oder Welten als Karte mit „Beitreten“ teilen
+# - Freunde als Favoriten oben anheften, Spitznamen und Notizen nur für dich, eigener Status mit „Nicht stören“, „zuletzt online“ und eine Profilkarte mit 3D-Skin und gemeinsamen Freunden
+# - Neu: Freundesvorschläge (Freunde deiner Freunde, nur wer zustimmt) und „Ist online“-Hinweise wahlweise nur für Favoriten
+# - Neue Abzeichen für Team und Community – Entwickler, Supporter, Designer, Tester, Partner, Creator und Botschafter – in der Freundesliste, auf der Profilkarte und an deinem Konto
+# - Die Glocke zeigt jetzt auch Einladungen in Welten und Partys; der Discord-Status zeigt in einer Party „(2 von 8)“
 
 # ---------- 0.13.7 (veröffentlicht – nicht noch einmal ausliefern) ----------
 # - Neu: Freunde einladen – dein Link unter Freunde → Einladen. Wer neu dazukommt, bekommt sofort den Freundesfunken und ihr seid gleich befreundet

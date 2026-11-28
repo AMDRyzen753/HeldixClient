@@ -1,14 +1,15 @@
 package dev.heldixclient.screen;
 
+import dev.heldixclient.addon.AddonManager;
 import dev.heldixclient.hud.Notifications;
 import dev.heldixclient.loader.api.event.WorldEvents;
 import dev.heldixclient.module.Module;
-import dev.heldixclient.module.ModuleManager;
 import dev.heldixclient.share.WorldShare;
 import dev.heldixclient.social.Invites;
 import dev.heldixclient.social.Social;
 import dev.heldixclient.ui.Shell;
 import dev.heldixclient.ui.Ui;
+import dev.heldixclient.voice.VoiceLink;
 import dev.heldixclient.waypoint.Waypoints;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.PauseScreen;
@@ -30,9 +31,10 @@ import java.util.function.Supplier;
 
 /**
  * Pausemenü im Heldix-Design (ersetzt Minecrafts Pausemenü, wenn das Heldix-Design an ist).
- * Links die gewohnten Knöpfe und darunter Schnellschalter für Module; rechts (in breiten Fenstern) Karten für
- * die Sitzung (Spielzeit, Position, Ping), Freunde (mit Knöpfen zum Einladen) und Wegpunkte. In schmalen Fenstern eine
- * Schnellzeile.
+ * Links die gewohnten Knöpfe, darunter (am unteren Rand, über „Verbindung trennen“) die Voice-Schalter – mit verbundenem
+ * Voice Chat – und die Schnellschalter für Module; die Knöpfe wachsen in den übrigen Platz, damit keine Lücke bleibt.
+ * Rechts (in breiten Fenstern) Karten für die Sitzung (Spielzeit, Position, Ping, Spieler; Server-Adresse kopieren),
+ * Freunde (mit „Freunde einladen“ und Party im Fuß der Karte) und Wegpunkte. In schmalen Fenstern eine Schnellzeile.
  * Das Vanilla-Pausemenü mit Knöpfen anderer Mods bleibt über "Klassisches Pausemenü" erreichbar.
  */
 public class PauseMenuScreen extends ShellScreen {
@@ -40,6 +42,12 @@ public class PauseMenuScreen extends ShellScreen {
 	private static final int SESSION_H = CARD_HEAD + 2 * 24 + 4;
 	private static final int WAYPOINTS_H = CARD_HEAD + 26;
 	private static final int TOGGLE_ROW = 24;
+	/** Fuß der Freunde-Karte (Einladen, Browser-Link, Party) */
+	private static final int FRIENDS_FOOT = 28;
+	private static final int MAX_QUICK_ROWS = 6;
+	/** so hoch dürfen die Knöpfe links höchstens werden, wenn sie den freien Platz füllen */
+	private static final int MAX_ROW_H = 34;
+	private static final String VOICE_ADDON = "voicechat";
 
 	/** Beginn der Sitzung (Welt bzw. Server betreten), 0 = unbekannt */
 	private static long sessionStart;
@@ -60,13 +68,20 @@ public class PauseMenuScreen extends ShellScreen {
 	private int quickH;
 	/** Was die Freunde-Karte zeigt (ändert es sich, werden die Widgets neu angelegt) */
 	private FriendsMode friendsMode;
-	/** Knopf für den Browser-Link der Voice-Gruppe da? Linker Rand der Knöpfe im Kopf der Freunde-Karte */
+	/** Knopf für den Browser-Link der Voice-Gruppe da? */
 	private boolean inviteVoice;
 	private int friendsHeaderRight;
+	/** Voice-Schalter (Mikrofon, Ton) beim Aufbau gezeigt? */
+	private boolean voiceShown;
 
-	/** Tooltips (und Beschriftungen) der Einladungs-Knöpfe in der Freunde-Karte, auch für den Autotest */
-	public static final String INVITE_BUTTON = "Freunde einladen – Link kopieren";
+	/** Beschriftung des Knopfs im Fuß der Freunde-Karte (Einladungslink kopieren), auch für den Autotest */
+	public static final String INVITE_BUTTON = "Freunde einladen";
 	public static final String BROWSER_LINK_BUTTON = "Browser-Link für die Voice-Gruppe kopieren (24 Std.)";
+	public static final String PARTY_BUTTON = "Party";
+	public static final String COPY_ADDRESS_BUTTON = "Server-Adresse kopieren";
+	/** Voice-Schalter links (nur mit verbundenem Voice Chat) */
+	public static final String VOICE_MIC = "Mikrofon";
+	public static final String VOICE_SOUND = "Ton";
 	/** Knopf „Welt teilen“ (Einzelspieler) und die Knöpfe der Karte „Welt geteilt“ */
 	public static final String SHARE_BUTTON = "Welt teilen";
 	public static final String SHARE_COPY_BUTTON = "Adresse kopieren";
@@ -76,8 +91,12 @@ public class PauseMenuScreen extends ShellScreen {
 	private boolean shareCard;
 	private String waypointMessage;
 	private long waypointMessageAt;
+	private long addressCopiedAt;
 	private boolean quickRow;
+	private int leftGap;
+	private boolean rowsCapped;
 	private final List<ToggleChip> toggles = new ArrayList<>();
+	private final List<ToggleChip> voiceToggles = new ArrayList<>();
 
 	private enum FriendsMode {
 		LIST,
@@ -105,9 +124,23 @@ public class PauseMenuScreen extends ShellScreen {
 		return ActionButton.widthFor("Klassisches Pausemenü", "external");
 	}
 
+	/** Server im Mehrspieler (nicht Einzelspieler), sonst null */
+	private ServerData currentServer() {
+		ServerData server = minecraft.getCurrentServer();
+		return server != null && !minecraft.isLocalServer() ? server : null;
+	}
+
+	/** Voice Chat verbunden und seine Tasten für Mikrofon und Ton da? */
+	private static boolean voiceAvailable() {
+		return VoiceLink.status() == VoiceLink.Status.CONNECTED && AddonManager.hasKey(VOICE_ADDON, "mute") && AddonManager.hasKey(VOICE_ADDON, "deafen");
+	}
+
 	@Override
 	protected void initContent() {
 		toggles.clear();
+		voiceToggles.clear();
+		voiceShown = false;
+		quickH = 0;
 		boolean small = contentH < 190;
 		int bigH = small ? 24 : 30;
 		int rowH = small ? 22 : 26;
@@ -116,6 +149,9 @@ public class PauseMenuScreen extends ShellScreen {
 		int x = contentX;
 		int w = twoColumns ? (contentW - 12) * 56 / 100 : contentW;
 		int y = contentY;
+		// Ping wie in der Serverliste, falls der Server in der Tab-Liste keinen meldet
+		ServerData server = currentServer();
+		if (server != null) ServerPing.request(server);
 
 		addRenderableWidget(new ActionButton(x, y, w, bigH, "Zurück zum Spiel", true, this::resume).withIcon("play"));
 		y += bigH + gap;
@@ -135,15 +171,16 @@ public class PauseMenuScreen extends ShellScreen {
 		entries.add(new Entry("HUD-Editor", "hud", () -> open(() -> new HudEditorScreen(this))));
 
 		int bottom = contentY + contentH;
+		int leaveTop = bottom - rowH;
 		// bis über den Verlassen-Knopf; die letzte Reihe braucht keinen Abstand nach unten
-		int rowsAvailable = Math.max(1, (bottom - rowH - gap - y + gap) / (rowH + gap));
+		int rowsAvailable = Math.max(1, (leaveTop - gap - y + gap) / (rowH + gap));
 		quickRow = false;
 		if (!twoColumns) {
 			// schmale Fenster: die neuen Bereiche als Schnellzeile (Schalter, Wegpunkt, Freunde) unter den Knöpfen –
 			// passt sie nicht, als zwei weitere Knöpfe
 			int baseRows = (entries.size() + 1) / 2;
 			int quickRowY = y + baseRows * (rowH + gap);
-			quickRow = quickRowY + 22 <= bottom - rowH - gap;
+			quickRow = quickRowY + 22 <= leaveTop - gap;
 			if (quickRow) {
 				buildQuickRow(x, quickRowY, w);
 			} else {
@@ -153,21 +190,47 @@ public class PauseMenuScreen extends ShellScreen {
 		}
 		// passen nicht alle Knöpfe in zwei Spalten (z. B. „Welt teilen“ in kleinen Fenstern), dann drei
 		int columns = entries.size() > rowsAvailable * 2 && (w - 2 * gap) / 3 >= 100 ? 3 : 2;
-		int cellW = (w - (columns - 1) * gap) / columns;
+		// zweispaltig mit mehr als sechs Knöpfen (Einzelspieler): drei nebeneinander, damit unten mehr Schnellschalter passen
+		if (twoColumns && entries.size() > 6 && (w - 2 * gap) / 3 >= 110) columns = 3;
 		int shown = Math.min(entries.size(), rowsAvailable * columns);
+		int gridRows = (shown + columns - 1) / columns;
+		int cellH = rowH;
+
+		if (twoColumns) {
+			// unten (über „Verbindung trennen“): Schnellschalter, darüber die Voice-Schalter; die Knöpfe füllen den Rest
+			int above = leaveTop - gap;
+			int gridH = gridRows * rowH + (gridRows - 1) * gap;
+			int free = above - (y + gridH + gap);
+			boolean voice = voiceAvailable() && free >= 22;
+			if (voice) free -= 22 + gap;
+			int quickRows = Math.clamp((free - 4 - CARD_HEAD - 4) / TOGGLE_ROW, 0, MAX_QUICK_ROWS);
+			List<Module> modules = quickModules(quickRows * 2);
+			quickRows = modules.isEmpty() ? 0 : (modules.size() + 1) / 2;
+			int quickCardH = quickRows > 0 ? CARD_HEAD + quickRows * TOGGLE_ROW + 4 : 0;
+			int quickTop = above - quickCardH;
+			int voiceY = (quickRows > 0 ? quickTop - gap : above) - 22;
+			int gridLimit = voice ? voiceY - gap : quickRows > 0 ? quickTop - gap - 4 : above;
+			cellH = Math.clamp((gridLimit - y - (gridRows - 1) * gap) / Math.max(1, gridRows), rowH, MAX_ROW_H);
+			int gridBottom = y + gridRows * cellH + (gridRows - 1) * gap;
+			leftGap = (voice ? voiceY : quickRows > 0 ? quickTop : leaveTop) - gridBottom;
+			rowsCapped = cellH == MAX_ROW_H;
+			if (voice) buildVoiceRow(x, voiceY, w);
+			if (quickRows > 0) buildQuickCard(x, quickTop, w, modules);
+		}
+
+		int cellW = (w - (columns - 1) * gap) / columns;
 		for (int i = 0; i < shown; i++) {
 			Entry entry = entries.get(i);
 			int column = i % columns;
 			int bx = x + column * (cellW + gap);
-			int by = y + (i / columns) * (rowH + gap);
+			int by = y + (i / columns) * (cellH + gap);
 			// letzte Spalte bis zum Rand; der letzte Knopf füllt seine Reihe
 			int bw = column == columns - 1 || i == shown - 1 ? x + w - bx : cellW;
-			addRenderableWidget(new ActionButton(bx, by, bw, rowH, entry.label(), false, entry.action()).withIcon(entry.icon()));
+			addRenderableWidget(new ActionButton(bx, by, bw, cellH, entry.label(), false, entry.action()).withIcon(entry.icon()));
 		}
-		int gridBottom = y + (shown + columns - 1) / columns * (rowH + gap) - gap;
 
 		String leave = minecraft.isLocalServer() ? "Speichern und zum Hauptmenü" : "Verbindung trennen";
-		disconnect = new ActionButton(x, bottom - rowH, w, rowH, leave, false, this::leave).withIcon("quit").withVariant(ActionButton.Variant.DANGER);
+		disconnect = new ActionButton(x, leaveTop, w, rowH, leave, false, this::leave).withIcon("quit").withVariant(ActionButton.Variant.DANGER);
 		addRenderableWidget(disconnect);
 
 		String classic = "Klassisches Pausemenü";
@@ -176,11 +239,7 @@ public class PauseMenuScreen extends ShellScreen {
 				() -> Shell.openVanilla(minecraft, new PauseScreen(true))).withIcon("external").withVariant(ActionButton.Variant.GHOST));
 
 		sideW = twoColumns ? contentW - w - 12 : 0;
-		quickH = 0;
-		if (twoColumns) {
-			buildQuickCard(x, gridBottom + gap + 4, w, bottom - rowH - gap - 4);
-			buildSide(x + w + 12, bottom);
-		}
+		if (twoColumns) buildSide(x + w + 12, bottom);
 	}
 
 	/** Schnellzeile (schmale Fenster): vier Modul-Schalter als Icons, Wegpunkt setzen, Freunde */
@@ -201,12 +260,25 @@ public class PauseMenuScreen extends ShellScreen {
 				() -> open(() -> new HeldixMenuScreen(this, Shell.Page.FRIENDS))).withIcon("friends"));
 	}
 
-	/** Karte Schnell umschalten unter den Knöpfen: so viele Reihen (je zwei Schalter), wie Platz haben */
-	private void buildQuickCard(int x, int y, int w, int maxBottom) {
-		int rows = Math.clamp((maxBottom - y - CARD_HEAD - 6) / TOGGLE_ROW, 0, 4);
-		List<Module> modules = quickModules(rows * 2);
-		if (rows == 0 || modules.isEmpty()) return;
-		rows = (modules.size() + 1) / 2;
+	/** Voice-Schalter: Mikrofon und Ton (lösen die Tasten des Voice Chats aus, wie ein Tastendruck) */
+	private void buildVoiceRow(int x, int y, int w) {
+		voiceShown = true;
+		int half = (w - 6) / 2;
+		ToggleChip mic = new ToggleChip(x, y, half, 22, VOICE_MIC, "mic", () -> !VoiceLink.selfMuted(), on -> {
+			if (on == VoiceLink.selfMuted()) AddonManager.runKey(VOICE_ADDON, "mute");
+		});
+		ToggleChip sound = new ToggleChip(x + half + 6, y, w - half - 6, 22, VOICE_SOUND, "volume", () -> !VoiceLink.selfDeafened(), on -> {
+			if (on == VoiceLink.selfDeafened()) AddonManager.runKey(VOICE_ADDON, "deafen");
+		});
+		voiceToggles.add(mic);
+		voiceToggles.add(sound);
+		addRenderableWidget(mic);
+		addRenderableWidget(sound);
+	}
+
+	/** Karte Schnell umschalten (je zwei Schalter pro Reihe) */
+	private void buildQuickCard(int x, int y, int w, List<Module> modules) {
+		int rows = (modules.size() + 1) / 2;
 		quickX = x;
 		quickW = w;
 		quickY = y;
@@ -245,7 +317,7 @@ public class PauseMenuScreen extends ShellScreen {
 		friendsY = sessionY + sessionH + gap;
 		friendsH = waypointsY - gap - friendsY;
 		// wenig Platz: Sitzung weglassen, Freunde bekommen die Fläche
-		if (friendsH < CARD_HEAD + 44) {
+		if (friendsH < CARD_HEAD + FRIENDS_FOOT + 34) {
 			sessionH = 0;
 			friendsY = contentY;
 			friendsH = waypointsY - gap - friendsY;
@@ -254,13 +326,19 @@ public class PauseMenuScreen extends ShellScreen {
 		shareCard = WorldShare.active() && sessionH > 0;
 		shareSignature = shareSignature();
 		if (shareCard) buildShareCard();
+		else if (sessionH > 0 && currentServer() != null && !currentServer().isRealm()) {
+			// Server-Adresse kopieren (für Freunde ohne HeldixClient)
+			addRenderableWidget(ActionButton.icon(sideX + sideW - 24, sessionY + 4, 18, "copy", COPY_ADDRESS_BUTTON, this::copyAddress));
+		}
 
-		// Freunde: Liste, leerer Zustand mit Knopf oder Hinweis zum Dienst
+		// Freunde: Liste, leerer Zustand oder Hinweis zum Dienst; im Fuß Einladen, Browser-Link und Party
 		friendsMode = friendsMode();
 		Runnable openFriends = () -> open(() -> new HeldixMenuScreen(this, Shell.Page.FRIENDS));
 		partyShown = PartyWidget.hasContent();
+		boolean foot = Social.online();
+		int listBottom = friendsY + friendsH - (foot ? FRIENDS_FOOT + 2 : 4);
 		if (friendsMode == FriendsMode.LIST) {
-			int rows = Math.max(0, (friendsH - CARD_HEAD - 4) / 32);
+			int rows = Math.max(0, (listBottom - friendsY - CARD_HEAD) / 32);
 			// Party (ab Heldix-Dienst 1.12.0) als erste Zeile der Freunde-Karte
 			int first = 0;
 			if (partyShown && rows > 1) {
@@ -271,33 +349,48 @@ public class PauseMenuScreen extends ShellScreen {
 				int index = i - first;
 				addRenderableWidget(new FriendWidget(sideX + 4, friendsY + CARD_HEAD + i * 32, sideW - 8, 30, () -> friendAt(index), openFriends));
 			}
-		} else if (friendsMode == FriendsMode.EMPTY && friendsH >= CARD_HEAD + 64) {
-			String add = "Freund hinzufügen";
-			int bw = Math.min(sideW - 24, ActionButton.widthFor(add, "user-plus"));
-			addRenderableWidget(new ActionButton(sideX + (sideW - bw) / 2, friendsY + friendsH - 30, bw, 20, add, true, openFriends).withIcon("user-plus"));
 		}
 		String all = "Alle";
 		int aw = ActionButton.widthFor(all, "chevron-right") - 4;
 		int bx = sideX + sideW - 6 - aw;
 		addRenderableWidget(new ActionButton(bx, friendsY + 4, aw, 18, all, false, openFriends)
 				.withIcon("chevron-right").withVariant(ActionButton.Variant.GHOST));
-		// Freunde einladen (ab Heldix-Dienst 1.11.0): Link kopieren, in einer Voice-Gruppe auch den Browser-Link
-		inviteVoice = Invites.browserLinkAvailable();
-		if (Social.online()) {
-			bx -= 20;
-			addRenderableWidget(ActionButton.icon(bx, friendsY + 4, 18, "user-plus", INVITE_BUTTON, () -> Invites.copyInvite(minecraft, null)));
-			if (inviteVoice) {
-				bx -= 20;
-				addRenderableWidget(ActionButton.icon(bx, friendsY + 4, 18, "headphones", BROWSER_LINK_BUTTON, () -> Invites.copyBrowserLink(minecraft, null)));
-			}
-		}
 		friendsHeaderRight = bx;
+		inviteVoice = Invites.browserLinkAvailable();
+		if (foot) buildFriendsFoot(openFriends);
 
 		// Wegpunkte: hier setzen, verwalten
 		int half = (sideW - 16 - 6) / 2;
 		addRenderableWidget(new ActionButton(sideX + 8, waypointsY + CARD_HEAD - 2, half, 20, "Hier setzen", true, this::setWaypoint).withIcon("plus"));
 		addRenderableWidget(new ActionButton(sideX + 8 + half + 6, waypointsY + CARD_HEAD - 2, sideW - 16 - half - 6, 20, "Verwalten", false,
 				() -> open(() -> new HeldixMenuScreen(this, Shell.Page.WAYPOINTS))).withIcon("pin"));
+	}
+
+	/**
+	 * Fuß der Freunde-Karte: „Freunde einladen“ (Einladungslink; im Mehrspieler mit diesem Server), in einer Voice-Gruppe der
+	 * Browser-Link, und die Party. Ohne Freunde statt der Party „Freund hinzufügen“.
+	 */
+	private void buildFriendsFoot(Runnable openFriends) {
+		int y = friendsY + friendsH - FRIENDS_FOOT + 2;
+		int x = sideX + 8;
+		int right = sideX + sideW - 8;
+		String server = Invites.currentServer(minecraft);
+		String tooltip = server != null ? "Einladungslink kopieren – Freunde holen sich HeldixClient und kommen direkt auf " + ServersScreen.shortAddress(server)
+				: "Einladungslink kopieren – Freunde holen sich HeldixClient, danach seid ihr befreundet";
+		boolean noFriends = friendsMode == FriendsMode.EMPTY;
+		ActionButton second = noFriends
+				? ActionButton.icon(right - 22, y, 22, "user-plus", "Freund hinzufügen", openFriends)
+				: ActionButton.icon(right - 22, y, 22, "party", PARTY_BUTTON, () -> open(() -> new HeldixMenuScreen(this, Shell.Page.PARTY)));
+		second.withVariant(ActionButton.Variant.SECONDARY);
+		addRenderableWidget(second);
+		right -= 26;
+		if (inviteVoice) {
+			addRenderableWidget(ActionButton.icon(right - 22, y, 22, "headphones", BROWSER_LINK_BUTTON, () -> Invites.copyBrowserLink(minecraft, null))
+					.withVariant(ActionButton.Variant.SECONDARY));
+			right -= 26;
+		}
+		addRenderableWidget(new ActionButton(x, y, right - x, 22, INVITE_BUTTON, true, () -> Invites.copyInvite(minecraft, null))
+				.withIcon("user-plus").withTooltip(tooltip));
 	}
 
 	/** Karte „Welt geteilt“: oben Adresse (Kopieren) bzw. wer anklopft, darunter Erlauben/Ablehnen bzw. Einladen, Verwalten, Beenden */
@@ -358,9 +451,10 @@ public class PauseMenuScreen extends ShellScreen {
 	@Override
 	public void tick() {
 		super.tick();
-		// Dienst verbunden, erster Freund oder Voice-Gruppe betreten/verlassen: Freunde-Karte neu aufbauen
+		ServerPing.tick();
+		// Dienst verbunden, erster Freund, Voice-Gruppe oder Voice Chat verbunden/getrennt: neu aufbauen
 		if (sideW > 0 && (friendsMode != friendsMode() || inviteVoice != Invites.browserLinkAvailable() || !shareSignature().equals(shareSignature)
-				|| partyShown != PartyWidget.hasContent())) {
+				|| partyShown != PartyWidget.hasContent() || voiceShown != voiceAvailable())) {
 			rebuildWidgets();
 		}
 	}
@@ -384,6 +478,13 @@ public class PauseMenuScreen extends ShellScreen {
 		Notifications.show("waypoint", "Wegpunkt gesetzt", waypoint.name + " · " + waypoint.coordinates(), null);
 	}
 
+	private void copyAddress() {
+		ServerData server = currentServer();
+		if (server == null) return;
+		minecraft.keyboardHandler.setClipboard(ServersScreen.shortAddress(server.ip));
+		addressCopiedAt = System.currentTimeMillis();
+	}
+
 	private void open(Supplier<Screen> screen) {
 		minecraft.gui.setScreen(screen.get());
 	}
@@ -401,8 +502,14 @@ public class PauseMenuScreen extends ShellScreen {
 
 	@Override
 	protected String subtitle() {
-		ServerData server = minecraft.getCurrentServer();
-		if (server != null && !minecraft.isLocalServer()) return "Mehrspieler  ·  " + server.name;
+		ServerData server = currentServer();
+		if (server != null) {
+			// Server mit Minecrafts Standardnamen zeigen ihre Adresse; sonst Name und Adresse
+			String name = ServersScreen.displayName(server);
+			String address = ServersScreen.shortAddress(server.ip);
+			if (server.isRealm() || address.isBlank() || name.equalsIgnoreCase(address)) return (server.isRealm() ? "Realms  ·  " : "Mehrspieler  ·  ") + name;
+			return "Mehrspieler  ·  " + name + "  ·  " + address;
+		}
 		if (minecraft.getSingleplayerServer() != null) {
 			String world = minecraft.getSingleplayerServer().getWorldData().getLevelName();
 			if (WorldShare.online()) return "Einzelspieler  ·  " + world + "  ·  geteilt über den Heldix-Dienst";
@@ -429,7 +536,8 @@ public class PauseMenuScreen extends ShellScreen {
 		if (shareCard) {
 			drawShareCard(g);
 		} else if (sessionH > 0) {
-			card(g, sideX, sessionY, sideW, sessionH, "clock", "Sitzung", null);
+			String extra = System.currentTimeMillis() - addressCopiedAt < 3000 ? "Adresse kopiert" : null;
+			card(g, sideX, sessionY, sideW, sessionH, "clock", "Sitzung", extra, sideX + sideW - 28);
 			String[][] stats = sessionStats();
 			int tileW = (sideW - 16 - 6) / 2;
 			for (int i = 0; i < stats.length; i++) {
@@ -444,13 +552,12 @@ public class PauseMenuScreen extends ShellScreen {
 		card(g, sideX, friendsY, sideW, friendsH, "friends", "Freunde", friends.isEmpty() ? null : online + " von " + friends.size() + " online",
 				friendsHeaderRight - 4);
 		if (friendsMode != FriendsMode.LIST) {
-			String text = friendsMode == FriendsMode.EMPTY ? "Noch keine Freunde. Schick eine Anfrage an jemanden, der HeldixClient nutzt."
+			String text = friendsMode == FriendsMode.EMPTY ? "Noch keine Freunde. Lade jemanden ein – mit dem Link holt er sich HeldixClient, und ihr seid gleich befreundet."
 					: FriendWidget.serviceHint();
 			if (text != null) {
 				List<FormattedCharSequence> lines = Ui.wrap(text, sideW - 32, Ui.Font.SMALL);
-				boolean button = friendsMode == FriendsMode.EMPTY && friendsH >= CARD_HEAD + 64;
 				int areaTop = friendsY + CARD_HEAD;
-				int areaBottom = friendsY + friendsH - (button ? 36 : 4);
+				int areaBottom = friendsY + friendsH - (Social.online() ? FRIENDS_FOOT + 4 : 4);
 				int iconSize = areaBottom - areaTop >= 40 + lines.size() * 10 ? 22 : 0;
 				int blockH = iconSize + (iconSize > 0 ? 6 : 0) + lines.size() * 10;
 				int ty = areaTop + Math.max(4, (areaBottom - areaTop - blockH) / 2);
@@ -464,6 +571,14 @@ public class PauseMenuScreen extends ShellScreen {
 					g.text(font, line, cx - font.width(line) / 2, ty, Ui.MUTED, false);
 					ty += 10;
 				}
+			}
+		} else if (online == 0 && Social.online()) {
+			// alle offline: Hinweis über dem Fuß, wenn unter den Zeilen Platz ist
+			int listBottom = friendsY + friendsH - FRIENDS_FOOT - 2;
+			int used = friendsY + CARD_HEAD + Math.min(friends.size() + (partyShown ? 1 : 0), Math.max(0, (listBottom - friendsY - CARD_HEAD) / 32)) * 32;
+			if (listBottom - used >= 22) {
+				String hint = Ui.ellipsize("Gerade ist niemand online – lade weitere Freunde ein.", sideW - 24, Ui.Font.SMALL);
+				Ui.text(g, hint, sideX + (sideW - Ui.width(hint, Ui.Font.SMALL)) / 2, listBottom - 14, Ui.FAINT, Ui.Font.SMALL);
 			}
 		}
 		// Wegpunkte
@@ -508,11 +623,23 @@ public class PauseMenuScreen extends ShellScreen {
 			String mode = minecraft.gameMode == null ? "–" : minecraft.gameMode.getPlayerMode().getShortDisplayName().getString();
 			fourth = new String[] {"user", "Spielmodus", mode};
 		} else {
-			PlayerInfo info = minecraft.player == null ? null : minecraft.getConnection().getPlayerInfo(minecraft.player.getUUID());
-			third = new String[] {"signal", "Ping", info == null ? "–" : info.getLatency() + " ms"};
+			third = new String[] {"signal", "Ping", ping()};
 			fourth = new String[] {"friends", "Spieler", Integer.toString(minecraft.getConnection().getOnlinePlayers().size())};
 		}
 		return new String[][] {{"clock", "Spielzeit", time}, {"compass", "Position", position}, third, fourth};
+	}
+
+	/**
+	 * Ping: was der Server in der Tab-Liste meldet; melden ihn viele Netzwerke nicht (0 ms), der gemessene Wert der
+	 * Server-Abfrage wie in der Serverliste.
+	 */
+	private String ping() {
+		PlayerInfo info = minecraft.player == null ? null : minecraft.getConnection().getPlayerInfo(minecraft.player.getUUID());
+		if (info != null && info.getLatency() > 0) return info.getLatency() + " ms";
+		ServerData server = currentServer();
+		ServerPing.Result result = server == null ? null : ServerPing.result(server.ip);
+		if (result != null && result.ok() && result.ping() > 0) return result.ping() + " ms";
+		return result != null && result.state() == ServerData.State.PINGING ? "wird gemessen …" : "–";
 	}
 
 	/** Kleine Kachel: Icon, Bezeichnung darüber, Wert darunter */
@@ -544,6 +671,21 @@ public class PauseMenuScreen extends ShellScreen {
 	/** Für den Autotest: Schnellschalter im Pausemenü */
 	public List<ToggleChip> toggles() {
 		return toggles;
+	}
+
+	/** Für den Autotest: Voice-Schalter (Mikrofon, Ton) – leer ohne verbundenen Voice Chat */
+	public List<ToggleChip> voiceToggles() {
+		return voiceToggles;
+	}
+
+	/** Für den Autotest: Abstand links zwischen den Knöpfen und dem Nächsten darunter (-1 = einspaltig) */
+	public int leftGap() {
+		return sideW > 0 ? leftGap : -1;
+	}
+
+	/** Für den Autotest: Knöpfe links schon so hoch wie erlaubt (dann darf eine Lücke bleiben) */
+	public boolean rowsCapped() {
+		return rowsCapped;
 	}
 
 	@Override

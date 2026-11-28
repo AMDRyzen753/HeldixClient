@@ -138,21 +138,25 @@ final class InviteTests {
 
 	/** Knopf „Freunde einladen“ in der Freunde-Karte des Pausemenüs: derselbe Link (die offene Einladung wird wiederverwendet) */
 	private static void pauseMenu(TestContext t, String code) {
-		t.run(mc -> mc.keyboardHandler.setClipboard(""));
-		t.setScreen(() -> new PauseScreen(true));
-		t.waitTicks(8);
-		t.check("Einladen: Heldix-Pausemenü offen", t.compute(mc -> mc.gui.screen() instanceof PauseMenuScreen));
-		if (!t.compute(mc -> hasWidget(mc, PauseMenuScreen.INVITE_BUTTON))) {
-			t.log("Pausemenü ohne Freunde-Karte (kleines Fenster): Einladen-Knopf nicht geprüft");
+		// die Freunde-Karte gibt es nur im zweispaltigen Pausemenü: dafür das Fenster vergrößern
+		AutoTest.bigWindow(t, "Einladen im Pausemenü", () -> {
+			t.run(mc -> mc.keyboardHandler.setClipboard(""));
+			t.setScreen(() -> new PauseScreen(true));
+			t.waitTicks(8);
+			t.check("Einladen: Heldix-Pausemenü offen", t.compute(mc -> mc.gui.screen() instanceof PauseMenuScreen));
+			if (!t.compute(mc -> hasWidget(mc, PauseMenuScreen.INVITE_BUTTON))) {
+				t.log("Pausemenü ohne Freunde-Karte: Einladen-Knopf nicht geprüft");
+				t.setScreen(() -> null);
+				return;
+			}
+			t.clickWidget(PauseMenuScreen.INVITE_BUTTON);
+			t.waitSoft(mc -> WEB_LINK.matcher(clipboard(mc)).matches(), 15);
+			Matcher matcher = WEB_LINK.matcher(t.compute(InviteTests::clipboard));
+			t.check("Einladen: „" + PauseMenuScreen.INVITE_BUTTON + "“ im Pausemenü kopiert denselben Link (Einladung wiederverwendet)",
+					matcher.matches() && matcher.group(1).equals(code));
+			t.screenshot("einladung-03-pausemenue");
 			t.setScreen(() -> null);
-			return;
-		}
-		t.clickWidget(PauseMenuScreen.INVITE_BUTTON);
-		t.waitSoft(mc -> WEB_LINK.matcher(clipboard(mc)).matches(), 15);
-		Matcher matcher = WEB_LINK.matcher(t.compute(InviteTests::clipboard));
-		t.check("Einladen: Knopf im Pausemenü kopiert denselben Link (Einladung wiederverwendet)", matcher.matches() && matcher.group(1).equals(code));
-		t.screenshot("einladung-03-pausemenue");
-		t.setScreen(() -> null);
+		});
 	}
 
 	// ======================================================================================

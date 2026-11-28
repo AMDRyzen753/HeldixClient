@@ -906,11 +906,17 @@ final class Format2Tests {
 					.findFirst().orElse(null);
 			if (hover == null) continue;
 			openTab(t, slot);
-			int index = index(t, slot, hover.id());
-			int[] center = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).cosmeticCenter(index));
-			t.moveMouse(center[0], center[1]);
-			t.waitTicks(8);
-			check(t, "Format 2: Kachel " + hover.id() + " im Slot " + slot + " unter der Maus", hover.id().equals(t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).cosmeticHovered())));
+			// Die Kacheln können sich nach dem Reiterwechsel noch verschieben (Katalog, Bilder): Mitte neu lesen und höchstens
+			// dreimal hinfahren, bis die richtige Kachel unter der Maus liegt
+			boolean onTile = false;
+			for (int attempt = 0; attempt < 3 && !onTile; attempt++) {
+				int index = index(t, slot, hover.id());
+				int[] center = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).cosmeticCenter(index));
+				t.moveMouse(center[0], center[1]);
+				t.waitTicks(8);
+				onTile = hover.id().equals(t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).cosmeticHovered()));
+			}
+			check(t, "Format 2: Kachel " + hover.id() + " im Slot " + slot + " unter der Maus", onTile);
 			String expectedClip = hover.rig().clipFor("emote");
 			boolean emote = t.waitSoft(mc -> {
 				String[] shown = CosmeticRenderer.menuRig(slot);

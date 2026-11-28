@@ -120,7 +120,12 @@ describe('Welt-Relay: Serverliste', () => {
       assert.deepEqual(status, {
         version: { name: 'HeldixClient', protocol: 770 },
         players: { max: 0, online: 0 },
-        description: { text: 'Welt von Anna ist gerade nicht geöffnet', color: 'gray' },
+        description: {
+          text: 'Welt von Anna ist gerade nicht geöffnet',
+          color: 'gray',
+          // Werbung in der Serverliste (ohne eingestellte Webseite ohne Adresse)
+          extra: [{ text: '\n' }, { text: 'Geteilt mit ', color: 'dark_aqua' }, { text: 'HeldixClient', color: 'aqua' }],
+        },
       });
       // Großschreibung, Punkt und Port am Ende, Mod-Kennung nach \0: dieselbe Welt
       const variant = await serverList(await mc(), `${world.code.toUpperCase()}.WELT.TEST.:25565\0FML3\0`);
@@ -129,6 +134,26 @@ describe('Welt-Relay: Serverliste', () => {
         const unknown = await serverList(await mc(), address);
         assert.equal(unknown.description.text, 'Diese Welt gibt es nicht', address);
       }
+    });
+  });
+
+  test('Werbung in der Serverliste: mit Webseite „Geteilt mit HeldixClient · <Webseite>“, auch bei unbekannten Welten', async () => {
+    await withRelay({ website: 'https://heldix.example' }, async ({ service, player, mc }) => {
+      const anna = await player('Anna');
+      const world = await createWorld(service, anna);
+      const expected = [
+        { text: '\n' },
+        { text: 'Geteilt mit ', color: 'dark_aqua' },
+        { text: 'HeldixClient', color: 'aqua' },
+        { text: ' · ', color: 'dark_gray' },
+        { text: 'heldix.example', color: 'gray' },
+      ];
+      const closed = await serverList(await mc(), world.address);
+      assert.equal(closed.description.text, 'Welt von Anna ist gerade nicht geöffnet');
+      assert.deepEqual(closed.description.extra, expected);
+      const unknown = await serverList(await mc(), 'zzzzzz.welt.test');
+      assert.equal(unknown.description.text, 'Diese Welt gibt es nicht');
+      assert.deepEqual(unknown.description.extra, expected);
     });
   });
 

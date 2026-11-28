@@ -511,6 +511,7 @@ export function createService(options: ServiceOptions): Service {
       ? null
       : new WorldRelay(worlds, {
           domain: worlds.domain,
+          site: website === null ? null : new URL(website).host,
           handshakeTimeoutMs: options.worldHandshakeTimeoutMs ?? 5_000,
           connectionsPerMinute: options.worldConnectionsPerMinute ?? 20,
           maxConnectionsPerIp: options.worldMaxConnectionsPerIp ?? 16,

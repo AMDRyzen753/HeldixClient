@@ -142,6 +142,16 @@ public final class VoiceLink {
 		selfDeafened = deafened;
 	}
 
+	/** eigenes Mikrofon stumm (wie zuletzt vom Voice Chat gemeldet) */
+	public static boolean selfMuted() {
+		return selfMuted;
+	}
+
+	/** eigener Ton aus (wie zuletzt vom Voice Chat gemeldet) */
+	public static boolean selfDeafened() {
+		return selfDeafened;
+	}
+
 	public static boolean peerMuted(UUID player) {
 		return player != null && PEER_MUTED.contains(player);
 	}

@@ -26,6 +26,8 @@ import { STATUS_UNKNOWN, statusOffline, TEXT_BAD_NAME, TEXT_UNKNOWN, WORLD_CODE_
 export interface RelayOptions {
   /** Welt-Domain (wie bei Worlds). */
   domain: string;
+  /** Webseite für die Werbezeile in der Serverliste (z. B. „heldixclient.com“), null = ohne. */
+  site?: string | null;
   /** Handshake (und Login Start bzw. Status-Abfrage und Ping) müssen so schnell ankommen (Standard 5 s). */
   handshakeTimeoutMs: number;
   /** Neue Verbindungen je IP und Minute (Standard 20). */
@@ -34,6 +36,20 @@ export interface RelayOptions {
   maxConnectionsPerIp: number;
   maxConnections: number;
   log: (line: string) => void;
+}
+
+/**
+ * Eigene Beschreibung in der Serverliste (Welt zu oder unbekannt): der Hinweis grau, darunter als Werbung
+ * „Geteilt mit HeldixClient · <Webseite>“ – sieht jeder, der die Adresse gespeichert hat, auch ohne HeldixClient.
+ */
+export function brandedDescription(text: string, site: string | null): Record<string, unknown> {
+  const extra: Record<string, string>[] = [
+    { text: '\n' },
+    { text: 'Geteilt mit ', color: 'dark_aqua' },
+    { text: 'HeldixClient', color: 'aqua' },
+  ];
+  if (site) extra.push({ text: ' · ', color: 'dark_gray' }, { text: site, color: 'gray' });
+  return { text, color: 'gray', extra };
 }
 
 /** Mehr Bytes vor dem Durchreichen braucht kein Client (Handshake + Login Start). */
@@ -210,7 +226,7 @@ export class WorldRelay {
       return { versionName: online.version, protocol: online.protocol, online: online.players, max: online.maxPlayers, description: textComponent(online.motd) };
     }
     const text = target === null ? STATUS_UNKNOWN : statusOffline(target.ownerName);
-    return { versionName: 'HeldixClient', protocol, online: 0, max: 0, description: textComponent(text, 'gray') };
+    return { versionName: 'HeldixClient', protocol, online: 0, max: 0, description: brandedDescription(text, this.options.site ?? null) };
   }
 
   /** Abgelaufene Zähler je IP vergessen. */

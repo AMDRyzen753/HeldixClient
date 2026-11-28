@@ -109,17 +109,19 @@ public final class Notifications {
 		float in = ease(Math.clamp((now - entry.shownAt) / (float) SLIDE_MS, 0f, 1f));
 		float out = now > entry.hideAt ? Math.clamp((now - entry.hideAt) / (float) FADE_MS, 0f, 1f) : 0f;
 		float alpha = in * (1f - out);
-		if (alpha <= 0.02f) return Math.round(HEIGHT * (1f - out));
-
 		boolean hasImage = entry.image != null;
 		int textX = 34;
 		int textWidth = Math.max(Ui.width(entry.title, Ui.Font.LABEL), Ui.width(entry.message, Ui.Font.SMALL));
 		int w = Math.clamp(textX + textWidth + 10, MIN_WIDTH, MAX_WIDTH);
+		// lange Meldungen in zwei Zeilen (z. B. Minecrafts Hinweis zu nicht überprüfbaren Chatnachrichten)
+		String[] lines = lines(entry.message, w - textX - 10);
+		int height = HEIGHT + (lines.length > 1 ? 10 : 0);
+		if (alpha <= 0.02f) return Math.round(height * (1f - out));
 		float x = g.guiWidth() - w - 6 + (1f - in) * (w + 12);
 
-		Ui.shadow(g, x, y, w, HEIGHT, 0.45f * alpha);
-		Ui.rect(g, x, y, w, HEIGHT, 8, Ui.withAlpha(0xF2121826, alpha));
-		Ui.outline(g, x, y, w, HEIGHT, 8, Ui.withAlpha(Ui.LINE_STRONG, alpha));
+		Ui.shadow(g, x, y, w, height, 0.45f * alpha);
+		Ui.rect(g, x, y, w, height, 8, Ui.withAlpha(0xF2121826, alpha));
+		Ui.outline(g, x, y, w, height, 8, Ui.withAlpha(Ui.LINE_STRONG, alpha));
 
 		boolean drewImage = hasImage && Ui.image(g, entry.image, x + 6, y + 6, 22, 22, alpha);
 		if (!drewImage) {
@@ -129,12 +131,31 @@ public final class Notifications {
 		int maxText = w - textX - 10;
 		int tx = Math.round(x) + textX;
 		Ui.text(g, Ui.ellipsize(entry.title, maxText, Ui.Font.LABEL), tx, y + 7, Ui.withAlpha(Ui.TEXT, alpha), Ui.Font.LABEL);
-		Ui.text(g, Ui.ellipsize(entry.message, maxText, Ui.Font.SMALL), tx, y + 19, Ui.withAlpha(Ui.MUTED, alpha), Ui.Font.SMALL);
+		for (int i = 0; i < lines.length; i++) {
+			Ui.text(g, lines[i], tx, y + 19 + i * 10, Ui.withAlpha(Ui.MUTED, alpha), Ui.Font.SMALL);
+		}
 
 		// verbleibende Anzeigezeit als feine Linie unten
 		float remaining = Math.clamp((entry.hideAt - now) / (float) HOLD_MS, 0f, 1f);
-		if (remaining > 0) Ui.rect(g, x + 8, y + HEIGHT - 2.5f, (w - 16) * remaining, 1f, 0.5f, Ui.withAlpha(Ui.ACCENT_LINE, alpha));
-		return Math.round(HEIGHT * (1f - ease(out)));
+		if (remaining > 0) Ui.rect(g, x + 8, y + height - 2.5f, (w - 16) * remaining, 1f, 0.5f, Ui.withAlpha(Ui.ACCENT_LINE, alpha));
+		return Math.round(height * (1f - ease(out)));
+	}
+
+	/** Meldung in höchstens zwei Zeilen (nach Wörtern umbrochen, die zweite notfalls mit „…“) */
+	static String[] lines(String message, int max) {
+		if (message == null || message.isEmpty()) return new String[] {""};
+		if (Ui.width(message, Ui.Font.SMALL) <= max) return new String[] {message};
+		String[] words = message.split(" ");
+		String first = "";
+		int i = 0;
+		for (; i < words.length; i++) {
+			String next = first.isEmpty() ? words[i] : first + " " + words[i];
+			if (Ui.width(next, Ui.Font.SMALL) > max) break;
+			first = next;
+		}
+		if (first.isEmpty() || i >= words.length) return new String[] {Ui.ellipsize(message, max, Ui.Font.SMALL)};
+		String rest = String.join(" ", java.util.Arrays.copyOfRange(words, i, words.length));
+		return new String[] {first, Ui.ellipsize(rest, max, Ui.Font.SMALL)};
 	}
 
 	private static float ease(float t) {

@@ -89,9 +89,25 @@ public class HeldixTitle {
 	/**
 	 * Maße der Startseite (GUI-Pixel); sideW = 0: keine rechte Spalte; figH = 0: keine Spielfigur.
 	 * Rechts zwei Tafeln: „Zuletzt gespielt“ (recentY, recentH) und „Freunde“ (friendsY, friendsH).
+	 * centeredTiles: schmale Kacheln mit Icon über dem Namen; stackedPills: Knöpfe mit Icon über kleiner Beschriftung;
+	 * figBeside: die Spielfigur steht rechts neben Karte und Kacheln (kleine Fenster) statt über der Karte.
 	 */
 	private record Layout(int edge, int columnX, int columnW, boolean compact, int greetY, int heroY, int heroH, int tilesY, int tileH,
-			int pillsY, int tipY, int sideX, int sideW, int recentY, int recentH, int friendsY, int friendsH, int figX, int figY, int figW, int figH) {
+			int pillsY, int pillH, int tipY, int stripY, int sideX, int sideW, int recentY, int recentH, int friendsY, int friendsH,
+			int figX, int figY, int figW, int figH, boolean centeredTiles, boolean stackedPills, boolean figBeside) {
+	}
+
+	private static final String[] TILE_LABELS = {"Einzelspieler", "Mehrspieler", "Heldix-Welten", "Realms"};
+	/** Heldix-Bereiche unter den Kacheln: Name, Icon (die Seiten stehen in {@link #PILL_PAGES}) */
+	private static final String[][] PILLS = {{"Module", "modules"}, {"Cosmetics", "sparkles"}, {"Grafik", "shader"}, {"HUD-Editor", "hud"},
+			{"Einstellungen", "settings"}};
+	private static final Shell.Page[] PILL_PAGES = {Shell.Page.MODULES, Shell.Page.COSMETICS, Shell.Page.SHADER, Shell.Page.HUD, Shell.Page.SETTINGS};
+
+	/** Breite der Heldix-Knöpfe mit Icon und Text nebeneinander (samt Abständen) */
+	private static int pillsInlineWidth() {
+		int sum = (PILLS.length - 1) * GAP;
+		for (String[] pill : PILLS) sum += Ui.width(pill[0], Ui.Font.LABEL) + 30;
+		return sum;
 	}
 
 	public HeldixTitle(Minecraft minecraft) {
@@ -106,6 +122,8 @@ public class HeldixTitle {
 			servers.addFirst(lastServer);
 		}
 		for (ServerData server : servers.subList(0, Math.min(3, servers.size()))) loadServerIcon(server);
+		// Live-Stand des zuletzt besuchten Servers für „Weiterspielen“ (wie in der Serverliste; höchstens einmal je Minute)
+		if (lastServer != null && minecraft.allowsMultiplayer()) ServerPing.request(lastServer);
 		buildRecent();
 		loadWorlds();
 	}
@@ -181,31 +199,69 @@ public class HeldixTitle {
 		int columnW = Math.min(width - edge * 2, Math.max(330, Math.min(470, width * 40 / 100)));
 		// breite Fenster: rechts eine Spalte „Zuletzt gespielt“
 		int sideW = !compact && width - edge * 2 >= columnW + SIDE_GAP + 250 ? Math.min(300, width - edge * 2 - columnW - SIDE_GAP) : 0;
-		int total = columnW + (sideW > 0 ? SIDE_GAP + sideW : 0);
+		// kleine Fenster ohne rechte Spalte: die Spielfigur rechts neben Karte und Kacheln (über der Karte ist dort kein Platz);
+		// die Spalte darf dafür bis auf 300 Pixel schmaler werden
+		int besideW = 0;
+		if (compact && sideW == 0) {
+			int want = 62;
+			int free = width - edge * 2 - columnW;
+			if (free < want + SIDE_GAP) columnW = Math.max(300, columnW - (want + SIDE_GAP - free));
+			free = width - edge * 2 - columnW;
+			if (free >= 44 + SIDE_GAP) besideW = Math.min(want, free - SIDE_GAP);
+		}
+		int total = columnW + (sideW > 0 ? SIDE_GAP + sideW : besideW > 0 ? SIDE_GAP + besideW : 0);
 		int columnX = (width - total) / 2;
+
+		// Kacheln: passt ein Name nicht neben sein Icon, stehen Icon und Name untereinander (mittig)
+		int tileW = (columnW - 3 * GAP) / 4;
+		int inline = 0;
+		for (String label : TILE_LABELS) inline = Math.max(inline, StartCard.inlineWidth(label));
+		boolean centeredTiles = tileW < inline;
+		// Heldix-Knöpfe: Icon und Text nebeneinander, sonst Icon über kleiner Beschriftung
+		boolean stackedPills = pillsInlineWidth() > columnW;
+
 		int greetH = compact ? 14 : 34;
+		int greetGap = compact ? 8 : 10;
 		int heroH = compact ? 36 : 46;
-		int tileH = compact ? 40 : 64;
-		int pillH = 20;
+		int tileH = compact ? (centeredTiles ? 50 : 40) : 64;
+		int pillH = stackedPills ? 30 : 20;
 		int tipH = compact ? 0 : 22;
-		int blockH = greetH + 10 + heroH + GAP + 2 + tileH + GAP + 2 + pillH + tipH;
+		// ohne rechte Spalte: Freunde-Zeile unter den Knöpfen (in großen Fenstern an Stelle des Tipps)
+		int stripH = compact && sideW == 0 ? 26 : 0;
+		int blockH = greetH + greetGap + heroH + GAP + 2 + tileH + GAP + 2 + pillH + tipH + stripH;
 		int top = edge + 28;
 		int bottom = height - edge - 16;
 		int y = top + Math.max(0, (bottom - top - blockH) * 45 / 100);
-		int heroY = y + greetH + 10;
+		int heroY = y + greetH + greetGap;
 		int tilesY = heroY + heroH + GAP + 2;
 		int pillsY = tilesY + tileH + GAP + 2;
 		int tipY = compact ? -1 : pillsY + pillH + 12;
+		int stripY = tipY >= 0 ? tipY - 5 : pillsY + pillH + 8;
 		// rechte Spalte so hoch wie die linke (mit Tipp): oben Zuletzt gespielt, unten Freunde
 		int sideBottom = tipY >= 0 ? tipY + 10 : pillsY + pillH;
 		int half = (sideBottom - y - GAP) / 2;
-		// Spielfigur steht rechts auf der Karte „Weiterspielen“, so hoch, wie über der Begrüßung Platz ist
-		int figH = Math.min(112, heroY + 4 - (top + 4));
-		if (figH < 40) figH = 0;
-		int figW = Math.round(figH * 0.62f);
-		return new Layout(edge, columnX, columnW, compact, y, heroY, heroH, tilesY, tileH, pillsY, tipY,
+
+		int figX;
+		int figY;
+		int figW;
+		int figH;
+		if (besideW > 0) {
+			// neben Karte und Kacheln, von der Begrüßung bis zum Ende der Kacheln
+			figH = Math.min(Math.round(besideW / 0.62f), tilesY + tileH - y);
+			figW = Math.round(figH * 0.62f);
+			figX = columnX + columnW + SIDE_GAP + (besideW - figW) / 2;
+			figY = tilesY + tileH - figH;
+		} else {
+			// steht rechts auf der Karte „Weiterspielen“, so hoch, wie über der Begrüßung Platz ist
+			figH = Math.min(112, heroY + 4 - (top + 4));
+			if (figH < 40) figH = 0;
+			figW = Math.round(figH * 0.62f);
+			figX = columnX + columnW - figW - 6;
+			figY = heroY + 4 - figH;
+		}
+		return new Layout(edge, columnX, columnW, compact, y, heroY, heroH, tilesY, tileH, pillsY, pillH, tipY, stripY,
 				columnX + columnW + SIDE_GAP, sideW, y, half, y + half + GAP, sideBottom - y - half - GAP,
-				columnX + columnW - figW - 6, heroY + 4 - figH, figW, figH);
+				figX, figY, figW, figH, centeredTiles, stackedPills, besideW > 0);
 	}
 
 	// ---------- Widgets ----------
@@ -222,56 +278,44 @@ public class HeldixTitle {
 
 		// Einzelspieler, Mehrspieler, Heldix-Welten, Realms
 		int tileW = (l.columnW() - 3 * GAP) / 4;
+		boolean centered = l.centeredTiles();
 		widgets.add(new StartCard(l.columnX(), l.tilesY(), tileW, l.tileH(), StartCard.Style.TILE, "Einzelspieler", "world", WORLDS,
 				() -> new StartCard.Content("Einzelspieler", worldCount < 0 ? "Lädt …" : count(worldCount, "Welt", "Welten"), true),
-				() -> minecraft.gui.setScreen(new WorldsScreen())));
+				() -> minecraft.gui.setScreen(new WorldsScreen())).centered(centered));
 		widgets.add(new StartCard(l.columnX() + tileW + GAP, l.tilesY(), tileW, l.tileH(), StartCard.Style.TILE, "Mehrspieler", "server", SERVERS,
-				this::serversContent, () -> Shell.open(minecraft, Shell.Page.SERVERS, screen)));
+				this::serversContent, () -> Shell.open(minecraft, Shell.Page.SERVERS, screen)).centered(centered));
 		widgets.add(new StartCard(l.columnX() + 2 * (tileW + GAP), l.tilesY(), tileW, l.tileH(), StartCard.Style.TILE, "Heldix-Welten", "lan", HELDIX_WORLDS,
-				this::heldixWorldsContent, () -> Shell.open(minecraft, Shell.Page.HELDIX_WORLDS, screen)));
+				() -> heldixWorldsContent(centered), () -> Shell.open(minecraft, Shell.Page.HELDIX_WORLDS, screen)).centered(centered));
 		widgets.add(new StartCard(l.columnX() + 3 * (tileW + GAP), l.tilesY(), l.columnW() - 3 * (tileW + GAP), l.tileH(), StartCard.Style.TILE,
-				"Realms", "realms", REALMS, () -> new StartCard.Content("Realms", "Welten von Mojang", true),
-				() -> minecraft.gui.setScreen(new RealmsMainScreen(screen))));
+				"Realms", "realms", REALMS, () -> new StartCard.Content("Realms", centered ? "Mojang" : "Welten von Mojang", true),
+				() -> minecraft.gui.setScreen(new RealmsMainScreen(screen))).centered(centered));
 
 		// eigene Spielfigur mit Cape (Klick: Cape-Auswahl)
 		if (l.figH() > 0) {
 			widgets.add(new FigureWidget(l.figX(), l.figY(), l.figW(), l.figH(), () -> Shell.open(minecraft, Shell.Page.CAPE, screen)));
 		}
 
-		// Heldix-Bereiche
-		String[][] pills = {{"Module", "modules"}, {"Cape", "cape"}, {"Grafik", "shader"}, {"HUD-Editor", "hud"}, {"Einstellungen", "settings"}};
-		Shell.Page[] pages = {Shell.Page.MODULES, Shell.Page.CAPE, Shell.Page.SHADER, Shell.Page.HUD, Shell.Page.SETTINGS};
-		// Breite nach Beschriftung; übriger Platz wird gleichmäßig verteilt, reicht er nicht, nur Icons
-		int[] natural = new int[pills.length];
-		int sum = (pills.length - 1) * GAP;
-		for (int i = 0; i < pills.length; i++) {
-			natural[i] = Ui.width(pills[i][0], Ui.Font.LABEL) + 30;
-			sum += natural[i];
-		}
-		boolean iconOnly = sum > l.columnW();
-		int extra = iconOnly ? 0 : (l.columnW() - sum) / pills.length;
+		// Heldix-Bereiche: immer beschriftet – Icon und Text nebeneinander (Breite nach Text, übriger Platz gleichmäßig
+		// verteilt) oder, wenn das nicht passt, gleich breite Knöpfe mit Icon über kleiner Beschriftung
+		int sum = pillsInlineWidth();
+		int extra = l.stackedPills() ? 0 : (l.columnW() - sum) / PILLS.length;
 		int px = l.columnX();
-		for (int i = 0; i < pills.length; i++) {
-			Shell.Page page = pages[i];
-			int w = iconOnly ? (l.columnW() - (pills.length - 1) * GAP) / pills.length : natural[i] + extra;
-			if (i == pills.length - 1) w = l.columnX() + l.columnW() - px;
-			ActionButton pill = iconOnly
-					? ActionButton.icon(px, l.pillsY(), 20, pills[i][1], pills[i][0], () -> Shell.open(minecraft, page, screen))
-					: new ActionButton(px, l.pillsY(), w, 20, pills[i][0], false, () -> Shell.open(minecraft, page, screen)).withIcon(pills[i][1]);
-			pill.setWidth(w);
-			pill.withVariant(ActionButton.Variant.SOLID);
+		for (int i = 0; i < PILLS.length; i++) {
+			Shell.Page page = PILL_PAGES[i];
+			int w = l.stackedPills() ? (l.columnW() - (PILLS.length - 1) * GAP) / PILLS.length : Ui.width(PILLS[i][0], Ui.Font.LABEL) + 30 + extra;
+			if (i == PILLS.length - 1) w = l.columnX() + l.columnW() - px;
+			ActionButton pill = new ActionButton(px, l.pillsY(), w, l.pillH(), PILLS[i][0], false, () -> Shell.open(minecraft, page, screen))
+					.withIcon(PILLS[i][1]).withVariant(ActionButton.Variant.SOLID);
+			if (l.stackedPills()) pill.withStackedLabel();
 			px += w + GAP;
 			widgets.add(pill);
 		}
 
 		// schmale Fenster: Freunde als Zeile unter den Knöpfen (anstelle des Tipps)
 		friendsStrip = null;
-		if (l.sideW() == 0) {
-			int stripY = l.tipY() >= 0 ? l.tipY() - 5 : l.pillsY() + 20 + 8;
-			if (stripY + 18 <= height - l.edge() - 14) {
-				friendsStrip = new FriendsStrip(l.columnX(), stripY, l.columnW(), 18, () -> Shell.open(minecraft, Shell.Page.FRIENDS, screen));
-				widgets.add(friendsStrip);
-			}
+		if (l.sideW() == 0 && l.stripY() + 18 <= height - l.edge() - 12) {
+			friendsStrip = new FriendsStrip(l.columnX(), l.stripY(), l.columnW(), 18, () -> Shell.open(minecraft, Shell.Page.FRIENDS, screen));
+			widgets.add(friendsStrip);
 		}
 
 		// rechts: Zuletzt gespielt und Freunde
@@ -351,8 +395,8 @@ public class HeldixTitle {
 
 	private StartCard.Content heroContent() {
 		if (serverIsNewer()) {
-			return new StartCard.Content(ServersScreen.displayName(lastServer), "Mehrspieler  ·  " + ServersScreen.shortAddress(lastServer.ip),
-					minecraft.allowsMultiplayer(), null, images.get("server:" + lastServer.ip));
+			return new StartCard.Content(ServersScreen.displayName(lastServer), serverDetail(lastServer), minecraft.allowsMultiplayer(), null,
+					images.get("server:" + lastServer.ip));
 		}
 		if (worldCount < 0) return new StartCard.Content("Lädt …", "", false);
 		LevelSummary world = lastWorld();
@@ -362,11 +406,27 @@ public class HeldixTitle {
 				images.get("world:" + world.getLevelId()));
 	}
 
-	/** Heldix-Welten: Einladungen von Freunden zählen, sonst ein kurzer Hinweis */
-	private StartCard.Content heldixWorldsContent() {
+	/**
+	 * Zeile unter dem Servernamen: „Mehrspieler“, die Adresse nur, wenn sie nicht schon der Name ist, und der Live-Stand
+	 * („153 online · 24 ms“ bzw. „gerade nicht erreichbar“). Eine andere Protokollnummer verschweigt sie: Viele Netzwerke
+	 * melden ihre Grundversion und lassen trotzdem jede Version herein.
+	 */
+	static String serverDetail(ServerData server) {
+		String address = ServersScreen.shortAddress(server.ip);
+		String detail = ServersScreen.displayName(server).equalsIgnoreCase(address) ? "Mehrspieler" : "Mehrspieler  ·  " + address;
+		ServerPing.Result result = ServerPing.result(server.ip);
+		if (result == null || result.state() == ServerData.State.PINGING) return detail;
+		if (result.state() == ServerData.State.UNREACHABLE) return detail + "  ·  gerade nicht erreichbar";
+		String summary = ServerPing.summary(result);
+		return summary == null ? detail : detail + "  ·  " + summary;
+	}
+
+	/** Heldix-Welten: Einladungen von Freunden zählen, sonst ein kurzer Hinweis (in schmalen Kacheln kürzer) */
+	private StartCard.Content heldixWorldsContent(boolean narrow) {
 		int invites = dev.heldixclient.share.WorldInvites.recent().size();
 		if (invites > 0) return new StartCard.Content("Heldix-Welten", count(invites, "Einladung", "Einladungen"), true);
-		return new StartCard.Content("Heldix-Welten", Social.online() ? "Welten von Freunden" : "Mit Heldix-Dienst", true);
+		String hint = Social.online() ? (narrow ? "Von Freunden" : "Welten von Freunden") : (narrow ? "Heldix-Dienst" : "Mit Heldix-Dienst");
+		return new StartCard.Content("Heldix-Welten", hint, true);
 	}
 
 	private StartCard.Content serversContent() {
@@ -431,6 +491,8 @@ public class HeldixTitle {
 		}
 		Layout l = layout != null ? layout : layout(width, height);
 		int edge = l.edge();
+		// Abfrage des letzten Servers weiterlaufen lassen
+		ServerPing.tick();
 
 		// Logo oben links
 		Ui.logo(g, edge, edge + 1, 18, fade);
@@ -461,13 +523,15 @@ public class HeldixTitle {
 		// Begrüßung
 		int hour = LocalTime.now().getHour();
 		String greeting = hour < 5 ? "Gute Nacht" : hour < 11 ? "Guten Morgen" : hour < 18 ? "Hallo" : "Guten Abend";
+		// steht die Figur über der Karte, endet die Begrüßung vor ihr
+		int figureW = l.figH() > 0 && !l.figBeside() ? l.figW() + 14 : 0;
 		if (l.compact()) {
 			int greetW = Ui.width(greeting + ", ", Ui.Font.TITLE);
-			int compactNameW = l.columnW() - greetW - (l.figH() > 0 ? l.figW() + 14 : 0);
+			int compactNameW = l.columnW() - greetW - figureW;
 			Ui.text(g, greeting + ", ", l.columnX(), l.greetY(), Ui.withAlpha(Ui.MUTED, fade), Ui.Font.TITLE);
 			Ui.text(g, Ui.ellipsize(name, compactNameW, Ui.Font.TITLE), l.columnX() + greetW, l.greetY(), Ui.withAlpha(Ui.TEXT, fade), Ui.Font.TITLE);
 		} else {
-			int greetNameW = l.columnW() - (l.figH() > 0 ? l.figW() + 14 : 0);
+			int greetNameW = l.columnW() - figureW;
 			Ui.text(g, greeting + ",", l.columnX() + 1, l.greetY(), Ui.withAlpha(Ui.MUTED, fade), Ui.Font.BODY);
 			Ui.text(g, Ui.ellipsize(name, greetNameW, Ui.Font.HERO), l.columnX(), l.greetY() + 11, Ui.withAlpha(Ui.TEXT, fade), Ui.Font.HERO);
 		}
