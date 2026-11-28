@@ -18,10 +18,10 @@ jobs:
     name: Installer bauen
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Java 25 einrichten
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
@@ -32,7 +32,7 @@ jobs:
             mod/gradle/wrapper/gradle-wrapper.properties
 
       - name: Node.js einrichten
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -40,7 +40,7 @@ jobs:
 
       # Gradle lädt Minecraft zum Kompilieren von Mojang; das muss nicht bei jedem Lauf neu passieren
       - name: Minecraft-Dateien zwischenspeichern
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: mod/.gradle/minecraft
           key: minecraft-${{ hashFiles('mod/gradle.properties') }}
@@ -53,8 +53,16 @@ jobs:
         working-directory: launcher
         run: npm run dist -- --publish never
 
+      # Der Gradle-Daemon hält unter Windows Dateien im Gradle- und Minecraft-Cache offen; dann bricht das Speichern der
+      # Caches am Ende ab („tar.exe failed with exit code 2“). Daher vorher beenden.
+      - name: Gradle-Daemon beenden
+        if: always()
+        continue-on-error: true
+        working-directory: mod
+        run: ./gradlew.bat --stop
+
       - name: Installer hochladen
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: HeldixClient-Setup
           path: launcher/release/*.exe
@@ -65,10 +73,10 @@ jobs:
     # aktueller Apple-Silicon-Runner von GitHub (macos-14 gibt es nicht mehr); electron-builder baut dort auch die Intel-Version
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Java 25 einrichten
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '25'
@@ -79,14 +87,14 @@ jobs:
             mod/gradle/wrapper/gradle-wrapper.properties
 
       - name: Node.js einrichten
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: launcher/package-lock.json
 
       - name: Minecraft-Dateien zwischenspeichern
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: mod/.gradle/minecraft
           key: minecraft-mac-${{ hashFiles('mod/gradle.properties') }}
@@ -102,8 +110,14 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm run dist:mac -- --publish never
 
+      - name: Gradle-Daemon beenden
+        if: always()
+        continue-on-error: true
+        working-directory: mod
+        run: sh gradlew --stop
+
       - name: Mac-Downloads hochladen
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: HeldixClient-macOS
           path: |
@@ -122,10 +136,10 @@ jobs:
     runs-on: ubuntu-latest
     environment: release
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Node.js einrichten
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -151,7 +165,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: HeldixClient-macOS
           path: launcher/mac-artifacts
@@ -168,7 +182,7 @@ jobs:
           node dist/scripts/release-mac.js mac-artifacts
 
       - name: update-mac.json hochladen
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: HeldixClient-macOS-Update
           path: launcher/release/update/update-mac*.json
@@ -182,17 +196,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: HeldixClient-Setup
           path: release
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: HeldixClient-macOS
           path: release
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: HeldixClient-macOS-Update
           path: release
