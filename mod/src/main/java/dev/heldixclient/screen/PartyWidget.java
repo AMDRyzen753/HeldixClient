@@ -77,7 +77,7 @@ public class PartyWidget extends AbstractButton {
 		int textW = w - (textX - x) - 8 - facesW;
 		for (int i = 0; i < faces; i++) {
 			Party.Member member = party.members().get(i);
-			FriendWidget.face(g, member.uuid(), member.name(), x + w - 8 - 12 - (faces - 1 - i) * 9, y + (h - 12) / 2, 12, alpha * (member.online() ? 1f : 0.5f));
+			FriendWidget.face(g, member.uuid(), member.name(), x + w - 8 - 12 - (faces - 1 - i) * 9, y + (h - 12) / 2, 12, alpha * (member.online() ? 1f : member.inLauncher() ? 0.75f : 0.5f));
 		}
 		Ui.text(g, Ui.ellipsize(title, textW, Ui.Font.LABEL), textX, y + h / 2 - 10, Ui.withAlpha(Ui.TEXT, alpha), Ui.Font.LABEL);
 		Ui.text(g, Ui.ellipsize(detail, textW, Ui.Font.SMALL), textX, y + h / 2 + 2, Ui.withAlpha(detailColor, alpha), Ui.Font.SMALL);

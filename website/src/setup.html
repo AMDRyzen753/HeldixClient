@@ -1,0 +1,101 @@
+<!--seite {"titel":"Geteiltes Setup","beschreibung":"Ein geteiltes HeldixClient-Setup: Mods, Ressourcenpakete, Shader und Addons samt Einstellungen – mit einem Klick als neue Instanz in HeldixClient anlegen.","noindex":true,"og":"zusammen"}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
+<link rel="stylesheet" href="/oeffentlich.css">
+<script type="module" src="/setup.js"></script>
+</head>
+<body data-seite="setup">
+{{include:nav.html}}
+
+<main id="inhalt" class="container section section--tight setup-page" data-zustand="laden" aria-busy="true">
+  <noscript><p class="notice">Für die Vorschau braucht dein Browser JavaScript. Du kannst das Setup auch direkt in HeldixClient öffnen.</p></noscript>
+
+  <!-- Wird geladen -->
+  <div class="app-loading" id="setup-laden" role="status">
+    <span class="spinner" aria-hidden="true"></span><span>Setup wird geladen …</span>
+  </div>
+
+  <!-- Kein Code, unbekannt, abgelaufen oder nicht erreichbar -->
+  <section class="card public-state" id="setup-weg" aria-labelledby="setup-weg-titel" hidden>
+    <span class="icon-tile icon-tile--lg" id="setup-weg-symbol">{{icon:clock}}</span>
+    <h1 class="h3" id="setup-weg-titel">Dieses Setup gibt es nicht mehr</h1>
+    <p class="text-2" id="setup-weg-text">Der Link ist abgelaufen oder wurde zurückgezogen. Frag einfach nach einem neuen.</p>
+    <div class="btn-group">
+      <button class="btn btn--primary" type="button" id="setup-erneut" hidden>{{icon:refresh}}Erneut versuchen</button>
+      <a class="btn btn--secondary" href="/download" data-download>{{icon:download}}<span data-download-label>{{t:download.knopf}}</span></a>
+      <a class="btn btn--secondary" href="/hilfe/setup-teilen">{{icon:help-circle}}So funktioniert Setup teilen</a>
+    </div>
+  </section>
+
+  <!-- Das Setup -->
+  <div class="setup-layout" id="setup" hidden>
+    <section class="card card--accent setup-hero" aria-labelledby="setup-name">
+      <div class="setup-hero__head">
+        <span class="icon-tile icon-tile--lg" id="setup-loader-symbol">{{icon:cube}}</span>
+        <div class="setup-hero__title">
+          <span class="eyebrow">{{icon:link}}Geteiltes Setup</span>
+          <h1 class="h2" id="setup-name">Setup</h1>
+          <p class="setup-creator"><img class="kopf" id="setup-kopf" src="/assets/standard-kopf.svg" width="28" height="28" alt=""><span>Geteilt von <strong id="setup-ersteller">…</strong></span></p>
+        </div>
+      </div>
+      <p class="setup-description" id="setup-beschreibung" hidden></p>
+      <ul class="setup-chips" id="setup-chips" aria-label="Eckdaten"></ul>
+      <p class="notice small" id="setup-eigenes" hidden>{{icon:info}}<span>Das ist dein Setup. Zähler und Widerrufen findest du im Konto unter <a href="/konto#reiter=setups">Meine Setups</a>.</span></p>
+      <div class="btn-group setup-actions">
+        <a class="btn btn--primary btn--lg" id="setup-oeffnen" href="heldixclient://setup/">{{icon:loader-heldix}}In HeldixClient öffnen</a>
+        <a class="btn btn--secondary btn--lg" href="/download" data-download data-download-kurz id="setup-download">{{icon:download}}<span data-download-label>HeldixClient herunterladen</span></a>
+      </div>
+      <p class="tiny text-3">„In HeldixClient öffnen“ zeigt im Launcher eine Vorschau. Erst wenn du „Als neue Instanz anlegen“ wählst, lädt er alles – von Modrinth und aus dem Addon-Store, mit geprüften Prüfsummen.</p>
+      <div class="setup-code">
+        <p class="small text-2">Klappt der Knopf nicht? Kopier den Code oder den Link und füg ihn im Launcher unter Instanzen → Setups ein:</p>
+        <div class="world-address__row">
+          <code id="setup-code">…</code>
+          <button class="btn btn--secondary btn--sm" type="button" id="setup-code-kopieren">{{icon:copy}}Code kopieren</button>
+          <button class="btn btn--ghost btn--sm" type="button" id="setup-link-kopieren">{{icon:link}}Link kopieren</button>
+        </div>
+      </div>
+      <div class="setup-foot">
+        <dl class="setup-stats" id="setup-zahlen">
+          <div><dt>Aufrufe</dt><dd id="setup-aufrufe">–</dd></div>
+          <div><dt>Installiert</dt><dd id="setup-installiert">–</dd></div>
+        </dl>
+        <button class="btn btn--ghost btn--sm" type="button" id="setup-melden">{{icon:flag}}Melden</button>
+      </div>
+      <p class="tiny text-3 setup-report-hint" id="setup-melden-hinweis" hidden></p>
+    </section>
+
+    <section class="card setup-content" aria-labelledby="setup-inhalt-titel">
+      <div class="card__head">
+        <span class="icon-tile">{{icon:list}}</span>
+        <div><h2 class="card__title" id="setup-inhalt-titel">Was installiert wird</h2><p class="tiny text-3" id="setup-inhalt-zahl"></p></div>
+      </div>
+      <div id="setup-inhalt"></div>
+    </section>
+
+    <section class="card setup-settings" aria-labelledby="setup-einstellungen-titel">
+      <div class="card__head">
+        <span class="icon-tile">{{icon:settings}}</span>
+        <div><h2 class="card__title" id="setup-einstellungen-titel">Einstellungen</h2><p class="tiny text-3">Übernimmt der Launcher nur, wenn du es beim Anlegen willst.</p></div>
+      </div>
+      <div id="setup-einstellungen"></div>
+    </section>
+
+    <aside class="card setup-side">
+      <h2 class="h4">Sicher nachgebaut</h2>
+      <ul class="setup-facts">
+        <li>{{icon:shield}}<span>Ein Setup enthält keine Dateien, nur Namen und Versionen. Mods, Ressourcenpakete und Shader kommen von Modrinth, Addons aus dem Addon-Store von HeldixClient.</span></li>
+        <li>{{icon:cube}}<span>Der Launcher legt immer eine neue Instanz an – deine anderen Instanzen bleiben, wie sie sind.</span></li>
+        <li>{{icon:flag}}<span>Stimmt mit einem Setup etwas nicht, melde es. Das Team sieht es sich an.</span></li>
+      </ul>
+      <a class="link-arrow" href="/hilfe/setup-teilen">Setup teilen erklärt{{icon:chevron-right}}</a>
+    </aside>
+  </div>
+</main>
+
+{{ICONS_ALLE_HTML}}
+{{include:footer.html}}
+</body>
+</html>

@@ -28,10 +28,13 @@ const KARTEN = [
   ['addons', 'Addon-Store', 'Mehr Funktionen mit einem Klick', 'Voice Chat, Minimap, Spotify und mehr – vom Team geprüft und signiert.', 'einrichtung-addons.webp', ['Geprüft', 'Signiert']],
   ['hilfe', 'Hilfe-Center', 'Wobei können wir helfen?', 'Anleitungen von der Installation über Party und Welt teilen bis zur Fehlersuche.', null, ['Installation', 'Freunde', 'Welt teilen', 'Probleme lösen']],
   ['entwickler', 'Für Entwickler', 'Erweitere HeldixClient.', 'Heldix-Addons mit stabiler Java-API – einreichen, prüfen lassen, im Store veröffentlichen.', null, ['Addon-API', 'Heldix Loader']],
-  ['neuigkeiten', 'Neuigkeiten', `Neu in ${version}`, 'Party, Welt teilen, Freunde 2.0, Einrichtung beim ersten Start und ein neuer Discord-Status.', 'launcher-welten.webp', ['Versionsverlauf']],
+  ['neuigkeiten', 'Neuigkeiten', `Neu in ${version}`, 'Setup teilen per Link, öffentliche Spielerprofile, Partner-Server mit eigenem Plugin und „Im Launcher“ bei Freunden.', 'launcher-welten.webp', ['Versionsverlauf']],
   ['einladung', 'Einladung', 'Du bist eingeladen!', 'Hol dir HeldixClient – wer neu dazukommt, bekommt den Freundesfunken, und ihr seid gleich befreundet.', 'einladung-dialog.webp', ['Freundesfunken', 'Kostenlos']],
   ['das-team', 'Das Team', 'Die Menschen hinter HeldixClient', 'Entwicklung, Design, Support und Moderation – und was die Abzeichen bedeuten.', null, ['Team', 'Abzeichen']],
   ['status', 'Status', 'Läuft der Heldix-Dienst?', 'Freunde, Party, Nachrichten, Welt teilen und Capes im Überblick.', null, ['Live']],
+  // 0.14.1: Partner-Programm und allgemeine Karte für Spielerprofile (der Dienst nimmt sie für unbekannte/private Profile)
+  ['partner', 'Partner-Programm', 'HeldixClient für deinen Server', 'Voice-Gruppen, Server-HUD, Belohnungs-Cosmetics und Server-Regeln – kostenlos für Partner-Server.', null, ['Kostenlos', 'Paper', 'Abzeichen „Partner“']],
+  ['spieler', 'Spielerprofil', 'Spielt mit HeldixClient', '3D-Figur mit Cape und Cosmetics, Abzeichen und Welten – öffentliche Profile auf heldixclient.com.', null, ['Profil', 'Zusammen spielen']],
 ];
 
 const escape = (value) => String(value).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);

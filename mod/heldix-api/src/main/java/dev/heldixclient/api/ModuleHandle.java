@@ -139,6 +139,18 @@ public interface ModuleHandle {
 	 */
 	void showKey(KeyHandle key, String label, String description);
 
+	/**
+	 * Das Modul folgt einer Server-Regel ({@link ServerInfo#allowed}): Hat der Server diesen Schlüssel abgeschaltet,
+	 * zeichnet HeldixClient das HUD-Element nicht (bei HUD-Modulen), die Karte im Heldix-Menü zeigt „Auf diesem Server
+	 * deaktiviert“ und Einschalten zeigt denselben Hinweis. Die Einstellung des Spielers bleibt dabei erhalten. Bei
+	 * Modulen ohne HUD prüft das Addon die Regel selbst (z. B. in {@link HeldixEvents#onServerInfoChange}). Mehrfach
+	 * aufrufen = mehrere Regeln (jede sperrt).
+	 *
+	 * @param rule Schlüssel, z. B. "minimap" (a-z, 0-9, „_“, „-“ und „.“, höchstens 32 Zeichen)
+	 * @since 11
+	 */
+	void followServerRule(String rule);
+
 	@FunctionalInterface
 	interface ToggleListener {
 		void onToggle(boolean enabled);

@@ -343,3 +343,127 @@
     justify-content: space-between;
   }
 }
+
+/* ---------- Partner-Server (ab Heldix-Dienst 1.14.0): Abschnitt auf /entdecken, Karten auch auf /partner ---------- */
+.partner-section[hidden] {
+  display: none;
+}
+.partner-section__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--sp-3) var(--sp-5);
+  margin-bottom: var(--sp-4);
+}
+.partner-section__head > div:first-child {
+  display: grid;
+  gap: var(--sp-2);
+  flex: 1 1 420px;
+  min-width: 0;
+}
+.partner-section__head p {
+  margin: 0;
+  max-width: 70ch;
+}
+.partner-section__side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.eyebrow img.rolle,
+.partner-chip img.rolle {
+  height: 16px;
+}
+.partner-chip {
+  border-color: rgba(45, 212, 191, 0.32);
+  background: rgba(20, 184, 166, 0.12);
+  color: #5eead4;
+}
+.partner-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: var(--sp-4);
+}
+.partner-card {
+  --card-pad: var(--sp-5);
+  display: grid;
+  align-content: start;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.partner-card.is-featured {
+  border-color: rgba(251, 191, 36, 0.34);
+  box-shadow: 0 18px 44px -28px rgba(251, 191, 36, 0.55);
+}
+.partner-card__top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.partner-card__title {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.partner-card__title .card__title {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.partner-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+.partner-card .card__text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.partner-card__address {
+  padding-left: 12px;
+}
+.partner-card__address code {
+  font-size: var(--fs-sm);
+}
+.partner-card__site .icon {
+  width: 14px;
+  height: 14px;
+}
+.partner-card p.tiny {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+/* Handy: Partner-Server als waagrecht wischbare Reihe – das Weltenverzeichnis darunter rutscht so nicht weit nach unten */
+@media (max-width: 640px) {
+  .partner-section .partner-grid {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: min(86%, 340px);
+    gap: var(--sp-3);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    padding-bottom: var(--sp-2);
+    scrollbar-width: thin;
+  }
+  .partner-section .partner-card {
+    scroll-snap-align: start;
+  }
+  .partner-section .partner-grid:has(> .partner-card:only-child) {
+    grid-auto-columns: 100%;
+  }
+}
+@media (max-width: 480px) {
+  .partner-card__address {
+    flex-wrap: wrap;
+    padding: 8px;
+  }
+  .partner-card__address code {
+    flex-basis: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

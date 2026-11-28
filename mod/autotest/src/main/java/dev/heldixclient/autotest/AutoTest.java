@@ -146,6 +146,16 @@ public final class AutoTest implements HeldixModInitializer {
 			t.waitFor("Welt verlassen", mc -> mc.level == null, 60);
 			return;
 		}
+		// Nur beim Entwickeln: HELDIX_AUTOTEST_ONLY=server führt nur die Prüfungen zur Server-Schnittstelle aus (Testwelt, danach mit
+		// HELDIX_AUTOTEST_PAPER und HELDIX_AUTOTEST_PLUGIN ein echter Paper-Server mit dem Plugin „HeldixClient Server“)
+		if ("server".equals(System.getenv("HELDIX_AUTOTEST_ONLY"))) {
+			createFlatWorld(t);
+			ServerLinkTests.inWorld(t);
+			t.run(mc -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));
+			t.waitFor("Welt verlassen", mc -> mc.level == null, 60);
+			ServerLinkTests.realServer(t);
+			return;
+		}
 		// Nur beim Entwickeln: HELDIX_AUTOTEST_ONLY=hud führt nur die HUD-Prüfungen in einer Testwelt aus
 		if ("hud".equals(System.getenv("HELDIX_AUTOTEST_ONLY"))) {
 			createFlatWorld(t);
@@ -438,10 +448,15 @@ public final class AutoTest implements HeldixModInitializer {
 		// HUD: Stile, Bezugspunkte, HUD-Editor mit Rechtsklick-Menü, anklickbare Elemente, HUD-API (Stufe 5) mit Spotify
 		HudTests.run(t, fabric);
 
+		// Server-Schnittstelle (0.14.1, API 11): Codec, Regeln, Server-HUD, Einblendungen, Partner, Server-Gruppe, „Im Launcher“
+		ServerLinkTests.inWorld(t);
+
 		// Welt verlassen – mit Launcher über „Welt verlassen und wechseln“ auf der Seite Konten
 		AccountTests.leaveWorld(t);
 		t.waitFor("Welt verlassen", mc -> mc.level == null && mc.gui.screen() instanceof TitleScreen, 60);
 		t.check("Welt-verlassen-Event", left);
+		// Server-Schnittstelle mit echtem Paper-Server und Plugin (nur mit HELDIX_AUTOTEST_PAPER und HELDIX_AUTOTEST_PLUGIN)
+		ServerLinkTests.realServer(t);
 
 		// Die übrigen Menüs im Heldix-Design
 		Screen titleScreen = t.compute(mc -> mc.gui.screen());

@@ -10,5 +10,5 @@
     "client": ["dev.heldixclient.HeldixClient"]
   },
   "transformers": ["dev.heldixclient.transform.HeldixPatches", "dev.heldixclient.transform.DroppedItemPatches", "dev.heldixclient.account.AccountPatches",
-    "dev.heldixclient.transform.WorldSharePatches"]
+    "dev.heldixclient.transform.WorldSharePatches", "dev.heldixclient.transform.ServerLinkPatches"]
 }

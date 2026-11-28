@@ -9,6 +9,10 @@
 // aus GET /v1/team/cosmetics, alle Regeln von Format 1 bzw. 2, dazu Version und Slot gegen den Katalog. Erst wenn alles
 // grün ist, geht der Umschlag unverändert an den Dienst – der prüft dasselbe noch einmal. Format 2 (animierte Meshes):
 // Vorschau mit Auswahl der Animation (Namen aus dem Manifest), Steckbrief mit Mesh, Animationen, Zuständen und Leuchten.
+// Ab Dienst 1.14.0: Zugang „Partner“ – eine Belohnung (signiertes Manifest bleibt access: unlock), die ein Partner-Server
+// vergibt (POST /v1/partner/rewards). Zuordnen im Katalog über „Partner“ (PATCH /v1/team/cosmetics/<id> { access:
+// 'partner', partner }), lösen mit PATCH { access: <Zugang im Manifest> }. Der Dienst liefert dazu manifestAccess,
+// partner und partnerName; andere Zugänge als im Manifest lehnt er ab (409 ACCESS_SIGNED, NOT_UNLOCK).
 import { busy, confirmAction, emptyState, formatBytes, formatDate, formatDateTime, h, icon, loadingState, openDialog, rerender, showError, toast, uid } from './app-common.js';
 import {
   BUILTIN_CAPE_IDS,
@@ -20,6 +24,7 @@ import {
   CosmeticError,
   SLOT_NAMES,
   SLOT_TITLES,
+  PARTNER_ID_RE,
   animationButtons,
   checkCosmeticEnvelope,
   cosmeticAnimated,
@@ -51,7 +56,11 @@ function normalizeEntry(entry) {
     version: Number.isInteger(entry.version) && entry.version > 0 ? entry.version : null,
     name: text(entry.name, COSMETIC_LIMITS.nameMax) || entry.id,
     description: text(entry.description, COSMETIC_LIMITS.descriptionMax),
-    access: entry.access === 'team' || entry.access === 'unlock' ? entry.access : 'all',
+    access: entry.access === 'team' || entry.access === 'unlock' || entry.access === 'partner' ? entry.access : 'all',
+    partner: entry.access === 'partner' && typeof entry.partner === 'string' && PARTNER_ID_RE.test(entry.partner) ? entry.partner : null,
+    partnerName: entry.access === 'partner' && typeof entry.partnerName === 'string' ? entry.partnerName.slice(0, 40) : null,
+    /** Zugang im signierten Manifest (älterer Dienst ohne Angabe: aus access, partner zählt als unlock) */
+    manifestAccess: ['all', 'team', 'unlock'].includes(entry.manifestAccess) ? entry.manifestAccess : entry.access === 'partner' ? 'unlock' : entry.access === 'team' || entry.access === 'unlock' ? entry.access : 'all',
     date: typeof entry.date === 'string' ? entry.date : null,
     sha256: typeof entry.sha256 === 'string' && /^[0-9a-f]{64}$/.test(entry.sha256) ? entry.sha256 : null,
     size: number(entry.size),
@@ -185,7 +194,7 @@ function manifestFacts(manifest, { envelopeBytes = null } = {}) {
     fact('Name', h('strong', { text: manifest.name })),
     fact('ID', h('code', { class: 'mono', text: manifest.id })),
     fact('Version', String(manifest.version)),
-    fact('Wählbar für', manifest.access === 'team' ? 'nur Team-Mitglieder' : manifest.access === 'unlock' ? 'nur, wer es freigeschaltet hat (Belohnung für Einladungen)' : 'alle Spieler'),
+    fact('Wählbar für', manifest.access === 'team' ? 'nur Team-Mitglieder' : manifest.access === 'unlock' ? 'nur, wer es freigeschaltet hat (Belohnung, z. B. für Einladungen oder auf einem Partner-Server)' : 'alle Spieler'),
     fact('Beschreibung', manifest.description || '–'),
     fact('Textur', `${manifest.image.width} × ${manifest.image.height} Pixel · ${formatBytes(manifest.image.bytes)}${manifest.glow ? ' · mit Leuchtebene' : ''}`),
     ...(manifest.format === 2 ? meshFacts(manifest, fact) : []),
@@ -201,8 +210,21 @@ function manifestFacts(manifest, { envelopeBytes = null } = {}) {
 /**
  * teamCall: Anfrage mit Team-Zugang. onChange(): nach Änderungen am Katalog (Suche, Übersicht).
  */
-export function initTeamCosmetics({ teamCall, onChange }) {
-  const state = { data: null, filter: 'all', chosen: null, focusId: null };
+export function initTeamCosmetics({ teamCall, onChange, getPartners = async () => [] }) {
+  const state = { data: null, filter: 'all', chosen: null, focusId: null, partners: null };
+
+  /** Partner (id → Name) für Chips und die Auswahl; einmal geladen, Fehler still. */
+  async function partners() {
+    if (!state.partners) {
+      try {
+        state.partners = (await getPartners()) ?? [];
+      } catch {
+        state.partners = [];
+      }
+    }
+    return state.partners;
+  }
+  const partnerLabel = (id, known = null) => known || ((state.partners ?? []).find((partner) => partner.id === id)?.name ?? id);
   let previewDialog = null;
 
   // -------------------------------------------------------------------------------------------------------
@@ -243,7 +265,7 @@ export function initTeamCosmetics({ teamCall, onChange }) {
     $('cosmetic-anzahl').textContent = data.cosmetics.length ? `(${data.cosmetics.length})` : '';
     renderFilter();
     const list = data.cosmetics.filter((entry) => state.filter === 'all' || entry.slot === state.filter);
-    rerender($('cosmetic-liste'), JSON.stringify([list, state.filter]), () => {
+    rerender($('cosmetic-liste'), JSON.stringify([list, state.filter, (state.partners ?? []).map((partner) => [partner.id, partner.name])]), () => {
       if (!data.cosmetics.length) return emptyState('Noch kein Cosmetic im Katalog. Das erste veröffentlichst du oben mit einer .cosmetic.json.', 'sparkles');
       return h('ul', { class: 'rows cosmetic-rows' }, list.map(row));
     });
@@ -281,6 +303,7 @@ export function initTeamCosmetics({ teamCall, onChange }) {
           chip(`Version ${entry.version ?? '?'}`, 'accent'),
           entry.access === 'team' ? h('span', { class: 'chip team-only' }, icon('shield'), 'Nur Team') : null,
           entry.access === 'unlock' ? h('span', { class: 'chip accent' }, icon('lock'), 'Belohnung') : null,
+          entry.access === 'partner' ? h('span', { class: 'chip accent', dataset: { partner: entry.partner ?? '' } }, icon('server'), `Partner: ${entry.partner ? partnerLabel(entry.partner, entry.partnerName) : 'nicht gewählt'}`) : null,
           entry.hidden ? chip('ausgeblendet', 'warning') : null,
         ),
         entry.description ? h('div', { class: 'row-sub', text: entry.description }) : null,
@@ -291,6 +314,7 @@ export function initTeamCosmetics({ teamCall, onChange }) {
         { class: 'row-actions cosmetic-actions' },
         h('label', { class: 'inline-switch', for: switchId }, toggle, h('span', { text: 'Sichtbar' })),
         h('button', { type: 'button', class: 'button tiny ghost', dataset: { focusKey: `preview:${entry.id}` }, 'aria-label': `Vorschau von ${entry.name}`, onClick: (event) => openPreview(entry, event.currentTarget) }, icon('eye'), h('span', { class: 'label', text: 'Vorschau' })),
+        entry.manifestAccess === 'unlock' ? h('button', { type: 'button', class: 'button tiny ghost', dataset: { focusKey: `access:${entry.id}`, aktion: 'zugang' }, 'aria-label': `Partner-Server für ${entry.name} wählen`, onClick: (event) => editAccess(entry, event.currentTarget) }, icon('server'), h('span', { class: 'label', text: 'Partner' })) : null,
         h('button', { type: 'button', class: 'button tiny ghost quiet-danger', dataset: { focusKey: `delete:${entry.id}` }, 'aria-label': `${entry.name} löschen`, onClick: () => remove(entry) }, icon('trash'), h('span', { class: 'label', text: 'Löschen' })),
       ),
     );
@@ -346,6 +370,55 @@ export function initTeamCosmetics({ teamCall, onChange }) {
       onConfirm: async () => apply(await teamCall('DELETE', `/v1/team/cosmetics/${encodeURIComponent(entry.id)}`)),
     });
     if (ok) toast(`${entry.name} ist gelöscht.`, 'success');
+  }
+
+  /**
+   * Zugang einer Belohnung (Manifest access: unlock): „Belohnung“ (z. B. für Einladungen) oder „Partner“ mit Auswahl des
+   * Partners. PATCH /v1/team/cosmetics/<id> { access: 'partner', partner } bzw. { access: 'unlock' } zum Lösen.
+   */
+  async function editAccess(entry, opener) {
+    const list = await partners();
+    const name = uid('zugang');
+    const options = [
+      ['unlock', 'Belohnung', 'Tragen kann es nur, wer es freigeschaltet hat – zum Beispiel über Einladungen.'],
+      ['partner', 'Partner', 'Belohnung eines Partner-Servers: Der Server schaltet es für Spieler frei. Im Katalog steht „Belohnung auf“ und der Name des Servers.'],
+    ];
+    const radios = options.map(([value, label, help]) => {
+      const input = h('input', { type: 'radio', name, value });
+      input.checked = (entry.access === 'partner' ? 'partner' : 'unlock') === value;
+      return h('label', { class: 'check-row' }, input, h('span', null, h('strong', { text: label }), h('br'), h('span', { class: 'muted small', text: help })));
+    });
+    const selectId = uid('zugang-partner');
+    const select = h(
+      'select',
+      { class: 'select input', id: selectId },
+      h('option', { value: '' }, list.length ? 'Partner wählen …' : 'Noch kein Partner angelegt'),
+      list.map((partner) => h('option', { value: partner.id }, `${partner.name} (${partner.id})${partner.status === 'paused' ? ' – pausiert' : ''}`)),
+    );
+    select.value = entry.partner && list.some((partner) => partner.id === entry.partner) ? entry.partner : '';
+    const partnerField = h('div', { class: 'field', hidden: entry.access !== 'partner' }, h('label', { class: 'field__label', for: selectId, text: 'Partner-Server' }), select, h('span', { class: 'field__help', text: 'Nur dieser Partner kann das Cosmetic über seinen Schlüssel vergeben.' }));
+    const chosen = () => radios.map((row) => row.querySelector('input')).find((input) => input.checked)?.value ?? 'unlock';
+    const sync = () => {
+      partnerField.hidden = chosen() !== 'partner';
+    };
+    for (const row of radios) row.querySelector('input').addEventListener('change', sync);
+    const ok = await openDialog({
+      title: `Zugang von ${entry.name}`,
+      body: [
+        h('fieldset', { class: 'cosmetic-access' }, h('legend', { class: 'sr-only', text: 'Wer es tragen kann' }), radios),
+        partnerField,
+        h('p', { class: 'muted small', text: 'Sehen können es immer alle. Den Zugang im signierten Manifest (Belohnung) ändert das nicht – die Zuordnung zum Partner speichert nur der Heldix-Dienst. Schon vergebene Freischaltungen bleiben.' }),
+      ],
+      confirmLabel: 'Speichern',
+      canConfirm: () => chosen() !== 'partner' || PARTNER_ID_RE.test(select.value),
+      onConfirm: async () => {
+        const access = chosen();
+        const body = access === 'partner' ? { access, partner: select.value } : { access: entry.manifestAccess };
+        apply(await teamCall('PATCH', `/v1/team/cosmetics/${encodeURIComponent(entry.id)}`, body));
+      },
+    });
+    if (!ok) return opener?.focus?.();
+    toast(chosen() === 'partner' ? `${entry.name} ist jetzt eine Belohnung auf ${partnerLabel(select.value)}.` : `${entry.name} ist keinem Partner mehr zugeordnet.`, 'success');
   }
 
   /** Vorschau eines veröffentlichten Cosmetics (GET /v1/team/cosmetics/<id>, auch ausgeblendete) – geprüft wie beim Hochladen. */
@@ -510,6 +583,7 @@ export function initTeamCosmetics({ teamCall, onChange }) {
       if (!name || name[1] !== m.id || Number(name[2]) !== m.version) list.push(['warn', `Der Dateiname passt nicht zu ID und Version (erwartet ${m.id}-${m.version}.cosmetic.json). Geprüft wird der Inhalt.`]);
       if (m.access === 'team') list.push(['info', 'Wählbar nur für Team-Mitglieder (access: team). Sehen können es alle.']);
       if (m.access === 'unlock') list.push(['info', 'Belohnung (access: unlock): wählbar nur für Spieler, die es freigeschaltet haben – zum Beispiel über Einladungen. Sehen können es alle. Freigeschaltet wird nur, was der Dienst als Belohnung kennt.']);
+      if (m.access === 'unlock') list.push(['info', 'Als Belohnung eines Partner-Servers: nach dem Veröffentlichen in der Liste unter „Partner“ den Partner wählen. Das Manifest bleibt dabei access: unlock.']);
     }
     return list;
   }
@@ -561,7 +635,7 @@ export function initTeamCosmetics({ teamCall, onChange }) {
         h('p', {
           text: existing
             ? `Die neue Version ersetzt Version ${existing.version}. ${existing.wearers ? `${wearersText(existing.wearers)} sehen sie beim nächsten Laden des Katalogs.` : ''}`.trim()
-            : `„${m.name}“ steht danach im Katalog (${SLOT_TITLES[m.slot] ?? m.slot}) – im Spiel, im Launcher und auf der Webseite${m.access === 'team' ? ', wählbar nur für das Team' : m.access === 'unlock' ? ', wählbar nur für Spieler, die es freigeschaltet haben' : ''}.`,
+            : `„${m.name}“ steht danach im Katalog (${SLOT_TITLES[m.slot] ?? m.slot}) – im Spiel, im Launcher und auf der Webseite${m.access === 'team' ? ', wählbar nur für das Team' : m.access === 'unlock' || m.access === 'partner' ? ', wählbar nur für Spieler, die es freigeschaltet haben' : ''}.`,
         }),
         h('p', { class: 'muted small', text: 'Gesendet wird der Umschlag genau so, wie er in der Datei steht. Der Dienst prüft Signatur und Regeln noch einmal.' }),
       ],
@@ -602,7 +676,9 @@ export function initTeamCosmetics({ teamCall, onChange }) {
     /** Bereich geöffnet; focusId: diesen Eintrag hervorheben (Suche, Links). */
     show({ focusId = null } = {}) {
       if (focusId) state.filter = 'all';
-      return load({ focusId });
+      // Partner zuerst (für die Chips „Partner: <Name>“), damit die Liste nur einmal gezeichnet wird – ein zweites
+      // Zeichnen würde die Hervorhebung (Suche, Links) gleich wieder entfernen
+      return partners().then(() => load({ focusId }));
     },
     /** Zuletzt geladene Liste (für die Suche) oder null. */
     list: () => state.data?.cosmetics ?? null,
@@ -611,6 +687,7 @@ export function initTeamCosmetics({ teamCall, onChange }) {
       closePreview();
       resetUpload();
       state.data = null;
+      state.partners = null;
       $('cosmetic-liste').replaceChildren();
       $('cosmetic-liste').dataset.signature = '';
     },

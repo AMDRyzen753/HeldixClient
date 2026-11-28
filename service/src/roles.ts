@@ -66,6 +66,8 @@ export const PERMISSIONS = [
   // ab 1.13.0: Voice-Moderation (Meldungen mit Clips, Voice-Sperren, Liste „Voice aus“ ansehen) und deren Einstellungen
   'voice:moderate',
   'voice:admin',
+  // ab 1.14.0: Partner-Server (Anträge, Partner und Schlüssel, Belohnungs-Cosmetics zuordnen)
+  'partners:manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -87,16 +89,17 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'discover:moderate': 'Entdecken moderieren (Meldungen, ausblenden, Besitzer sperren)',
   'voice:moderate': 'Voice moderieren (Meldungen und Aufnahmen, Voice-Sperren, Liste „Voice aus“ ansehen)',
   'voice:admin': 'Voice-Einstellungen (Voice-Regeln veröffentlichen, Aufnahmen an/aus, Liste „Voice aus“ ändern)',
+  'partners:manage': 'Partner-Server verwalten (Anträge, Schlüssel, Cosmetics)',
 };
 
 /**
  * Welche Rolle welches Recht hat (Tabelle aus rollen-spec.md; „Spieler-Daten löschen“ bleibt wie bisher nur Admin). Ab
  * 1.13.0: `hosting:manage` Admin und Entwickler, `hosting:grant` nur Admin, `discover:moderate` Admin, Moderator, Supporter;
- * `voice:moderate` Admin, Moderator, Supporter, `voice:admin` nur Admin.
+ * `voice:moderate` Admin, Moderator, Supporter, `voice:admin` nur Admin. Ab 1.14.0: `partners:manage` Admin und Entwickler.
  */
 export const ROLE_PERMISSIONS: Record<TeamRole, readonly Permission[]> = {
   admin: [...PERMISSIONS],
-  'developer-team': ['updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'players', 'audit', 'team.view', 'hosting:manage'],
+  'developer-team': ['updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'players', 'audit', 'team.view', 'hosting:manage', 'partners:manage'],
   moderator: ['addon-reports', 'news', 'moderation', 'players', 'support', 'audit', 'team.view', 'discover:moderate', 'voice:moderate'],
   supporter: ['players', 'support', 'team.view', 'discover:moderate', 'voice:moderate'],
   designer: ['cosmetics', 'team.view'],

@@ -1,4 +1,4 @@
-import type { AccountInfo, DiscordPreview, DiscordStatus, Friend, HostedState, InstanceInfo, LauncherView, LogLine, NotificationTarget, PlayerBadge, PopularWorlds, QuickPlayList, QuickPlayTarget, ServerStatus, Settings, SkinInfo, SocialOverview, UpdateState } from '../shared/api';
+import type { AccountInfo, DiscordPreview, DiscordStatus, Friend, HostedState, InstanceInfo, LauncherView, LogLine, NotificationTarget, PartnerServer, PartnerServers, PlayerBadge, PopularWorlds, QuickPlayList, QuickPlayTarget, ServerStatus, Settings, SkinInfo, SocialOverview, UpdateState } from '../shared/api';
 import {
   $,
   api,
@@ -26,7 +26,7 @@ import { showFigure, setFigureActive } from './figure.js';
 import { UI_ICONS } from './ui-icons.js';
 import { initInstances, launchInstance, openDetail, resetInstancesView, type DetailTab } from './instances.js';
 import { loadNews } from './news.js';
-import { activateFriends, initFriends, openFriendChat, openInviteSection, openPartySection } from './friends.js';
+import { LAUNCHER_PRESENCE, LAUNCHER_PRESENCE_DND, activateFriends, initFriends, openFriendChat, openInviteSection, openPartySection } from './friends.js';
 import { badgeIcon, badgeLabel } from './badges.js';
 import { shortcut } from './keys.js';
 import { activateProfile, initProfile, reloadCosmetics, showProfileCosmetic } from './profile.js';
@@ -36,6 +36,7 @@ import { initCrash, showCrash } from './crash.js';
 import { afterSetup, initSetup, restartSetup, setupOpen, startSetupIfNeeded } from './setup.js';
 import { initNotifications } from './notifications.js';
 import { initWorlds, joinWorldNow, openPendingWorld, openWorldDialog } from './world.js';
+import { initSetupShare, openPendingSetup } from './setupshare.js';
 import { hostedWorld, initWorldState, isWorldAddress, onWorldsChange, refreshWorlds, worldsOverview } from './worldstate.js';
 
 // Icons im HTML (<svg data-icon="…">) aus dem Heldix-Icon-Set füllen, Logos der Loader einsetzen
@@ -101,6 +102,7 @@ initSetup({
     api.setPresenceView((document.body.dataset.view ?? 'home') as LauncherView);
     void openPendingInvite();
     void openPendingWorld();
+    void openPendingSetup();
     void showWhatsNew();
   },
 });
@@ -110,6 +112,12 @@ api.onInviteEvent((event) => {
 // Geteilte Welten: Links heldixclient://welt/<code>, Dialog „Welt von …“, offene Welten der Freunde
 initWorldState();
 initWorlds({ showView });
+// Setup teilen: Links heldixclient://setup/<code>, Vorschau, „Als neue Instanz anlegen“
+initSetupShare({
+  showView,
+  openInstance: (id) => openDetail(id),
+  playInstance: (id) => void launchInstance(id, showView),
+});
 // Glocke: Klick auf einen Eintrag führt dorthin
 initNotifications({ open: openNotificationTarget });
 function openNotificationTarget(target: NotificationTarget): void {
@@ -436,7 +444,11 @@ function renderHomeFriends(): void {
       break;
   }
   const online = social.friends.filter((friend) => friend.online);
-  sub.textContent = social.friends.length === 0 ? 'Noch keine Freunde' : `${online.length} von ${social.friends.length} online`;
+  // „Im Launcher“ (Dienst 1.14.0): Launcher offen, nicht im Spiel – nach den Freunden im Spiel, vor den Offline-Freunden
+  const inLauncher = social.friends.filter((friend) => !friend.online && friend.launcher);
+  sub.textContent = social.friends.length === 0 ? 'Noch keine Freunde'
+    : inLauncher.length ? `${online.length} von ${social.friends.length} online · ${inLauncher.length} im Launcher`
+      : `${online.length} von ${social.friends.length} online`;
   if (social.incoming.length > 0) {
     const names = social.incoming.slice(0, 2).map((r) => r.name).join(', ');
     list.append(rowItem(placeholderIcon('user-plus'),
@@ -449,7 +461,7 @@ function renderHomeFriends(): void {
     return;
   }
   const busy = state.game.state === 'preparing' || state.game.state === 'running';
-  if (online.length === 0) list.append(h('div', { class: 'row-note', text: 'Gerade ist niemand online.' }));
+  if (online.length === 0) list.append(h('div', { class: 'row-note', text: inLauncher.length ? 'Gerade ist niemand im Spiel.' : 'Gerade ist niemand online.' }));
   for (const friend of online.slice(0, 5)) {
     const open = () => {
       showView('friends');
@@ -470,11 +482,27 @@ function renderHomeFriends(): void {
     list.append(h('div', { class: 'row-empty', text: `und ${online.length - 5} weitere online` }));
     return;
   }
+  // im Launcher (bis zu fünf Zeilen insgesamt): Nachrichten kommen dort sofort an, Beitreten geht erst im Spiel
+  const launcherRows = inLauncher.slice(0, Math.max(0, 5 - online.length));
+  if (launcherRows.length > 0 && online.length > 0) list.append(h('div', { class: 'row-divider', text: 'Im Launcher' }));
+  for (const friend of launcherRows) {
+    const open = () => {
+      showView('friends');
+      openFriendChat(friend.uuid);
+    };
+    const name = friend.nickname || friend.name;
+    const row = rowItem(playerHead(friend.uuid, friend.name), name, friend.dnd ? LAUNCHER_PRESENCE_DND : LAUNCHER_PRESENCE, `Nachricht an ${name}`, open,
+      { icon: UI_ICONS.chat, title: 'Nachricht schreiben', run: open },
+      friend.unread > 0 ? h('span', { class: 'row-badge', title: 'Ungelesene Nachrichten', text: String(friend.unread) }) : null);
+    row.classList.add('launcher');
+    row.querySelector('.row-meta')?.classList.add(friend.dnd ? 'dnd' : 'launcher');
+    list.append(row);
+  }
   // bis zu drei Einträge: offline Freunde (ungelesene Nachrichten zuerst), damit der Bereich nicht leer bleibt
-  const offline = social.friends.filter((friend) => !friend.online)
+  const offline = social.friends.filter((friend) => !friend.online && !friend.launcher)
     .sort((a, b) => b.unread - a.unread || a.name.localeCompare(b.name, 'de'))
-    .slice(0, Math.max(0, 3 - online.length));
-  if (offline.length > 0 && online.length > 0) list.append(h('div', { class: 'row-divider', text: 'Offline' }));
+    .slice(0, Math.max(0, 3 - online.length - launcherRows.length));
+  if (offline.length > 0 && online.length + launcherRows.length > 0) list.append(h('div', { class: 'row-divider', text: 'Offline' }));
   for (const friend of offline) {
     const open = () => {
       showView('friends');
@@ -558,26 +586,66 @@ function hostedBadge(state: HostedState): HTMLElement {
   return h('span', { class: `row-badge world-hosted state-${state}`, title: `Dauerhafte Welt auf dem Heldix-Server · ${hostedStateText(state)}`, text: label });
 }
 
-// ---------- Startseite: beliebte Welten aus Entdecken (Dienst 1.13.0) ----------
+// ---------- Startseite: beliebte Welten aus Entdecken (Dienst 1.13.0) und Partner-Server (Dienst 1.14.0) ----------
 let popular: PopularWorlds | null = null;
+let partnerServers: PartnerServers | null = null;
+/** höchstens so viele Partner-Server auf der Startseite (hervorgehobene zuerst) */
+const HOME_PARTNERS = 3;
 
 function renderHomePopular(): void {
   const panel = $('#home-popular-panel');
   const list = $('#home-popular');
   const sub = $('#home-popular-sub');
   list.textContent = '';
-  if (!popular || popular.status === 'off' || popular.status === 'unsupported' || (popular.status === 'error' && popular.worlds.length === 0)) {
-    panel.hidden = true;
-    return;
-  }
-  if (popular.worlds.length === 0) {
+  const worlds = popular && (popular.status === 'ok' || popular.status === 'error') ? popular.worlds : [];
+  const partners = partnerServers?.partners.slice(0, HOME_PARTNERS) ?? [];
+  if (worlds.length === 0 && partners.length === 0) {
     panel.hidden = true;
     return;
   }
   panel.hidden = false;
-  sub.textContent = 'Entdecken · öffentliche Welten';
+  sub.textContent = worlds.length && partners.length ? 'Entdecken · öffentliche Welten und Partner-Server' : worlds.length ? 'Entdecken · öffentliche Welten' : 'Partner-Server';
   const busy = state.game.state === 'preparing' || state.game.state === 'running';
-  for (const world of popular.worlds) {
+  renderHomeWorldsPopular(list, worlds, busy);
+  if (partners.length && worlds.length) list.append(h('div', { class: 'row-divider', text: 'Partner-Server' }));
+  for (const partner of partners) {
+    const meta = [partner.description || null, partner.address].filter(Boolean).join(' · ');
+    const row = rowItem(placeholderIcon('server'), partner.name, meta, `Adresse ${partner.address} kopieren`, () => void copyPartnerAddress(partner),
+      busy ? undefined : { icon: ICONS.play, title: `Auf ${partner.name} spielen`, run: () => void joinPartner(partner) },
+      h('span', { class: 'row-badge partner-badge', title: 'Partner-Server von HeldixClient' }, badgeIcon('partner', 12), h('span', { text: 'Partner' })));
+    row.dataset.partner = partner.id;
+    if (partner.featured) row.classList.add('featured');
+    list.append(row);
+  }
+}
+
+async function copyPartnerAddress(partner: PartnerServer): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(partner.address);
+    toast(`Adresse von ${partner.name} kopiert – oder direkt mit ▶ beitreten.`, 'success');
+  } catch {
+    toast('Kopieren ging nicht.', 'error');
+  }
+}
+
+/** „Beitreten“ auf einem Partner-Server: zuletzt gespielte Instanz mit HeldixClient, Schnellstart auf die Adresse */
+async function joinPartner(partner: PartnerServer): Promise<void> {
+  if (!state.accounts.some((a) => a.active)) {
+    openAccounts($('#home-name'));
+    return;
+  }
+  try {
+    const result = await api.joinServer(partner.address);
+    toast(`Minecraft startet mit „${result.instanceName}“ und verbindet mit ${partner.name}.`, 'success');
+    await reloadInstances().catch(() => undefined);
+    showView('home');
+  } catch (error) {
+    toast(errorMessage(error), 'error');
+  }
+}
+
+function renderHomeWorldsPopular(list: HTMLElement, worlds: PopularWorlds['worlds'], busy: boolean): void {
+  for (const world of worlds) {
     const tags = world.tags.map((t) => DISCOVER_TAG_NAMES[t] ?? t).join(', ');
     const status = world.state === 'online' ? 'geöffnet' : hostedStateText(world.state);
     const players = world.state === 'running' || world.state === 'online' ? `${world.players}/${world.maxPlayers} Spieler` : status;
@@ -603,6 +671,14 @@ void api.getPopularWorlds().then((next) => {
 }).catch(() => undefined);
 api.onPopularWorlds((next) => {
   popular = next;
+  renderHomePopular();
+});
+void api.getPartners().then((next) => {
+  partnerServers = next;
+  renderHomePopular();
+}).catch(() => undefined);
+api.onPartners((next) => {
+  partnerServers = next;
   renderHomePopular();
 });
 onWorldsChange(() => {

@@ -412,6 +412,14 @@ export class Discover {
     return value;
   }
 
+  /** Ab 1.14.0: sichtbare Einträge eines Gastgebers (öffentliches Spielerprofil), beliebteste zuerst. */
+  entriesOf(uuid: string): DiscoverEntry[] {
+    return this.entries()
+      .filter(({ entry }) => entry.host.uuid === uuid)
+      .sort((x, y) => y.entry.players - x.entry.players || y.recentLikes - x.recentLikes || y.entry.listedAt - x.entry.listedAt)
+      .map(({ entry }) => entry);
+  }
+
   /** `GET /v1/public/discover/meta`: Tags, Sprachen, Sortierungen und Regeln für die Oberflächen. */
   meta() {
     return {

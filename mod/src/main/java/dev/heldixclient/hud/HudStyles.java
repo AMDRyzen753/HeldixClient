@@ -251,6 +251,18 @@ public final class HudStyles {
 		return new Resolved(kind, accent, label, text, bg, opacity, border, shadow, align, scale);
 	}
 
+	/**
+	 * Stil für ein HUD-Element vom Server ({@link ServerHud}): die globalen Werte, Ausrichtung nach der Spalte des
+	 * Bezugspunkts (0 links, 1 Mitte, 2 rechts) und auf Wunsch die Farbe des Servers als Akzent (Titel, Balken).
+	 */
+	public static Resolved forServer(int column, Integer color) {
+		Resolved global = resolve(null);
+		int accent = color != null ? color | 0xFF000000 : global.accent;
+		int label = color != null ? light(accent) : global.label;
+		HudStyle.Align align = HudStyle.Align.values()[Math.clamp(column, 0, 2)];
+		return new Resolved(global.kind, accent, label, global.text, global.background, global.opacity, global.border, global.shadow, align, global.scale);
+	}
+
 	/** Stil des Elements, das gerade gezeichnet wird (außerhalb: global) */
 	public static Resolved current() {
 		return current != null ? current : resolve(null);

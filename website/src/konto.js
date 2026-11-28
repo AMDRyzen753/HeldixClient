@@ -9,6 +9,8 @@
 //   Profil, Privatsphäre, Benachrichtigungen . konto-einstellungen.js
 //   Cape & Cosmetics, Figur der Übersicht .... konto-cosmetics.js
 //   Meine Welten ............................. konto-welten.js (dauerhafte Welten: konto-hosting.js)
+//   Meine Setups (ab Dienst 1.14.0) .......... konto-setups.js
+//   Öffentliches Profil (ab Dienst 1.14.0) ... konto-oeffentlich.js
 //   Meine Addons ............................. konto-addons.js
 //   Support, Blockierte, Meldungen, Sicherheit, Daten: hier
 //
@@ -19,7 +21,8 @@
 // ohne Anmeldung genügen #reiter=support (oder ältere Links wie #support und #ziel=support). Weitere Werte in der
 // Adresse: #reiter=nachrichten&mit=<uuid> öffnet den Chat, #reiter=support&anfrage=<id> die Anfrage,
 // #reiter=freunde&teil=einladen (alt) führt zu „Freunde einladen“. Kommt die Anmeldung von einer Einladung (/einladung
-// merkt sich den Code im sessionStorage des Tabs), geht es danach dorthin zurück.
+// merkt sich den Code im sessionStorage des Tabs), geht es danach dorthin zurück; ebenso von /setup, /spieler/<name>
+// und /partner (rueckweg.js, ab 0.14.1).
 import {
   $,
   ApiError,
@@ -52,6 +55,8 @@ import { loginErrorText, minecraftLoginAvailable, setupMinecraftLogin } from './
 import { createShell, parseShellHash, sectionHref, shellIcon } from './app-shell.js';
 import { markInviteLoginError, pendingInvite, rewardInfo } from './einladung-common.js';
 import { initMyAddons } from './konto-addons.js';
+import { initPublicProfile } from './konto-oeffentlich.js';
+import { initSetups } from './konto-setups.js';
 import { initChat } from './konto-chat.js';
 import { initCosmetics } from './konto-cosmetics.js';
 import { initInvites } from './konto-einladungen.js';
@@ -63,6 +68,7 @@ import { initOverview } from './konto-uebersicht.js';
 import { initWorlds } from './konto-welten.js';
 import { initVoiceAccount } from './konto-voice.js';
 import { badgeLabel, roleIcon, roleLabel } from './rollen.js';
+import { forgetReturn, takeReturn } from './rueckweg.js';
 import { attachmentList, normalizeAttachments } from './support-attachments.js';
 
 // Alle Spielerbilder auf dieser Seite: Minecraft-Köpfe über die Cookie-Sitzung (sonst Initialen).
@@ -105,9 +111,11 @@ let worlds = null;
 let settings = null;
 let live = null;
 let voiceAccount = null;
+let setups = null;
+let publicProfile = null;
 const supportRefresher = poller(() => refreshSupport(), 15_000);
 /** Ziele aus dem Einmal-Link (#code=…&ziel=…). */
-const TARGETS = new Set(['uebersicht', 'profil', 'freunde', 'nachrichten', 'party', 'einladen', 'welten', 'privatsphaere', 'benachrichtigungen', 'sicherheit', 'daten', 'support', 'addons', 'team', 'plus']);
+const TARGETS = new Set(['uebersicht', 'profil', 'freunde', 'nachrichten', 'party', 'einladen', 'welten', 'setups', 'privatsphaere', 'oeffentlich', 'benachrichtigungen', 'sicherheit', 'daten', 'support', 'addons', 'team', 'plus']);
 
 // ---------------------------------------------------------------------------------------------------------
 // Anfragen mit Sitzung: 401 heißt abgemeldet (abgelaufen, anderswo beendet oder Daten gelöscht)
@@ -131,7 +139,7 @@ function sessionEnded(message) {
   cosmetics?.stop();
   invites?.stop();
   overview?.reset();
-  for (const module of [friends, chat, party, worlds]) module?.reset();
+  for (const module of [friends, chat, party, worlds, setups, publicProfile]) module?.reset();
   Object.assign(store, { me: null, friends: null, conversations: null, party: null, worlds: null, invites: null, hosting: null });
   for (const dialog of document.querySelectorAll('dialog.modal')) dialog.remove();
   showGuest(message);
@@ -216,12 +224,19 @@ async function start() {
       return;
     }
     notice = loginErrorText(params.get('fehler'));
+    forgetReturn();
   }
   if (code !== null) {
     try {
       const me = await api('POST', '/v1/web/session', { code });
       if (invite?.accept) {
         location.replace(`/einladung#${invite.code}`);
+        return;
+      }
+      // Anmeldung kam von /setup, /spieler/<name> oder /partner (rueckweg.js): dorthin zurück
+      const back = invite ? null : takeReturn();
+      if (back) {
+        location.replace(back);
         return;
       }
       // Ziele außerhalb des Kontos: Team-Bereich und Heldix+ (/plus, Warteliste)
@@ -316,6 +331,8 @@ function onTab(name, { params = null } = {}) {
   party.onTab(name);
   worlds.onTab(name);
   invites.onTab(name, params);
+  setups.onTab(name);
+  publicProfile.onTab(name);
   if (name === 'privatsphaere') {
     loadBlocks().catch(showError);
     loadReports().catch(showError);
@@ -372,7 +389,8 @@ function onLiveEvent(message) {
       myAddons.refreshInBackground().catch(() => {});
       break;
     case 'unlock':
-      toast(`Freigeschaltet: ${rewardInfo(message.cosmetic).name}! Du findest es unter Profil & Cosmetics.`, 'success');
+      // Ab Dienst 1.14.0 auch Belohnungen von Partner-Servern (reason: partner, partner: <Name>)
+      toast(message.reason === 'partner' && typeof message.partner === 'string' && message.partner ? `Freigeschaltet auf ${message.partner}: ${rewardInfo(message.cosmetic).name}! Du findest es unter Profil & Cosmetics.` : `Freigeschaltet: ${rewardInfo(message.cosmetic).name}! Du findest es unter Profil & Cosmetics.`, 'success');
       cosmetics.setUser(state.me);
       invites.setUser(state.me);
       break;
@@ -1073,6 +1091,8 @@ function init() {
   party = initParty(ctx);
   worlds = initWorlds(ctx);
   voiceAccount = initVoiceAccount({ call });
+  setups = initSetups({ call });
+  publicProfile = initPublicProfile({ call, getMe: () => state.me });
   live = createLive({
     call,
     poll: pollAll,

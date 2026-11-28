@@ -23,6 +23,9 @@ import type {
   PartyFollow,
   PartyLocation,
   PublicInviteView,
+  PublicProfileState,
+  SharedSetupDraft,
+  SharedSetupPreview,
   WorldJoinView,
   InstancePatch,
   LogLine,
@@ -52,7 +55,7 @@ import { loginMinecraft, offlineUuid, refreshMicrosoft, sessionFromAccessToken, 
 import { AccountBridge, IPC_JVM_FLAG } from './core/accountipc';
 import { OFFLINE_LOCKED, SessionManager } from './core/sessions';
 import { addContentFiles, countEnabled, importContentFiles, listAllContent, listContent, removeContent, setContentEnabled, type ContentContext } from './core/content';
-import { applyPendingRemovals, installStoreAddon, storeForInstance, uninstallStoreAddon, type OverviewInstance, type StoreEntry } from './core/addonstore';
+import { applyPendingRemovals, fetchStore, installStoreAddon, storeForInstance, uninstallStoreAddon, type OverviewInstance, type StoreEntry } from './core/addonstore';
 import { AddonStoreService, noticeList, type StoreNotice } from './core/storeservice';
 import { DiscordRpc } from './core/discord';
 import { getFabricGameVersions } from './core/fabric';
@@ -73,6 +76,10 @@ import { HostingClient, hostedAsFriendWorld, type HostingEvent } from './core/ho
 import { DiscoverClient, discoverAsFriendWorld } from './core/discover';
 import { DOWNLOAD_INVITE_FILE, INVITE_POLL_MS, INVITE_PROTOCOL, InviteService, acceptNotes, findInviteLink, inviteCode, inviteServer, isMissing, parseInviteLink, parsePastedInvite, pickInviteInstance, readDownloadInvite, finishDownloadInvite, rewardName, type PublicInvite } from './core/invites';
 import { listQuickPlay, validateQuickPlay } from './core/quickplay';
+import { SETUP_OFFLINE, applyPendingOptions, findSetupLink, parsePastedSetup, parseSetupLink, setupCode, type SetupLoader } from './core/setupshare';
+import { SetupService, buildSetup, emptySetupPreview, installSetup, previewSetup, setupMissing, shareMeta, sharedResult } from './core/setupinstall';
+import { PartnerClient } from './core/partners';
+import { PUBLIC_PROFILE_OFFLINE, PublicProfileClient, publicProfileUrl } from './core/publicprofile';
 import { serverStatus } from './core/serverstatus';
 import { loaderLogos } from './core/loaderlogos';
 import { removeOfficialProfile } from './core/officialcleanup';
@@ -1257,14 +1264,170 @@ const discover = new DiscoverClient({
   log: (line) => console.log(`[Launcher] ${line}`),
 });
 
+// ---------- Partner-Server unter „Beliebte Welten“ (siehe core/partners.ts) ----------
+
+const partners = new PartnerClient({
+  serviceUrl: HELDIX_SERVICE_URL,
+  onUpdate: (list) => broadcast('partners:update', list),
+});
+
+// ---------- Setup teilen (siehe core/setupshare.ts und core/setupinstall.ts) ----------
+
+const setups = new SetupService({ serviceUrl: HELDIX_SERVICE_URL, website: WEBSITE_URL, auth: HELDIX_SERVICE_URL ? social : null });
+
+/** Geöffneter Link heldixclient://setup/<code>, bis die Oberfläche ihn abholt (setups:take) */
+let pendingSetup: string | null = findSetupLink(process.argv);
+/** gerade wird ein Setup als Instanz angelegt (immer nur eines) */
+let installingSetup = false;
+
+function receiveSetup(code: string | null): void {
+  if (!code) return;
+  pendingSetup = code;
+  launcherLog('Setup-Link geöffnet');
+  if (app.isReady()) sendWhenReady('setups:open', null);
+}
+
+/** Warum eine Instanz mit dieser Minecraft-Version und diesem Loader hier nicht geht (null = geht) */
+async function setupTargetProblem(minecraft: string, loader: SetupLoader): Promise<string | null> {
+  if (loader === 'heldix') {
+    const mods = await findClientMods(clientModsDir(), CLIENT_MOD_PREFIX);
+    return mods.some((m) => m.minecraft === minecraft) ? null : `Für Minecraft ${minecraft} hat dieser Launcher noch keine HeldixClient-Mod. Aktualisiere den Launcher und versuch es dann noch einmal.`;
+  }
+  if (loader === 'fabric') {
+    const fabric = await getFabricGameVersions(paths);
+    return fabric.size === 0 || fabric.has(minecraft) ? null : `Fabric unterstützt Minecraft ${minecraft} nicht.`;
+  }
+  try {
+    const { manifest } = await getVersionManifest(paths);
+    return manifest.versions.some((v) => v.id === minecraft) ? null : `Minecraft ${minecraft} gibt es nicht.`;
+  } catch {
+    // offline: beim Start zeigt sich, ob die Version geht
+    return null;
+  }
+}
+
+/** Kann das aktive Konto Setups teilen (Dienst, Microsoft-Konto)? Sonst der Grund. */
+async function shareProblem(): Promise<string | null> {
+  if (!HELDIX_SERVICE_URL) return 'Kein Heldix-Dienst eingerichtet.';
+  if (await social.canAuthenticate()) return null;
+  return (await store.getActiveAccount().catch(() => null)) ? SETUP_OFFLINE : 'Bitte zuerst ein Konto hinzufügen.';
+}
+
+async function buildShare(rawId: unknown, options: { graphics: boolean; keys: boolean }) {
+  const instance = await instances.require(String(rawId));
+  const built = await buildSetup(instances.dir(instance.id), { name: instance.name, minecraft: instance.minecraft, loader: instance.loader, heldixClient: usesHeldixClient(instance) }, {
+    ...options,
+    store: () => fetchStore(HELDIX_SERVICE_URL, STORE_PUBLIC_KEY),
+  });
+  return { instance, built };
+}
+
+/** Dialog „Setup teilen“: was mitginge (Grafik und Tasten nur gezählt) */
+async function prepareSetupShare(rawId: unknown): Promise<SharedSetupDraft> {
+  const { instance, built } = await buildShare(rawId, { graphics: true, keys: true });
+  return {
+    instanceId: instance.id,
+    instanceName: instance.name,
+    minecraft: instance.minecraft,
+    loader: instance.loader,
+    heldixClient: usesHeldixClient(instance),
+    items: built.items,
+    notShared: built.notShared,
+    graphics: built.graphics,
+    keys: built.keys,
+    problem: await shareProblem(),
+  };
+}
+
+async function createSetupShare(rawId: unknown, rawOptions: unknown) {
+  const problem = await shareProblem();
+  if (problem) throw new Error(problem);
+  const options = (rawOptions && typeof rawOptions === 'object' ? rawOptions : {}) as Record<string, unknown>;
+  // frisch aus der Instanz gebaut – die Oberfläche schickt nur die Auswahl, nie den Inhalt
+  const { instance, built } = await buildShare(rawId, { graphics: options.graphics === true, keys: options.keys === true });
+  const meta = shareMeta(options, instance.name);
+  const created = await setups.create(built.content, { ...meta, expiresDays: options.expiresDays ?? null });
+  launcherLog(`Setup „${meta.name}“ geteilt (${built.items.length} Inhalte, ${built.notShared.length} nicht geteilt)`);
+  return sharedResult(created, built);
+}
+
+async function setupPreview(rawCode: unknown): Promise<SharedSetupPreview> {
+  const code = setupCode(rawCode);
+  try {
+    const setup = await setups.publicSetup(code, true);
+    return await previewSetup(setup, { serviceUrl: HELDIX_SERVICE_URL, publicKey: STORE_PUBLIC_KEY, checkTarget: setupTargetProblem });
+  } catch (error) {
+    const missing = setupMissing(error);
+    return emptySetupPreview(code, missing ?? 'error', missing ? null : error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function installSharedSetup(rawCode: unknown, rawOptions: unknown) {
+  const code = setupCode(rawCode);
+  if (installingSetup) throw new Error('Es wird schon ein Setup angelegt – bitte kurz warten.');
+  const options = (rawOptions && typeof rawOptions === 'object' ? rawOptions : {}) as Record<string, unknown>;
+  installingSetup = true;
+  try {
+    const setup = await setups.publicSetup(code);
+    const result = await installSetup(setup, options, {
+      instances,
+      serviceUrl: HELDIX_SERVICE_URL,
+      publicKey: STORE_PUBLIC_KEY,
+      checkTarget: setupTargetProblem,
+      onProgress: sendProgress,
+      markInstalled: (c) => setups.markInstalled(c),
+      log: (line) => launcherLog(line),
+    });
+    await store.saveSettings({ selectedInstanceId: result.instanceId });
+    refreshDockMenu();
+    storeChanged();
+    return result;
+  } finally {
+    installingSetup = false;
+  }
+}
+
+// ---------- Öffentliches Profil (siehe core/publicprofile.ts) ----------
+
+const publicProfiles = new PublicProfileClient(HELDIX_SERVICE_URL ? social : null);
+
+/** Stand für Skins & Cosmetics; change = öffentlich schalten bzw. verbergen (Fehler kommen dann als Ausnahme) */
+async function publicProfileState(change?: boolean): Promise<PublicProfileState> {
+  const account = await store.getActiveAccount().catch(() => null);
+  const base = { error: null, enabled: false, url: account ? publicProfileUrl(WEBSITE_URL, account.name) : null, name: account?.name ?? null };
+  if (!HELDIX_SERVICE_URL) return { ...base, status: 'unsupported' };
+  if (!account) return { ...base, status: 'no-account' };
+  if (!(await social.canAuthenticate())) {
+    if (change !== undefined) throw new Error(PUBLIC_PROFILE_OFFLINE);
+    return { ...base, status: 'offline-account' };
+  }
+  try {
+    const settings = change === undefined ? await publicProfiles.get() : await publicProfiles.setEnabled(change);
+    if (!settings) return { ...base, status: 'unsupported' };
+    if (change !== undefined) launcherLog(settings.enabled ? 'Öffentliches Profil eingeschaltet' : 'Öffentliches Profil ausgeschaltet');
+    return { ...base, status: 'ok', enabled: settings.enabled };
+  } catch (error) {
+    if (change !== undefined) throw error;
+    return { ...base, status: 'error', error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function openPublicProfile(): Promise<void> {
+  const account = await store.getActiveAccount();
+  if (!account) throw new Error('Bitte zuerst ein Konto hinzufügen.');
+  const url = publicProfileUrl(WEBSITE_URL, account.name);
+  if (!url) throw new Error('Die Profilseite lässt sich für dieses Konto nicht öffnen.');
+  await shell.openExternal(url);
+}
+
 /**
- * Webseite angemeldet öffnen (Einmal-Link), auf Wunsch mit einem Bereich der Konto-Seite. „welten“ (Meine Welten) kennt
+ * Webseite angemeldet öffnen (Einmal-Link), auf Wunsch mit einem Bereich der Konto-Seite. „welten“, „oeffentlich“, „setups“ kennt
  * der Dienst beim Einmal-Link nicht; die Konto-Seite liest das Ziel aber aus dem Fragment – deshalb hängt der Launcher es
  * selbst an (#code=…&ziel=welten).
  */
 async function openWebAccount(rawTarget?: unknown): Promise<void> {
   const targets = ['profil', 'freunde', 'nachrichten', 'privatsphaere', 'daten', 'support', 'team'];
-  const fragmentTargets = ['welten'];
+  const fragmentTargets = ['welten', 'oeffentlich', 'setups'];
   const target = typeof rawTarget === 'string' && targets.includes(rawTarget) ? rawTarget : undefined;
   const fragment = typeof rawTarget === 'string' && fragmentTargets.includes(rawTarget) ? rawTarget : undefined;
   const account = await store.getActiveAccount();
@@ -2017,6 +2180,11 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
       onInfo: (message) => launcherLog(message),
     });
 
+    // Einstellungen aus einem geteilten Setup (erster Start der Instanz): jetzt ist die Client-JAR mit der Datenversion da
+    const setupNote = await applyPendingOptions(prepared.gameDir, prepared.clientJar)
+      .catch((error: unknown) => `Einstellungen aus dem Setup nicht übernommen: ${error instanceof Error ? error.message : String(error)}`);
+    if (setupNote) launcherLog(setupNote);
+
     const userJvmArgs = settings.jvmArgs.split(/\s+/).filter(Boolean);
     const tuning = settings.jvmTuning ? tunedJvmArguments(prepared.javaMajor, userJvmArgs) : [];
     // Vulkan-Vorgabe nur für Heldix-Instanzen; Fabric und Vanilla nutzen die Einstellung im Spiel (Fabric-Mods brauchen oft OpenGL)
@@ -2291,8 +2459,36 @@ function registerIpc(): void {
   });
   ipcMain.handle('worlds:public', (_e, code: unknown) => worldJoinView(code));
   ipcMain.handle('worlds:join', (_e, code: unknown) => joinWorld(code));
-  // Startseite „Beliebte Welten“ (Entdecken, Dienst 1.13.0)
+  // Startseite „Beliebte Welten“ (Entdecken, Dienst 1.13.0) und Partner-Server (Dienst 1.14.0)
   ipcMain.handle('discover:popular', (_e, refresh?: unknown) => discover.popular(refresh === true));
+  ipcMain.handle('partners:get', (_e, refresh?: unknown) => partners.list(refresh === true));
+
+  // Setup teilen: Instanz teilen, Links heldixclient://setup/<code>, Vorschau, „Als neue Instanz anlegen“
+  ipcMain.handle('setups:prepare', (_e, id: unknown) => prepareSetupShare(id));
+  ipcMain.handle('setups:create', (_e, id: unknown, options: unknown) => createSetupShare(id, options));
+  ipcMain.handle('setups:mine', () => setups.mine());
+  ipcMain.handle('setups:revoke', (_e, code: unknown) => setups.revoke(code));
+  ipcMain.handle('setups:take', () => {
+    // während des Einrichtungs-Assistenten bleibt der Link liegen (danach holt die Oberfläche ihn ab)
+    if (setupGate.active) return null;
+    const code = pendingSetup;
+    pendingSetup = null;
+    return code;
+  });
+  ipcMain.handle('setups:paste', (_e, text: unknown) => {
+    const code = parsePastedSetup(text, { bareCode: true });
+    if (!code) throw new Error('Das ist kein Setup-Link. Er sieht so aus: heldixclient.com/setup#abc23def45 – oder füge nur den Code mit 10 Zeichen ein.');
+    pendingSetup = code;
+    send('setups:open', null);
+    return code;
+  });
+  ipcMain.handle('setups:preview', (_e, code: unknown) => setupPreview(code));
+  ipcMain.handle('setups:install', (_e, code: unknown, options: unknown) => installSharedSetup(code, options));
+
+  // Öffentliches Profil (Skins & Cosmetics)
+  ipcMain.handle('publicProfile:get', () => publicProfileState());
+  ipcMain.handle('publicProfile:set', (_e, enabled: unknown) => publicProfileState(enabled === true));
+  ipcMain.handle('publicProfile:open', () => openPublicProfile());
 
   // Benachrichtigungen (Glocke)
   ipcMain.handle('notifications:list', () => notificationList());
@@ -2496,6 +2692,13 @@ function registerIpc(): void {
   // Freunde → Einladen: „Link von einem Freund? Hier einfügen“ (Web-Link, heldixclient://-Link oder Code) öffnet
   // denselben Dialog wie ein geöffneter Link (invite:open → invites:take)
   ipcMain.handle('invites:paste', (_e, text: unknown) => {
+    // Setup-Links (Web-Link oder heldixclient://setup/…) öffnen die Vorschau; ein bloßer Code bleibt eine Einladung
+    const setup = parsePastedSetup(text);
+    if (setup) {
+      pendingSetup = setup;
+      send('setups:open', null);
+      return setup;
+    }
     const code = parsePastedInvite(text);
     const world = code ? null : parsePastedWorld(text);
     if (world) {
@@ -2503,7 +2706,7 @@ function registerIpc(): void {
       send('world:open', null);
       return world;
     }
-    if (!code) throw new Error('Das ist kein Einladungs- oder Welt-Link. Er sieht so aus: heldixclient.com/einladung#abc23def45 bzw. heldixclient.com/welt#k7m2xq');
+    if (!code) throw new Error('Das ist kein Einladungs-, Welt- oder Setup-Link. Er sieht so aus: heldixclient.com/einladung#abc23def45, heldixclient.com/welt#k7m2xq oder heldixclient.com/setup#abc23def45');
     if (code !== pendingInvite) dropDownloadInvite();
     pendingInvite = code;
     send('invite:open', null);
@@ -2917,12 +3120,14 @@ app.on('second-instance', (_event, argv) => {
   focusWindow();
   receiveInvite(findInviteLink(argv));
   receiveWorld(findWorldLink(argv));
+  receiveSetup(findSetupLink(argv));
 });
 // macOS: Links kommen als Ereignis (auch vor dem Start; dann holt die Oberfläche den Code beim Laden ab)
 app.on('open-url', (event, url) => {
   event.preventDefault();
   receiveInvite(parseInviteLink(url));
   receiveWorld(parseWorldLink(url));
+  receiveSetup(parseSetupLink(url));
 });
 
 if (singleInstance) {
@@ -2947,6 +3152,7 @@ if (singleInstance) {
       if (pendingInvite) launcherLog('Einladungslink geöffnet');
     }
     if (pendingWorld) launcherLog('Welt-Link geöffnet');
+    if (pendingSetup) launcherLog('Setup-Link geöffnet');
     registerIpc();
     const settings = await store.getSettings();
     autoUpdate = settings.autoUpdate;
@@ -3004,8 +3210,11 @@ if (singleInstance) {
     // dauerhafte Welten: Stand alle 5 Minuten (dazwischen Echtzeit); Entdecken für „Beliebte Welten“, solange ein Fenster sichtbar ist
     hosting.start();
     setTimeout(() => void discover.popular().catch(() => undefined), 4000).unref();
+    // Partner-Server: eine Stunde im Speicher (partners.list fragt erst dann wieder)
+    setTimeout(() => void partners.list().catch(() => undefined), 5000).unref();
     setInterval(() => {
       if (anyWindowVisible()) void discover.popular(true).catch(() => undefined);
+      if (anyWindowVisible()) void partners.list().catch(() => undefined);
     }, 5 * 60_000).unref();
     // ohne Startfenster gleich prüfen (nur Hinweis); danach alle 30 Minuten, nach einer gescheiterten Prüfung schon in einer Minute
     if (plan === 'background') void updateNoticeAtStart().catch(() => undefined);

@@ -101,6 +101,9 @@
 .text-online {
   color: var(--c-green-300);
 }
+.text-launcher {
+  color: var(--c-cyan-300);
+}
 .bereich .list-gap {
   display: grid;
   gap: var(--sp-3);
@@ -684,6 +687,11 @@ dialog .avatar .presence {
 dialog .avatar .presence.on {
   background: var(--online);
 }
+/* Nur der Launcher ist offen (Heldix-Dienst ab 1.14.0): Heldix-Türkis statt Grün */
+.bereich .avatar .presence.launcher,
+dialog .avatar .presence.launcher {
+  background: var(--c-cyan-400);
+}
 .avatar-stack {
   display: flex;
 }
@@ -754,6 +762,9 @@ dialog .avatar .presence.on {
 }
 .bereich .row-sub.online {
   color: var(--c-green-300);
+}
+.bereich .row-sub.launcher {
+  color: var(--c-cyan-300);
 }
 .bereich .row-meta {
   color: var(--text-3);

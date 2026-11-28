@@ -109,10 +109,23 @@ export class Team {
       snapshot = [];
     }
     const names: Record<string, string> = { [report.reporter]: report.reporterName, [report.reported]: report.reportedName };
+    // ab 1.14.0: Stand des gemeldeten Setups bzw. Profils beim Melden (gemeldet ist dann der Ersteller bzw. Inhaber)
+    let subject: Record<string, unknown> = {};
+    if ((report.kind === 'setup' || report.kind === 'profile') && report.context !== null) {
+      try {
+        const parsed = JSON.parse(report.context) as Record<string, unknown>;
+        const value = parsed[report.kind];
+        if (typeof value === 'object' && value !== null && !Array.isArray(value)) subject = { [report.kind]: value };
+      } catch {
+        subject = {};
+      }
+    }
     return {
       id: report.id,
-      // ab 1.13.0: „voice“ = Voice-Meldung (Kontext, Aufnahme und Ergebnis unter /v1/team/voice/reports)
+      // ab 1.13.0: „voice“ = Voice-Meldung (Kontext, Aufnahme und Ergebnis unter /v1/team/voice/reports);
+      // ab 1.14.0: „setup“ (Feld setup: { code, name, description }) und „profile“ (Feld profile: { name, bio })
       kind: report.kind,
+      ...subject,
       at: report.at,
       status: report.status,
       reason: report.reason,

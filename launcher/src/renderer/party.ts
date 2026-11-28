@@ -10,7 +10,7 @@ export interface PartyContext {
   friends(): Friend[];
   /** eigener Spieler beim Dienst (null = nicht verbunden) */
   me(): { uuid: string; dnd: boolean } | null;
-  head(uuid: string, name: string, size?: 'sm' | 'md', status?: 'online' | 'offline'): HTMLElement;
+  head(uuid: string, name: string, size?: 'sm' | 'md', status?: 'online' | 'launcher' | 'offline' | 'dnd'): HTMLElement;
   openChat(uuid: string): void;
   openProfile(uuid: string): void;
   /** Stand hat sich geändert (Zähler an der Seitenleiste) */
@@ -67,7 +67,8 @@ export function locationText(location: PartyLocation | null): string {
 function memberText(member: PartyMember): string {
   if (member.away) return member.awayUntil ? `Ohne Verbindung – bleibt bis ${clock(member.awayUntil)}` : 'Ohne Verbindung';
   if (member.location) return locationText(member.location);
-  if (!member.online) return 'Im Launcher';
+  // Dienst 1.14.0 sagt ausdrücklich, ob der Launcher verbunden ist; sonst ist nur noch eine andere Verbindung da
+  if (!member.online) return member.launcher ? 'Im Launcher – bekommt Nachrichten sofort' : 'Nicht im Spiel';
   switch (member.state) {
     case 'singleplayer': return 'Einzelspieler';
     case 'multiplayer': return 'Mehrspieler';
@@ -275,11 +276,14 @@ function menuItem(icon: string, label: string, action: () => void, danger = fals
   }, uiIcon(icon, 'btn-icon'), h('span', { text: label }));
 }
 
-/** Liste der Freunde zum Einladen (online zuerst) */
+/** im Spiel vor „Im Launcher“ vor offline */
+const rank = (f: { online: boolean; launcher: boolean }) => (f.online ? 2 : f.launcher ? 1 : 0);
+
+/** Liste der Freunde zum Einladen (im Spiel zuerst, dann im Launcher, dann offline – wie bisher alle einladbar) */
 function openInviteMenu(anchor: HTMLElement): void {
   if (!ctx) return;
   const friends = ctx.friends().filter((f) => canInviteToParty(f.uuid))
-    .sort((a, b) => Number(b.online) - Number(a.online) || (a.nickname || a.name).localeCompare(b.nickname || b.name, 'de'));
+    .sort((a, b) => rank(b) - rank(a) || (a.nickname || a.name).localeCompare(b.nickname || b.name, 'de'));
   const items: HTMLElement[] = friends.slice(0, 40).map((friend) => h('button', {
     type: 'button',
     role: 'menuitem',
@@ -289,10 +293,12 @@ function openInviteMenu(anchor: HTMLElement): void {
       e.stopPropagation();
       void inviteToParty(friend.uuid, friend.nickname || friend.name);
     },
-  }, ctx!.head(friend.uuid, friend.name, 'sm', friend.online ? 'online' : 'offline'),
+  }, ctx!.head(friend.uuid, friend.name, 'sm', friend.online ? 'online' : friend.launcher ? 'launcher' : 'offline'),
   h('span', { class: 'friends-row-text' },
     h('span', { class: 'friends-row-name', text: friend.nickname || friend.name }),
-    h('span', { class: 'friends-row-meta', text: friend.online ? 'Online' : 'Offline – sieht die Einladung beim nächsten Start' }))));
+    h('span', { class: 'friends-row-meta', text: friend.online ? 'Im Spiel'
+      : friend.launcher ? 'Im Launcher – sieht die Einladung sofort, mitspielen nach dem Start'
+        : 'Offline – sieht die Einladung beim nächsten Start' }))));
   if (!items.length) items.push(h('div', { class: 'friends-party-menu-empty', text: ctx.friends().length ? 'Alle Freunde sind schon dabei oder eingeladen.' : 'Füge zuerst Freunde hinzu.' }));
   openMenu(anchor, [h('div', { class: 'friends-party-menu-title', text: 'In die Party einladen' }), ...items], 'wide');
 }
@@ -422,7 +428,7 @@ async function saveAutoFollow(input: HTMLInputElement): Promise<void> {
 
 function memberChip(member: PartyMember): HTMLElement {
   const me = myUuid();
-  const status = member.online ? 'online' : 'offline';
+  const status = member.online ? 'online' : member.launcher ? 'launcher' : 'offline';
   const more = h('button', { class: 'icon-button small friends-party-more', type: 'button', title: 'Mehr', 'aria-label': `Mehr zu ${member.name}`, onclick: (e: Event) => {
     e.stopPropagation();
     memberMenu(e.currentTarget as HTMLElement, member);

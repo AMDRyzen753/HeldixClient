@@ -10,6 +10,8 @@ import { checkText, type State } from './validate';
 /** Was Freunde über den Online-Status eines Spielers sehen. */
 export interface Presence {
   online: boolean;
+  /** Ab 1.14.0: nicht im Spiel, aber im Launcher (bekommt Nachrichten sofort); nur mit sichtbarem Online-Status */
+  launcher: boolean;
   state: State | null;
   server: string | null;
   /** Statustext (immer, auch offline) oder null */
@@ -29,6 +31,8 @@ export interface Friend {
   uuid: string;
   name: string;
   online: boolean;
+  /** Ab 1.14.0: „Im Launcher“ (kein Spiel, mindestens ein Launcher verbunden) */
+  launcher: boolean;
   state: State | null;
   server: string | null;
   since: number;
@@ -80,6 +84,7 @@ export function friendView(user: UserRow, relation: FriendRelation | number, pre
     uuid: user.uuid,
     name: user.name,
     online: presence.online,
+    launcher: presence.launcher,
     state: presence.state,
     server: presence.server,
     since: rel.since,

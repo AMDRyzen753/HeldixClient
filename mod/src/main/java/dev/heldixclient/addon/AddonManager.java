@@ -68,6 +68,9 @@ public final class AddonManager {
 	static final List<Listener<Runnable>> RESPAWN = new CopyOnWriteArrayList<>();
 	static final List<Listener<Consumer<String>>> DIMENSION = new CopyOnWriteArrayList<>();
 	static final List<Listener<HeldixEvents.HealthListener>> HEALTH = new CopyOnWriteArrayList<>();
+	// API 11: Server-Info/-Regeln und Sprache
+	static final List<Listener<Consumer<dev.heldixclient.api.ServerInfo>>> SERVER_INFO = new CopyOnWriteArrayList<>();
+	static final List<Listener<Consumer<String>>> LANGUAGE = new CopyOnWriteArrayList<>();
 
 	/** Zustand aus dem letzten Tick, um Änderungen zu erkennen (nur Haupt-Thread) */
 	private static Screen lastScreen;
@@ -396,6 +399,15 @@ public final class AddonManager {
 			}
 		});
 		ChatEvents.RECEIVE.register((message, fromPlayer) -> chat(message.getString()));
+		// API 11: Server-Info und Regeln (Plugin „HeldixClient Server“), Sprache
+		dev.heldixclient.serverlink.ServerLink.addListener(() -> {
+			dev.heldixclient.api.ServerInfo info = dev.heldixclient.serverlink.ServerLink.info();
+			dispatch(SERVER_INFO, "onServerInfoChange", listener -> listener.accept(info));
+		});
+		dev.heldixclient.serverlink.ServerLink.addLanguageListener(() -> {
+			String language = dev.heldixclient.ui.Language.current();
+			dispatch(LANGUAGE, "onLanguageChange", listener -> listener.accept(language));
+		});
 		ClientEvents.STOPPING.register(minecraft -> {
 			for (LoadedAddon addon : ADDONS) {
 				if (!addon.isActive() || addon.instance == null) continue;

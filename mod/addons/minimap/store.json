@@ -3,8 +3,9 @@
 	"icon": "map",
 	"kategorie": "hud",
 	"plattformen": [],
-	"beschreibung": "Eine Karte deiner Umgebung im HUD – auf jedem Server, ganz ohne Plugin.\n\n- Rund oder eckig, in drei Größen; auf Wunsch dreht sich die Karte mit dir (sonst ist Norden oben)\n- Echte Blockfarben aus den Texturen (auch mit Ressourcenpaketen), Wasser nach Tiefe, Höhen schattiert – oder klassisch in den Farben der Minecraft-Karten\n- Deine Wegpunkte und dein Todespunkt auf der Karte; liegen sie außerhalb, zeigt ein Punkt am Rand die Richtung\n- Himmelsrichtungen am Rand und Koordinaten darunter\n- Zoomen mit Plus und Minus auf dem Ziffernblock, Sichtweite von 16 bis 512 Blöcken\n- Höhlenansicht unter Tage und im Nether – nur in Einzelspieler-Welten\n\nFair Play: Auf Servern zeigt die Minimap nur, was von oben zu sehen ist – keine Höhlen, keine Spieler, keine Mobs.",
+	"beschreibung": "Eine Karte deiner Umgebung im HUD – auf jedem Server, ganz ohne Plugin.\n\n- Rund oder eckig, in drei Größen; auf Wunsch dreht sich die Karte mit dir (sonst ist Norden oben)\n- Echte Blockfarben aus den Texturen (auch mit Ressourcenpaketen), Wasser nach Tiefe, Höhen schattiert – oder klassisch in den Farben der Minecraft-Karten\n- Deine Wegpunkte und dein Todespunkt auf der Karte; liegen sie außerhalb, zeigt ein Punkt am Rand die Richtung\n- Himmelsrichtungen am Rand und Koordinaten darunter\n- Zoomen mit Plus und Minus auf dem Ziffernblock, Sichtweite von 16 bis 512 Blöcken\n- Höhlenansicht unter Tage und im Nether – nur in Einzelspieler-Welten\n\nFair Play: Auf Servern zeigt die Minimap nur, was von oben zu sehen ist – keine Höhlen, keine Spieler, keine Mobs.\n\nServer mit dem Plugin „HeldixClient Server“ können die Minimap, die Wegpunkte auf der Karte oder die Koordinaten darunter abschalten – dann zeigt das Heldix-Menü „Auf diesem Server deaktiviert“.",
 	"hinweise": [
-		"Neu: Minimap im HUD mit echten Blockfarben, Wegpunkten und Himmelsrichtungen"
+		"Server mit dem Plugin „HeldixClient Server“ können die Minimap, die Wegpunkte auf der Karte und die Koordinaten darunter abschalten – dann steht im Heldix-Menü „Auf diesem Server deaktiviert“",
+		"Braucht HeldixClient 0.14.1 (Heldix-API 11)"
 	]
 }

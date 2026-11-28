@@ -43,11 +43,14 @@ public class FriendsStrip extends AbstractButton {
 	protected void extractContents(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
 		List<Social.Friend> friends = Social.online() ? Social.friends() : List.of();
 		List<Social.Friend> online = friends.stream().filter(Social.Friend::online).toList();
+		// ab Dienst 1.14.0: Freunde, die nur den Launcher offen haben (bekommen Nachrichten sofort)
+		long launcher = friends.stream().filter(Social.Friend::inLauncher).count();
 		hover += ((isHoveredOrFocused() ? 1f : 0f) - hover) * 0.35f;
 		int x = getX();
 		int y = getY();
 		int h = getHeight();
 		String text = friends.isEmpty() ? "Noch keine Freunde  ·  Freunde einladen"
+				: online.isEmpty() && launcher > 0 ? (launcher == 1 ? "Keiner im Spiel  ·  1 Freund im Launcher" : "Keiner im Spiel  ·  " + launcher + " Freunde im Launcher")
 				: online.isEmpty() ? "Keine Freunde online  ·  Freunde einladen"
 				: online.size() == 1 ? online.getFirst().shownName() + " ist online" : online.size() + " Freunde online";
 		// Party (ab Heldix-Dienst 1.12.0) bzw. eine Einladung vorne

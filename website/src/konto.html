@@ -296,6 +296,21 @@
       </div>
     </div>
 
+    <!-- Meine Setups (konto-setups.js, ab Dienst 1.14.0) -->
+    <div class="panel" id="panel-setups" role="tabpanel" aria-labelledby="tab-setups" tabindex="0" hidden>
+      <section class="card" aria-labelledby="setups-titel">
+        <div class="card__head">
+          <span class="icon-tile">{{icon:cube}}</span>
+          <div><h2 class="card__title" id="setups-titel" tabindex="-1">Meine Setups</h2><p class="tiny text-3">Instanzen, die du als Link geteilt hast – mit Aufrufen und Installationen.</p></div>
+          <span class="card__head-end setups-head-end"><span class="chip" id="setups-zahl"></span><button class="btn btn--ghost btn--sm" type="button" id="setups-neu">{{icon:refresh}}Aktualisieren</button></span>
+        </div>
+        <p class="small text-2">Ein Setup teilst du im Launcher: Instanz öffnen und auf „Teilen“ klicken. Geteilt werden Mods, Ressourcenpakete, Shader und Addons mit ihren Versionen, auf Wunsch auch Grafik-Einstellungen und Tasten – keine Dateien. Wer den Link öffnet, legt damit in HeldixClient eine neue Instanz an.</p>
+        <p class="notice small" id="setups-aus" hidden>Setups teilen gibt es mit dem Heldix-Dienst ab Version 1.14.0. Dieser Dienst kennt sie noch nicht.</p>
+        <div id="setups-liste" class="list-gap"></div>
+        <p class="tiny text-3">Höchstens 50 aktive Setups und 20 neue am Tag. Widerrufen macht den Link sofort ungültig. <a href="/hilfe/setup-teilen">So funktioniert Setup teilen</a></p>
+      </section>
+    </div>
+
     <!-- Meine Addons -->
     <div class="panel" id="panel-addons" role="tabpanel" aria-labelledby="tab-addons" tabindex="0" hidden>
       <div id="addons-uebersicht">
@@ -557,6 +572,41 @@
       </div>
     </div>
 
+    <!-- Öffentliches Profil (konto-oeffentlich.js, ab Dienst 1.14.0) -->
+    <div class="panel" id="panel-oeffentlich" role="tabpanel" aria-labelledby="tab-oeffentlich" tabindex="0" hidden>
+      <section class="card public-profile" aria-labelledby="oeffentlich-titel">
+        <div class="card__head">
+          <span class="icon-tile icon-tile--online">{{icon:user}}</span>
+          <div><h2 class="card__title" id="oeffentlich-titel">Öffentliches Profil</h2><p class="tiny text-3">Deine eigene Seite auf heldixclient.com – zum Teilen mit Freunden und auf Servern.</p></div>
+          <span class="card__head-end setups-head-end"><span class="saved" id="oeffentlich-gespeichert" aria-live="polite"></span><span class="chip" id="oeffentlich-stand"></span></span>
+        </div>
+        <p class="notice small" id="oeffentlich-aus" hidden>Öffentliche Profile gibt es mit dem Heldix-Dienst ab Version 1.14.0. Dieser Dienst kennt sie noch nicht.</p>
+        <div class="public-profile__body" id="oeffentlich-inhalt" hidden>
+          <label class="switch-row public-profile__master"><span class="switch-text"><strong>Öffentliches Profil</strong><small id="oeffentlich-an-text">Jeder mit dem Link sieht deine Profilseite mit Name, Kopf und 3D-Figur. Suchmaschinen können sie finden. Aus: Die Seite gibt es nicht.</small></span><input type="checkbox" class="switch" role="switch" id="oeffentlich-an" aria-describedby="oeffentlich-an-text"></label>
+          <p class="notice small" id="oeffentlich-ausgeblendet" hidden>Das Team hat dein Profil ausgeblendet, zum Beispiel nach einer Meldung. Solange ist die Seite für andere nicht zu sehen. Fragen dazu stellst du über eine <a href="#reiter=support" data-goto="support">Support-Anfrage</a>.</p>
+          <div class="public-profile__link" id="oeffentlich-vorschau" hidden>
+            <span class="small text-2">Deine Seite:</span>
+            <a class="public-profile__url" id="oeffentlich-link" href="/spieler/">heldixclient.com/spieler/</a>
+            <span class="btn-group">
+              <a class="btn btn--secondary btn--sm" id="oeffentlich-ansehen" href="/spieler/" data-profil-link>{{icon:eye}}Profil ansehen</a>
+              <button class="btn btn--ghost btn--sm" type="button" id="oeffentlich-kopieren">{{icon:link}}Link kopieren</button>
+            </span>
+          </div>
+          <p class="small text-3" id="oeffentlich-privat">Dein Profil ist privat. Schaltest du es ein, legst du unten fest, was darauf steht.</p>
+          <form class="public-profile__bio" id="oeffentlich-bio-form" novalidate>
+            <label class="field">
+              <span class="field-row"><span class="field__label">Bio</span><span class="counter" id="oeffentlich-bio-zaehler"></span></span>
+              <textarea class="input textarea small-textarea" id="oeffentlich-bio" name="bio" maxlength="160" rows="2" placeholder="Ein Satz über dich, z. B. „Baue gern Burgen und spiele Parkour.“"></textarea>
+            </label>
+            <div class="btn-group"><button class="btn btn--primary btn--sm" type="submit" id="oeffentlich-bio-speichern">{{icon:check}}Bio speichern</button></div>
+            <p class="form-error" id="oeffentlich-bio-fehler" role="alert" hidden></p>
+          </form>
+          <div class="switches" id="oeffentlich-schalter"></div>
+          <p class="tiny text-3">Immer zu sehen sind dein Spielername, dein Kopf und dein Skin. Nie zu sehen sind deine Freunde, dein Online-Status, deine Nachrichten und wo du gerade spielst. Mehr in der <a href="/datenschutz#oeffentliches-profil">Datenschutzerklärung</a>.</p>
+        </div>
+      </section>
+    </div>
+
     <!-- Benachrichtigungen (konto-einstellungen.js) -->
     <div class="panel" id="panel-benachrichtigungen" role="tabpanel" aria-labelledby="tab-benachrichtigungen" tabindex="0" hidden>
       <section class="card" aria-labelledby="hinweise-titel">
@@ -637,6 +687,8 @@
             <li>{{icon:world}}<span>Deine geteilten Welten mit Einstellungen und Mitgliedern</span></li>
             <li>{{icon:server}}<span>Dauerhafte Welten: Weltdaten, Plugins, Konfiguration und Sicherungen bis zum Löschen, das Server-Log (Spielernamen, Chat, Befehle) 7 Tage; Freischaltungen und deinen Eintrag auf der Heldix+-Warteliste</span></li>
             <li>{{icon:compass}}<span>Entdecken: deine Einträge im Weltenverzeichnis, deine „Gefällt mir“ und deine Meldungen</span></li>
+            <li>{{icon:cube}}<span>Deine geteilten Setups: Name, Beschreibung, die geteilten Inhalte und Einstellungen, Ablauf sowie Aufrufe und Installationen</span></li>
+            <li>{{icon:user}}<span>Dein öffentliches Profil (ob es an ist, deine Bio, welche Teile zu sehen sind) und deine Anträge fürs Partner-Programm mit Kontaktangabe</span></li>
             <li>{{icon:ban}}<span>Spieler, die du blockiert hast, und deine Meldungen (90 Tage)</span></li>
             <li>{{icon:info}}<span>Support-Anfragen mit deinen Nachrichten und den Antworten des Teams</span></li>
             <li>{{icon:addons}}<span>Addon-Einreichungen samt JAR und Screenshots, deine Bewertungen und Addon-Meldungen</span></li>

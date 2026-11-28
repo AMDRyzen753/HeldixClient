@@ -14,7 +14,7 @@
 
   // Aktuelle Seite in Navigation und Menü markieren (Hilfe-Artikel gehören zu „Hilfe“, Capes zu „Cosmetics“ …)
   const here = location.pathname.replace(/\.html$/, '').replace(/\/$/, '') || '/';
-  const SECTION = { '/capes': '/cosmetics', '/welt': '/entdecken', '/einladung': '/zusammen', '/warum': '/module', '/entwickler': '/addons' };
+  const SECTION = { '/capes': '/cosmetics', '/welt': '/entdecken', '/partner': '/entdecken', '/einladung': '/zusammen', '/setup': '/zusammen', '/warum': '/module', '/entwickler': '/addons' };
   const current = SECTION[here] ?? here;
   for (const link of document.querySelectorAll('.site-nav a[href^="/"], .menu__links a[href^="/"], .site-header__actions a[href^="/"]')) {
     const target = link.getAttribute('href').replace(/\/$/, '') || '/';

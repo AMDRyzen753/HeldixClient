@@ -1,6 +1,6 @@
 // HeldixClient – Webseite: Team-Rollen, Rechte und Abzeichen (Heldix-Dienst 1.12.0, rollen-spec.md; 1.13.0: Rechte
 // hosting:manage, hosting:grant und discover:moderate für dauerhafte Welten, Heldix+-Warteliste und Entdecken;
-// voice:moderate und voice:admin für die Voice-Moderation).
+// voice:moderate und voice:admin für die Voice-Moderation; 1.14.0: partners:manage für das Partner-Programm).
 //
 // Der Dienst entscheidet über jede Route selbst (403 code forbidden). Die Webseite blendet nur aus, was die eigene
 // Rolle nicht darf: WebMe.permissions bzw. GET /v1/team/permissions. Fehlen die Angaben (älterer Dienst bis 1.11),
@@ -37,12 +37,14 @@ export const PERMISSIONS = [
   { id: 'discover:moderate', label: 'Entdecken moderieren', text: 'Entdecken moderieren (Meldungen, ausblenden, Besitzer sperren)' },
   { id: 'voice:moderate', label: 'Voice moderieren', text: 'Voice-Meldungen prüfen (auch Aufnahmen anhören), Voice-Sperren, Regeln und Liste „Voice aus“ ansehen' },
   { id: 'voice:admin', label: 'Voice verwalten', text: 'Voice-Regeln veröffentlichen, Aufnahmen beim Melden schalten, Liste „Voice aus“ ändern' },
+  // Ab Dienst 1.14.0
+  { id: 'partners:manage', label: 'Partner-Server', text: 'Partner-Server verwalten (Anträge, Schlüssel, Cosmetics)' },
 ];
 
 /** Rechte je Rolle (Tabelle aus rollen-spec.md bzw. dienst-1.12 §7, ab 1.13.0 mit Hosting und Entdecken) – nur als Rückfall, der Dienst liefert sie selbst. */
 export const ROLE_PERMISSIONS = {
-  admin: ['team.manage', 'players.delete', 'updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'moderation', 'players', 'support', 'audit', 'team.view', 'hosting:manage', 'hosting:grant', 'discover:moderate', 'voice:moderate', 'voice:admin'],
-  'developer-team': ['updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'players', 'audit', 'team.view', 'hosting:manage'],
+  admin: ['team.manage', 'players.delete', 'updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'moderation', 'players', 'support', 'audit', 'team.view', 'hosting:manage', 'hosting:grant', 'discover:moderate', 'voice:moderate', 'voice:admin', 'partners:manage'],
+  'developer-team': ['updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'players', 'audit', 'team.view', 'hosting:manage', 'partners:manage'],
   moderator: ['addon-reports', 'news', 'moderation', 'players', 'support', 'audit', 'team.view', 'discover:moderate', 'voice:moderate'],
   supporter: ['players', 'support', 'team.view', 'discover:moderate', 'voice:moderate'],
   designer: ['cosmetics', 'team.view'],

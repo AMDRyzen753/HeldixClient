@@ -82,13 +82,15 @@ test('ohne eingerichtete Webseite kein Cookie-WebSocket (403); Launcher mit ?cli
     const benWs = (await connect(service.wsUrl, ben.token)).client;
     const launcher = (await connect(`${service.wsUrl}?client=launcher`, anna.token)).client;
     await benWs.sync();
-    assert.equal(benWs.drain().some((m) => m.type === 'friend'), false, 'Launcher macht nicht online');
+    // ab 1.14.0: Launcher macht nicht online, aber „Im Launcher“ (eigene Aktualisierung an die Freunde)
+    const inLauncher = benWs.drain().filter((m) => m.type === 'friend');
+    assert.deepEqual(inLauncher.map((m) => [m.friend.online, m.friend.launcher]), [[false, true]], 'Launcher macht nicht online');
     assert.equal((await api(service.url, 'GET', '/v1/status')).body.online, 1);
     // Das Spiel kommt dazu: jetzt online; Launcher bleibt verbunden, wenn das Spiel geht
     const game = (await connect(service.wsUrl, anna.token)).client;
-    assert.equal((await benWs.next('friend')).friend.online, true);
+    assert.deepEqual(((m) => [m.friend.online, m.friend.launcher])(await benWs.next('friend')), [true, false]);
     await game.close();
-    assert.equal((await benWs.next('friend')).friend.online, false);
+    assert.deepEqual(((m) => [m.friend.online, m.friend.launcher])(await benWs.next('friend')), [false, true]);
     await api(service.url, 'POST', `/v1/messages/${anna.uuid}`, { token: ben.token, body: { text: 'Im Launcher?' } });
     assert.equal((await launcher.next('message')).message.text, 'Im Launcher?');
     await launcher.close();

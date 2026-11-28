@@ -13,7 +13,7 @@ import { ADDON_MANIFEST_BODY_LIMIT, Addons, MAX_ADDON_SIZE } from './addons';
 import { Challenges, hashToken, hasJoined, isLoopback, newToken, parseBearer } from './auth';
 import { Blocks } from './blocks';
 import { Cosmetics, ENVELOPE_CACHE_CONTROL, IMMUTABLE_CACHE_CONTROL, LIST_CACHE_CONTROL, type WornChoice } from './cosmetics';
-import { COSMETIC_MAX_ENVELOPE_BYTES } from './cosmetics-format';
+import { COSMETIC_ID_RE, COSMETIC_MAX_ENVELOPE_BYTES } from './cosmetics-format';
 import { ONLINE_NOTIFY, Store, type OnlineNotify, type SettingsPatch, type TeamMemberRow, type UserRow, type WebSessionRow } from './db';
 import { Friends } from './friends';
 import { HeadCache, isHeadSize, renderHead } from './heads';
@@ -54,6 +54,10 @@ import { ServerJars } from './hosting/server-jars';
 import { HostingStore } from './hosting/store';
 import { Uploads } from './hosting/uploads';
 import { Plus } from './plus';
+import { Partners, type PartnerRow } from './partners';
+import { PublicProfiles } from './public-profiles';
+import { SETUP_BODY_LIMIT, Setups } from './setups';
+import { SERVER_GROUP_MAX_PER_PARTNER, SERVER_GROUP_MAX_PER_REQUEST, SERVER_GROUP_RE, SERVER_GROUP_TTL_MS, VoiceServerGroups } from './voice-server-groups';
 import {
   exportWorlds,
   MAX_WORLDS,
@@ -324,6 +328,28 @@ export interface ServiceOptions {
   discoverReportLimit?: number;
   /** Heldix+-Warteliste: Zahl öffentlich erst ab so vielen Einträgen (Standard 50). */
   plusCountMin?: number;
+
+  // ---------- Server-Partner, Setup teilen, öffentliche Profile (ab 1.14.0) ----------
+  /**
+   * Ordner der gebauten Webseite (darin spieler.html für `/spieler/<name>`, HELDIX_DIENST_WEBSITE_DIR); ohne bzw. ohne
+   * Datei: eine kleine eingebaute Seite mit denselben Vorschau-Angaben.
+   */
+  websiteDir?: string | null;
+  /** Partner-Schnittstelle: Anfragen je Schlüssel und Zeitraum (rateWindowMs, Standard 120), Belohnungen je Partner und Stunde (600). */
+  partnerRateLimit?: number;
+  partnerRewardRateLimit?: number;
+  /** Ungültige Partner-Schlüssel je IP und Zeitraum (rateWindowMs, Standard 20). */
+  partnerFailRateLimit?: number;
+  /** Server-Gruppen im Voice: ohne Erneuerung so lange gültig (Standard 10 Minuten), Aufräumen alle (Standard 30 s). */
+  partnerVoiceTtlMs?: number;
+  partnerVoiceSweepMs?: number;
+  /** Öffentliche Partner-Liste, Setups, Spielerprofile und die Seite /spieler/… je IP und Zeitraum (rateWindowMs). */
+  publicPartnerRateLimit?: number;
+  publicSetupRateLimit?: number;
+  publicProfileRateLimit?: number;
+  /** Setups: aktive je Spieler (Standard 50), neue je 24 Stunden (Standard 20). */
+  setupMaxActive?: number;
+  setupDailyLimit?: number;
 }
 
 export interface Service {
@@ -344,13 +370,16 @@ interface Context {
   session?: WebSessionRow;
   /** Team-Mitglied (nur bei Team-Routen) */
   member?: TeamMemberRow;
+  /** Partner (nur bei Routen der Partner-Schnittstelle, ab 1.14.0) */
+  partner?: PartnerRow;
 }
 
 /**
  * Wer eine Route benutzen darf: `public` alle, `auth`/`dev` Anmeldung (Grenze pro IP), `user` Bearer-Token oder
- * Cookie, `bearer` nur Bearer-Token (Launcher, Spiel), `web` nur Cookie (Webseite), `team` Cookie mit Team-Rolle und 2FA.
+ * Cookie, `bearer` nur Bearer-Token (Launcher, Spiel), `web` nur Cookie (Webseite), `team` Cookie mit Team-Rolle und 2FA,
+ * `partner` (ab 1.14.0) `Authorization: Partner <key>` des Server-Plugins (Grenze je Schlüssel).
  */
-type Kind = 'public' | 'auth' | 'dev' | 'user' | 'bearer' | 'web' | 'team';
+type Kind = 'public' | 'auth' | 'dev' | 'user' | 'bearer' | 'web' | 'team' | 'partner';
 
 /** Angemeldet über Bearer-Token oder Cookie; `key` zählt für die Begrenzung der Anfragen. */
 interface Auth {
@@ -377,7 +406,8 @@ interface Route {
 function isPublicPath(path: string): boolean {
   return (
     path.startsWith('/v1/launcher/') ||
-    path.startsWith('/v1/public/') ||
+    // Melden eines Profils geht nur angemeldet: ohne CORS (ab 1.14.0).
+    (path.startsWith('/v1/public/') && !/^\/v1\/public\/players\/[^/]+\/report$/.test(path)) ||
     path === '/v1/addons' ||
     // Bewerten und Melden gehen nur angemeldet: ohne CORS.
     (path.startsWith('/v1/addons/') && !/\/(?:rating|reports)$/.test(path)) ||
@@ -524,6 +554,20 @@ export function createService(options: ServiceOptions): Service {
     guestReportHourly: options.voiceGuestReportHourly ?? 3,
     log,
   });
+  // Server-Partner (ab 1.14.0): Partner-Schlüssel, Belohnungen und Server-Gruppen im Voice Chat (nur im Arbeitsspeicher).
+  // Pausiert, gelöscht oder andere Server: Die Server-Gruppen dieses Partners gelten sofort nicht mehr.
+  let serverGroups: VoiceServerGroups | null = null;
+  const partners = new Partners(store, realtime, { log, onPartnerChanged: (id) => serverGroups?.clear(id) });
+  const partnerVoiceTtlMs = options.partnerVoiceTtlMs ?? SERVER_GROUP_TTL_MS;
+  serverGroups =
+    options.voice === false
+      ? null
+      : new VoiceServerGroups({
+          ttlMs: partnerVoiceTtlMs,
+          sweepMs: options.partnerVoiceSweepMs ?? 30_000,
+          now: Date.now,
+          resolve: (server) => partners.scopeFor(server),
+        });
   // Voice Chat und Einladungen kennen sich gegenseitig (Gruppe einer Einladung, Gäste entfernen): erst beide anlegen.
   let invites: Invites | undefined;
   const voice =
@@ -547,9 +591,12 @@ export function createService(options: ServiceOptions): Service {
             party: (group, uuid) => parties?.voiceParty(group, uuid) ?? null,
             name: (uuid) => store.getUser(uuid)?.name ?? '',
           },
+          serverGroups: serverGroups ?? undefined,
         });
   // Konto gelöscht oder gesperrt: auch die Voice-Verbindung schließen.
   if (voice) realtime.onDisconnectUser((uuid, code, reason) => voice.disconnectUser(uuid, code, reason));
+  // Server-Gruppen geändert (Plugin, Ablauf, Partner): Betroffene wechseln sofort die Gruppe.
+  if (voice && serverGroups) serverGroups.listener = (uuids) => voice.serverGroupsChanged(uuids);
   if (voice) {
     voiceMod.listener = {
       banned: (uuid, gate) => {
@@ -801,6 +848,27 @@ export function createService(options: ServiceOptions): Service {
   const updates = new Updates(updatesDir, log, recordVersion);
   const addons = new Addons(store, addonsDir, log);
   const cosmetics = new Cosmetics(store, capes, log);
+  // ab 1.14.0: Belohnungen von Partner-Servern im Katalog (access "partner")
+  cosmetics.setPartnerSource(() => partners.cosmeticPartners());
+  // Setup teilen und öffentliche Spielerprofile (ab 1.14.0); Meldungen gehen in die Meldungen des Teams.
+  const setups = new Setups(store, reports, {
+    website,
+    maxActive: options.setupMaxActive ?? 50,
+    dailyLimit: options.setupDailyLimit ?? 20,
+    log,
+  });
+  const publicProfiles = new PublicProfiles(store, cosmetics, addons, discover, reports, {
+    website,
+    apiUrl,
+    websiteDir: options.websiteDir ?? null,
+  });
+  const partnerLimiter = new RateLimiter(options.partnerRateLimit ?? 120, rateWindowMs);
+  const partnerRewardLimiter = new RateLimiter(options.partnerRewardRateLimit ?? 600, 60 * 60_000);
+  // Ungültige Partner-Schlüssel je IP (wie die Anmeldung)
+  const partnerFailLimiter = new RateLimiter(options.partnerFailRateLimit ?? 20, rateWindowMs);
+  const publicPartnerLimiter = new RateLimiter(options.publicPartnerRateLimit ?? 120, rateWindowMs);
+  const publicSetupLimiter = new RateLimiter(options.publicSetupRateLimit ?? 60, rateWindowMs);
+  const publicProfileLimiter = new RateLimiter(options.publicProfileRateLimit ?? 120, rateWindowMs);
   const addonFeedback = new AddonFeedback(
     store,
     addons,
@@ -1086,6 +1154,10 @@ export function createService(options: ServiceOptions): Service {
         voice: voiceMod.exportFor(user),
         discover: discover.exportFor(user),
         plus: plus.exportFor(user),
+        // ab 1.14.0
+        partnerApplications: partners.exportFor(user),
+        setups: setups.exportFor(user),
+        publicProfile: publicProfiles.exportFor(user),
         addonStore: {
           submissions: submissions.exportFor(user),
           ...addonFeedback.exportFor(user),
@@ -1245,10 +1317,13 @@ export function createService(options: ServiceOptions): Service {
     return web.link(ctx.user, target);
   }
 
-  /** `GET /v1/public/skins/<uuid>`: nur für öffentliche Team-Mitglieder, sonst (und ohne Skin) 404. */
+  /**
+   * `GET /v1/public/skins/<uuid>`: nur für öffentliche Team-Mitglieder und (ab 1.14.0) Spieler mit öffentlichem Profil,
+   * sonst (und ohne Skin) 404.
+   */
   async function publicSkin(ctx: Context) {
     const uuid = ctx.params[0];
-    const png = isUuid(uuid) && store.isPublicTeamMember(uuid) ? await skins.get(uuid) : null;
+    const png = isUuid(uuid) && (store.isPublicTeamMember(uuid) || publicProfiles.isPublic(uuid)) ? await skins.get(uuid) : null;
     return sendSkin(ctx, png, 'max-age=3600');
   }
 
@@ -1385,18 +1460,19 @@ export function createService(options: ServiceOptions): Service {
   const heads = new HeadCache();
 
   /**
-   * `GET /v1/public/heads/<uuid>.png?size=32|64|128` (Standard 64): Kopf aus dem Skin für Webseite und Discord. Nur für
-   * Spieler, die der Dienst kennt und die „Für andere erkennbar“ an haben (oder auf der Teamseite stehen); sonst 404.
+   * `GET /v1/public/heads/<uuid>.png?size=32|64|128|256` (Standard 64): Kopf aus dem Skin für Webseite und Discord. Nur für
+   * Spieler, die der Dienst kennt und die „Für andere erkennbar“ an haben (oder auf der Teamseite stehen bzw. ab 1.14.0 ein
+   * öffentliches Profil haben); sonst 404.
    * Ohne Skin (oder nicht lesbar) der Standard-Kopf. Eigene Grenze pro IP.
    */
   async function publicHead(ctx: Context) {
     rateLimit(headLimiter, clientIp(ctx.req), 'Zu viele Köpfe auf einmal. Bitte kurz warten.');
     const raw = textQuery(ctx, 'size');
     const size = raw === null ? 64 : /^\d{2,3}$/.test(raw) ? Number(raw) : NaN;
-    if (!isHeadSize(size)) throw new HttpError(400, '„size“ muss 32, 64 oder 128 sein.');
+    if (!isHeadSize(size)) throw new HttpError(400, '„size“ muss 32, 64, 128 oder 256 sein.');
     const uuid = ctx.params[0] ?? '';
     const user = isUuid(uuid) ? store.getUser(uuid) : undefined;
-    if (!user || !(user.visible || store.isPublicTeamMember(uuid))) throw new HttpError(404, 'Kein Kopf gefunden.');
+    if (!user || !(user.visible || store.isPublicTeamMember(uuid) || publicProfiles.isPublic(uuid))) throw new HttpError(404, 'Kein Kopf gefunden.');
     const key = `${uuid}:${size}`;
     let png = heads.get(key);
     if (!png) {
@@ -2103,6 +2179,216 @@ export function createService(options: ServiceOptions): Service {
     return { uuid: target.uuid, name: target.name, ...result, allowed: hostingGrants.allowed(target.uuid), grants: hostingGrants.of(target.uuid) };
   }
 
+  // ---------- Server-Partner, Setup teilen, öffentliche Profile (ab 1.14.0) ----------
+
+  /** Antwort 201 (angelegt) statt 200. */
+  function created(ctx: Context, value: unknown) {
+    sendJson(ctx.res, 201, value);
+    return RESPONDED;
+  }
+
+  const VOICE_OFF_PARTNER = 'Der Voice Chat ist auf diesem Heldix-Dienst aus.';
+
+  /** `PUT /v1/partner/voice/groups { server, groups: { "<uuid>": "<gruppe>" | null } }` (nur im Arbeitsspeicher) */
+  async function partnerVoiceGroups(ctx: Context) {
+    if (voice === null || serverGroups === null) throw new HttpError(503, VOICE_OFF_PARTNER, {}, 'VOICE_OFF');
+    // 500 Einträge mit UUID und Gruppe sind größer als BODY_LIMIT.
+    const input = await readJsonObject(ctx.req, 64 * 1024);
+    const scope = partners.scopeOf(ctx.partner!, input.server);
+    const { groups } = input;
+    if (typeof groups !== 'object' || groups === null || Array.isArray(groups)) {
+      throw new HttpError(400, '„groups“ muss ein Objekt { "<uuid>": "<gruppe>" | null } sein.');
+    }
+    const entries = Object.entries(groups as Record<string, unknown>);
+    if (entries.length > SERVER_GROUP_MAX_PER_REQUEST) throw new HttpError(400, `Höchstens ${SERVER_GROUP_MAX_PER_REQUEST} Einträge je Anfrage.`);
+    const checked: [string, string | null][] = [];
+    for (const [uuid, group] of entries) {
+      if (!isUuid(uuid)) throw new HttpError(400, `„groups“: „${String(uuid).slice(0, 40)}“ ist keine UUID (32 kleine Hex-Zeichen ohne Bindestriche).`);
+      if (group !== null && (typeof group !== 'string' || !SERVER_GROUP_RE.test(group))) {
+        throw new HttpError(400, `„groups.${uuid}“ muss eine Gruppe aus 1 bis 24 Zeichen a–z, 0–9, _ und - sein oder null.`);
+      }
+      checked.push([uuid, group as string | null]);
+    }
+    const result = serverGroups.set(scope, checked);
+    if (result === null) throw new HttpError(409, `Höchstens ${SERVER_GROUP_MAX_PER_PARTNER} Spieler mit Server-Gruppe je Partner.`, {}, 'SERVER_GROUP_LIMIT');
+    return { server: scope.entry, players: result.players, ttl: Math.round(partnerVoiceTtlMs / 1000) };
+  }
+
+  /** `DELETE /v1/partner/voice/groups?server=…`: alle Server-Gruppen dieses Servers leeren. */
+  function partnerVoiceClear(ctx: Context) {
+    if (voice === null || serverGroups === null) throw new HttpError(503, VOICE_OFF_PARTNER, {}, 'VOICE_OFF');
+    const scope = partners.scopeOf(ctx.partner!, textQuery(ctx, 'server'));
+    serverGroups.clear(ctx.partner!.id, scope.key);
+    return { ok: true, server: scope.entry };
+  }
+
+  /** `GET /spieler/<name>`: Seite der Webseite mit Vorschaukarte (Caddy leitet `/spieler/*` hierher). */
+  function playerPage(ctx: Context) {
+    rateLimit(publicProfileLimiter, `seite:${clientIp(ctx.req)}`);
+    const { status, html } = publicProfiles.renderPage(ctx.params[0]);
+    ctx.res.writeHead(status, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Length': String(Buffer.byteLength(html)),
+      'Cache-Control': status === 200 ? 'public, max-age=60' : 'no-cache',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    ctx.res.end(html);
+    return RESPONDED;
+  }
+
+  const partnerRoutes: Route[] = [
+    {
+      method: 'GET',
+      pattern: /^\/v1\/public\/partners$/,
+      kind: 'public',
+      handler: (ctx) => {
+        rateLimit(publicPartnerLimiter, clientIp(ctx.req));
+        sendJson(ctx.res, 200, partners.publicList(), { 'Cache-Control': 'public, max-age=300' });
+        return RESPONDED;
+      },
+    },
+    { method: 'POST', pattern: /^\/v1\/partner-applications$/, kind: 'user', handler: async (ctx) => created(ctx, partners.apply(ctx.user, await body(ctx))) },
+    { method: 'GET', pattern: /^\/v1\/account\/partner-applications$/, kind: 'user', handler: (ctx) => partners.mine(ctx.user) },
+    // Team: Partner, Schlüssel, Anträge und Belohnungs-Cosmetics
+    { method: 'GET', pattern: /^\/v1\/team\/partners$/, kind: 'team', permission: 'partners:manage', handler: () => partners.teamList() },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/team\/partners$/,
+      kind: 'team',
+      permission: 'partners:manage',
+      handler: async (ctx) => created(ctx, partners.create(actor(ctx), await body(ctx))),
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/team\/partners\/([^/]+)$/,
+      kind: 'team',
+      permission: 'partners:manage',
+      handler: async (ctx) => partners.update(actor(ctx), ctx.params[0], await body(ctx)),
+    },
+    { method: 'DELETE', pattern: /^\/v1\/team\/partners\/([^/]+)$/, kind: 'team', permission: 'partners:manage', handler: (ctx) => partners.remove(actor(ctx), ctx.params[0]) },
+    { method: 'POST', pattern: /^\/v1\/team\/partners\/([^/]+)\/key$/, kind: 'team', permission: 'partners:manage', handler: (ctx) => partners.newKey(actor(ctx), ctx.params[0]) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/partner-applications$/,
+      kind: 'team',
+      permission: 'partners:manage',
+      handler: (ctx) => partners.teamApplications(textQuery(ctx, 'status')),
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/team\/partner-applications\/([^/]+)$/,
+      kind: 'team',
+      permission: 'partners:manage',
+      handler: async (ctx) => partners.decide(actor(ctx), idParam(ctx.params[0]), await body(ctx)),
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/team\/cosmetics\/([^/]+)\/partner$/,
+      kind: 'team',
+      permission: 'partners:manage',
+      handler: async (ctx) => {
+        const input = await body(ctx);
+        if (!Object.hasOwn(input, 'partner')) throw new HttpError(400, '„partner“ fehlt (ID eines Partners oder null).');
+        partners.assignCosmetic(actor(ctx), ctx.params[0] ?? '', input.partner);
+        return team.cosmeticsOverview();
+      },
+    },
+    // Partner-Schnittstelle (Server-Plugin, Authorization: Partner <key>)
+    { method: 'GET', pattern: /^\/v1\/partner\/me$/, kind: 'partner', handler: (ctx) => partners.me(ctx.partner!) },
+    { method: 'PUT', pattern: /^\/v1\/partner\/voice\/groups$/, kind: 'partner', handler: partnerVoiceGroups },
+    { method: 'DELETE', pattern: /^\/v1\/partner\/voice\/groups$/, kind: 'partner', handler: partnerVoiceClear },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/partner\/rewards$/,
+      kind: 'partner',
+      handler: async (ctx) => {
+        rateLimit(partnerRewardLimiter, ctx.partner!.id, 'Höchstens 600 Belohnungen pro Stunde je Partner. Bitte später noch einmal.');
+        return partners.reward(ctx.partner!, await body(ctx));
+      },
+    },
+    // Entwicklungsmodus (nur von diesem Rechner, wie /v1/auth/dev): Partner anlegen bzw. aktiv setzen und einen neuen
+    // Schlüssel holen – für Autotests des Server-Plugins ohne Team-Bereich. Optional `{ id, name, servers, cosmetics }`.
+    {
+      method: 'POST',
+      pattern: /^\/v1\/dev\/partner$/,
+      kind: 'dev',
+      handler: async (ctx) => {
+        const input = await body(ctx);
+        const id = input.id ?? 'autotest';
+        const { cosmetics: assign, ...fields } = input;
+        if (typeof id === 'string' && partners.get(id)) partners.update(DEV_ACTOR, id, { ...fields, status: 'active' });
+        else partners.create(DEV_ACTOR, { name: 'Autotest', servers: ['autotest.example.net'], ...fields, id });
+        if (Array.isArray(assign)) for (const cosmetic of assign) partners.assignCosmetic(DEV_ACTOR, String(cosmetic), id);
+        const { key } = partners.newKey(DEV_ACTOR, id as string);
+        return { partner: partners.teamList().partners.find((p) => p.id === id), key };
+      },
+    },
+  ];
+
+  const setupRoutes: Route[] = [
+    {
+      method: 'POST',
+      pattern: /^\/v1\/setups$/,
+      kind: 'user',
+      // Inhalt bis 64 KiB (mehr als BODY_LIMIT)
+      handler: async (ctx) => created(ctx, setups.create(ctx.user, await readJsonObject(ctx.req, SETUP_BODY_LIMIT))),
+    },
+    { method: 'GET', pattern: /^\/v1\/setups$/, kind: 'user', handler: (ctx) => setups.mine(ctx.user) },
+    { method: 'GET', pattern: /^\/v1\/setups\/([^/]+)$/, kind: 'user', handler: (ctx) => setups.getOwn(ctx.user, ctx.params[0]) },
+    { method: 'DELETE', pattern: /^\/v1\/setups\/([^/]+)$/, kind: 'user', handler: (ctx) => setups.revoke(ctx.user, ctx.params[0]) },
+    { method: 'POST', pattern: /^\/v1\/setups\/([^/]+)\/report$/, kind: 'user', handler: async (ctx) => setups.report(ctx.user, ctx.params[0], await body(ctx)) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/public\/setups\/([^/]+)$/,
+      kind: 'public',
+      handler: (ctx) => {
+        rateLimit(publicSetupLimiter, clientIp(ctx.req));
+        return setups.publicGet(ctx.params[0], clientIp(ctx.req));
+      },
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/public\/setups\/([^/]+)\/installed$/,
+      kind: 'public',
+      handler: (ctx) => {
+        rateLimit(publicSetupLimiter, clientIp(ctx.req));
+        return setups.markInstalled(ctx.params[0], clientIp(ctx.req));
+      },
+    },
+    { method: 'DELETE', pattern: /^\/v1\/team\/setups\/([^/]+)$/, kind: 'team', permission: 'moderation', handler: (ctx) => setups.teamRevoke(actor(ctx), ctx.params[0]) },
+  ];
+
+  const profileRoutes: Route[] = [
+    { method: 'GET', pattern: /^\/v1\/account\/public-profile$/, kind: 'user', handler: (ctx) => publicProfiles.get(ctx.user) },
+    { method: 'PUT', pattern: /^\/v1\/account\/public-profile$/, kind: 'user', handler: async (ctx) => publicProfiles.put(ctx.user, await body(ctx)) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/public\/players\/([^/]+)$/,
+      kind: 'public',
+      handler: (ctx) => {
+        rateLimit(publicProfileLimiter, clientIp(ctx.req));
+        sendJson(ctx.res, 200, publicProfiles.publicView(ctx.params[0]), { 'Cache-Control': 'public, max-age=30' });
+        return RESPONDED;
+      },
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/public\/players\/([^/]+)\/report$/,
+      kind: 'user',
+      handler: async (ctx) => publicProfiles.report(ctx.user, ctx.params[0], await body(ctx)),
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/team\/public-profiles\/([^/]+)$/,
+      kind: 'team',
+      permission: 'moderation',
+      handler: async (ctx) => publicProfiles.teamSetHidden(actor(ctx), uuidParam(ctx.params[0]), await body(ctx)),
+    },
+    // Seite der Webseite mit Vorschaukarte (über Caddy auf der Adresse der Webseite)
+    { method: 'GET', pattern: /^\/spieler\/([^/]+)\/?$/, kind: 'public', handler: playerPage },
+    { method: 'HEAD', pattern: /^\/spieler\/([^/]+)\/?$/, kind: 'public', handler: playerPage },
+  ];
+
   // Team-Routen: Recht je Route (roles.ts). Ohne `permission` darf jedes Team-Mitglied (mit 2FA).
   const teamRoutes: Route[] = [
     // Dauerhafte Welten (ab 1.13.0)
@@ -2410,7 +2696,36 @@ export function createService(options: ServiceOptions): Service {
       pattern: /^\/v1\/team\/cosmetics\/([^/]+)$/,
       kind: 'team',
       permission: 'cosmetics',
-      handler: async (ctx) => team.setCosmeticHidden(actor(ctx), ctx.params[0] ?? '', await body(ctx)),
+      // `{ hidden }` und/oder (ab 1.14.0) der Zugang: `{ access: "partner", partner: "<id>" }` bzw. `{ partner: "<id>" | null }`
+      // ordnet einem Partner zu, `{ access: "<Zugang im Manifest>" }` löst die Zuordnung. Zuordnen und Lösen nur mit
+      // „Partner-Server verwalten“; einen anderen Zugang als im signierten Manifest gibt es nur mit einer neuen Version.
+      handler: async (ctx) => {
+        const id = ctx.params[0] ?? '';
+        const input = await body(ctx);
+        if (Object.hasOwn(input, 'partner') || Object.hasOwn(input, 'access')) {
+          let partner: unknown = input.partner;
+          if (Object.hasOwn(input, 'access') && input.access !== 'partner') {
+            const info = COSMETIC_ID_RE.test(id) ? store.getCosmeticInfo(id) : undefined;
+            if (!info) throw new HttpError(404, 'Dieses Cosmetic gibt es nicht.');
+            if (input.access !== info.access) {
+              throw new HttpError(
+                409,
+                `Der Zugang steht im signierten Manifest („${info.access}“). Einen anderen gibt es nur mit einer neuen, signierten Version.`,
+                {},
+                'ACCESS_SIGNED',
+              );
+            }
+            partner = null;
+          }
+          const changes = partner !== null || partners.cosmeticPartners().has(id);
+          if (changes && !hasPermission(teamMember(ctx).role, 'partners:manage')) {
+            throw new HttpError(403, 'Dafür fehlt deiner Rolle das Recht „Partner-Server verwalten (Anträge, Schlüssel, Cosmetics)“.', {}, 'forbidden');
+          }
+          if (changes) partners.assignCosmetic(actor(ctx), id, partner);
+          if (!Object.hasOwn(input, 'hidden')) return team.cosmeticsOverview();
+        }
+        return team.setCosmeticHidden(actor(ctx), id, input);
+      },
     },
     {
       method: 'DELETE',
@@ -2798,6 +3113,9 @@ export function createService(options: ServiceOptions): Service {
     { method: 'GET', pattern: /^\/v1\/status$/, kind: 'public', handler: status },
     ...voiceRoutes,
     ...hostingRoutes,
+    ...partnerRoutes,
+    ...setupRoutes,
+    ...profileRoutes,
     ...teamRoutes,
     // Launcher-Updates (ohne Anmeldung); `latest` steht vor dem allgemeinen Muster für Dateien.
     { method: 'GET', pattern: /^\/v1\/launcher\/latest$/, kind: 'public', handler: launcherLatest },
@@ -2942,8 +3260,13 @@ export function createService(options: ServiceOptions): Service {
     let user: UserRow | undefined;
     let session: WebSessionRow | undefined;
     let member: TeamMemberRow | undefined;
+    let partner: PartnerRow | undefined;
     if (route.kind === 'auth' || route.kind === 'dev') {
       rateLimit(authLimiter, clientIp(req));
+    } else if (route.kind === 'partner') {
+      // Ab 1.14.0: Server-Plugin mit Partner-Schlüssel; ungültige Schlüssel zählen je IP, gültige je Schlüssel.
+      partner = partners.authenticate(req, () => rateLimit(partnerFailLimiter, clientIp(req), 'Zu viele ungültige Partner-Schlüssel. Bitte kurz warten.'));
+      rateLimit(partnerLimiter, partner.id);
     } else if (route.kind !== 'public') {
       const auth = authenticateFor(req, route.kind);
       if (!route.ownRateLimit) rateLimit(apiLimiter, auth.key);
@@ -2951,7 +3274,7 @@ export function createService(options: ServiceOptions): Service {
       session = auth.session;
       if (route.kind === 'team') member = web.teamGate(auth.user, auth.session!, route.permission);
     }
-    const result = await route.handler({ req, res, params, user: user!, session, member });
+    const result = await route.handler({ req, res, params, user: user!, session, member, partner });
     if (result !== RESPONDED) sendJson(res, 200, result);
   }
 
@@ -3039,7 +3362,8 @@ export function createService(options: ServiceOptions): Service {
     if (req.headers.authorization !== undefined) {
       const { user, tokenHash } = authenticate(req);
       const client = new URL(req.url ?? '/', 'http://heldix.invalid').searchParams.get('client');
-      return { uuid: user.uuid, key: tokenHash, kind: client === 'launcher' ? 'companion' : 'game', sessionId: null };
+      // ab 1.14.0: Launcher getrennt gezählt (Freunde sehen „Im Launcher“)
+      return { uuid: user.uuid, key: tokenHash, kind: client === 'launcher' ? 'launcher' : 'game', sessionId: null };
     }
     const value = readSessionCookie(req);
     if (value !== null) {
@@ -3170,6 +3494,12 @@ export function createService(options: ServiceOptions): Service {
     publicDiscoverLimiter.sweep(now);
     discoverLikeLimiter.sweep(now);
     uploadChunkLimiter.sweep(now);
+    partnerLimiter.sweep(now);
+    partnerRewardLimiter.sweep(now);
+    partnerFailLimiter.sweep(now);
+    publicPartnerLimiter.sweep(now);
+    publicSetupLimiter.sweep(now);
+    publicProfileLimiter.sweep(now);
     hostingUploads.sweep(now).catch((err: Error) => log(`Aufräumen der Uploads fehlgeschlagen: ${err.message}`));
     hosting?.sweepDownloads(now).catch((err: Error) => log(`Aufräumen der Downloads fehlgeschlagen: ${err.message}`));
     messages.sweepTyping(now);
@@ -3187,6 +3517,8 @@ export function createService(options: ServiceOptions): Service {
       store.deleteExpiredInvites(now);
       inviteService.sweep(now);
       discover.sweep(now - reportTtlMs);
+      // ab 1.14.0: abgelaufene und widerrufene Setups nach 30 Tagen
+      setups.sweep(now);
       // Voice-Moderation: alte Einträge im Sperr-Verlauf, abgelaufenes Entfernen und verwaiste Stummschaltungen
       voiceMod.sweep(now);
       voice?.sweep();
@@ -3215,6 +3547,7 @@ export function createService(options: ServiceOptions): Service {
     const hostingClosed = hosting?.close() ?? Promise.resolve();
     realtime.closeAll();
     voice?.closeAll();
+    serverGroups?.close();
     closing = new Promise<void>((resolve) => {
       wss.close();
       voiceWss?.close();

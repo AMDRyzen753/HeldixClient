@@ -106,6 +106,9 @@ public final class VoiceLink {
 	private static volatile boolean groupFull;
 	/** die gemeldete Gruppe ist die der Party (ab Dienst 1.12.0) */
 	private static volatile boolean partyGroupActive;
+	/** Server-Gruppe eines Partner-Servers (Plugin „HeldixClient Server“, ab Dienst 1.14.0), null = keine */
+	private static volatile String serverGroup;
+	private static volatile String serverGroupPartner = "";
 	private static volatile int generation;
 	private static volatile long retryAt;
 	private static int failures;
@@ -215,6 +218,16 @@ public final class VoiceLink {
 	}
 
 	/** Nur für automatische Tests: Prüfwert der Gruppe, die zuletzt mit "join" an den Dienst ging (null = keine) */
+	/** Server-Gruppe, die der Dienst gemeldet hat (Partner-Server mit Plugin), sonst null */
+	public static String serverGroup() {
+		return serverGroup;
+	}
+
+	/** Name des Partners zur Server-Gruppe ("" ohne) */
+	public static String serverGroupPartner() {
+		return serverGroup == null ? "" : serverGroupPartner;
+	}
+
 	public static String joinedGroup() {
 		return joinedGroup;
 	}
@@ -414,6 +427,11 @@ public final class VoiceLink {
 				if (group == null) groupMembers = Set.of();
 			}
 			sendText(join);
+			// anderer Server: dessen Server-Gruppe gilt nicht mehr (der Dienst meldet die neue nach dem Beitritt)
+			if (!Objects.equals(serverAddress(mc), joinedServer)) {
+				serverGroup = null;
+				serverGroupPartner = "";
+			}
 			joinedServer = serverAddress(mc);
 			joinedRoom = room;
 			joinedFriendsOnly = friendsOnly;
@@ -582,6 +600,8 @@ public final class VoiceLink {
 		PEER_DEAFENED.clear();
 		guests = Map.of();
 		browser = Set.of();
+		serverGroup = null;
+		serverGroupPartner = "";
 		VoiceModeration.clearRoom();
 	}
 
@@ -707,8 +727,11 @@ public final class VoiceLink {
 		} catch (RuntimeException e) {
 			return;
 		}
-		String type = json.has("type") ? json.get("type").getAsString() : "";
+		String type = json.has("type") && json.get("type").isJsonPrimitive() ? json.get("type").getAsString()
+				// Vertrag 0.14.1 nennt für serverGroup das Feld „t“ – beides annehmen
+				: json.has("t") && json.get("t").isJsonPrimitive() ? json.get("t").getAsString() : "";
 		switch (type) {
+			case "serverGroup", "server_group", "server-group" -> serverGroup(json);
 			case "ready" -> {
 				if (json.has("range")) range = Math.clamp(json.get("range").getAsInt(), 1, 256);
 				if (json.has("maxFrame")) maxFrame = Math.clamp(json.get("maxFrame").getAsInt(), 16, 4096);
@@ -761,6 +784,25 @@ public final class VoiceLink {
 			}
 			default -> VoiceModeration.handle(type, json);
 		}
+	}
+
+	/**
+	 * Ab Dienst 1.14.0: Server-Gruppe eines Partner-Servers ({@code { type|t: "serverGroup", group: "<gruppe>" | null,
+	 * partner: "<Name>" }}). Solange sie gilt, ist sie die Gruppe im Sprachkanal (die eigene bzw. die der Party ist aus).
+	 */
+	private static void serverGroup(JsonObject json) {
+		String group = json.has("group") && json.get("group").isJsonPrimitive() ? json.get("group").getAsString().strip().toLowerCase(Locale.ROOT) : null;
+		if (group != null && !group.matches("[a-z0-9_-]{1,24}")) group = null;
+		String partner = json.has("partner") && json.get("partner").isJsonPrimitive()
+				? json.get("partner").getAsString().replaceAll("[\\p{Cc}\\p{Cf}§]", "").strip() : "";
+		if (partner.length() > 40) partner = partner.substring(0, 40);
+		serverGroupPartner = group == null ? "" : partner;
+		serverGroup = group;
+	}
+
+	/** Nur für automatische Tests: eine Textnachricht des Dienstes verarbeiten, als käme sie über den Sprachkanal */
+	public static void testMessage(String message) {
+		handleText(message);
 	}
 
 	/** "guests": { "<32 hex>": "<Name>" } – Namen ohne Steuerzeichen und §, höchstens 24 Zeichen */

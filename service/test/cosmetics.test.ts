@@ -21,7 +21,8 @@ const NONE = { head: null, back: null, aura: null, companion: null };
 const NONE_ME = { ...NONE, cape: null, team: false, unlocked: [] };
 const SLOTS: CosmeticSlot[] = ['head', 'back', 'aura', 'companion', 'cape'];
 const LIST_KEYS = ['access', 'date', 'description', 'format', 'id', 'name', 'sha256', 'size', 'slot', 'version'];
-const TEAM_KEYS = ['access', 'createdAt', 'date', 'description', 'format', 'hidden', 'id', 'name', 'publishedAt', 'publishedBy', 'sha256', 'size', 'slot', 'version', 'wearers'];
+// ab 1.14.0 dazu manifestAccess (Zugang im signierten Manifest; access ist bei Belohnungen von Partnern "partner")
+const TEAM_KEYS = ['access', 'createdAt', 'date', 'description', 'format', 'hidden', 'id', 'manifestAccess', 'name', 'publishedAt', 'publishedBy', 'sha256', 'size', 'slot', 'version', 'wearers'];
 
 const sha256 = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
 

@@ -5,7 +5,7 @@
 //   heldixclient://einladung/<code>); für Server gibt es keinen Link – die Seite kopiert die Adresse und erklärt,
 //   wo man sie einträgt (Minecraft → Mehrspieler → Direkt verbinden).
 // - Reaktionen: die acht festen IDs des Dienstes als Emojis
-import { activity, copyText, h, toast } from './app-common.js';
+import { activity, copyText, h, presenceOf, presenceRank, toast } from './app-common.js';
 import { shellIcon } from './app-shell.js';
 import { badgeIcon, badgeLabel } from './rollen.js';
 
@@ -51,7 +51,10 @@ export function worldCodeOf(address, worldDomain = null) {
   return worldDomain ? match[1] : null;
 }
 
-/** Was ein Freund gerade macht (eine Zeile): „Spielt auf … · Nicht stören“ bzw. „Offline · zuletzt online vor …“. */
+/**
+ * Was ein Freund gerade macht (eine Zeile): „Spielt auf … · Nicht stören“, „Im Launcher – bekommt Nachrichten sofort“
+ * (ab Dienst 1.14.0, launcher: true; mit „Nicht stören“ hat das Vorrang) bzw. „Offline · zuletzt online vor …“.
+ */
 export function friendLine(friend, { worldName = null } = {}) {
   if (!friend) return '';
   if (friend.online) {
@@ -59,6 +62,7 @@ export function friendLine(friend, { worldName = null } = {}) {
     if (worldName && friend.server) text = `In der Welt „${worldName}“`;
     return friend.dnd ? `${text} · Nicht stören` : text;
   }
+  if (friend.launcher === true) return friend.dnd ? 'Im Launcher · Nicht stören' : 'Im Launcher – bekommt Nachrichten sofort';
   const last = lastOnlineText(friend.lastOnline);
   return last ? `Offline · ${last}` : 'Offline';
 }
@@ -135,16 +139,18 @@ export function joinCard(card, { worldDomain = null } = {}) {
   );
 }
 
-/** „3 von 9 online · 2 Anfragen“ */
+/** „3 von 9 online · 2 im Launcher · 2 Anfragen“ */
 export function friendsSummary(friends, incoming = 0) {
   const online = friends.filter((friend) => friend.online).length;
+  const launcher = friends.filter((friend) => presenceOf(friend) === 'launcher').length;
   const parts = [friends.length ? `${online} von ${friends.length} online` : 'Noch keine Freunde'];
+  if (launcher) parts.push(`${launcher} im Launcher`);
   if (incoming) parts.push(plural(incoming, 'Anfrage', 'Anfragen'));
   return parts.join(' · ');
 }
 
-/** Sortierung: Favoriten, dann online, dann Name. */
+/** Sortierung: Favoriten, dann im Spiel, im Launcher, offline, dann Name. */
 export function sortFriends(list) {
   const collator = new Intl.Collator('de', { sensitivity: 'base' });
-  return [...list].sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || Number(Boolean(b.online)) - Number(Boolean(a.online)) || collator.compare(displayName(a), displayName(b)));
+  return [...list].sort((a, b) => Number(Boolean(b.favorite)) - Number(Boolean(a.favorite)) || presenceRank(b) - presenceRank(a) || collator.compare(displayName(a), displayName(b)));
 }

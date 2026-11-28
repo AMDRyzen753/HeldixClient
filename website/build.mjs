@@ -26,8 +26,16 @@
 // - Versionsverlauf aus launcher/release-notes.md ({{VERSIONEN_HTML}}, /neuigkeiten)
 // - Schrift: WOFF2 aus den TTF-Dateien der Mod (ohne Abhängigkeiten: Tabellen unverändert, Brotli), TTF als Rückfall
 // - Bilder der Seiten (src/bilder/*.webp) und eigene Grafiken (src/assets) werden mitkopiert
+// Seit 0.14.1: Seiten mit eigenen Kopfangaben (<!--seite {"eigeneAngaben":true,"absolut":true}-->, spieler.html: der Dienst
+// ersetzt dort die Angaben je Profil an der Marke <!--heldix:spieler-meta-->) – ohne erzeugte Angaben, mit Prüfung auf nur
+// absolute Verweise (die Seite liegt unter /spieler/<name>).
+// Seit 0.14.1: Server-Plugin „HeldixClient Server“ zum Herunterladen – die neueste HeldixClient-Server-<x.y.z>.jar aus
+// mod/heldix-server/build/libs (ohne -sources) kommt nach /downloads/, wenn ihre Version zu mod/heldix-server/build.gradle
+// passt ({{#serverplugin}}…{{/serverplugin}}, {{SERVER_PLUGIN_HTML}} – auch in Markdown als eigene Zeile); sonst Warnung und
+// „kommt bald“. Anderer Quellordner zum Testen: HELDIX_SERVER_PLUGIN_LIBS oder buildWebsite(out, { serverPluginLibs }).
 // Angaben für Impressum/Datenschutz aus site.config.json (fehlt sie: site.config.example.json mit Hinweis).
 // Die Adresse der API (__API_DOMAIN__) setzt erst der Server-Installer ein (nur in *.html).
+import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -485,11 +493,79 @@ function readUpdatePublicKey() {
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// Server-Plugin „HeldixClient Server“ zum Herunterladen (mod/heldix-server, nur lesen – gebaut wird es mit Gradle)
+// ---------------------------------------------------------------------------------------------------------
+
+/** gradle.properties lesen (schluessel=wert; # und ! sind Kommentare). Fehlt die Datei: null. */
+function readProperties(file) {
+  if (!existsSync(file)) return null;
+  const props = {};
+  for (const line of readFileSync(file, 'utf8').replace(/\r\n?/g, '\n').split('\n')) {
+    const match = /^\s*([^#!\s=:][^=:\s]*)\s*[=:]\s*(.*?)\s*$/.exec(line);
+    if (match) props[match[1]] = match[2];
+  }
+  return props;
+}
+
+const SEMVER = /^\d+\.\d+\.\d+$/;
+const compareVersions = (a, b) => {
+  const x = a.split('.').map(Number);
+  const y = b.split('.').map(Number);
+  return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+};
+
+/**
+ * Das Server-Plugin zum Herunterladen: die neueste HeldixClient-Server-<x.y.z>.jar (die -sources.jar nie) aus libsDir.
+ * Ihre Version muss zu `version` in mod/heldix-server/build.gradle passen (dort rootProject.heldix_server_version aus
+ * mod/gradle.properties oder ein fester Text); die Minecraft-Version (für „Paper …“) kommt aus mod/gradle.properties.
+ * Ergebnis { plugin: { version, file, minecraft, size, sha256, data } } oder { warning } – dann bleibt es bei „kommt bald“.
+ */
+export function findServerPlugin(libsDir = path.join(root, 'mod', 'heldix-server', 'build', 'libs'), modDir = path.join(root, 'mod')) {
+  const props = readProperties(path.join(modDir, 'gradle.properties'));
+  if (!props) return { warning: 'mod/gradle.properties fehlt' };
+  const gradleFile = path.join(modDir, 'heldix-server', 'build.gradle');
+  if (!existsSync(gradleFile)) return { warning: 'mod/heldix-server/build.gradle fehlt' };
+  const line = (/^\s*version\s*=\s*(.+?)\s*$/m.exec(readFileSync(gradleFile, 'utf8'))?.[1] ?? '').replace(/^"\$\{(.+)\}"$/, '$1');
+  const literal = /^(['"])([^'"$]+)\1$/.exec(line);
+  const property = /^(?:(?:rootProject|project)\.)?(?:property\(\s*['"])?([A-Za-z_]\w*)(?:['"]\s*\))?$/.exec(line);
+  const expected = literal ? literal[2] : property ? props[property[1]] : undefined;
+  if (!expected || !SEMVER.test(expected)) return { warning: `Version in mod/heldix-server/build.gradle nicht lesbar („${line || 'fehlt'}“)` };
+  const minecraft = props.minecraft_version ?? '';
+  if (!/^\d+(?:\.\d+){1,2}$/.test(minecraft)) return { warning: 'minecraft_version fehlt in mod/gradle.properties' };
+  const jars = existsSync(libsDir)
+    ? readdirSync(libsDir)
+        .map((name) => /^HeldixClient-Server-(\d+\.\d+\.\d+)\.jar$/.exec(name))
+        .filter(Boolean)
+        .map(([file, version]) => ({ file, version }))
+        .sort((a, b) => compareVersions(b.version, a.version))
+    : [];
+  if (!jars.length) return { warning: `keine HeldixClient-Server-${expected}.jar in ${path.relative(root, libsDir) || libsDir} (gebaut wird mit gradlew :heldix-server:build)` };
+  const newest = jars[0];
+  if (newest.version !== expected) return { warning: `neueste Datei ${newest.file} passt nicht zur Version ${expected} aus mod/heldix-server/build.gradle` };
+  const data = readFileSync(path.join(libsDir, newest.file));
+  // Eine Jar ist ein ZIP-Archiv: beginnt mit „PK\3\4“ (leere oder halb geschriebene Dateien nicht ausliefern)
+  if (data.length < 22 || data.readUInt32LE(0) !== 0x04034b50) return { warning: `${newest.file} ist keine gültige Jar` };
+  return { plugin: { version: newest.version, file: newest.file, minecraft, size: data.length, sha256: createHash('sha256').update(data).digest('hex'), data } };
+}
+
+/** Dateigröße wie auf der Download-Seite (app-common.js formatBytes): 48,8 KB */
+function formatSize(bytes) {
+  const number = new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 });
+  if (bytes < 1024) return `${bytes} Byte`;
+  if (bytes < 1024 * 1024) return `${number.format(bytes / 1024)} KB`;
+  return `${number.format(bytes / 1024 / 1024)} MB`;
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // Bauen
 // ---------------------------------------------------------------------------------------------------------
 
-/** Baut die Seite nach outDir; gibt zurück, ob die Angaben für Impressum/Datenschutz vollständig sind. */
-export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
+/**
+ * Baut die Seite nach outDir; gibt zurück, ob die Angaben für Impressum/Datenschutz vollständig sind.
+ * options.serverPluginLibs: Ordner mit HeldixClient-Server-<version>.jar (sonst HELDIX_SERVER_PLUGIN_LIBS, sonst
+ * mod/heldix-server/build/libs) – zum Testen ohne die echte Datei.
+ */
+export function buildWebsite(outDir = path.join(websiteDir, 'dist'), options = {}) {
   const configFile = path.join(websiteDir, 'site.config.json');
   const complete = existsSync(configFile);
   const config = JSON.parse(readFileSync(complete ? configFile : path.join(websiteDir, 'site.config.example.json'), 'utf8'));
@@ -502,6 +578,17 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
   if (!/^https:\/\//.test(siteUrl)) throw new Error('site.config.json: "siteUrl" muss mit https:// beginnen');
 
   const version = JSON.parse(readFileSync(path.join(root, 'launcher', 'package.json'), 'utf8')).version;
+  // Server-Plugin zum Herunterladen (fehlt es oder passt die Version nicht: Warnung, die Seiten zeigen „kommt bald“)
+  const pluginLibs = options.serverPluginLibs || process.env.HELDIX_SERVER_PLUGIN_LIBS || undefined;
+  const { plugin: serverPlugin = null, warning: serverPluginWarning } = findServerPlugin(pluginLibs ? path.resolve(pluginLibs) : undefined);
+  if (serverPluginWarning) console.warn(`Webseite: Server-Plugin nicht zum Herunterladen – ${serverPluginWarning}. /partner und /entwickler/server-plugin zeigen „kommt bald“.`);
+  // Bedingte Blöcke: {{#name}}…{{/name}} nur, wenn name gilt, {{^name}}…{{/name}} nur sonst (auch über mehrere Zeilen)
+  const flags = { github: Boolean(githubUrl), serverplugin: Boolean(serverPlugin) };
+  const conditionals = (source) =>
+    source.replace(/\{\{([#^])([a-z]+)\}\}([\s\S]*?)\{\{\/\2\}\}/g, (match, mode, name, body) => {
+      if (!(name in flags)) throw new Error(`Unbekannter Block: {{${mode}${name}}}`);
+      return (mode === '#') === flags[name] ? body : '';
+    });
   const iconsSource = readFileSync(path.join(root, 'launcher', 'src', 'renderer', 'ui-icons.ts'), 'utf8');
   // ui-icons.ts enthält mehrere Tabellen (UI_ICONS, UI_BADGES, …): jede bis zum ersten „};“ am Zeilenanfang lesen
   const iconTable = (name) => {
@@ -664,6 +751,17 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
     HILFE_THEMEN_HTML: hilfeKategorieChips,
     HILFE_ANZAHL: String(hilfe.length),
     ENTWICKLER_KARTEN_HTML: entwicklerCardsHtml,
+    // Server-Plugin (nur in {{#serverplugin}}…{{/serverplugin}} sinnvoll, sonst leer)
+    SERVER_PLUGIN_VERSION: escape(serverPlugin?.version ?? ''),
+    SERVER_PLUGIN_MINECRAFT: escape(serverPlugin?.minecraft ?? ''),
+    SERVER_PLUGIN_HTML: serverPlugin
+      ? `<div class="card card--accent plugin-download" id="plugin-herunterladen">
+  <div class="plugin-download__head"><span class="icon-tile">${svg('server')}</span><div><p class="plugin-download__title">HeldixClient Server ${escape(serverPlugin.version)}</p><p class="plugin-download__meta">Plugin für Paper ${escape(serverPlugin.minecraft)} · ${escape(formatSize(serverPlugin.size))} · <code>${escape(serverPlugin.file)}</code></p></div></div>
+  <a class="btn btn--primary plugin-download__button" href="/downloads/${escape(encodeURIComponent(serverPlugin.file))}" download>${svg('download')}Plugin herunterladen</a>
+  <div class="plugin-download__hash"><span class="hash-label">SHA-256</span><code>${escape(serverPlugin.sha256)}</code><button class="icon-button small" type="button" data-copy="${escape(serverPlugin.sha256)}" data-copy-titel="Prüfsumme kopiert" aria-label="SHA-256-Prüfsumme kopieren" title="Prüfsumme kopieren">${svg('copy')}</button></div>
+  <p class="plugin-download__where">${svg('folder')}<span>In den Ordner <code>plugins/</code> deines Paper-Servers legen und den Server neu starten. Danach in <code>plugins/HeldixClient-Server/config.yml</code> bei <code>partner-key</code> deinen Partner-Schlüssel eintragen und <code>/heldix reload</code> – ohne Schlüssel laufen Regeln, HUD und Einblendungen trotzdem. Mehr unter <a href="/entwickler/server-plugin#einrichten">Einrichten</a>.</span></p>
+</div>`
+      : '',
     // Das ganze Icon-Set für Seiten, die ihre Icons erst zur Laufzeit kennen (Addon-Store: das Icon steht im Manifest)
     ICONS_ALLE_HTML: `<template id="icons">\n${Object.keys(icons)
       .sort()
@@ -700,6 +798,8 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
     const match = /<!--seite\s+(\{[\s\S]*?\})\s*-->\n?/.exec(text);
     if (!match) return { text, meta: '', noindex: false };
     const data = JSON.parse(match[1]);
+    // Seiten mit eigenen Angaben im <head> (spieler.html: Platzhalter, die der Dienst je Profil einsetzt)
+    if (data.eigeneAngaben) return { text: text.replace(match[0], ''), meta: '', noindex: Boolean(data.noindex), absolute: Boolean(data.absolut) };
     const title = data.titel ? `${data.titel} – HeldixClient` : 'HeldixClient';
     // Vorschaukarte: ausdrücklich angegeben („og“), sonst nach Seitenname, sonst die allgemeine
     const name = urlPath === '/' ? 'start' : urlPath.slice(1).replace(/\//g, '-');
@@ -725,16 +825,16 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
       `<meta name="twitter:image" content="${escape(image)}">`,
       data.software ? softwareJsonLd() : '',
     ].filter(Boolean);
-    return { text: text.replace(match[0], ''), meta: lines.join('\n'), noindex: Boolean(data.noindex) };
+    return { text: text.replace(match[0], ''), meta: lines.join('\n'), noindex: Boolean(data.noindex), absolute: Boolean(data.absolut) };
   };
 
   const render = (raw, urlPath, extra = {}) => {
-    const { text: withoutMeta, meta, noindex } = pageMeta(raw, urlPath);
+    const { text: withoutMeta, meta, noindex, absolute } = pageMeta(raw, urlPath);
     let out = withoutMeta.replace(/\{\{include:([\w.-]+)\}\}/g, (_, name) => readFileSync(path.join(partials, name), 'utf8').trimEnd());
     out = out.replace('{{SEITE_META}}', meta);
     out = out.replace(/\{\{t:([\w.-]+)\}\}/g, (_, key) => text(key));
-    // Bedingte Blöcke (auch über mehrere Zeilen)
-    out = out.replace(/\{\{([#^])github\}\}([\s\S]*?)\{\{\/github\}\}/g, (_, mode, body) => ((mode === '#') === Boolean(githubUrl) ? body : ''));
+    // Bedingte Blöcke (auch über mehrere Zeilen): github, serverplugin
+    out = conditionals(out);
     out = out.replace(/\{\{icon:([\w-]+)\}\}/g, (_, name) => svg(name));
     out = out.replace(/\{\{kopf:([^}]{1,32})\}\}/g, (_, name) => exampleHead(name));
     out = out.replace(/\{\{abzeichen:([\w-]+)(?::([^}]*))?\}\}/g, (_, id, label) => badgeImg(id, label ?? ''));
@@ -747,12 +847,23 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
     // CSP: keine Inline-Stile, -Handler oder -Skripte (JSON-LD ist ein Datenblock und erlaubt)
     if (/\sstyle=|<style|\son[a-z]+="/i.test(out.replace(/<svg[\s\S]*?<\/svg>/g, ''))) throw new Error(`${urlPath}: Inline-Stil oder Inline-Handler (CSP)`);
     if (/<script(?![^>]*\b(?:src=|type="application\/ld\+json"))[^>]*>/i.test(out)) throw new Error(`${urlPath}: Inline-Skript (CSP)`);
+    // Seiten, die unter einem tieferen Pfad ausgeliefert werden (/spieler/<name>): nur absolute Verweise
+    if (absolute) {
+      const relative = [...out.matchAll(/\s(?:src|href)="(?!\/|https:\/\/|#|heldixclient:|mailto:|data:)([^"]*)"/g)].map((m) => m[1]);
+      if (relative.length) throw new Error(`${urlPath}: relative Verweise (${relative.slice(0, 5).join(', ')}) – die Seite liegt unter einem tieferen Pfad`);
+    }
     if (!noindex && urlPath !== '/404') sitemap.push(urlPath);
     return out;
   };
 
   rmSync(outDir, { recursive: true, force: true });
   for (const dir of ['assets', 'images', 'bilder', 'og', 'fonts', 'vendor', 'capes', 'hilfe', 'entwickler', 'discord']) mkdirSync(path.join(outDir, dir), { recursive: true });
+  // Server-Plugin: genau die geprüfte Datei (dieselben Bytes wie für Größe und SHA-256) nach /downloads/
+  if (serverPlugin) {
+    mkdirSync(path.join(outDir, 'downloads'), { recursive: true });
+    writeFileSync(path.join(outDir, 'downloads', serverPlugin.file), serverPlugin.data);
+    console.log(`Webseite: Server-Plugin ${serverPlugin.version} zum Herunterladen – /downloads/${serverPlugin.file} (${formatSize(serverPlugin.size)}, SHA-256 ${serverPlugin.sha256})`);
+  }
 
   // Seiten aus src/*.html
   for (const file of readdirSync(srcDir)) {
@@ -768,7 +879,14 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
   const articleTemplate = readFileSync(path.join(srcDir, '_vorlagen', 'artikel.html'), 'utf8');
   const writeArticles = (list, area) => {
     for (const article of list) {
-      const { html, toc } = renderMarkdown(article.body);
+      // Im Markdown: bedingte Blöcke wie in den Seiten und HTML-Bausteine als eigene Zeile ({{SERVER_PLUGIN_HTML}})
+      const rendered = renderMarkdown(conditionals(article.body));
+      const toc = rendered.toc;
+      const html = rendered.html.replace(/<p>\{\{([A-Z_]+_HTML)\}\}<\/p>/g, (match, key) => {
+        if (!(key in values)) throw new Error(`${area}/${article.slug}.md: unbekannter Platzhalter {{${key}}}`);
+        return values[key];
+      });
+      if (/\{\{[#^/]?[A-Za-z]/.test(html)) throw new Error(`${area}/${article.slug}.md: unverarbeiteter Platzhalter oder Block`);
       const category = area === 'hilfe' ? HILFE_KATEGORIEN.find(([id]) => id === article.meta.kategorie) : null;
       const siblings = (area === 'hilfe' ? list.filter((other) => other.meta.kategorie === article.meta.kategorie) : list).filter((other) => other.slug !== article.slug);
       const extra = {

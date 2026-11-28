@@ -29,8 +29,12 @@ public interface HeldixApi {
 	 * Version 10: Moderation im Sprachkanal ({@link VoiceChannel#moderation}, {@link VoiceChannel#onModeration}, Rechte von
 	 * Gastgeber und Party-Leiter mit {@link VoiceChannel#moderate}), Melden mit Lautstärke-Verlauf und Aufnahme
 	 * ({@link VoiceChannel#openReport}) und Voice-Regeln ({@link VoiceChannel#showRules}) – über Dialoge von HeldixClient.
+	 * Version 11: Server-Info und Server-Regeln ({@link #server()}, {@link ServerInfo#allowed},
+	 * {@link HeldixEvents#onServerInfoChange}, {@link ModuleHandle#followServerRule}) für Server mit dem Plugin
+	 * „HeldixClient Server“, Server-Gruppe im Sprachkanal ({@link VoiceChannel#serverGroup}) und die Sprache des Spielers
+	 * ({@link #language()}, {@link HeldixEvents#onLanguageChange}).
 	 */
-	int API_VERSION = 10;
+	int API_VERSION = 11;
 
 	/** Informationen über das eigene Addon (aus heldix.addon.json). */
 	AddonInfo addon();
@@ -257,4 +261,24 @@ public interface HeldixApi {
 	 * @since 9
 	 */
 	void copyToClipboard(String text);
+
+	// --- ab API 11 --------------------------------------------------------------------------
+
+	/**
+	 * Der Server, auf dem der Spieler gerade ist: spricht er Heldix (Plugin „HeldixClient Server“), ist er ein
+	 * Partner-Server, und welche Funktionen hat er abgeschaltet ({@link ServerInfo#allowed}, z. B. {@code "minimap"}).
+	 * Ohne Server (Hauptmenü, Einzelspieler) ist alles erlaubt. Gibt immer den aktuellen Stand zurück; Änderungen meldet
+	 * {@link HeldixEvents#onServerInfoChange}. Darf aus jedem Thread aufgerufen werden.
+	 *
+	 * @since 11
+	 */
+	ServerInfo server();
+
+	/**
+	 * Sprache, in der das Addon mit dem Spieler sprechen soll: {@code "de"} oder {@code "en"}. Folgt der Sprache von
+	 * Minecraft (Deutsch → „de“, alles andere → „en“). Wechsel meldet {@link HeldixEvents#onLanguageChange}.
+	 *
+	 * @since 11
+	 */
+	String language();
 }

@@ -62,6 +62,8 @@ export function mapPartyMember(raw: unknown): PartyMember | null {
     ...p,
     leader: m.leader === true,
     online: m.online === true,
+    // nur der Launcher verbunden (Dienst 1.14.0); im Spiel hat Vorrang
+    launcher: m.online !== true && m.launcher === true,
     away: m.away === true,
     awayUntil: m.away === true && time(m.awayUntil) ? time(m.awayUntil) : null,
     state: ACTIVITIES.includes(m.state as FriendActivity) ? (m.state as FriendActivity) : null,

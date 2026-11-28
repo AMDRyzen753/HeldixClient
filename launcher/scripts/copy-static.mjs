@@ -8,7 +8,7 @@ const from = path.join(root, 'src', 'renderer');
 const to = path.join(root, 'dist', 'renderer');
 
 await mkdir(to, { recursive: true });
-for (const file of ['index.html', 'splash.html', 'styles.css', 'instances.css', 'home.css', 'store.css', 'friends.css', 'profile.css', 'setup.css', 'notifications.css', 'worlds.css', 'logo.svg', 'background.svg', 'tray.png', 'tray@2x.png']) {
+for (const file of ['index.html', 'splash.html', 'styles.css', 'instances.css', 'home.css', 'store.css', 'friends.css', 'profile.css', 'setup.css', 'notifications.css', 'worlds.css', 'sharing.css','logo.svg', 'background.svg', 'tray.png', 'tray@2x.png']) {
   await cp(path.join(from, file), path.join(to, file));
 }
 

@@ -44,6 +44,8 @@ public final class HudInteraction {
 	private static HudModule hovered;
 	/** Wegpunkt-Markierung unter der Maus im letzten Bild */
 	private static WaypointsModule.Marker hoveredMarker;
+	/** anklickbares HUD-Element vom Server unter der Maus im letzten Bild */
+	private static ServerHud.Element hoveredServer;
 	/** Tooltip im letzten Bild (für den Autotest) */
 	private static List<String> lastTooltip = List.of();
 	private static String lastCursor = "DEFAULT";
@@ -92,7 +94,7 @@ public final class HudInteraction {
 		List<HudModule> modules = ModuleManager.hudByLayer();
 		for (int i = modules.size() - 1; i >= 0; i--) {
 			HudModule module = modules.get(i);
-			if (module.isEnabled() && mouseX >= module.x() && mouseX < module.x() + module.width() && mouseY >= module.y()
+			if (module.activeHere() && mouseX >= module.x() && mouseX < module.x() + module.width() && mouseY >= module.y()
 					&& mouseY < module.y() + module.height()) {
 				return module;
 			}
@@ -108,6 +110,7 @@ public final class HudInteraction {
 	public static void render(GuiGraphicsExtractor g) {
 		hovered = null;
 		hoveredMarker = null;
+		hoveredServer = null;
 		lastTooltip = List.of();
 		lastCursor = "DEFAULT";
 		if (!active()) return;
@@ -147,10 +150,21 @@ public final class HudInteraction {
 			}
 		} else {
 			WaypointsModule.Marker marker = ModuleManager.waypoints != null ? ModuleManager.waypoints.markerAt(mouse[0], mouse[1]) : null;
+			ServerHud.Element element = marker == null ? ServerHud.clickableAt(mouse[0], mouse[1]) : null;
 			if (marker != null) {
 				hoveredMarker = marker;
 				Waypoints.Waypoint w = marker.waypoint();
 				tooltip = List.of(w.name, w.coordinates() + " · " + WaypointsModule.formatDistance(marker.distance()), "Klick: Wegpunkte verwalten");
+				cursor = HudHover.Cursor.HAND;
+			} else if (element != null) {
+				// anklickbares Element vom Server: Rahmen, Hand, kurzer Hinweis
+				hoveredServer = element;
+				int[] area = ServerHud.areaOf(element);
+				if (area != null) {
+					Ui.rect(g, area[0] - 2, area[1] - 2, area[2] + 4, area[3] + 4, 5, 0x1A3B82F6);
+					Ui.outline(g, area[0] - 2, area[1] - 2, area[2] + 4, area[3] + 4, 5, Ui.ACCENT);
+				}
+				tooltip = List.of(element.title().isEmpty() ? "Vom Server" : element.title(), "Klick: an den Server melden");
 				cursor = HudHover.Cursor.HAND;
 			}
 		}
@@ -226,7 +240,14 @@ public final class HudInteraction {
 		HudModule module = moduleAt(event.x(), event.y());
 		if (module == null) {
 			WaypointsModule.Marker marker = ModuleManager.waypoints != null ? ModuleManager.waypoints.markerAt(event.x(), event.y()) : null;
-			if (marker == null) return false;
+			if (marker == null) {
+				// anklickbares HUD-Element vom Server: hud_click an den Server
+				ServerHud.Element element = button == HudClick.LEFT ? ServerHud.clickableAt(event.x(), event.y()) : null;
+				if (element == null) return false;
+				action("server:" + element.id());
+				if (dev.heldixclient.serverlink.ServerLink.click(element)) sound(mc);
+				return true;
+			}
 			action("waypoint:open");
 			sound(mc);
 			mc.gui.setScreen(new HeldixMenuScreen(mc.gui.screen(), Shell.Page.WAYPOINTS));
@@ -292,6 +313,6 @@ public final class HudInteraction {
 	}
 
 	public static String hoveredId() {
-		return hovered != null ? hovered.id() : hoveredMarker != null ? "waypoint" : null;
+		return hovered != null ? hovered.id() : hoveredMarker != null ? "waypoint" : hoveredServer != null ? "server:" + hoveredServer.id() : null;
 	}
 }

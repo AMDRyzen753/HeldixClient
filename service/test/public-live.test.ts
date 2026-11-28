@@ -95,7 +95,7 @@ test('Köpfe: nur bekannte, erkennbare Spieler (oder Teamseite); Größen; Stand
     assert.deepEqual([image.width, image.height], [64, 64]);
     assert.deepEqual([...image.data.subarray((12 * 64 + 12) * 4, (12 * 64 + 12) * 4 + 4)], [0, 200, 0, 255], 'Pixel (1,1) des Gesichts');
     for (const size of [32, 128]) assert.equal(decodePng((await head(anna.uuid, `?size=${size}`)).body)!.width, size);
-    for (const bad of ['?size=16', '?size=abc', '?size=256']) assert.equal((await head(anna.uuid, bad)).status, 400, bad);
+    for (const bad of ['?size=16', '?size=abc', '?size=512']) assert.equal((await head(anna.uuid, bad)).status, 400, bad);
     // Zwischenspeicher: Mojang nur einmal gefragt
     const asked = fake.requests.filter((r) => r.includes(anna.uuid)).length;
     await head(anna.uuid);

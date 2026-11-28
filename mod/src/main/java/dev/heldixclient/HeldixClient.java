@@ -102,6 +102,8 @@ public class HeldixClient implements HeldixModInitializer {
 		HudEvents.RENDER.register((graphics, delta) -> dev.heldixclient.social.PartyPrompt.render(graphics));
 		WorldEvents.LEAVE.register(dev.heldixclient.share.WorldShare::leftWorld);
 		ClientEvents.STOPPING.register(dev.heldixclient.share.WorldShare::leftWorld);
+		// Server-Schnittstelle (0.14.1): Kanal heldixclient:server zum Plugin „HeldixClient Server“ (Regeln, HUD, Einblendungen)
+		dev.heldixclient.serverlink.ServerLink.init();
 
 		// Pausemenü: direkter Zugang zum Heldix-Menü
 		ScreenEvents.AFTER_INIT.register((minecraft, screen, width, height) -> {
@@ -159,6 +161,7 @@ public class HeldixClient implements HeldixModInitializer {
 		dev.heldixclient.player.PlayerMenu.tick(mc);
 		dev.heldixclient.share.WorldShare.tick(mc);
 		dev.heldixclient.voice.VoiceLink.tick(mc);
+		dev.heldixclient.serverlink.ServerLink.tick(mc);
 		dev.heldixclient.ui.SecureChatNotice.tick(mc);
 		ModuleManager.tick(mc);
 		DebugOverlay.seed(mc);

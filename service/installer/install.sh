@@ -33,11 +33,13 @@
 #   --port <zahl>        interner Port des Dienstes (Standard 8787)
 #   --no-https           ohne Caddy: der Dienst lauscht nur auf 127.0.0.1:<port>, ein eigener Reverse-Proxy macht HTTPS
 #                        (die Webseite liegt dann zum Ausliefern in /opt/heldix-dienst/app/website)
-#   --minecraft-login    Anmeldung mit dem Minecraft-Konto auf der Webseite einschalten (App-ID des Launchers; vorher in
-#                        Azure die Umleitungs-URI https://<api-domain>/v1/web/auth/microsoft/callback eintragen).
-#                        Fragt nach dem Client-Geheimnis (Eingabe unsichtbar; leer = ohne Geheimnis). Bleibt bei Updates an.
+#   --minecraft-login    Anmeldung mit dem Minecraft-Konto auf der Webseite einschalten – mit App-ID und Einstellungen des
+#                        Launchers (öffentlicher Client mit PKCE, kein Client-Geheimnis). Vorher in Azure bei der App des
+#                        Launchers unter „Mobil- und Desktopanwendungen“ die Umleitungs-URI
+#                        https://<api-domain>/v1/web/auth/microsoft/callback ergänzen. Bleibt bei Updates an.
 #   --ms-client-secret-file <datei>
-#                        Client-Geheimnis aus dieser Datei übernehmen (schaltet die Anmeldung ein; Datei danach löschen)
+#                        nur, wenn die Umleitungs-URI stattdessen unter „Web“ steht: Client-Geheimnis aus dieser Datei
+#                        übernehmen (schaltet die Anmeldung ein; Datei danach löschen)
 #   --ms-client-id <id>  andere App-ID (nur für eigene Builds: muss die von Mojang freigegebene App-ID des Launchers sein)
 #   --no-minecraft-login Anmeldung mit dem Minecraft-Konto wieder ausschalten (löscht auch das gespeicherte Geheimnis)
 #   --world-domain <name>
@@ -995,6 +997,13 @@ EOF
   if [ "$WEBSITE" = 1 ] && [ -n "$DOMAIN" ]; then set_env HELDIX_DIENST_WEBSITE "https://$DOMAIN"; fi
   # Öffentliche Adresse der API: daraus die Umleitungs-URI der Anmeldung mit dem Minecraft-Konto (allein ändert sie nichts)
   if [ -n "$API_DOMAIN" ]; then set_env HELDIX_DIENST_API_URL "https://$API_DOMAIN"; fi
+  # Öffentliche Spielerprofile (ab 1.14.0): /spieler/<name> liefert der Dienst aus der gebauten Webseite (spieler.html)
+  # mit eingesetzter Vorschaukarte (Name, Bio, Kopf); ohne Webseite gibt es die Seite nicht.
+  if [ "$WEBSITE" = 1 ]; then
+    set_env HELDIX_DIENST_WEBSITE_DIR "$INSTALL_DIR/app/website"
+  else
+    sed -i '/^HELDIX_DIENST_WEBSITE_DIR=/d' "$ENV_FILE"
+  fi
   configure_microsoft
   configure_world
   configure_hosting
@@ -1035,20 +1044,6 @@ save_secret() {
   mv -f "$tmp" "$MS_SECRET_FILE"
 }
 
-ask_secret() {
-  # Rückfrage nur mit Terminal und ohne --yes; die Eingabe bleibt unsichtbar. Leer: ohne Geheimnis (öffentlicher Client).
-  [ "$ASSUME_YES" = 0 ] && [ -r /dev/tty ] || return 1
-  local secret=""
-  printf '    Client-Geheimnis der Azure-App (Eingabe unsichtbar; leer lassen, wenn die Umleitungs-URI unter\n    „Mobil- und Desktopanwendungen“ steht): ' > /dev/tty
-  IFS= read -rs secret < /dev/tty || secret=""
-  printf '\n' > /dev/tty
-  [ -n "$secret" ] || return 1
-  local saved=1
-  if printf '%s\n' "$secret" | save_secret; then saved=0; fi
-  secret=""
-  return "$saved"
-}
-
 configure_microsoft() {
   # Anmeldung mit dem Minecraft-Konto auf der Webseite (optional). Ohne Option bleibt alles, wie es ist.
   if [ "$MS_LOGIN" = 0 ]; then
@@ -1062,9 +1057,9 @@ configure_microsoft() {
   if [ -n "$MS_SECRET_SOURCE" ]; then
     save_secret < "$MS_SECRET_SOURCE" || die "Die Datei mit dem Client-Geheimnis ist leer: $MS_SECRET_SOURCE"
     info "Client-Geheimnis übernommen. Die Datei $MS_SECRET_SOURCE wird nicht mehr gebraucht – bitte löschen."
-  elif [ ! -s "$MS_SECRET_FILE" ]; then
-    ask_secret || true
   fi
+  # Ohne --ms-client-secret-file wie der Launcher: öffentlicher Client mit PKCE (keine Rückfrage nach einem Geheimnis);
+  # ein früher gespeichertes Geheimnis bleibt in Gebrauch, bis --no-minecraft-login es löscht.
   if [ -s "$MS_SECRET_FILE" ]; then
     chown root:"$SERVICE_USER" "$MS_SECRET_FILE"
     chmod 640 "$MS_SECRET_FILE"
@@ -1140,6 +1135,12 @@ $DOMAIN {
 	# Neueste Launcher-Version für den Download-Bereich der Webseite (gleiche Adresse wegen der CSP)
 	handle /launcher-latest {
 		rewrite * /v1/launcher/latest
+		reverse_proxy 127.0.0.1:$PORT
+	}
+	# Öffentliche Spielerprofile (ab 1.14.0): Die Seite /spieler/<name> kommt vom Dienst – er setzt Titel und
+	# Vorschaukarte (og:*, twitter:*: Name, Bio, Kopf) in die gebaute spieler.html ein; Skripte, Bilder und Stile
+	# liefert weiter file_server.
+	handle /spieler/* {
 		reverse_proxy 127.0.0.1:$PORT
 	}
 	# Anmeldung, Spieler- und Team-Bereich: der Dienst unter /api auf derselben Adresse (Cookie der Webseite,
@@ -1370,6 +1371,7 @@ summary() {
     echo ""
     echo "  Ohne Caddy installiert: Leite HTTPS (inklusive WebSockets auf /v1/ws und /v1/voice) an 127.0.0.1:$PORT weiter."
     echo "  Die Webseite liegt zum Ausliefern in $INSTALL_DIR/app/website. Beispiele stehen in docs/dienst.md."
+    echo "  Spielerprofile: /spieler/* der Webseite ebenfalls an 127.0.0.1:$PORT weiterleiten (Vorschaukarte vom Dienst)."
   fi
   if [ "$PLACEHOLDERS" = 1 ] && [ "$WEBSITE" = 1 ]; then
     echo ""
@@ -1422,8 +1424,9 @@ summary() {
   fi
   echo ""
   if [ "$WEBSITE" = 1 ] && grep -q '^HELDIX_DIENST_MS_CLIENT_ID=' "$ENV_FILE" 2>/dev/null; then
-    echo "  Anmeldung mit dem Minecraft-Konto auf der Webseite ist an. Einmalig in Azure (dieselbe App-Registrierung wie der Launcher)"
-    echo "  diese Umleitungs-URI eintragen – mit Client-Geheimnis unter „Web“, ohne unter „Mobil- und Desktopanwendungen“:"
+    echo "  Anmeldung mit dem Minecraft-Konto auf der Webseite ist an. Einmalig in Azure bei der App des Launchers unter"
+    echo "  „Authentifizierung“ → „Mobil- und Desktopanwendungen“ (dort steht schon die Adresse des Launchers) diese Umleitungs-URI"
+    echo "  ergänzen (nur mit --ms-client-secret-file stattdessen unter „Web“):"
     printf '    %shttps://%s/v1/web/auth/microsoft/callback%s\n' "$BOLD" "$API_DOMAIN" "$RESET"
     echo "    Anleitung: docs/einrichtung.md. Ausschalten: Installer mit --no-minecraft-login erneut ausführen."
     echo ""

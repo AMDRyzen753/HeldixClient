@@ -499,3 +499,14 @@
   .friends-layout:not(.has-chat) .friends-chat { display: none; }
   .friends-back { display: grid; }
 }
+
+/* „Im Launcher“ (Dienst 1.14.0): Launcher offen, nicht im Spiel – Heldix-Türkis statt Grün; „Nicht stören“ (rot) hat Vorrang */
+:root { --presence-launcher: #22d3ee; --presence-launcher-text: #67e8f9; }
+.friends-avatar.launcher .friends-dot { background: var(--presence-launcher); }
+.friends-row.launcher .friends-row-meta { color: var(--presence-launcher-text); }
+.friends-row.launcher.dnd .friends-row-meta { color: #fca5a5; }
+.friends-chat-status.launcher { color: var(--presence-launcher-text); }
+.friends-profile-presence.launcher { color: var(--presence-launcher-text); }
+.friends-profile-presence.launcher .friends-profile-dot { background: var(--presence-launcher); }
+.friends-profile-presence.launcher.dnd .friends-profile-dot { background: var(--danger); }
+.friends-chat-status.launcher.dnd { color: #fca5a5; }

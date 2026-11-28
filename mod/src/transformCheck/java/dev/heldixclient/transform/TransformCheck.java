@@ -93,6 +93,7 @@ public final class TransformCheck {
 		check(refused && Arrays.equals(before, write(changed, loader)), "umgebaute Minecraft-Klasse: Patch abgelehnt, Klasse unverändert");
 
 		worldShareChecks(out, loader);
+		serverLinkChecks(out, loader);
 		mathChecks();
 
 		System.out.println(failures == 0 ? "ALLE PRUEFUNGEN BESTANDEN" : failures + " PRUEFUNG(EN) FEHLGESCHLAGEN");
@@ -136,6 +137,34 @@ public final class TransformCheck {
 					MethodNode place = result.methods.stream().filter(m -> m.name.equals("placeNewPlayer")).findFirst().orElseThrow();
 					check(calls(place, hooks, "playerJoined") == 1, "placeNewPlayer ruft den Hook am Ende genau einmal auf");
 				}
+			}
+		}
+	}
+
+	/** Kanal heldixclient:server (ServerLinkPatches): DiscardedPayload.codec und ClientPacketListener.handleCustomPayload */
+	private static void serverLinkChecks(Path out, ClassLoader loader) throws Exception {
+		ServerLinkPatches patches = new ServerLinkPatches();
+		check(patches.targets().size() == 2, "Server-Kanal: zwei Ziel-Klassen: " + patches.targets());
+		String hooks = "dev/heldixclient/transform/ServerLinkHooks";
+		for (String target : patches.targets()) {
+			ClassNode node = read(loader, target);
+			patches.transform(target, node);
+			byte[] patched = write(node, loader);
+			StringWriter errors = new StringWriter();
+			CheckClassAdapter.verify(new ClassReader(patched), loader, false, new PrintWriter(errors));
+			Path file = out.resolve(target + ".class");
+			Files.createDirectories(file.getParent());
+			Files.write(file, patched);
+			check(errors.toString().isBlank(), target + " Verifier: " + (errors.toString().isBlank() ? "ok" : "\n" + errors));
+			ClassNode result = new ClassNode();
+			new ClassReader(patched).accept(result, 0);
+			if (target.equals(ServerLinkPatches.DISCARDED)) {
+				MethodNode codec = result.methods.stream().filter(m -> m.name.equals("codec") && m.desc.startsWith("(Lnet/minecraft/resources/Identifier;I)")).findFirst().orElseThrow();
+				check(calls(codec, hooks, "codec") == 1, "DiscardedPayload.codec fragt zuerst den Hook (eigener Codec für heldixclient:server)");
+			} else {
+				MethodNode handle = result.methods.stream().filter(m -> m.name.equals("handleCustomPayload")
+						&& m.desc.equals("(Lnet/minecraft/network/protocol/common/custom/CustomPacketPayload;)V")).findFirst().orElseThrow();
+				check(calls(handle, hooks, "payload") == 1, "ClientPacketListener.handleCustomPayload gibt Nachrichten des Kanals an den Hook");
 			}
 		}
 	}

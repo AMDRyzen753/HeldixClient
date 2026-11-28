@@ -495,7 +495,7 @@ public class ShareWorldScreen extends ShellScreen {
 	private void buildInvite() {
 		int y = contentY;
 		List<Social.Friend> friends = new ArrayList<>(Social.friends());
-		friends.sort((a, b) -> a.online() != b.online() ? (a.online() ? -1 : 1) : a.name().compareToIgnoreCase(b.name()));
+		friends.sort((a, b) -> a.presenceRank() != b.presenceRank() ? Integer.compare(a.presenceRank(), b.presenceRank()) : a.name().compareToIgnoreCase(b.name()));
 		if (friends.isEmpty()) {
 			paragraph(y + 10, Social.online() ? "Noch keine Freunde. Füge zuerst Freunde hinzu (Profil → Freunde)." : "Nicht mit dem Heldix-Dienst verbunden.", Ui.MUTED);
 		}
@@ -507,7 +507,7 @@ public class ShareWorldScreen extends ShellScreen {
 		for (int i = 0; i < rowsShown; i++) {
 			Social.Friend friend = friends.get(scroll + i);
 			boolean member = WorldShare.members().stream().anyMatch(m -> friend.uuid().equals(m.uuid()) || m.name().equalsIgnoreCase(friend.name()));
-			String label = friend.name() + (member ? "  ·  schon eingetragen" : friend.online() ? "  ·  online" : "");
+			String label = friend.name() + (member ? "  ·  schon eingetragen" : friend.online() ? "  ·  online" : friend.inLauncher() ? "  ·  im Launcher" : "");
 			addRenderableWidget(new ToggleChip(contentX, y, contentW, ROW - 2, label, "user", () -> selected.contains(friend.uuid()), on -> {
 				if (on) selected.add(friend.uuid());
 				else selected.remove(friend.uuid());

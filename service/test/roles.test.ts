@@ -32,8 +32,10 @@ const EXPECTED: Record<TeamRole, string[]> = {
     // ab 1.13.0: Voice-Moderation (Admin, Moderator, Supporter) und Voice-Einstellungen (nur Admin)
     'voice:moderate',
     'voice:admin',
+    // ab 1.14.0: Partner-Server (Admin und Entwickler)
+    'partners:manage',
   ],
-  'developer-team': ['updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'players', 'audit', 'team.view', 'hosting:manage'],
+  'developer-team': ['updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'players', 'audit', 'team.view', 'hosting:manage', 'partners:manage'],
   moderator: ['addon-reports', 'news', 'moderation', 'players', 'support', 'audit', 'team.view', 'discover:moderate', 'voice:moderate'],
   supporter: ['players', 'support', 'team.view', 'discover:moderate', 'voice:moderate'],
   designer: ['cosmetics', 'team.view'],
@@ -296,7 +298,7 @@ test('Schema 10 → 11: Rollen bleiben, neue Einstellungen mit Standardwerten, z
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 13);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 14);
     // Unbekannte Rolle (z. B. aus einer neueren Version) gilt als Tester
     check.exec(`UPDATE team SET role = 'kaiser' WHERE uuid = '${anna}'`);
     check.close();

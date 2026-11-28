@@ -256,10 +256,13 @@ public final class Hooks {
 	}
 
 	public static boolean sprintKey(net.minecraft.client.KeyMapping key) {
+		// Regel „togglesprint“ des Servers (Plugin „HeldixClient Server“): Tasten wie bei Minecraft
+		if (!dev.heldixclient.serverlink.ServerRules.allowed("togglesprint")) return key.isDown();
 		return ModuleManager.toggleSprint != null ? ModuleManager.toggleSprint.sprintDown(key) : key.isDown();
 	}
 
 	public static boolean sneakKey(net.minecraft.client.KeyMapping key) {
+		if (!dev.heldixclient.serverlink.ServerRules.allowed("togglesprint")) return key.isDown();
 		return ModuleManager.toggleSprint != null ? ModuleManager.toggleSprint.sneakDown(key) : key.isDown();
 	}
 

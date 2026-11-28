@@ -25,6 +25,11 @@ public class ZoomModule extends Module {
 	@Override
 	public void tick(Minecraft mc) {
 		boolean wantZoom = isEnabled() && HeldixClient.zoomKey.isDown() && mc.gui.screen() == null;
+		// Server mit dem Plugin „HeldixClient Server“ kann Zoom per Regel abschalten
+		if (wantZoom && !dev.heldixclient.serverlink.ServerRules.allowed("zoom")) {
+			dev.heldixclient.serverlink.ServerRules.notifyBlocked("zoom");
+			wantZoom = false;
+		}
 		if (wantZoom && !zooming) start(mc);
 		else if (!wantZoom && zooming) stop(mc);
 	}

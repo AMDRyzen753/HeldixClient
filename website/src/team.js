@@ -4,7 +4,8 @@
 // Zeitleiste), Sperren, Neuigkeiten, Updates, Addons (team-addons.js), Cosmetics (team-cosmetics.js), Team & Rollen
 // (Rollen-Verwaltung, Community-Abzeichen, Rechte-Übersicht), Protokoll, Mein Teamprofil. Listen mit Suche, Filtern,
 // Sortierung, Seiten und Sammelaktionen: team-tabelle.js. Ab Dienst 1.13.0 dazu „Entdecken“, „Dauerhafte Welten“ und
-// „Heldix+“ (team-welten.js) und in den Spieler-Details die Freischaltungen (Recht hosting:grant).
+// „Heldix+“ (team-welten.js) und in den Spieler-Details die Freischaltungen (Recht hosting:grant). Ab Dienst 1.14.0
+// „Partner“ (team-partner.js, Recht partners:manage) und Meldungen zu geteilten Setups und öffentlichen Profilen.
 // Startseite ist die Übersicht (team-overview.js); dazu Schnellsuche (Strg+K, team-search.js) und Aktivität mit Glocke
 // (team-activity.js). Übersicht und Glocke nutzen dieselben Daten wie das Nachfragen alle 30 Sekunden (live).
 // Zugang: Cookie-Sitzung + Team-Rolle + Zwei-Faktor-Anmeldung (TOTP), in dieser Sitzung bestätigt (12 Stunden).
@@ -62,6 +63,8 @@ import { attachmentList, normalizeAttachments } from './support-attachments.js';
 import { COMMUNITY_BADGES, PERMISSIONS, ROLES, ROLE_PERMISSIONS, allows, badgeIcon, badgeLabel, permissionsOf, roleIcon, roleLabel } from './rollen.js';
 import { createListTools } from './team-tabelle.js';
 import { initTeamWorlds } from './team-welten.js';
+import { initTeamPartner } from './team-partner.js';
+import { loadPartners } from './partner-common.js';
 import { initTeamVoice } from './team-voice.js';
 
 // Spielerbilder im Team-Bereich: Minecraft-Köpfe über die Cookie-Sitzung (das bestätigte Team darf alle).
@@ -120,6 +123,7 @@ let quickSearch = null;
 let cosmeticsUi = null;
 let teamWorlds = null;
 let teamVoice = null;
+let teamPartner = null;
 
 /**
  * Was gerade offen ist – aus dem Nachfragen (Zähler) und den Listen der Bereiche, ohne eigene Anfragen. Nutzen
@@ -370,7 +374,7 @@ function showApp() {
 
 /** Zähler (Meldungen, Support, Einreichungen, Addon-Meldungen) neu laden – dieselben Anfragen wie das Nachfragen. */
 function refreshLive() {
-  return Promise.all([can('moderation') ? refreshReportCount() : null, can('support') ? refreshSupportCount() : null, can(['addons', 'addon-reports']) ? teamAddonsUi.refreshCounts() : null]);
+  return Promise.all([can('moderation') ? refreshReportCount() : null, can('support') ? refreshSupportCount() : null, can(['addons', 'addon-reports']) ? teamAddonsUi.refreshCounts() : null, can('partners:manage') && shell.current() !== 'partner' ? teamPartner.refreshCount() : null]);
 }
 
 /** Werte aus der Adresse (#reiter=…&anfrage=12) als Zahl bzw. Text. */
@@ -418,6 +422,7 @@ function onTab(name, { params = null } = {}) {
     voice: () => teamVoice.show(params),
     hosting: () => teamWorlds.showHosting(),
     plus: () => teamWorlds.showPlus(),
+    partner: () => teamPartner.show(params),
     team: loadMembers,
     protokoll: loadAudit,
     support: async () => {
@@ -579,6 +584,8 @@ function reportCard(report, select = null) {
       h('h2', { class: 'report-id', id: `meldung-${report.id}-titel`, text: `Meldung #${report.id}` }),
       chip(done ? 'Erledigt' : 'Offen', done ? 'success' : 'warning'),
       report.kind === 'voice' ? chip('Voice', 'accent') : null,
+      report.kind === 'setup' ? chip('Setup', 'accent') : null,
+      isProfileReport(report) ? chip('Öffentliches Profil', 'accent') : null,
       chip(report.kind === 'voice' ? report.reasonLabel ?? report.reason : reasonLabel(report.reason)),
       h('span', { class: 'report-time' }, timeEl(report.at, formatDateTime(report.at))),
     ),
@@ -594,6 +601,8 @@ function reportCard(report, select = null) {
     report.note ? h('blockquote', { class: 'quote' }, h('span', { class: 'quote-label', text: 'Hinweis: ' }), report.note) : h('p', { class: 'muted small', text: 'Kein Hinweis angegeben.' }),
     report.kind === 'voice'
       ? h('p', { class: 'muted small' }, 'Voice-Meldung: Kontext, Lautstärke-Verlauf und Aufnahme stehen im Bereich Voice. ', can('voice:moderate') ? h('button', { type: 'button', class: 'link-button', onClick: () => jump('voice', { meldung: report.id }) }, 'Im Bereich Voice öffnen') : null)
+      : report.kind === 'setup' || isProfileReport(report)
+      ? targetNote(report)
       : messages.length
       ? h(
           'details',
@@ -623,8 +632,63 @@ function reportCard(report, select = null) {
         ? null
         : h('button', { type: 'button', class: 'button tiny ghost danger-text', onClick: () => banFromReport(report) }, icon('ban'), `${reported.name ?? 'Spieler'} sperren …`),
       reported.uuid ? h('button', { type: 'button', class: 'button tiny ghost', onClick: () => openPlayer(reported.uuid) }, icon('user'), 'Spieler ansehen') : null,
+      report.kind === 'setup' && report.setup?.code && can('moderation') && !report.setupRevoked && report.setup?.revoked !== true ? h('button', { type: 'button', class: 'button tiny ghost danger-text', dataset: { aktion: 'setup-zurueckziehen' }, onClick: () => revokeSetup(report) }, icon('close'), 'Setup zurückziehen') : null,
+      isProfileReport(report) && reported.uuid && can('moderation') ? h('button', { type: 'button', class: 'button tiny ghost', dataset: { aktion: 'profil-ausblenden' }, onClick: (event) => hideProfile(event.currentTarget, reported, report) }, icon('eye-off'), report.profileHidden === true ? 'Profil wieder zeigen' : 'Profil ausblenden') : null,
     ),
   );
+}
+
+/** Meldung zu einem öffentlichen Profil (Dienst 1.14.0: kind profile bzw. public-profile). */
+const isProfileReport = (report) => report.kind === 'profile' || report.kind === 'public-profile';
+
+/** Was gemeldet wurde: geteiltes Setup (Code, Name) oder öffentliches Profil – mit Link zur öffentlichen Seite. */
+function targetNote(report) {
+  if (report.kind === 'setup') {
+    const setup = report.setup ?? report.target ?? {};
+    const codeOf = (value) => (typeof value === 'string' && /^[a-hjkmnp-z2-9]{10}$/.test(value) ? value : null);
+    const code = codeOf(setup.code) ?? codeOf(report.code);
+    const name = typeof setup.name === 'string' && setup.name ? setup.name : null;
+    return h('p', { class: 'muted small report-target' }, name ? `Gemeldet ist das geteilte Setup „${name}“${code ? ` (Code ${code})` : ''}. ` : `Gemeldet ist ein geteiltes Setup${code ? ` (Code ${code})` : ''}. `, code ? h('a', { href: `/setup#${code}`, target: '_blank', rel: 'noopener' }, 'Setup ansehen') : null);
+  }
+  const name = report.profile?.name ?? report.reported?.name;
+  const bio = typeof report.profile?.bio === 'string' && report.profile.bio ? report.profile.bio : null;
+  return [
+    h('p', { class: 'muted small report-target' }, 'Gemeldet ist das öffentliche Profil (Bio, Abzeichen, Welten). ', name ? h('a', { href: `/spieler/${encodeURIComponent(name)}`, target: '_blank', rel: 'noopener' }, 'Profil ansehen') : null),
+    bio ? h('blockquote', { class: 'quote report-bio' }, h('span', { class: 'quote-label', text: 'Bio: ' }), bio) : null,
+  ];
+}
+
+/** Gemeldetes Setup zurückziehen (DELETE /v1/team/setups/<code>, Recht moderation): der Link gilt danach nicht mehr. */
+async function revokeSetup(report) {
+  const code = report.setup?.code;
+  if (typeof code !== 'string' || !/^[a-hjkmnp-z2-9]{10}$/.test(code)) return;
+  const ok = await confirmAction({ title: `Setup ${report.setup?.name ? `„${report.setup.name}“` : code} zurückziehen?`, text: 'Der Link gilt danach nicht mehr – wer ihn öffnet, sieht „gilt nicht mehr“. Schon angelegte Instanzen bleiben. Die Meldung erledigst du danach wie gewohnt.', confirmLabel: 'Zurückziehen', danger: true, onConfirm: () => teamCall('DELETE', `/v1/team/setups/${code}`) });
+  if (!ok) return;
+  report.setupRevoked = true;
+  toast('Das Setup ist zurückgezogen.', 'success');
+  renderReports();
+}
+
+/** Öffentliches Profil ausblenden oder wieder zeigen (PUT /v1/team/public-profiles/<uuid> { hidden }). */
+async function hideProfile(button, player, report) {
+  const hidden = report.profileHidden !== true;
+  const run = async () => {
+    await teamCall('PUT', `/v1/team/public-profiles/${player.uuid}`, { hidden });
+    report.profileHidden = hidden;
+  };
+  if (hidden) {
+    const ok = await confirmAction({ title: `Profil von ${player.name ?? 'diesem Spieler'} ausblenden?`, text: 'Die Profilseite ist danach für andere nicht mehr zu sehen; der Spieler sieht im Konto den Hinweis „ausgeblendet“. Wieder zeigen geht jederzeit.', confirmLabel: 'Ausblenden', danger: true, onConfirm: run });
+    if (!ok) return;
+  } else {
+    try {
+      await busy(button, run);
+    } catch (error) {
+      showError(error);
+      return;
+    }
+  }
+  toast(hidden ? 'Das Profil ist ausgeblendet.' : 'Das Profil ist wieder zu sehen.', 'success');
+  renderReports();
 }
 
 async function markDone(button, report) {
@@ -3245,9 +3309,11 @@ function init() {
   });
   overview = initTeamOverview({ shell, teamCall, can, getMe: () => state.me, getLive: () => live, refreshLive, actionLabel });
   activity = initTeamActivity({ shell });
-  cosmeticsUi = initTeamCosmetics({ teamCall, onChange: () => quickSearch?.invalidate() });
+  // Partner für den Zugang „Partner“: mit partners:manage aus dem Team-Bereich (auch pausierte), sonst die aktiven
+  cosmeticsUi = initTeamCosmetics({ teamCall, onChange: () => quickSearch?.invalidate(), getPartners: () => (can('partners:manage') ? teamPartner.list() : loadPartners()) });
   teamWorlds = initTeamWorlds({ teamCall, can, shell, openPlayer: (uuid) => jump('spieler', { spieler: uuid }) });
   teamVoice = initTeamVoice({ teamCall, can, shell, openPlayer: (uuid) => jump('spieler', { spieler: uuid }) });
+  teamPartner = initTeamPartner({ teamCall, shell, openPlayer: (uuid) => jump('spieler', { spieler: uuid }) });
   quickSearch = initTeamSearch({
     shell,
     teamCall,

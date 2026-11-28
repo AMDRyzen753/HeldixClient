@@ -585,7 +585,8 @@ async function friends2AgainstService(base: string, make: MakeClient, tag: strin
     await rejects('Status zu lang (geht nicht raus)', () => q.setStatus({ statusText: 'x'.repeat(41) }), /40 Zeichen/);
     await waitUntil('Freund sieht den Status in Echtzeit', () => p.current.friends.find((f) => f.uuid === Q.uuid)?.statusText === 'Baue eine Burg');
     let qf = p.current.friends.find((f) => f.uuid === Q.uuid);
-    check('Status auch offline sichtbar, „Nicht stören“ nur online', qf?.statusText === 'Baue eine Burg' && qf.dnd === false && !qf.online, qf);
+    // ab 0.14.1 (Dienst 1.14.0): Der Freund hat den Launcher offen (Verbindung client=launcher) – „Im Launcher“, dort gilt „Nicht stören“ schon
+    check('Status außerhalb des Spiels sichtbar; im Launcher gilt „Nicht stören“', qf?.statusText === 'Baue eine Burg' && qf.launcher === true && qf.dnd === true && !qf.online, qf);
     const onlineBefore = (notices.get('konto2-p') ?? []).filter((n) => n.kind === 'online').length;
     const gameQ = await gameSocket(base, Q);
     games.push(gameQ.socket);
@@ -598,7 +599,8 @@ async function friends2AgainstService(base: string, make: MakeClient, tag: strin
     gameQ.socket.close();
     await waitUntil('Freund verlässt das Spiel', () => p.current.friends.find((f) => f.uuid === Q.uuid)?.online === false);
     qf = p.current.friends.find((f) => f.uuid === Q.uuid);
-    check('zuletzt online: gerundet gesetzt (höchstens 5 Minuten zurück)', typeof qf?.lastOnline === 'number' && qf.lastOnline <= Date.now() && qf.lastOnline > Date.now() - 6 * 60_000, qf);
+    // „zuletzt online“ beginnt erst, wenn auch der letzte Launcher zu ist (Dienst 1.14.0, im Dienst-Test geprüft)
+    check('Spiel verlassen, Launcher noch offen: „Im Launcher“, noch kein „zuletzt online“', qf?.online === false && qf.launcher === true && qf.lastOnline === null, qf);
     await q.setPrivacy({ showLastOnline: false });
     await waitUntil('„Zuletzt online zeigen“ aus', () => p.current.friends.find((f) => f.uuid === Q.uuid)?.lastOnline === null);
     await q.setPrivacy({ showLastOnline: true });

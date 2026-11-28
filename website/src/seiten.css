@@ -1156,6 +1156,80 @@
   border-color: rgba(251, 191, 36, 0.35);
   background: var(--reward-soft);
 }
+/* Server-Plugin zum Herunterladen (Baustein SERVER_PLUGIN_HTML aus build.mjs: /partner und /entwickler/server-plugin) */
+.plugin-download {
+  --card-pad: var(--sp-4);
+  justify-self: stretch;
+  gap: var(--sp-3);
+  max-width: 680px;
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+.plugin-download p {
+  margin: 0;
+}
+.plugin-download__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.plugin-download__head > div {
+  min-width: 0;
+}
+.plugin-download__title {
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+.plugin-download__meta,
+.plugin-download__where {
+  color: var(--text-2);
+}
+.plugin-download__button {
+  justify-self: start;
+}
+.plugin-download code {
+  padding: 1px 6px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+  font: 0.92em/1.5 var(--mono);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.plugin-download__hash {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+.plugin-download__hash code {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  word-break: break-all;
+  user-select: all;
+}
+.plugin-download__where {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+.plugin-download__where .icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin-top: 3px;
+  color: var(--text-3);
+}
 .article-figure {
   margin: var(--sp-5) 0 0;
 }

@@ -96,10 +96,11 @@ public class FriendWidget extends AbstractButton {
 		int size = Math.min(18, h - 10);
 		int fx = x + 7;
 		int fy = y + (h - size) / 2;
-		face(g, now.uuid(), now.name(), fx, fy, size, alpha * (now.online() ? 1f : 0.45f));
-		if (now.online()) {
+		face(g, now.uuid(), now.name(), fx, fy, size, alpha * (now.online() ? 1f : now.inLauncher() ? 0.75f : 0.45f));
+		// Punkt: im Spiel grün, im Launcher Heldix-Türkis, „Nicht stören“ gelb
+		if (now.reachable()) {
 			Ui.circle(g, fx + size, fy + size, 3.5f, Ui.withAlpha(0xFF0F1420, alpha));
-			Ui.circle(g, fx + size, fy + size, 2.5f, Ui.withAlpha(Ui.SUCCESS, alpha));
+			Ui.circle(g, fx + size, fy + size, 2.5f, Ui.withAlpha(now.presenceColor(), alpha));
 		}
 		int textX = fx + size + 9;
 		int textW = w - (textX - x) - 8;
@@ -107,9 +108,9 @@ public class FriendWidget extends AbstractButton {
 		String name = Ui.ellipsize(now.shownName(), textW - (now.favorite() ? 12 : 0), Ui.Font.LABEL);
 		Ui.text(g, name, textX, y + h / 2 - 10, Ui.withAlpha(Ui.TEXT, alpha), Ui.Font.LABEL);
 		if (now.favorite()) Ui.icon(g, "star", textX + Ui.width(name, Ui.Font.LABEL) + 4, y + h / 2 - 10, 8, Ui.withAlpha(0xFFFACC15, alpha));
-		String line = now.statusText() != null && now.online() ? now.activity() + " · „" + now.statusText() + "“" : now.activity();
+		String line = now.statusText() != null && now.reachable() ? now.activity() + " · „" + now.statusText() + "“" : now.activity();
 		Ui.text(g, Ui.ellipsize(line, textW, Ui.Font.SMALL), textX, y + h / 2 + 2,
-				Ui.withAlpha(now.online() ? now.dnd() ? Ui.WARNING : Ui.SUCCESS : Ui.FAINT, alpha), Ui.Font.SMALL);
+				Ui.withAlpha(now.presenceColor(), alpha), Ui.Font.SMALL);
 	}
 
 	@Override

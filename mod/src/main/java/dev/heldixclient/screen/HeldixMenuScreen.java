@@ -1610,9 +1610,9 @@ public class HeldixMenuScreen extends ShellScreen {
 		if (shown == null) return false;
 		Social.Friend friend = friendOf(shown);
 		FriendWidget.face(g, shown, friend != null ? friend.name() : openChatName, x, y, size, fade);
-		if (friend != null && friend.online()) {
+		if (friend != null && friend.reachable()) {
 			Ui.circle(g, x + size, y + size, 4, Ui.withAlpha(0xFF0F1420, fade));
-			Ui.circle(g, x + size, y + size, 3, Ui.withAlpha(Ui.SUCCESS, fade));
+			Ui.circle(g, x + size, y + size, 3, Ui.withAlpha(friend.presenceColor(), fade));
 		}
 		return true;
 	}
@@ -2127,10 +2127,10 @@ public class HeldixMenuScreen extends ShellScreen {
 				new SettingRow(new Setting.Key("Wegpunkt setzen", null, HeldixClient.waypointKey))));
 	}
 
-	/** Freunde, online zuerst */
+	/** Freunde: im Spiel zuerst, dann im Launcher, dann offline */
 	private static List<Social.Friend> sortedFriends() {
 		List<Social.Friend> friends = new ArrayList<>(Social.friends());
-		friends.sort(java.util.Comparator.comparing((Social.Friend f) -> !f.online()));
+		friends.sort(java.util.Comparator.comparingInt(Social.Friend::presenceRank));
 		return friends;
 	}
 
@@ -2188,7 +2188,9 @@ public class HeldixMenuScreen extends ShellScreen {
 		List<Social.Friend> friends = Social.friends();
 		List<Social.Friend> favorites = friends.stream().filter(Social.Friend::favorite).toList();
 		List<Social.Friend> online = friends.stream().filter(f -> f.online() && !f.favorite()).toList();
-		List<Social.Friend> offline = friends.stream().filter(f -> !f.online() && !f.favorite()).toList();
+		// ab Dienst 1.14.0: nicht im Spiel, aber im Launcher (bekommt Nachrichten sofort) – zwischen „Online“ und „Offline“
+		List<Social.Friend> launcher = friends.stream().filter(f -> f.inLauncher() && !f.favorite()).toList();
+		List<Social.Friend> offline = friends.stream().filter(f -> !f.reachable() && !f.favorite()).toList();
 		if (!favorites.isEmpty()) {
 			list.add(new Section("Favoriten", Integer.toString(favorites.size())));
 			list.add(new Group(favorites.stream().<Row>map(FriendRow::new).toList()));
@@ -2196,6 +2198,10 @@ public class HeldixMenuScreen extends ShellScreen {
 		if (!online.isEmpty()) {
 			list.add(new Section("Online", Integer.toString(online.size())));
 			list.add(new Group(online.stream().<Row>map(FriendRow::new).toList()));
+		}
+		if (!launcher.isEmpty()) {
+			list.add(new Section("Im Launcher", Integer.toString(launcher.size())));
+			list.add(new Group(launcher.stream().<Row>map(FriendRow::new).toList()));
 		}
 		if (!offline.isEmpty()) {
 			list.add(new Section("Offline", Integer.toString(offline.size())));
@@ -2329,7 +2335,7 @@ public class HeldixMenuScreen extends ShellScreen {
 		list.add(new ProfileHero(friend));
 		List<Row> about = new ArrayList<>();
 		if (friend.since() > 0) about.add(new Info("Befreundet seit", date(friend.since())));
-		about.add(new Info(friend.online() ? "Gerade" : "Zuletzt online", friend.online() ? friend.activity()
+		about.add(new Info(friend.reachable() ? "Gerade" : "Zuletzt online", friend.reachable() ? friend.activity()
 				: friend.lastOnline() > 0 ? Social.ago(friend.lastOnline()) : "nicht sichtbar"));
 		Badge.Role role = friend.badge() != null ? friend.badge() : Badge.Role.PLAYER;
 		about.add(new Info("Abzeichen", role.label() + (role.group() != Badge.Group.PLAYER ? " · " + role.group().label() : "")));
@@ -2911,6 +2917,10 @@ public class HeldixMenuScreen extends ShellScreen {
 						() -> config.hudHideChat, v -> config.hudHideChat = v)),
 				new SettingRow(configToggle("Im Chat anklickbar", "Bei offenem Chat zeigen Elemente Tooltips und reagieren auf Klicks",
 						() -> config.hudClickable, v -> config.hudClickable = v)),
+				new SettingRow(configToggle("Server-HUD", "Anzeigen, die Server mit dem Plugin „HeldixClient Server“ ins HUD legen (Text, Fortschritt, Listen)",
+						() -> config.serverHud, v -> config.serverHud = v)),
+				new SettingRow(configToggle("Server-Einblendungen", "Kurze Hinweise von Servern mit dem Plugin „HeldixClient Server“ oben rechts",
+						() -> config.serverToasts, v -> config.serverToasts = v)),
 				new SettingRow(new Setting.Action("Positionen", "Alle Elemente an ihre Standardstelle", "Zurücksetzen", () -> {
 					ModuleManager.hud().forEach(HudModule::resetPosition);
 					HeldixConfig.save();
@@ -3960,8 +3970,11 @@ public class HeldixMenuScreen extends ShellScreen {
 				// Name, Beschreibung, Schalter
 				int textW = cw - 20 - 24;
 				Ui.text(g, Ui.ellipsize(module.name(), textW, Ui.Font.LABEL), cx + 10, cy + 42, Ui.TEXT, Ui.Font.LABEL);
-				String description = module.source() != null ? module.source() : module.description();
-				Ui.text(g, Ui.ellipsize(description, cw - 20, Ui.Font.SMALL), cx + 10, cy + 54, module.source() != null ? 0xFF6EE7B7 : Ui.MUTED, Ui.Font.SMALL);
+				// vom Server gesperrt (Plugin „HeldixClient Server“): statt der Beschreibung der Hinweis
+				boolean blocked = module.blockedByServer();
+				String description = blocked ? dev.heldixclient.serverlink.ServerRules.BLOCKED_TEXT : module.source() != null ? module.source() : module.description();
+				int descriptionColor = blocked ? Ui.WARNING : module.source() != null ? 0xFF6EE7B7 : Ui.MUTED;
+				Ui.text(g, Ui.ellipsize(description, cw - 20, Ui.Font.SMALL), cx + 10, cy + 54, descriptionColor, Ui.Font.SMALL);
 				Ui.toggle(g, cx + cw - 28, cy + 41, t);
 			}
 		}
@@ -4781,7 +4794,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			}
 			int nameEnd = friendName(g, friend, x + 38, y + 8, textW);
 			if (Party.contains(friend.uuid()) && nameEnd + 34 < x + 38 + textW) tag(g, "Party", nameEnd + 5, y + 7, Ui.ACCENT_SOFT, Ui.ACCENT_TEXT);
-			int statusColor = friend.online() ? friend.dnd() ? Ui.WARNING : Ui.SUCCESS : Ui.FAINT;
+			int statusColor = friend.presenceColor();
 			String line = friend.statusText() != null ? friend.activity() + " · „" + Messages.clean(friend.statusText()) + "“" : friend.activity();
 			Ui.text(g, Ui.ellipsize(line, textW, Ui.Font.SMALL), x + 38, y + 21, statusColor, Ui.Font.SMALL);
 			boolean overRemove = Ui.inside(mouseX, mouseY, x + w - 30, y, 30, 36);
@@ -5005,7 +5018,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			int shown = Math.min(5, party.members().size());
 			for (int i = 0; i < shown; i++) {
 				Party.Member member = party.members().get(i);
-				FriendWidget.face(g, member.uuid(), member.name(), fx - (shown - 1 - i) * 13, y + 11, 12, member.online() ? 1f : 0.5f);
+				FriendWidget.face(g, member.uuid(), member.name(), fx - (shown - 1 - i) * 13, y + 11, 12, member.online() ? 1f : member.inLauncher() ? 0.75f : 0.5f);
 			}
 			Party.Member leader = party.leaderMember();
 			int textW = w - 40 - shown * 13 - 30;
@@ -5070,10 +5083,10 @@ public class HeldixMenuScreen extends ShellScreen {
 		@Override
 		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
 			if (Ui.inside(mouseX, mouseY, x, y, w, 36)) Ui.rect(g, x + 3, y + 2, w - 6, 32, 7, Ui.SURFACE);
-			FriendWidget.face(g, member.uuid(), member.name(), x + 10, y + 8, 20, member.online() ? 1f : 0.45f);
-			if (member.online() && !member.away()) {
+			FriendWidget.face(g, member.uuid(), member.name(), x + 10, y + 8, 20, member.online() ? 1f : member.inLauncher() ? 0.75f : 0.45f);
+			if ((member.online() && !member.away()) || member.inLauncher()) {
 				Ui.circle(g, x + 30, y + 28, 4, 0xFF161C28);
-				Ui.circle(g, x + 30, y + 28, 3, Ui.SUCCESS);
+				Ui.circle(g, x + 30, y + 28, 3, member.presenceColor());
 			}
 			List<Object[]> buttons = buttons(x, w);
 			int left = buttons.isEmpty() ? x + w - 10 : (int) buttons.getFirst()[1];
@@ -5083,7 +5096,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			name = Ui.ellipsize(name, textW - (member.leader() ? 40 : 0), Ui.Font.LABEL);
 			Ui.text(g, name, x + 40, y + 8, Ui.TEXT, Ui.Font.LABEL);
 			if (member.leader()) tag(g, "Leiter", x + 44 + Ui.width(name, Ui.Font.LABEL), y + 7, 0x33FACC15, 0xFFFACC15);
-			Ui.text(g, Ui.ellipsize(member.where(), textW, Ui.Font.SMALL), x + 40, y + 21, member.away() ? Ui.WARNING : Ui.MUTED, Ui.Font.SMALL);
+			Ui.text(g, Ui.ellipsize(member.where(), textW, Ui.Font.SMALL), x + 40, y + 21, member.away() ? Ui.WARNING : member.inLauncher() ? Ui.LAUNCHER : Ui.MUTED, Ui.Font.SMALL);
 			for (Object[] b : buttons) {
 				int bx = (int) b[1];
 				int bw = (int) b[2];
@@ -5186,7 +5199,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			int pw = pillWidth();
 			int textW = w - 40 - pw - 16;
 			friendName(g, friend, x + 38, y + 8, textW);
-			Ui.text(g, Ui.ellipsize(friend.activity(), textW, Ui.Font.SMALL), x + 38, y + 20, friend.online() ? Ui.SUCCESS : Ui.FAINT, Ui.Font.SMALL);
+			Ui.text(g, Ui.ellipsize(friend.activity(), textW, Ui.Font.SMALL), x + 38, y + 20, friend.presenceColor(), Ui.Font.SMALL);
 			int px = x + w - 10 - pw;
 			boolean can = Party.canInvite(friend.uuid());
 			boolean over = can && Ui.inside(mouseX, mouseY, px, y + 9, pw, 16);
@@ -5342,10 +5355,10 @@ public class HeldixMenuScreen extends ShellScreen {
 		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
 			Ui.rect(g, x, y, w, 86, 12, Ui.SURFACE);
 			Ui.outline(g, x, y, w, 86, 12, Ui.LINE);
-			FriendWidget.face(g, friend.uuid(), friend.name(), x + 12, y + 10, 36, friend.online() ? 1f : 0.6f);
-			if (friend.online()) {
+			FriendWidget.face(g, friend.uuid(), friend.name(), x + 12, y + 10, 36, friend.online() ? 1f : friend.inLauncher() ? 0.8f : 0.6f);
+			if (friend.reachable()) {
 				Ui.circle(g, x + 48, y + 46, 5, 0xFF161C28);
-				Ui.circle(g, x + 48, y + 46, 4, friend.dnd() ? Ui.WARNING : Ui.SUCCESS);
+				Ui.circle(g, x + 48, y + 46, 4, friend.presenceColor());
 			}
 			int tx = x + 58;
 			int textW = w - 70;
@@ -5355,7 +5368,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			g.text(font, Badge.symbol(role), nx, y + 12, 0xFFFFFFFF, false);
 			if (Ui.inside(mouseX, mouseY, nx, y + 10, 10, 11)) Ui.requestTooltip(role.label() + " · " + role.group().label(), mouseX, mouseY);
 			String second = (friend.nickname() != null ? friend.name() + " · " : "") + friend.activity();
-			Ui.text(g, Ui.ellipsize(second, textW, Ui.Font.SMALL), tx, y + 25, friend.online() ? friend.dnd() ? Ui.WARNING : Ui.SUCCESS : Ui.FAINT, Ui.Font.SMALL);
+			Ui.text(g, Ui.ellipsize(second, textW, Ui.Font.SMALL), tx, y + 25, friend.presenceColor(), Ui.Font.SMALL);
 			if (friend.statusText() != null) {
 				Ui.text(g, Ui.ellipsize("„" + Messages.clean(friend.statusText()) + "“", textW, Ui.Font.BODY), tx, y + 37, Ui.MUTED, Ui.Font.BODY);
 			}
@@ -5900,7 +5913,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			avatar(g, friend, x + 10, y + 7);
 			int textW = w - 46;
 			friendName(g, friend, x + 38, y + 8, textW);
-			Ui.text(g, Ui.ellipsize(friend.activity(), textW, Ui.Font.SMALL), x + 38, y + 20, friend.online() ? Ui.SUCCESS : Ui.FAINT, Ui.Font.SMALL);
+			Ui.text(g, Ui.ellipsize(friend.activity(), textW, Ui.Font.SMALL), x + 38, y + 20, friend.presenceColor(), Ui.Font.SMALL);
 		}
 
 		@Override
@@ -5937,9 +5950,9 @@ public class HeldixMenuScreen extends ShellScreen {
 			if (Ui.inside(mouseX, mouseY, x, y, w, 38)) Ui.rect(g, x + 3, y + 2, w - 6, 34, 7, Ui.SURFACE);
 			Social.Friend friend = friendOf(conversation.uuid());
 			FriendWidget.face(g, conversation.uuid(), conversation.name(), x + 10, y + 9, 20, 1f);
-			if (friend != null && friend.online()) {
+			if (friend != null && friend.reachable()) {
 				Ui.circle(g, x + 30, y + 29, 4, 0xFF161C28);
-				Ui.circle(g, x + 30, y + 29, 3, Ui.SUCCESS);
+				Ui.circle(g, x + 30, y + 29, 3, friend.presenceColor());
 			}
 			String time = shortTime(conversation.last().at());
 			int timeW = Ui.width(time, Ui.Font.SMALL);
@@ -5990,7 +6003,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			int pw = Ui.width("Schreiben", Ui.Font.SMALL) + 30;
 			int textW = w - 40 - pw - 16;
 			friendName(g, friend, x + 38, y + 8, textW);
-			Ui.text(g, Ui.ellipsize(friend.activity(), textW, Ui.Font.SMALL), x + 38, y + 20, friend.online() ? Ui.SUCCESS : Ui.FAINT, Ui.Font.SMALL);
+			Ui.text(g, Ui.ellipsize(friend.activity(), textW, Ui.Font.SMALL), x + 38, y + 20, friend.presenceColor(), Ui.Font.SMALL);
 			int px = x + w - 10 - pw;
 			Ui.rect(g, px, y + 9, pw, 16, 8, hover ? Ui.SURFACE_STRONG : Ui.SURFACE_HOVER);
 			Ui.icon(g, "chat", px + 7, y + 12.5f, 9, Ui.ACCENT_TEXT);
@@ -6749,12 +6762,12 @@ public class HeldixMenuScreen extends ShellScreen {
 		return java.time.format.DateTimeFormatter.ofPattern("dd.MM.").format(day);
 	}
 
-	/** Kopf des Skins (20 px), offline blasser; grüner Punkt = online */
+	/** Kopf des Skins (20 px), offline blasser; Punkt: grün = im Spiel, türkis = im Launcher, gelb = „Nicht stören“ */
 	private void avatar(GuiGraphicsExtractor g, Social.Friend friend, int x, int y) {
-		FriendWidget.face(g, friend.uuid(), friend.name(), x, y + 1, 20, friend.online() ? 1f : 0.45f);
-		if (friend.online()) {
+		FriendWidget.face(g, friend.uuid(), friend.name(), x, y + 1, 20, friend.online() ? 1f : friend.inLauncher() ? 0.75f : 0.45f);
+		if (friend.reachable()) {
 			Ui.circle(g, x + 20, y + 21, 4, 0xFF161C28);
-			Ui.circle(g, x + 20, y + 21, 3, Ui.SUCCESS);
+			Ui.circle(g, x + 20, y + 21, 3, friend.presenceColor());
 		}
 	}
 
@@ -6963,10 +6976,10 @@ public class HeldixMenuScreen extends ShellScreen {
 				boolean over = Ui.inside(mouseX, mouseY, x + 4, iy, w - 8, LIST_ITEM - 2) && mouseY >= top && mouseY < top + room;
 				if (selected) Ui.rect(g, x + 4, iy, w - 8, LIST_ITEM - 2, 7, Ui.ACCENT_SOFT);
 				else if (over) Ui.rect(g, x + 4, iy, w - 8, LIST_ITEM - 2, 7, Ui.SURFACE_HOVER);
-				FriendWidget.face(g, uuid, name, x + 10, iy + 7, 16, friend != null && friend.online() ? 1f : 0.55f);
-				if (friend != null && friend.online()) {
+				FriendWidget.face(g, uuid, name, x + 10, iy + 7, 16, friend != null && friend.reachable() ? 1f : 0.55f);
+				if (friend != null && friend.reachable()) {
 					Ui.circle(g, x + 26, iy + 23, 3.5f, 0xFF161C28);
-					Ui.circle(g, x + 26, iy + 23, 2.5f, Ui.SUCCESS);
+					Ui.circle(g, x + 26, iy + 23, 2.5f, friend.presenceColor());
 				}
 				int unread = selected ? 0 : Messages.unread(uuid);
 				int textW = w - 44 - (unread > 0 ? 18 : 0);

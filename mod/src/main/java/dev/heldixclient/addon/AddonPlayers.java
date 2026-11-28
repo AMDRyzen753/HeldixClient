@@ -178,6 +178,18 @@ final class AddonPlayers {
 				return VoiceLink.isActive(owner) ? VoiceLink.groupMembers() : Set.of();
 			}
 
+			// --- API 11: Server-Gruppe (Partner-Server mit dem Plugin „HeldixClient Server“) ---
+
+			@Override
+			public String serverGroup() {
+				return VoiceLink.isActive(owner) ? VoiceLink.serverGroup() : null;
+			}
+
+			@Override
+			public String serverGroupPartner() {
+				return VoiceLink.isActive(owner) ? VoiceLink.serverGroupPartner() : "";
+			}
+
 			@Override
 			public boolean groupsAvailable() {
 				return VoiceLink.isActive(owner) && VoiceLink.groupsAvailable();

@@ -266,6 +266,25 @@ public interface VoiceChannel {
 	 */
 	boolean clipsActive();
 
+	/**
+	 * Server-Gruppe: Ein Partner-Server mit dem Plugin „HeldixClient Server“ kann Spieler in Gruppen einteilen (z. B. je
+	 * Team einer Runde). Solange du in einer Server-Gruppe bist, hörst du in der Nähe nur Spieler derselben Server-Gruppe,
+	 * und deine Gruppe ({@link #groupMembers()}) ist die Server-Gruppe – auf diesem Server, in jeder Entfernung. Deine eigene
+	 * Gruppe ({@link #setGroup}) und die Gruppe der Party sind dort so lange aus. Den Namen meldet der Heldix-Dienst über
+	 * den Sprachkanal (ab Dienst 1.14.0).
+	 *
+	 * @return Name der Server-Gruppe (a-z, 0-9, „_“, „-“, höchstens 24 Zeichen) oder null, wenn keine gilt
+	 * @since 11
+	 */
+	String serverGroup();
+
+	/**
+	 * Name des Partner-Servers, der die {@link #serverGroup() Server-Gruppe} gesetzt hat ("" ohne Server-Gruppe).
+	 *
+	 * @since 11
+	 */
+	String serverGroupPartner();
+
 	/** Moderations-Aktion für {@link #moderate}. @since 10 */
 	enum ModerationAction {
 		/** für alle stummschalten (der Dienst leitet die Stimme im Bereich nicht weiter) */

@@ -9,7 +9,7 @@
 //
 // Keine eigenen Anfragen: konto.js reicht nach jeder Änderung den aktuellen Stand herein (update(stand)).
 // Texte vom Server landen nur als Text im Dokument.
-import { avatar, emptyState, h, icon, relativeTime, rerender, shortWhen, timeEl } from './app-common.js';
+import { avatar, emptyState, h, icon, presenceClass, presenceDot, presenceOf, relativeTime, rerender, shortWhen, timeEl } from './app-common.js';
 import { sectionHref, shellIcon } from './app-shell.js';
 import { displayName, friendLine, friendsSummary, joinButton, joinCard, joinTarget, sortFriends } from './konto-sozial.js';
 
@@ -318,7 +318,8 @@ export function initOverview({ shell, onStatus, worldDomain = () => null, openCh
   function renderFriends() {
     const box = $('uebersicht-freunde');
     const friends = stand.friends?.friends ?? [];
-    const online = sortFriends(friends.filter((friend) => friend.online)).slice(0, 5);
+    // Im Spiel zuerst, dann im Launcher (Dienst ab 1.14.0) – beide sind gerade erreichbar
+    const online = sortFriends(friends.filter((friend) => presenceOf(friend) !== 'offline')).slice(0, 5);
     rerender(box, JSON.stringify([online, friends.length, stand.friends?.incoming.length, worldDomain()]), () => [
       cardHead({ iconNode: icon('friends'), tone: 'online', title: 'Freunde online', titleId: 'uebersicht-freunde-titel', sub: stand.friends ? friendsSummary(friends, stand.friends.incoming.length) : 'Wird geladen …', link: { section: 'freunde' } }),
       !stand.friends
@@ -328,17 +329,17 @@ export function initOverview({ shell, onStatus, worldDomain = () => null, openCh
               'ul',
               { class: 'rows' },
               online.map((friend) => {
-                const target = friend.server ? joinTarget({ server: friend.server, worldDomain: worldDomain() }) : null;
+                const target = friend.online && friend.server ? joinTarget({ server: friend.server, worldDomain: worldDomain() }) : null;
                 return h(
                   'li',
                   { class: 'row', dataset: { uuid: friend.uuid } },
-                  avatar(friend.name, friend.uuid, { online: true }),
-                  h('div', { class: 'row-main' }, h('div', { class: 'row-title', text: displayName(friend) }), h('div', { class: 'row-sub online', text: friendLine(friend) })),
+                  avatar(friend.name, friend.uuid, { online: presenceDot(friend) }),
+                  h('div', { class: 'row-main' }, h('div', { class: 'row-title', text: displayName(friend) }), h('div', { class: `row-sub${presenceClass(friend)}`, text: friendLine(friend) })),
                   h('div', { class: 'row-actions' }, target ? joinButton(target) : null, h('button', { type: 'button', class: 'btn btn--secondary btn--sm btn--icon', 'aria-label': `Nachricht an ${displayName(friend)}`, onClick: () => openChat(friend.uuid) }, icon('chat'))),
                 );
               }),
             )
-          : emptyState(friends.length ? 'Gerade ist keiner deiner Freunde im Spiel.' : 'Noch keine Freunde – lade welche ein!', 'friends'),
+          : emptyState(friends.length ? 'Gerade ist keiner deiner Freunde im Spiel oder im Launcher.' : 'Noch keine Freunde – lade welche ein!', 'friends'),
     ]);
   }
 

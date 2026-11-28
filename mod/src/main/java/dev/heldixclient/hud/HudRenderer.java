@@ -35,9 +35,12 @@ public final class HudRenderer {
 			// Wegpunkte unter den HUD-Elementen
 			if (ModuleManager.waypoints != null) ModuleManager.waypoints.render(g, mc);
 			for (HudModule module : ModuleManager.hudByLayer()) {
-				if (module.isEnabled()) module.extract(g, mc);
+				// auf Servern, deren Regeln das Modul sperren (z. B. Koordinaten, Minimap), bleibt es weg
+				if (module.activeHere()) module.extract(g, mc);
 			}
 			if (HudModule.takeMigrated()) HeldixConfig.save();
+			// HUD-Elemente vom Server (Plugin „HeldixClient Server“) über den eigenen
+			ServerHud.render(g, mc);
 		} else if (ModuleManager.waypoints != null) {
 			ModuleManager.waypoints.clearMarkers();
 		}

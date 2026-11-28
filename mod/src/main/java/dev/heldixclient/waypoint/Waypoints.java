@@ -150,6 +150,8 @@ public final class Waypoints {
 	/** Neuer Wegpunkt an der Position des Spielers; leerer Name = "Wegpunkt N" */
 	public static Waypoint add(Minecraft mc, String name) {
 		if (mc.player == null || mc.level == null) return null;
+		// Server mit dem Plugin „HeldixClient Server“ kann Wegpunkte per Regel abschalten (Hinweis statt Wegpunkt)
+		if (!dev.heldixclient.serverlink.ServerRules.allowedOrNotify("waypoints")) return null;
 		List<Waypoint> list = current(mc);
 		String clean = name == null ? "" : name.strip();
 		if (clean.isEmpty()) clean = "Wegpunkt " + (list.stream().filter(w -> !w.death).count() + 1);
@@ -162,7 +164,7 @@ public final class Waypoints {
 
 	/** Todespunkt setzen (ersetzt den vorigen dieser Welt) */
 	public static Waypoint death(Minecraft mc) {
-		if (mc.player == null || mc.level == null) return null;
+		if (mc.player == null || mc.level == null || !dev.heldixclient.serverlink.ServerRules.allowed("waypoints")) return null;
 		List<Waypoint> list = current(mc);
 		list.removeIf(w -> w.death);
 		Waypoint waypoint = new Waypoint(DEATH_NAME, mc.player.blockPosition(), dimension(mc), 0xFFF87171, true);

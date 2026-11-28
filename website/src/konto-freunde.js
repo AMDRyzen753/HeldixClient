@@ -18,6 +18,9 @@ import {
   icon,
   isPlayerName,
   openDialog,
+  presenceClass,
+  presenceDot,
+  presenceOf,
   reasonLabel,
   relativeTime,
   REPORT_REASONS,
@@ -79,7 +82,8 @@ export function initFriends(ctx) {
   function visibleFriends() {
     const query = local.query.trim().toLowerCase();
     let list = store.friends?.friends ?? [];
-    if (local.filter === 'online') list = list.filter((friend) => friend.online);
+    // „Online“: erreichbar – im Spiel oder im Launcher (Dienst ab 1.14.0); die im Spiel stehen zuerst
+    if (local.filter === 'online') list = list.filter((friend) => presenceOf(friend) !== 'offline');
     if (local.filter === 'favoriten') list = list.filter((friend) => friend.favorite);
     if (query) list = list.filter((friend) => friend.name.toLowerCase().includes(query) || (friend.nickname ?? '').toLowerCase().includes(query));
     return sortFriends(list);
@@ -91,7 +95,7 @@ export function initFriends(ctx) {
     return h(
       'li',
       { class: `row friend-row${friend.favorite ? ' is-favorite' : ''}`, dataset: { uuid: friend.uuid } },
-      avatar(friend.name, friend.uuid, { online: Boolean(friend.online) }),
+      avatar(friend.name, friend.uuid, { online: presenceDot(friend) }),
       h(
         'div',
         { class: 'row-main' },
@@ -102,9 +106,9 @@ export function initFriends(ctx) {
           friend.nickname ? h('span', { class: 'row-realname', text: friend.name }) : null,
           badgeMark(friend.badge),
           friend.favorite ? h('span', { class: 'fav-mark', title: 'Favorit', 'aria-label': 'Favorit' }, shellIcon('star')) : null,
-          friend.dnd && friend.online ? h('span', { class: 'chip chip--danger chip--xs', text: 'Nicht stören' }) : null,
+          friend.dnd && presenceOf(friend) !== 'offline' ? h('span', { class: 'chip chip--danger chip--xs', text: 'Nicht stören' }) : null,
         ),
-        h('div', { class: `row-sub${friend.online ? ' online' : ''}`, text: friendLine(friend, { worldName }) }),
+        h('div', { class: `row-sub${presenceClass(friend)}`, title: presenceOf(friend) === 'launcher' ? 'Im Launcher – bekommt Nachrichten sofort' : undefined, text: friendLine(friend, { worldName }) }),
         friend.statusText ? h('div', { class: 'row-status', text: `„${friend.statusText}“` }) : null,
       ),
       h(
@@ -453,14 +457,14 @@ export function initFriends(ctx) {
       h(
         'div',
         { class: 'profile-card__head' },
-        avatar(friend.name, friend.uuid, { size: 'xl', online: Boolean(friend.online) }),
+        avatar(friend.name, friend.uuid, { size: 'xl', online: presenceDot(friend) }),
         h(
           'div',
           { class: 'profile-card__who' },
           h('p', { class: 'profile-card__name' }, h('strong', { text: displayName(friend) }), badgeMark(friend.badge, 18)),
           friend.nickname ? h('p', { class: 'tiny text-3', text: `Spielername: ${friend.name}` }) : null,
           friend.badge ? h('p', { class: 'tiny text-3', text: badgeLabel(friend.badge) }) : null,
-          h('p', { class: `small ${friend.online ? 'text-online' : 'text-2'}`, text: friendLine(friend) }),
+          h('p', { class: `small ${{ game: 'text-online', launcher: 'text-launcher', offline: 'text-2' }[presenceOf(friend)]}`, text: friendLine(friend) }),
           friend.statusText ? h('p', { class: 'profile-card__status', text: `„${friend.statusText}“` }) : null,
         ),
         favorite,

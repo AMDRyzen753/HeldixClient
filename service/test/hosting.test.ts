@@ -121,7 +121,7 @@ describe('Dauerhafte Welten: Zugang und Grenzen', () => {
       const shared = await api(t.service.url, 'GET', `/v1/worlds/${world.id}`, { token: anna.token });
       assert.deepEqual([shared.body.name, shared.body.hosted, shared.body.online], ['Flachland', { state: 'sleeping' }, false]);
       // User-Agent an die Fill-API
-      assert.ok(t.apis.requests.some((r) => r.path.startsWith('/v3/projects/paper') && /^heldix-dienst\/1\.13\.0 \(heldix\.example\)$/.test(r.userAgent)));
+      assert.ok(t.apis.requests.some((r) => r.path.startsWith('/v3/projects/paper') && /^heldix-dienst\/1\.14\.0 \(heldix\.example\)$/.test(r.userAgent)));
     });
   });
 

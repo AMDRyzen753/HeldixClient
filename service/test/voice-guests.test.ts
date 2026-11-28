@@ -279,8 +279,10 @@ describe('Voice im Browser: Verbindung', () => {
         range: 48,
         maxFrame: 1024,
         protocol: 1,
-        features: ['state', 'groups', 'guests', 'moderation'],
+        // ab 1.14.0: Server-Gruppen der Partner-Server (größer als eigene Gruppen)
+        features: ['state', 'groups', 'guests', 'moderation', 'serverGroups'],
         maxGroup: 16,
+        maxServerGroup: 100,
         rules: null,
         clips: null,
       });

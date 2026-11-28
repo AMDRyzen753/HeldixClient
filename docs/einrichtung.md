@@ -44,38 +44,35 @@ Ab Heldix-Dienst 1.7.0 können sich Spieler auf der Webseite (`/konto`, `/team`)
 
 > **Dieselbe App-Registrierung wie der Launcher.** Mojang hat die Minecraft-Schnittstellen für genau diese Anwendungs-ID freigegeben (seit 26.11.2026, siehe oben). Für die Webseite deshalb **keine neue App registrieren** und nie die ID einer anderen App eintragen: Damit antworten die Minecraft-Dienste mit „Invalid app registration“, und jede Anmeldung endet mit „Die Minecraft-Dienste haben die Anmeldung abgelehnt“.
 
-Einmal im [Azure-Portal](https://portal.azure.com) (als Besitzer der App-Registrierung) und auf dem Server:
+Einmal im [Azure-Portal](https://portal.azure.com) (als Besitzer der App-Registrierung) und auf dem Server. Der Dienst nimmt dafür **App-ID und Einstellungen des Launchers**: wie der Launcher ein öffentlicher Client mit PKCE, ohne Client-Geheimnis. In Azure kommt nur eine zweite Umleitungs-URI dazu.
 
-1. **App öffnen:** **App-Registrierungen** → die vorhandene App „HeldixClient“ öffnen. Die **Anwendungs-ID (Client)** muss genau `MICROSOFT_CLIENT_ID` aus [config.ts](../launcher/src/main/config.ts) sein. Die unterstützten Kontotypen bleiben „Nur persönliche Microsoft-Konten“.
-2. **Umleitungs-URI eintragen:** **Authentifizierung** → **Plattform hinzufügen** → **Web**. Umleitungs-URI:
+1. **App öffnen:** **App-Registrierungen** → die vorhandene App „HeldixClient“ öffnen. Die **Anwendungs-ID (Client)** muss genau `MICROSOFT_CLIENT_ID` aus [config.ts](../launcher/src/main/config.ts) sein (der Installer übernimmt sie beim Bauen von dort). Die unterstützten Kontotypen bleiben „Nur persönliche Microsoft-Konten“.
+2. **Umleitungs-URI ergänzen:** **Authentifizierung** → bei der vorhandenen Plattform **Mobil- und Desktopanwendungen** (dort steht schon `https://login.microsoftonline.com/common/oauth2/nativeclient` für den Launcher – die bleibt) → **URI hinzufügen**:
 
    ```text
    https://<api-domain>/v1/web/auth/microsoft/callback
    ```
 
-   Bei HeldixClient also `https://api.heldixclient.com/v1/web/auth/microsoft/callback`. Genau so, mit `https://`, ohne Schrägstrich am Ende: Der Dienst baut sie aus `HELDIX_DIENST_API_URL` und schickt sie bei jeder Anmeldung mit; weicht sie ab, zeigt Microsoft eine Fehlerseite (AADSTS50011). Die Häkchen für „Zugriffstoken“ und „ID-Token“ (impliziter Fluss) **nicht** setzen, die Abmelde-URL bleibt leer. Speichern. Die vorhandene Plattform „Mobil- und Desktopanwendungen“ mit `https://login.microsoftonline.com/common/oauth2/nativeclient` für den Launcher bleibt, wie sie ist.
-3. **Client-Geheimnis anlegen:** **Zertifikate & Geheimnisse** → **Geheime Clientschlüssel** → **Neuer geheimer Clientschlüssel**, Beschreibung z. B. „Heldix-Dienst Webseite“, Ablauf z. B. 24 Monate. Danach sofort den **Wert** kopieren (nicht die „Geheimnis-ID“); Azure zeigt ihn nur dieses eine Mal. Den Wert nirgends einchecken, nicht in Chats oder Tickets kopieren.
-4. **Berechtigungen:** nichts zu tun. Der Dienst fragt wie der Launcher nur `XboxLive.signin` an (ohne `offline_access`, also ohne dauerhaften Zugriff); Spieler stimmen beim ersten Anmelden selbst zu.
-5. **Auf dem Server einschalten** (Installer derselben oder einer neueren Version, mit denselben Optionen wie bei der Installation):
+   Bei HeldixClient also `https://api.heldixclient.com/v1/web/auth/microsoft/callback`. Genau so, mit `https://`, ohne Schrägstrich am Ende: Der Dienst baut sie aus `HELDIX_DIENST_API_URL` und schickt sie bei jeder Anmeldung mit; weicht sie ab, zeigt Microsoft eine Fehlerseite (AADSTS50011). Speichern. Kein Client-Geheimnis, keine neue Plattform „Web“.
+3. **Berechtigungen:** nichts zu tun. Der Dienst fragt wie der Launcher nur `XboxLive.signin` an (ohne `offline_access`, also ohne dauerhaften Zugriff); Spieler stimmen beim ersten Anmelden selbst zu.
+4. **Auf dem Server einschalten** (Installer derselben oder einer neueren Version, mit denselben Optionen wie bei der Installation):
 
    ```sh
    sudo bash heldix-dienst-install.sh --domain example.de --minecraft-login
    ```
 
-   Der Installer fragt nach dem Client-Geheimnis; die Eingabe bleibt unsichtbar. Ohne Terminal (oder mit `--yes`) geht es über eine Datei, die danach gelöscht wird (als root, z. B. nach `sudo -i`):
+   Der Installer setzt `HELDIX_DIENST_MS_CLIENT_ID` (App-ID des Launchers) und `HELDIX_DIENST_API_URL`. Ab Dienst 1.14.0 fragt er nichts mehr; der Installer von 1.13.0 und älter fragt noch nach einem Client-Geheimnis – dort einfach **Enter** drücken (leer = wie der Launcher). Ohne Installer dieselben Umgebungsvariablen setzen (siehe [docs/dienst.md](dienst.md#von-hand)).
+5. **Prüfen:** Im Log steht beim Start `Anmeldung mit dem Minecraft-Konto auf der Webseite: an (öffentlicher Client mit PKCE, Umleitungs-URI https://…/v1/web/auth/microsoft/callback)` (`journalctl -u heldix-dienst`). Auf `https://<domain>/konto` erscheint im abgemeldeten Zustand der Knopf **Mit Minecraft-Konto anmelden**; einmal durchklicken.
 
-   ```sh
-   (umask 077; read -rs -p 'Client-Geheimnis: ' s && printf '%s\n' "$s" > /root/ms-secret; echo)
-   sudo bash heldix-dienst-install.sh --domain example.de --ms-client-secret-file /root/ms-secret --yes
-   shred -u /root/ms-secret
-   ```
+**Mit Client-Geheimnis (optional, für Fortgeschrittene):** Statt unter „Mobil- und Desktopanwendungen“ lässt sich die Umleitungs-URI auch unter einer Plattform **Web** eintragen. Dann ist ein Geheimnis Pflicht (sonst antwortet Microsoft mit „invalid_client“, AADSTS7000218): **Zertifikate & Geheimnisse** → **Neuer geheimer Clientschlüssel**, den **Wert** sofort kopieren (nicht die „Geheimnis-ID“), nirgends einchecken. Auf dem Server über eine Datei übernehmen, die danach gelöscht wird (als root, z. B. nach `sudo -i`):
 
-   Der Installer legt das Geheimnis als `/etc/heldix-dienst/ms-client-secret` ab (root, Gruppe des Dienstes, Rechte 640) und setzt `HELDIX_DIENST_MS_CLIENT_ID` (App-ID des Launchers), `HELDIX_DIENST_MS_CLIENT_SECRET_FILE` und `HELDIX_DIENST_API_URL`. Ohne Installer dieselben Umgebungsvariablen setzen (siehe [docs/dienst.md](dienst.md#von-hand)).
-6. **Prüfen:** Im Log steht beim Start `Anmeldung mit dem Minecraft-Konto auf der Webseite: an (mit Client-Geheimnis, Umleitungs-URI https://…/v1/web/auth/microsoft/callback)` (`journalctl -u heldix-dienst`). Auf `https://<domain>/konto` erscheint im abgemeldeten Zustand der Knopf **Mit Minecraft-Konto anmelden**; einmal durchklicken.
+```sh
+(umask 077; read -rs -p 'Client-Geheimnis: ' s && printf '%s\n' "$s" > /root/ms-secret; echo)
+sudo bash heldix-dienst-install.sh --domain example.de --ms-client-secret-file /root/ms-secret --yes
+shred -u /root/ms-secret
+```
 
-**Geheimnis läuft ab:** Azure-Geheimnisse haben ein Ablaufdatum. Rechtzeitig vorher ein neues anlegen, auf dem Server mit `--ms-client-secret-file` übernehmen und danach das alte in Azure löschen. Ist es schon abgelaufen, steht im Log „Microsoft lehnt den Code ab (HTTP 401, invalid_client, AADSTS7000222)“, und Spieler sehen „Microsoft hat die Anmeldung nicht bestätigt“.
-
-**Ohne Geheimnis (öffentlicher Client):** Statt unter **Web** lässt sich dieselbe Umleitungs-URI unter **Mobil- und Desktopanwendungen** eintragen (Plattform hinzufügen → „Mobil- und Desktopanwendungen“ → benutzerdefinierte Umleitungs-URI). Microsoft behandelt die Anmeldung dann als öffentlichen Client, der Code wird nur mit PKCE eingelöst; beim Installer die Frage nach dem Geheimnis leer lassen. Eine URI gehört immer nur zu einer Plattform. Steht sie unter **Web**, ist das Geheimnis Pflicht: Ohne antwortet Microsoft mit „invalid_client“ (AADSTS7000218). Empfohlen ist **Web mit Geheimnis**.
+Der Installer legt es als `/etc/heldix-dienst/ms-client-secret` ab (root, Gruppe des Dienstes, Rechte 640) und setzt `HELDIX_DIENST_MS_CLIENT_SECRET_FILE`. Azure-Geheimnisse laufen ab: rechtzeitig vorher ein neues anlegen und genauso übernehmen; ist es abgelaufen, steht im Log „Microsoft lehnt den Code ab (HTTP 401, invalid_client, AADSTS7000222)“. Eine URI gehört immer nur zu einer Plattform.
 
 **Ausschalten:** Installer mit `--no-minecraft-login` (löscht auch das Geheimnis auf dem Server), danach Umleitungs-URI und Geheimnis in Azure entfernen. Der Knopf verschwindet sofort, die Anmeldung über den Launcher geht wie bisher.
 

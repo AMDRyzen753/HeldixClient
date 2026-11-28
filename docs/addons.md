@@ -50,7 +50,7 @@ Bisherige Heldix-Mods (`heldix.mod.json` im Ordner `mods/`) laufen unverändert 
 | `id` | ja | a-z, 0-9, `_` und `-`; je Instanz einmal (liegen mehrere Versionen da, gilt die neueste) |
 | `name`, `version`, `description`, `authors` | nein | Anzeige; `version` wie `1.2.0` |
 | `entrypoint` | einer der drei | Klasse, die `HeldixAddon` implementiert (Heldix-API) |
-| `api` | mit `entrypoint` | Stufe der Heldix-API, die das Addon braucht (1 bis 4) |
+| `api` | mit `entrypoint` | Stufe der Heldix-API, die das Addon braucht (1 bis 11) |
 | `clientEntrypoint` | einer der drei | Klasse, die `HeldixModInitializer` implementiert (Loader-API); läuft beim Spielstart im Konstruktor von `Minecraft`, zur selben Zeit wie die Einstiegspunkte der Heldix-Mods (vor ihnen) |
 | `transformers` | einer der drei | Liste von Klassen, die `ClassTransformer` implementieren (Loader-API) |
 | `minecraft` | mit `clientEntrypoint` oder `transformers` | Minecraft-Versionen, für die das Addon gebaut ist: Liste oder ein einzelner Text. Jede Angabe ist eine genaue Version (`26.3` passt nicht zu `26.3.1`) oder eine Regel wie in `heldix.mod.json` (`*`, `26.x`, `>=26.2`, `26.2 \|\| 26.3`); Snapshots (`26w14a`) passen nur genau. Leer bzw. weggelassen = jede Version (nur bei reinen API-Addons erlaubt). |
@@ -361,13 +361,38 @@ Umgesetzt in `VoiceLink` (liest `guests` und `browser` aus `peers`, schickt `kic
 
 Umgesetzt in `dev.heldixclient.voice`: `VoiceModeration` (Nachrichten `rules`, `banned`, `room`, `moderated`, `mod`, `group` mit `kicked`, `clips`, `peers.silenced`, Close-Codes 4012/4013, Vorprüfung `GET /v1/voice/me` vor jedem Verbinden gegen eine Verbinden-Schließen-Schleife), `VoiceDialogs` (öffnet den Regeln-Dialog von selbst erst, wenn kein anderes Fenster offen ist), `VoiceRulesScreen`, `VoiceReportScreen`, `VoiceReports` (Kontext: Server, Dimension, Zeitpunkt, Gruppe, wer in Hörweite war, ≤ 20; `POST /v1/voice/reports`, dann bei `clip` in der Antwort `PUT /v1/voice/reports/<id>/clip` mit `audio/ogg`) und `OggOpus` (Clip-Format: Ogg-Seiten mit CRC-32, `OpusHead`/`OpusTags` mit `HELDIX_SPEAKER`, `HELDIX_START`, `HELDIX_SEGMENTS`, Lücken und Pausen bis 1 s mit Stille `F8 FF FE`, ≤ 10 Minuten und 3 MiB, das Älteste wird gekürzt). Gesperrt: Statustext mit Ende der Sperre, neu verbinden erst danach (dauerhaft frühestens nach 30 Minuten); Regeln offen: kein Dauer-Neuverbinden, nach dem Annehmen sofort. Das Protokoll steht in [dienst.md](dienst.md).
 
+**API 11** (ab HeldixClient 0.14.1, `"api": 11`): Server-Info und Server-Regeln, Server-Gruppe im Sprachkanal, Sprache
+
+Server mit dem Plugin **„HeldixClient Server“** ([server-plugin.md](server-plugin.md)) sprechen mit HeldixClient über den Kanal `heldixclient:server`: Sie melden sich (`welcome`), schalten Funktionen ab (`rules`), legen eigene HUD-Elemente an und schicken Einblendungen. Addons sehen davon den Stand und die Regeln:
+
+| Neu | Wofür |
+| --- | --- |
+| `api.server()` → `ServerInfo` | `connected()`, `address()`, `heldix()` (Plugin hat sich gemeldet), `name()` (aus `welcome`), `partner()`/`partnerName()` (nur laut Partnerliste des Heldix-Dienstes, `GET /v1/public/partners`, 1 h zwischengespeichert), `allowed(schlüssel)`, `disabled()`. Ohne Server ist alles erlaubt; jeder Thread |
+| `api.events().onServerInfoChange(info -> …)` → `Registration` | Server meldet sich, neue Regeln, Partnerliste erkennt ihn, Server verlassen (dann wieder alles erlaubt) |
+| `modul.followServerRule("minimap")` | Modul an eine Regel binden: ist sie gesetzt, zeichnet HeldixClient das HUD-Element nicht, die Karte im Heldix-Menü zeigt „Auf diesem Server deaktiviert“, Einschalten zeigt denselben Hinweis; die Einstellung des Spielers bleibt. Bei Modulen ohne HUD prüft das Addon die Regel selbst |
+| `api.voice().serverGroup()`, `serverGroupPartner()` | Server-Gruppe eines Partner-Servers (Voice-Gruppen des Plugins, ab Dienst 1.14.0): solange sie gilt, ist sie die Gruppe (`groupMembers()`), die eigene Gruppe und die Party-Gruppe sind auf diesem Server aus; `null` = keine |
+| `api.language()`, `api.events().onLanguageChange(sprache -> …)` | `"de"` oder `"en"` nach der Sprache von Minecraft (Deutsch → „de“, alles andere → „en“). HeldixClient 0.14.1 selbst spricht noch Deutsch; die Sprache geht auch im `hello` an Server |
+
+```java
+// Regeln beachten: Radar nur, wo der Server es erlaubt (eigener Schlüssel)
+ModuleHandle radar = api.registerHudModule(ModuleSpec.of("radar", "Radar", "Spieler in der Nähe"), canvas -> { … });
+radar.followServerRule("radar");                                   // HUD aus, Hinweis im Menü
+api.events().onServerInfoChange(info -> {
+    if (info.heldix() && !info.allowed("waypoints")) api.logger().info("Auf " + info.name() + " keine Wegpunkte");
+});
+boolean karte = api.server().allowed("minimap");
+String text = api.language().equals("en") ? "Nearby" : "In der Nähe";
+```
+
+Bekannte Schlüssel setzt HeldixClient selbst durch (auch gegen ältere Addons): `freelook`, `zoom`, `minimap` (das Minimap-Modul ist fest zugeordnet), `worldmap`, `waypoints` (`api.waypoints()` ist dann leer), `coordinates`, `fullbright` (nur für Addons), `togglesprint`. Sind `minimap` und `worldmap` beide aus, liefert `api.worldMap()` nichts mehr (`available()` false, `sampleSurface` 0). Die vollständige Liste mit Wirkung steht in [server-plugin.md](server-plugin.md#regel-schlüssel). Umgesetzt in `dev.heldixclient.serverlink` (`ServerLink`, `ServerRules`, `Partners`, `FabricNetworking`) und `hud/ServerHud`; der Kanal braucht den Eingriff in `DiscardedPayload` (Heldix Loader 2.5.0, siehe [In Fabric-Instanzen](#in-fabric-instanzen)).
+
 **Warum Dialoge von HeldixClient:** Zustimmung zu den Voice-Regeln (mit der Aufnahme beim Melden) muss eigenständig und verständlich sein, und Meldungen gehen mit dem Konto des Spielers an das Team. Deshalb kann ein Addon weder selbst „annehmen“ noch selbst melden – es öffnet nur die Dialoge, und Moderieren und Melden gehen nur als direkte Folge einer Aktion des Spielers (wie `sendChatMessage`).
 
 **Warum so:** Neue Methoden gibt es nur an Schnittstellen, die HeldixClient selbst bereitstellt (`HeldixApi`, `HeldixEvents`, `HudCanvas`, `ModuleHandle`); Schnittstellen, die Addons selbst schreiben (`HeldixAddon`, `DroppedItemRenderer`, Listener), bleiben unverändert. Einzige Ausnahme ist `HudRenderer`: Es bekommt in API 5 nur **Default-Methoden** (`onClick`, `onHover`), bleibt ein funktionales Interface, und fertige Addons (auch Lambdas) laufen unverändert. `HudClick`, `HudHover` und `HudStyle` stellt HeldixClient bereit, deshalb sind es Schnittstellen. `GameInfo`, `PlayerState`, `DroppedItem`, `CosmeticInfo` und `CosmeticChange` sind Schnittstellen statt Records, damit spätere Versionen Werte ergänzen können, ohne Addons zu brechen. `DroppedItemPose` baut das Addon selbst, deshalb ist es ein Record (wie `ItemInfo`). Die bisherigen Events (`onTick` …) geben weiter `void` zurück – eine andere Rückgabe würde fertige Addons brechen.
 
 Tastencodes aus `HeldixKeys` sind feste GLFW-Werte. HeldixClient übersetzt sie in die Tasten der jeweiligen Minecraft-Version (seit 26.x nimmt Minecraft SDL-Scancodes). Bis 0.13.0 landeten sie unübersetzt im Spiel: Standardtasten wie Pos1 lagen dadurch auf falschen Tasten, und `HeldixKeys.NONE` brachte das Spiel zum Absturz. Falsch gespeicherte Standardtasten setzt HeldixClient einmal auf die richtigen zurück.
 
-Addons für API 1 bis 9 laufen unverändert weiter. Ein Addon, das eine neuere API braucht, als der installierte HeldixClient kann, wird mit dem Hinweis „bitte HeldixClient aktualisieren“ übersprungen (z. B. ein Addon mit `"api": 9` in HeldixClient 0.13.5). Launcher und Addon-Store im Spiel zeigen es dort mit „Braucht einen neueren HeldixClient“ statt mit „Installieren“.
+Addons für API 1 bis 10 laufen unverändert weiter. Ein Addon, das eine neuere API braucht, als der installierte HeldixClient kann, wird mit dem Hinweis „bitte HeldixClient aktualisieren“ übersprungen (z. B. ein Addon mit `"api": 11` in HeldixClient 0.14.0). Launcher und Addon-Store im Spiel zeigen es dort mit „Braucht einen neueren HeldixClient“ statt mit „Installieren“.
 
 Details stehen in den Javadoc-Kommentaren der [API-Klassen](../mod/heldix-api/src/main/java/dev/heldixclient/api).
 
@@ -427,7 +452,7 @@ Scheitert ein Transformer erst später, wenn seine Ziel-Klasse geladen wird (z. 
 
 In Fabric laufen Heldix-Transformer über ein Mixin-Plugin der Fabric-Brücke, und das nur für die Klassen ihrer festen Liste ([Targets.java](../mod/heldix-loader-fabric/src/main/java/dev/heldixclient/loader/fabric/Targets.java)). Ein Addon mit Transformern lädt der Loader in Fabric deshalb nur, wenn **alle** Ziele seiner Transformer in dieser Liste stehen; dafür erzeugt er die Transformer vorab einmal in einem eigenen Classloader zur Prüfung. Sonst bleibt es aus und zeigt **„Läuft nur in Heldix-Instanzen“** mit den fehlenden Klassen. Passen alle Ziele, legt der Loader die JAR auf Fabrics Classpath (Knot), meldet die Transformer an und ruft den clientEntrypoint auf – wie in Heldix-Instanzen. Addons nur mit `clientEntrypoint` und reine API-Addons laufen in Fabric immer.
 
-Ziel-Klassen, die in Fabric unterstützt werden (Loader 2.4.0, Minecraft 26.3):
+Ziel-Klassen, die in Fabric unterstützt werden (Loader 2.5.0, Minecraft 26.3):
 
 | Bereich | Klassen |
 | --- | --- |
@@ -435,7 +460,8 @@ Ziel-Klassen, die in Fabric unterstützt werden (Loader 2.4.0, Minecraft 26.3):
 | HUD und Zeichnen | `net.minecraft.client.gui.Hud`, `net.minecraft.client.gui.Gui`, `net.minecraft.client.gui.GuiGraphicsExtractor`, `net.minecraft.client.renderer.GameRenderer`, `net.minecraft.client.gui.components.DebugScreenOverlay` |
 | Menüs | `net.minecraft.client.gui.screens.Screen`, `net.minecraft.client.gui.screens.TitleScreen`, `net.minecraft.client.gui.screens.LoadingOverlay`, `net.minecraft.client.gui.screens.LevelLoadingScreen`, `net.minecraft.client.gui.screens.ConnectScreen`, `net.minecraft.client.gui.components.AbstractSelectionList` |
 | Chat und Tab-Liste | `net.minecraft.client.multiplayer.chat.ChatListener`, `net.minecraft.client.gui.components.ChatComponent`, `net.minecraft.client.gui.screens.ChatScreen`, `net.minecraft.client.gui.components.PlayerTabOverlay` |
-| Netzwerk | `net.minecraft.client.multiplayer.ClientPacketListener` |
+| Netzwerk | `net.minecraft.client.multiplayer.ClientPacketListener`, `net.minecraft.network.protocol.common.custom.DiscardedPayload` (ab Loader 2.5.0: Kanal `heldixclient:server`) |
+| Welt teilen (eingebauter Server) | `net.minecraft.server.players.PlayerList`, `net.minecraft.client.server.IntegratedServer`, `net.minecraft.client.server.IntegratedPlayerList` |
 | Kamera und Eingabe | `net.minecraft.client.Camera`, `net.minecraft.client.MouseHandler`, `net.minecraft.client.player.KeyboardInput` |
 | Spieler und Entitäten | `net.minecraft.client.player.AbstractClientPlayer`, `net.minecraft.world.entity.Entity`, `net.minecraft.client.renderer.entity.EntityRenderer`, `net.minecraft.client.renderer.entity.layers.CapeLayer` |
 | Gedroppte Items | `net.minecraft.client.renderer.entity.ItemEntityRenderer`, `net.minecraft.client.renderer.entity.state.ItemEntityRenderState` |
@@ -539,12 +565,13 @@ Bewertungen (1–5 Sterne) und Meldungen zu Addons gehen auf der Webseite und im
 
 ### Voice-Chat-Addon
 
-Proximity-Voice-Chat über den Heldix-Dienst ([mod/addons/voicechat](../mod/addons/voicechat), Version 1.3.0, API 10), auf jedem Server ohne Plugin.
+Proximity-Voice-Chat über den Heldix-Dienst ([mod/addons/voicechat](../mod/addons/voicechat), Version 1.4.0, API 11), auf jedem Server ohne Plugin.
 
 - **Ton:** Aufnahme mit `javax.sound` (48 kHz mono, 20-ms-Rahmen), Rauschfilter (Hochpass 90 Hz gegen Brummen, dazu ein Rauschtor, das den Grundpegel verfolgt und leises Rauschen zwischen den Worten auf 20 % dämpft), Opus mit [Concentus](https://github.com/jaredmdobson/concentus) (reines Java, BSD-Lizenz, liegt in der JAR mit `META-INF/LICENSE-concentus.txt`), 24 kbit/s mit FEC. Wiedergabe: je Sprecher ein Decoder mit 60 ms Puffer, Lücken überbrückt Opus; Mischen in Stereo nach Abstand (bis 4 Blöcke voll, am Rand der Reichweite still) und Richtung (`NearbyPlayer.direction()`); die eigene Gruppe ohne Abstand. Signaltöne (kurze Gleittöne) bei Push-to-Talk und beim Stummschalten werden nur lokal dazugemischt.
 - **Sprechen:** Push-to-Talk (`addKey`, ab Werk V) oder Sprachaktivierung mit Schwelle und 300 ms Nachlauf; Tasten „Mikrofon stumm“ und „Ton aus“; „Mikrofon testen“ spielt zehn Sekunden lang die eigenen Rahmen ab, ohne zu senden.
 - **Gruppen** (ab 1.1.0): Einstellungen „Gruppe“ und „Gruppen-Passwort“ (Textfelder, 1,5 s nach dem letzten Tippen übernommen) → `voice().setGroup`. Mitglieder hören sich auf dem ganzen Server, auch in anderen Dimensionen; Kommen und Gehen meldet eine Einblendung. Spieler in der Nähe hören weiter wie gewohnt.
 - **Status** (ab 1.1.0): Mikrofon stumm / Ton aus gehen per `voice().setState` an Raum und Gruppe.
+- **Server-Gruppen** (ab 1.4.0, API 11, Heldix-Dienst 1.14.0): Ein Partner-Server mit dem Plugin „HeldixClient Server“ kann Spieler in Voice-Gruppen setzen (z. B. je Team, [server-plugin.md](server-plugin.md)). Solange `voice().serverGroup()` gilt, zeigt die Anzeige „Server-Gruppe „…“ · N“ statt der eigenen Gruppe, Kommen und Gehen der eigenen Gruppe werden nicht gemeldet, und eine Einblendung sagt beim Eintritt „<Partner> hat dich in diese Voice-Gruppe gesetzt. Deine eigene Gruppe ist hier so lange aus.“ bzw. beim Austritt „Du bist in keiner Server-Gruppe mehr.“ Die eigene Gruppe bleibt eingestellt und gilt wieder, sobald die Server-Gruppe weg ist.
 - **Gäste im Browser** (ab 1.2.0, API 9, Heldix-Dienst 1.11.0): Im Gruppen-Bereich des Untermenüs steht direkt unter „Gruppen-Passwort“ der Knopf „Browser-Link kopieren“ (`voice().createBrowserLink`, dann `api.copyToClipboard`; bei offenem Chat auch als Knopf in der Anzeige). Wer den Link öffnet, redet auf der Webseite in der Gruppe mit – als Gast mit Namen oder angemeldet; 24 Std. gültig, höchstens 4 Gäste. Gäste und Spieler im Browser stehen in der Anzeige mit „Gast“ bzw. „Browser“ (Gäste ohne Skin-Abfrage, mit Symbol), Kommen und Gehen meldet die Einblendung mit Kennzeichen. Bei offenem Chat zeigt die Anzeige alle Mitglieder der Gruppe; ein × neben einem Gast entfernt ihn (`voice().removeGuest`). Kann der Dienst keine Gäste (`guestsAvailable()` false), gibt es den Knopf in der Anzeige nicht, und der Knopf im Untermenü meldet den Grund.
 - **Moderation und Melden** (ab 1.3.0, API 10, Heldix-Dienst 1.13.0): Spielermenü „Melden …“ und bei offenem Chat ein Knopf je Sprecher in der Anzeige öffnen den Melde-Dialog von HeldixClient (`voice().openReport`); die Anzeige listet dann auch, wer in der letzten Minute zu hören war. Anhänge: Lautstärke-Verlauf je Sprecher (`LevelHistory`, rms/peak je Sekunde, 600 s, immer, vor dem Schutz gemessen) und – nur bei `clipsActive()` – der Ringpuffer der empfangenen Pakete (`ClipBuffer`: nur Arbeitsspeicher, je Sprecher ≤ 10 Minuten und 3 MiB, ≤ 32 Sprecher, ≤ 48 MiB; verdrängt das Älteste bzw. wer am längsten nicht zu hören war; geleert bei Server-/Weltwechsel, Trennen, Aufnahmen aus und Modul aus; nie die eigene Stimme). Gastgeber, Operatoren und Party-Leiter (`rights().canModerate`) bekommen im Spielermenü und in der Anzeige „Für alle stummschalten“/„Stumm für alle aufheben“ und „Aus dem Voice entfernen (10 Min.)“/„Entfernen aufheben“; für alle Stumme haben ein gelbes `volume-off` über dem Kopf und in der Anzeige. Einblendungen bei Sperre (mit Einspruch im Chat), Stummschalten/Entfernen durch Gastgeber oder Leiter und Server ohne Voice; bei offenem Chat zeigt die Anzeige „Meldungen können die letzten 10 Minuten enthalten“, wenn Aufnahmen aktiv sind.
 - **Voice-Regeln** (ab 1.3.0): Verlangt der Dienst die Zustimmung (`RULES_REQUIRED`), öffnet das Addon den Dialog von HeldixClient (`voice().showRules`, einmal je Fassung, solange das Modul an ist); Knopf „Voice-Regeln“ im Untermenü jederzeit. Ablehnen: Einblendung, Voice bleibt aus.
@@ -556,13 +583,14 @@ Proximity-Voice-Chat über den Heldix-Dienst ([mod/addons/voicechat](../mod/addo
 
 ### Minimap-Addon
 
-Karte der Umgebung im HUD ([mod/addons/minimap](../mod/addons/minimap), Version 1.0.0, API 8), nur über die Heldix-API – läuft in Heldix- und Fabric-Instanzen.
+Karte der Umgebung im HUD ([mod/addons/minimap](../mod/addons/minimap), Version 1.1.0, API 11), nur über die Heldix-API – läuft in Heldix- und Fabric-Instanzen.
 
 - **Daten:** Im Tick liest das Addon die Chunks um den Spieler über `worldMap().sampleSurface` (höchstens 12 neue und 4 aufgefrischte je Tick, nahe alle 2 s, ferne alle 8 s neu), daraus entsteht ein Fenster schattierter Farben (Licht von Nordwesten, Wasser nach Tiefe dunkler). Chunks weit außerhalb werden vergessen.
 - **Bild:** Jedes Bild tastet das Fenster gedreht und gezoomt ab (Auflösung = Größe × `pixelScale`, höchstens 256²), schneidet es mit weicher Kante rund oder eckig zu und zeichnet es mit `canvas.image`. Neu berechnet wird nur, wenn sich Position, Blick, Zoom oder Fenster geändert haben.
 - **Darüber:** Rand, Himmelsrichtungen (N rot), Wegpunkte (außerhalb als Punkt am Rand, Todespunkt als rotes Kreuz), Pfeil des Spielers, Koordinaten darunter.
 - **Einstellungen:** Form, Größe, Drehen, Himmelsrichtungen und Koordinaten auch im Rechtsklick-Menü des HUD-Editors; Sichtweite (32–256), Farben (Texturen/Kartenfarben), Höhen schattieren, Wegpunkte, Höhlenansicht. Tasten Hereinzoomen/Herauszoomen (Ziffernblock + und −, 16–512 Blöcke).
 - **Fair Play:** Auf Servern nur die Oberfläche; Höhlenansicht und Nether nur im Einzelspieler. Keine Spieler und keine Mobs auf der Karte.
+- **Server-Regeln** (ab 1.1.0, API 11): Das Modul folgt der Regel `minimap` (`followServerRule`; HeldixClient blendet die Karte aus und zeigt im Menü „Auf diesem Server deaktiviert“, ältere Versionen sperrt HeldixClient über die Modul-ID `minimap:minimap`). Unter `waypoints` zeigt die Karte keine Wegpunkte, unter `coordinates` keine Koordinaten; gesperrt liest das Addon keine Chunks.
 - **Autotest:** `MinimapTests` prüft die API (Farben, Höhen, Feldgrößen, Höhlenansicht, Wegpunkte) und das Addon (Chunks, Bild im HUD, Zoom per Taste, eckig mit Kartenfarben).
 
 ### Emote-Rad

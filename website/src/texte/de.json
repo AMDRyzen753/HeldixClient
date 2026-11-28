@@ -53,6 +53,8 @@
     "hinweis": "HeldixClient ist kein offizielles Minecraft-Produkt und nicht von Mojang oder Microsoft genehmigt oder mit ihnen verbunden. Minecraft ist eine Marke von Mojang AB.",
     "schrift": "Schrift Inter (SIL Open Font License)",
     "mit": "Quelloffen unter MIT-Lizenz",
-    "dienst": "Heldix-Dienst"
+    "dienst": "Heldix-Dienst",
+    "partner": "Partner-Server",
+    "serverPlugin": "Server-Plugin"
   }
 }

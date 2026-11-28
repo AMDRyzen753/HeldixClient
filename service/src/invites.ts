@@ -208,7 +208,9 @@ export class Invites {
     const link = this.view(this.obtain(user.uuid, null, null, false));
     const invites = this.store.openInvitesOf(user.uuid, Date.now()).map((invite) => this.view(invite));
     const { invited, confirmed } = this.store.referralCounts(user.uuid);
-    const unlocked = this.store.unlocksOf(user.uuid).map((u) => u.cosmetic);
+    // nur Belohnungen fürs Einladen: Launcher bis 0.14.0 melden jede neue Freischaltung hier als „Belohnung für deine
+    // Einladungen“ – Partner-Belohnungen (Herkunft partner:<id>, ab 1.14.0) gehören nicht dazu
+    const unlocked = this.store.unlocksOf(user.uuid).filter((u) => u.reason === 'invite').map((u) => u.cosmetic);
     return {
       link,
       invites,

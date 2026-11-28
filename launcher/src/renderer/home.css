@@ -291,3 +291,7 @@
   .home-notice { flex-wrap: wrap; }
   .home-notice-actions { order: 3; width: 100%; justify-content: flex-end; }
 }
+
+/* „Im Launcher“ (Dienst 1.14.0): Türkis statt Grün, „Nicht stören“ rot */
+.row-meta.launcher { color: var(--presence-launcher-text, #67e8f9); }
+.row-meta.dnd { color: #fca5a5; }

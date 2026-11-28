@@ -1,10 +1,10 @@
 // Köpfe aus dem Minecraft-Skin (ab 1.12.0) für Webseite und Discord-Bilder: Gesicht (8×8) mit der Hut-Ebene darüber,
-// ohne Glättung vergrößert auf 32, 64 oder 128 Pixel, als PNG. Ohne fremde Pakete: PNG lesen und schreiben mit node:zlib.
+// ohne Glättung vergrößert auf 32, 64, 128 oder (ab 1.14.0, Vorschaukarten) 256 Pixel, als PNG. Ohne fremde Pakete: PNG lesen und schreiben mit node:zlib.
 // Gelesen werden nur Skins in 64×64 oder 64×32 (wie Minecraft sie erlaubt), 8 Bit, ohne Interlacing; alles andere und
 // Spieler ohne Skin bekommen einen einfachen Standard-Kopf.
 import { crc32, deflateSync, inflateSync } from 'node:zlib';
 
-export const HEAD_SIZES = [32, 64, 128] as const;
+export const HEAD_SIZES = [32, 64, 128, 256] as const;
 export type HeadSize = (typeof HEAD_SIZES)[number];
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);

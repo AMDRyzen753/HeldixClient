@@ -43,6 +43,7 @@ import org.spongepowered.asm.mixin.Mixin;
 		Targets.PLAYER_LIST,
 		Targets.INTEGRATED_SERVER,
 		Targets.INTEGRATED_PLAYER_LIST,
+		Targets.DISCARDED_PAYLOAD,
 }, priority = 100000)
 public abstract class TransformTargets {
 }

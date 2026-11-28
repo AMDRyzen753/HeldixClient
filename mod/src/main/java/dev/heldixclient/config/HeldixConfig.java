@@ -100,6 +100,10 @@ public final class HeldixConfig {
 		public boolean hudHideChat;
 		/** HUD-Elemente bei offenem Chat anklickbar (Aktionen, Tooltips) */
 		public boolean hudClickable = true;
+		/** HUD-Elemente von Servern mit dem Plugin „HeldixClient Server“ zeigen (Kanal heldixclient:server) */
+		public boolean serverHud = true;
+		/** Einblendungen von Servern mit dem Plugin „HeldixClient Server“ zeigen */
+		public boolean serverToasts = true;
 		/** Heldix-Design für Hauptmenü, Buttons, Listen und Hintergründe (false = Vanilla) */
 		public boolean customMenus = true;
 		/** Aktiver Shader-Stil (siehe ShaderPreset), "aus" = keiner */

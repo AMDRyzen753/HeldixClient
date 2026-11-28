@@ -55,6 +55,8 @@ public final class Ui {
 	public static final int ACCENT_LINE = 0x993B82F6;
 	public static final int ACCENT_TEXT = 0xFF93C5FD;
 	public static final int SUCCESS = 0xFF34D399;
+	/** Heldix-Türkis: Freund „Im Launcher“ (nicht im Spiel, bekommt Nachrichten sofort) */
+	public static final int LAUNCHER = 0xFF2DD4BF;
 	public static final int WARNING = 0xFFFBBF24;
 	public static final int DANGER = 0xFFF87171;
 

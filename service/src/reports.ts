@@ -1,4 +1,6 @@
-// Melden: Spieler melden einen anderen; der Betreiber prüft die Meldung mit heldix-dienst-admin (src/admin.ts).
+// Melden: Spieler melden einen anderen; der Betreiber prüft die Meldung mit heldix-dienst-admin (src/admin.ts). Ab 1.14.0
+// auch geteilte Setups und öffentliche Spielerprofile (Art `setup` bzw. `profile`, Stand beim Melden in `context`).
+import type { StatementSync } from 'node:sqlite';
 import type { Store, UserRow } from './db';
 import { UNKNOWN_PLAYER } from './friends';
 import { HttpError } from './http';
@@ -42,12 +44,71 @@ function retryAfter(until: number, now: number): Record<string, string> {
   return { 'Retry-After': String(Math.max(1, Math.ceil((until - now) / 1000))) };
 }
 
+/** Ab 1.14.0: Meldung zu etwas, das einem Spieler gehört (Setup, öffentliches Profil). */
+export interface SubjectReport {
+  kind: 'setup' | 'profile';
+  /** Schlüssel des Gemeldeten (Code des Setups bzw. UUID des Profils): höchstens eine offene Meldung je Meldendem */
+  subject: string;
+  /** Wem es gehört (Ersteller bzw. Inhaber des Profils) */
+  owner: { uuid: string; name: string };
+  /** Stand beim Melden für das Team (Name, Beschreibung bzw. Bio) */
+  snapshot: Record<string, unknown>;
+}
+
+const SELF_REPORT: Record<SubjectReport['kind'], string> = {
+  setup: 'Dein eigenes Setup kannst du nicht melden.',
+  profile: 'Du kannst dich nicht selbst melden.',
+};
+
 export class Reports {
+  private readonly sql: Record<'insert' | 'openPair' | 'since', StatementSync>;
+
   constructor(
     private readonly store: Store,
     private readonly limits: ReportLimits,
     private readonly log: (line: string) => void,
-  ) {}
+  ) {
+    this.sql = {
+      insert: store.prepare(`INSERT INTO reports (reporter, reporter_name, reported, reported_name, reason, note, messages, at, kind, context)
+        VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?)`),
+      openPair: store.prepare("SELECT 1 AS x FROM reports WHERE reporter = ? AND kind = ? AND status = 'open' AND json_extract(context, '$.subject') = ? LIMIT 1"),
+      since: store.prepare("SELECT count(*) AS n, min(at) AS oldest FROM reports WHERE reporter = ? AND kind IN ('setup', 'profile') AND at > ?"),
+    };
+  }
+
+  /**
+   * Ab 1.14.0: `POST /v1/setups/<code>/report` bzw. `POST /v1/public/players/<name>/report` mit `{ reason, note? }`.
+   * Gründe wie bei Spielern; je Meldendem eine offene Meldung je Setup bzw. Profil und zusammen höchstens so viele wie
+   * bei Spielern in 24 Stunden. Die Meldung erscheint in den Meldungen des Teams (`kind` setup bzw. profile).
+   */
+  reportSubject(me: UserRow, target: SubjectReport, input: Record<string, unknown>): { reported: true } {
+    const { reason } = input;
+    if (!isReportReason(reason)) throw new HttpError(400, `Ungültiger Grund (erlaubt: ${REPORT_REASONS.join(', ')}).`);
+    let note = '';
+    if (input.note !== undefined && input.note !== null) {
+      const checked = checkText(input.note, MAX_NOTE_LENGTH, true);
+      if ('problem' in checked) throw new HttpError(400, NOTE_ERRORS[checked.problem]);
+      note = checked.text;
+    }
+    if (target.owner.uuid === me.uuid) throw new HttpError(400, SELF_REPORT[target.kind]);
+    if (this.sql.openPair.get(me.uuid, target.kind, target.subject) !== undefined) {
+      throw new HttpError(429, 'Das hast du schon gemeldet. Das Team schaut es sich an.');
+    }
+    const now = Date.now();
+    const recent = this.sql.since.get(me.uuid, now - this.limits.windowMs) as { n: number; oldest: number | null };
+    if (Number(recent.n) >= this.limits.perReporter) {
+      throw new HttpError(
+        429,
+        `Du hast in den letzten 24 Stunden schon ${this.limits.perReporter} Setups oder Profile gemeldet. Versuche es später noch einmal.`,
+        retryAfter(Number(recent.oldest ?? now) + this.limits.windowMs, now),
+      );
+    }
+    const context = JSON.stringify({ subject: target.subject, [target.kind]: target.snapshot });
+    const result = this.sql.insert.run(me.uuid, me.name, target.owner.uuid, target.owner.name, reason, note, now, target.kind, context);
+    // Ohne Namen und Inhalte: Das Log soll nur zeigen, dass es etwas zu prüfen gibt.
+    this.log(`Neue Meldung #${Number(result.lastInsertRowid)} (${target.kind === 'setup' ? 'Setup' : 'Profil'}, Grund: ${reason}).`);
+    return { reported: true };
+  }
 
   /** `POST /v1/reports` mit `{ uuid, reason, note? }`. */
   report(me: UserRow, input: Record<string, unknown>): { reported: true } {

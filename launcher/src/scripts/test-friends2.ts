@@ -1,6 +1,6 @@
 // Prüft die Logik von Freunde 2.0 im Launcher ohne Netz: Echtzeit-Begleiter (core/realtime.ts, mit nachgebautem
 // WebSocket: Anmeldung im Header, Zustände, Ping, Neuverbinden mit Backoff, 4001/4003, Stopp), Freunde (Favoriten,
-// Spitzname, Notiz, Status, „Nicht stören“, zuletzt online, Abzeichen, Sortierung, „ist online“), Nachrichten
+// Spitzname, Notiz, Status, „Nicht stören“, zuletzt online, Abzeichen, Sortierung, „ist online“, „Im Launcher“), Nachrichten
 // (Antworten, Karten, Reaktionen, Rückfall-Text), Party (core/party.ts: Stand, Einladungen, Chat, Folgen, Ende),
 // Welten in Echtzeit (core/worlds.ts) und die neuen Arten der Glocke (core/notifications.ts).
 //
@@ -12,9 +12,9 @@ import path from 'node:path';
 import type { Friend, PartyState } from '../shared/api';
 import { inviteServer } from '../main/core/invites';
 import { NotificationStore } from '../main/core/notifications';
-import { PartyClient, followAction, locationText, mapLocation, mapParty, mapPartyChat, mapPartyInvite, mergeChat, type PartyEvent } from '../main/core/party';
+import { PartyClient, followAction, locationText, mapLocation, mapParty, mapPartyChat, mapPartyInvite, mapPartyMember, mergeChat, type PartyEvent } from '../main/core/party';
 import { BACKOFF_MS, BLOCKED_RETRY_MS, CompanionSocket, backoffDelay, companionUrl, parseMessage, type CompanionState, type SocketLike } from '../main/core/realtime';
-import { BADGES, cameOnline, cardFallbackText, checkCard, cleanLine, displayName, mapCard, mapFriend, mapFriends, mapMessage, sortFriends } from '../main/core/social';
+import { BADGES, cameOnline, cardFallbackText, checkCard, cleanLine, displayName, joinableServer, mapCard, mapFriend, mapFriends, mapMessage, presenceRank, sortFriends } from '../main/core/social';
 import { WorldClient, mapOwnWorld, mapWorldInvite } from '../main/core/worlds';
 import { check, delay, finish, rejects } from './testkit';
 
@@ -181,6 +181,36 @@ function friendTests(): void {
   check('Text wie Nachrichten: Steuer- und Schreibrichtungs-Zeichen weg, eine Zeile', cleanLine(' a‮b\nc\u0000 ') === 'ab c');
 }
 
+/** „Im Launcher“ (Dienst 1.14.0): Launcher offen, nicht im Spiel – eigener Zustand zwischen im Spiel und offline */
+function launcherTests(): void {
+  const base = { uuid: LENA, name: 'Lena', since: 1000, lastOnline: 12345, state: 'multiplayer', server: 'play.example.de' };
+  const inLauncher = mapFriend({ ...base, online: false, launcher: true });
+  check('Im Launcher: eigener Zustand, nicht online, kein Server, kein „zuletzt online“', inLauncher.launcher && !inLauncher.online && inLauncher.activity === null && inLauncher.server === null && inLauncher.lastOnline === null, inLauncher);
+  check('Im Launcher: „Nicht stören“ gilt auch hier', mapFriend({ ...base, online: false, launcher: true, dnd: true }).dnd);
+  check('Im Spiel hat Vorrang vor „Im Launcher“', (() => {
+    const both = mapFriend({ ...base, online: true, launcher: true });
+    return both.online && !both.launcher;
+  })());
+  check('Offline: weder Launcher noch „Nicht stören“', (() => {
+    const off = mapFriend({ ...base, online: false, launcher: false, dnd: true });
+    return !off.launcher && !off.dnd && off.lastOnline === 12345;
+  })());
+  check('Alter Dienst ohne Feld: nicht im Launcher', !mapFriend({ ...base, online: false }).launcher && !mapFriend({ ...base, online: false, launcher: 'ja' }).launcher);
+  check('Rang: im Spiel > Launcher > offline', presenceRank({ online: true, launcher: false }) > presenceRank({ online: false, launcher: true }) && presenceRank({ online: false, launcher: true }) > presenceRank({ online: false, launcher: false }));
+
+  const f = (name: string, state: 'spiel' | 'launcher' | 'offline', favorite = false): Friend => ({ ...mapFriend({ uuid: name.charAt(0).repeat(32), name, online: state === 'spiel', launcher: state === 'launcher' }), favorite });
+  const sorted = sortFriends([f('Anna', 'offline'), f('Bert', 'launcher'), f('Carl', 'spiel'), f('Dora', 'launcher', true), f('Emil', 'offline', true), f('Finn', 'spiel', true), f('Gina', 'launcher')]);
+  check('Sortierung: Favoriten (Spiel, Launcher, offline), dann im Spiel, im Launcher, offline', sorted.map((x) => x.name).join() === 'Finn,Dora,Emil,Carl,Bert,Gina,Anna', sorted.map((x) => x.name));
+  check('„ist online“ nur beim Wechsel ins Spiel, nicht für „Im Launcher“', cameOnline(new Set(), [f('Bert', 'launcher'), f('Carl', 'spiel')], 'all').map((x) => x.name).join() === 'Carl');
+  check('Beitreten nur im Spiel', joinableServer(inLauncher) === null && joinableServer(mapFriend({ ...base, online: true })) === 'play.example.de');
+
+  const member = mapPartyMember({ uuid: MAX, name: 'Max', online: false, launcher: true });
+  check('Party-Mitglied im Launcher', member?.launcher === true && member.online === false);
+  check('Party-Mitglied im Spiel: Launcher-Feld aus', mapPartyMember({ uuid: MAX, name: 'Max', online: true, launcher: true })?.launcher === false);
+  check('Party-Mitglied ohne Feld (alter Dienst)', mapPartyMember({ uuid: MAX, name: 'Max', online: false })?.launcher === false);
+  check('Begleiter-Verbindung meldet sich als Launcher', /\/v1\/ws\?client=launcher$/.test(companionUrl('https://api.heldixclient.com')));
+}
+
 function messageTests(): void {
   const message = mapMessage({
     id: 7, from: LENA, to: ME, text: 'Komm auf play.example.de', at: 5, read: false,
@@ -345,6 +375,7 @@ async function main(): Promise<void> {
   try {
     await realtimeTests();
     friendTests();
+    launcherTests();
     messageTests();
     await partyTests();
     await worldTests();

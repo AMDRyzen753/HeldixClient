@@ -59,7 +59,8 @@ public class WaypointsModule extends Module {
 	/** Markierungen ins HUD zeichnen (HudRenderer, vor den HUD-Elementen). */
 	public void render(GuiGraphicsExtractor g, Minecraft mc) {
 		clearMarkers();
-		if (!isEnabled() || mc.player == null || mc.level == null) return;
+		// Server mit dem Plugin „HeldixClient Server“ kann Wegpunkte per Regel abschalten
+		if (!activeHere() || mc.player == null || mc.level == null) return;
 		List<Waypoints.Waypoint> waypoints = Waypoints.visibleHere(mc);
 		if (waypoints.isEmpty()) return;
 		Camera camera = mc.gameRenderer.mainCamera();

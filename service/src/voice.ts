@@ -4,11 +4,14 @@
 // Der Dienst speichert und protokolliert dabei nichts: keine Sprache, keine Positionen, keine Räume, keine Gruppen, keinen
 // Status, keine Namen von Gästen. Ab 1.13.0 (Funktion „moderation“): Voice-Regeln mit Pflicht-Zustimmung (4012),
 // Voice-Sperren (4013), Liste „Voice aus“ für Server, und Gastgeber/Operatoren einer Heldix-Welt bzw. der Leiter einer
-// Party schalten andere für alle stumm oder entfernen sie für 10 Minuten (nur im Arbeitsspeicher).
+// Party schalten andere für alle stumm oder entfernen sie für 10 Minuten (nur im Arbeitsspeicher). Ab 1.14.0
+// (Funktion „serverGroups“): Partner-Server teilen ihre Spieler in Server-Gruppen ein (voice-server-groups.ts, ebenfalls
+// nur im Arbeitsspeicher); wer eine hat, hört in der Nähe nur dieselbe Server-Gruppe, und sie ersetzt seine eigene Gruppe.
 import { WebSocket, type RawData } from 'ws';
 import type { Store } from './db';
 import { isInviteCode, normalizeServer } from './validate';
 import { VOICE_KICK_MS, VOICE_SERVER_OFF, type ServiceVoiceContext, type VoiceGate } from './voice-moderation';
+import type { ServerGroupOf } from './voice-server-groups';
 
 /** Heldix-Welt zu einer Server-Adresse und die Rolle eines Spielers darin. */
 export interface VoiceWorld {
@@ -60,6 +63,8 @@ export interface VoiceOptions {
   normalizeServer?: (value: unknown) => string | null;
   /** Ab 1.13.0: Moderation; ohne: wie 1.12.0 (keine Regeln, keine Sperren, kein „moderation“). */
   moderation?: VoiceModerationHooks;
+  /** Ab 1.14.0: Server-Gruppen der Partner-Server (nur zusammen mit `moderation`); ohne: keine. */
+  serverGroups?: { of(server: string, uuid: string): ServerGroupOf | null };
 }
 
 /** Gast im Browser: Name und Einladung aus der Gast-Sitzung (nur im Arbeitsspeicher). */
@@ -146,6 +151,11 @@ interface Connection {
   mutedNotified: Set<string>;
   /** Angenommene Version der Voice-Regeln beim Verbinden (null = keine nötig bzw. keine) */
   rulesVersion: number | null;
+  /**
+   * Ab 1.14.0: Server-Gruppe auf einem Partner-Server als Gruppenschlüssel (`sg <partner> <server> <gruppe>`), sonst
+   * null. Dann ist `group` dieser Schlüssel, in der Nähe hört nur, wer denselben Schlüssel (bzw. beide keinen) hat.
+   */
+  serverGroup: string | null;
 }
 
 export const VOICE_PROTOCOL = 1;
@@ -158,8 +168,12 @@ export const VOICE_MAX_FRAME = 1024;
 export const VOICE_FEATURES: readonly string[] = ['state', 'groups', 'guests'];
 /** `moderation` (ab 1.13.0): Regeln, Sperren, „Voice aus“, Stummschalten und Entfernen durch Gastgeber und Leiter. */
 export const VOICE_FEATURES_MODERATION: readonly string[] = [...VOICE_FEATURES, 'moderation'];
+/** `serverGroups` (ab 1.14.0): Server-Gruppen der Partner-Server, Nachricht `serverGroup`. */
+export const VOICE_FEATURES_SERVER_GROUPS: readonly string[] = [...VOICE_FEATURES_MODERATION, 'serverGroups'];
 /** Höchstens so viele Mitglieder hat eine Gruppe (Gäste zählen mit). */
 export const VOICE_MAX_GROUP = 16;
+/** Höchstens so viele Mitglieder hat eine Server-Gruppe (ab 1.14.0, z. B. ein Team eines Minispiels). */
+export const VOICE_MAX_SERVER_GROUP = 100;
 /** Höchstens so viele Gäste gleichzeitig je Einladung. */
 export const VOICE_MAX_GUESTS = 4;
 /** Unterprotokoll für Verbindungen aus dem Browser (Gäste schicken dazu `gast.<token>`). */
@@ -208,6 +222,16 @@ const MOD_ACTIONS = ['mute', 'unmute', 'kick', 'unkick'] as const;
 type ModAction = (typeof MOD_ACTIONS)[number];
 /** Stummschaltungen ohne Verbindung im Bereich so lange behalten (Wiederverbinden hebt sie nicht auf). */
 const SCOPE_IDLE_MS = 10 * 60_000;
+
+/** Gruppenschlüssel einer Server-Gruppe (Server-Adressen enthalten nie Leerzeichen, `sg` ist keine Adresse). */
+function serverGroupKey(group: ServerGroupOf): string {
+  return `sg ${group.key} ${group.group}`;
+}
+
+/** Höchstzahl der Mitglieder einer Gruppe: Server-Gruppen dürfen größer sein. */
+function groupLimit(key: string): number {
+  return key.startsWith('sg ') ? VOICE_MAX_SERVER_GROUP : VOICE_MAX_GROUP;
+}
 
 function isMode(value: unknown): value is Mode {
   return value === 'all' || value === 'friends';
@@ -323,6 +347,7 @@ export class Voice {
       roomSent: null,
       mutedNotified: new Set(),
       rulesVersion: null,
+      serverGroup: null,
     };
     // Zuerst die Ereignisse anmelden: Geht danach etwas schief, räumt 'close' auf.
     ws.on('message', (data, isBinary) => this.onMessage(conn, data, isBinary));
@@ -365,8 +390,10 @@ export class Voice {
       range: this.options.range,
       maxFrame: VOICE_MAX_FRAME,
       protocol: VOICE_PROTOCOL,
-      features: hooks ? VOICE_FEATURES_MODERATION : VOICE_FEATURES,
+      features: hooks ? (this.options.serverGroups ? VOICE_FEATURES_SERVER_GROUPS : VOICE_FEATURES_MODERATION) : VOICE_FEATURES,
       maxGroup: VOICE_MAX_GROUP,
+      // ab 1.14.0: Server-Gruppen der Partner-Server dürfen größer sein
+      ...(hooks && this.options.serverGroups ? { maxServerGroup: VOICE_MAX_SERVER_GROUP } : {}),
       // ab 1.13.0: veröffentlichte Voice-Regeln (angenommen, sonst wäre 4012 gekommen) und ob Clips aktiv sind
       ...(hooks ? { rules: conn.rulesVersion === null ? null : { version: conn.rulesVersion }, clips: hooks.clips() } : {}),
     });
@@ -423,6 +450,38 @@ export class Voice {
     }
   }
 
+  /**
+   * Ab 1.14.0: Server-Gruppen haben sich geändert (Plugin, Ablauf, Partner pausiert oder gelöscht). Betroffene Spieler
+   * (`null` = alle) wechseln sofort in ihre neue Gruppe bzw. zurück in ihre eigene; jede betroffene Verbindung bekommt
+   * ihre Liste danach nur einmal.
+   */
+  serverGroupsChanged(uuids: ReadonlySet<string> | null): void {
+    const groups = this.options.serverGroups;
+    if (!groups || !this.options.moderation) return;
+    const batch = new Set<Connection>();
+    for (const conn of [...this.connections.values()]) {
+      if (conn.browser || conn.lastJoin === null || conn.roomVoice === 'off') continue;
+      if (uuids !== null && !uuids.has(conn.uuid)) continue;
+      const next = groups.of(conn.lastJoin.server, conn.uuid);
+      if ((next === null ? null : serverGroupKey(next)) === conn.serverGroup) continue;
+      this.joinGame(conn, conn.lastJoin.server, conn.lastJoin.dimension, conn.lastJoin.group, batch);
+    }
+    for (const conn of batch) if (this.connections.get(conn.uuid) === conn) this.sendPeersTo(conn);
+  }
+
+  /**
+   * Server-Gruppe der Verbindung setzen. Bei einer Änderung bekommt der Client
+   * `{ type: 'serverGroup', server, group, partner }` (`t` steht für Clients nach dem Vertrag zusätzlich darin).
+   * Liefert true, wenn sich etwas geändert hat.
+   */
+  private setServerGroup(conn: Connection, group: ServerGroupOf | null): boolean {
+    const key = group === null ? null : serverGroupKey(group);
+    if (key === conn.serverGroup) return false;
+    conn.serverGroup = key;
+    this.sendTo(conn, { type: 'serverGroup', t: 'serverGroup', server: conn.server, group: group?.group ?? null, partner: group?.partnerName ?? null });
+    return true;
+  }
+
   /** Ist diese ID gerade ein verbundener Gast? (Melden: Gäste lassen sich nicht melden.) */
   isGuest(id: string): boolean {
     const conn = this.connections.get(id);
@@ -449,6 +508,7 @@ export class Voice {
     const from = this.freshPosition(conn, now);
     if (from && conn.room !== null) {
       for (const other of this.rooms.get(conn.room) ?? []) {
+        if (other.serverGroup !== conn.serverGroup) continue;
         const to = this.freshPosition(other, now);
         if (!to) continue;
         const dx = from.x - to.x;
@@ -643,6 +703,7 @@ export class Voice {
         conn.lastJoin = null;
         conn.world = null;
         conn.party = null;
+        this.setServerGroup(conn, null);
         if (conn.room === null && conn.group === null) return;
         conn.invite = null;
         this.leave(conn);
@@ -694,24 +755,28 @@ export class Voice {
    * `join` aus dem Spiel mit Moderation: „Voice aus“ (kein Raum, keine Gruppe), Welt und Party bestimmen, Entfernte
    * bleiben draußen (Welt: ohne Raum, Party: ohne Gruppe), danach `room` und – für Stummgeschaltete – `moderated`.
    */
-  private joinGame(conn: Connection, server: string, dimension: string, groupHex: string | null): void {
+  private joinGame(conn: Connection, server: string, dimension: string, groupHex: string | null, batch?: Set<Connection>): void {
     const hooks = this.options.moderation!;
     const now = this.options.now();
     const previousWorld = conn.world;
-    const party = hooks.party(groupHex, conn.uuid);
-    // Party verlassen: Stummschaltungen in früheren Parties enden.
+    const reportedParty = hooks.party(groupHex, conn.uuid);
+    // Party verlassen: Stummschaltungen in früheren Parties enden (eine Server-Gruppe zählt nicht als Verlassen).
     for (const key of this.scopes.keys()) {
-      if (key.startsWith('party:') && key !== (party ? `party:${party.id}` : '')) this.endMute(key, conn.uuid);
+      if (key.startsWith('party:') && key !== (reportedParty ? `party:${reportedParty.id}` : '')) this.endMute(key, conn.uuid);
     }
     if (hooks.serverOff(server)) {
       if (previousWorld !== null) this.endMute(`world:${previousWorld.id}`, conn.uuid);
       conn.server = server;
       conn.world = null;
       conn.party = null;
-      this.join(conn, null, null);
+      this.setServerGroup(conn, null);
+      this.join(conn, null, null, batch);
       this.setRoom(conn, 'off', VOICE_SERVER_OFF, null, true);
       return;
     }
+    // Ab 1.14.0: Eine Server-Gruppe des Partner-Servers ersetzt die eigene Gruppe bzw. die Party-Gruppe, solange sie gilt.
+    const serverGroup = this.options.serverGroups?.of(server, conn.uuid) ?? null;
+    const party = serverGroup === null ? reportedParty : null;
     const world = hooks.world(server, conn.uuid);
     if (previousWorld !== null && previousWorld.id !== world?.id) this.endMute(`world:${previousWorld.id}`, conn.uuid);
     conn.server = server;
@@ -728,13 +793,21 @@ export class Voice {
       until = worldKick;
       message = 'Du bist gerade aus dem Voice dieser Welt entfernt.';
     }
-    let group: string | null = groupHex === null ? null : `${server} ${groupHex}`;
+    let group: string | null = serverGroup !== null ? serverGroupKey(serverGroup) : groupHex === null ? null : `${server} ${groupHex}`;
     let partyKick: number | null = null;
-    if (group !== null && party !== null && party.inGroup) {
+    if (serverGroup === null && group !== null && party !== null && party.inGroup) {
       partyKick = this.scopeEntry(`party:${party.id}`, conn.uuid, now)?.kickedUntil ?? null;
       if (partyKick !== null) group = null;
     }
-    this.join(conn, room, group);
+    const serverGroupChanged = this.setServerGroup(conn, serverGroup);
+    this.join(conn, room, group, batch);
+    // Andere Server-Gruppe im selben Raum: Wer dort zu hören ist, hat sich für alle im Raum geändert.
+    if (serverGroupChanged && conn.room !== null) {
+      for (const other of this.rooms.get(conn.room) ?? []) {
+        if (batch) batch.add(other);
+        else this.sendPeersTo(other);
+      }
+    }
     if (partyKick !== null) {
       this.sendTo(conn, { type: 'group', status: 'kicked', until: partyKick, message: 'Du bist gerade aus dem Voice der Party entfernt.' });
     }
@@ -768,7 +841,8 @@ export class Voice {
     if (!hooks || conn.browser || conn.lastJoin === null || conn.server === null || conn.roomVoice === 'off') return;
     const now = this.options.now();
     conn.world = hooks.world(conn.server, conn.uuid);
-    conn.party = hooks.party(conn.lastJoin.group, conn.uuid);
+    // Mit Server-Gruppe ist die Party-Gruppe aus (ab 1.14.0).
+    conn.party = conn.serverGroup === null ? hooks.party(conn.lastJoin.group, conn.uuid) : null;
     // Entfernen abgelaufen: wieder in den Raum (der Client darf auch selbst `join` schicken).
     if (conn.roomVoice === 'kicked' && (conn.roomUntil ?? 0) <= now) {
       this.joinGame(conn, conn.lastJoin.server, conn.lastJoin.dimension, conn.lastJoin.group);
@@ -845,6 +919,7 @@ export class Voice {
       const present = other !== undefined && other.guest === null && other.world?.id === world.id;
       if ((act === 'mute' || act === 'kick') && !present) return reply('invalid', `${targetName} ist gerade nicht im Voice dieser Welt.`);
     } else {
+      if (conn.serverGroup !== null) return reply('denied', 'Auf diesem Server gilt gerade eine Server-Gruppe; die Party-Gruppe ist so lange aus.');
       const party = conn.lastJoin === null ? null : hooks.party(conn.lastJoin.group, conn.uuid);
       conn.party = party;
       if (party === null || !party.inGroup || conn.group === null || party.leader !== conn.uuid) return reply('denied', 'Das darf nur der Leiter der Party (in der Voice-Gruppe der Party).');
@@ -957,11 +1032,13 @@ export class Voice {
    * Raum betreten oder wechseln (`room` null: kein Raum, im Browser) und Gruppe betreten, wechseln oder verlassen
    * (`group` null: keine Gruppe). Raum und Gruppe sind unabhängig: Beim Dimensionswechsel bleibt die Gruppe, im selben
    * Raum wechselt nur die Gruppe. Beim Raumwechsel gilt die alte Position nicht mehr (andere Dimension, anderer Server).
+   * Mit `batch` werden die Betroffenen nur gesammelt (sie bekommen ihre Liste danach einmal).
    */
-  private join(conn: Connection, room: string | null, group: string | null): void {
+  private join(conn: Connection, room: string | null, group: string | null, batch?: Set<Connection>): void {
     if (conn.room === room && conn.group === group) {
       // Nichts geändert: nur die aktuelle Liste an den Spieler selbst.
-      this.sendPeersTo(conn);
+      if (batch) batch.add(conn);
+      else this.sendPeersTo(conn);
       return;
     }
     // Jeder Betroffene bekommt einmal seine vollständige Liste, auch wenn er in Raum und Gruppe ist.
@@ -977,7 +1054,7 @@ export class Voice {
     if (conn.group !== group) {
       this.leaveGroup(conn, notify);
       if (group !== null) {
-        if ((this.groups.get(group)?.size ?? 0) >= VOICE_MAX_GROUP) {
+        if ((this.groups.get(group)?.size ?? 0) >= groupLimit(group)) {
           // Voll: Der Spieler ist danach in keiner Gruppe.
           full = true;
         } else {
@@ -988,7 +1065,10 @@ export class Voice {
     }
     notify.add(conn);
     if (full) this.sendTo(conn, { type: 'group', status: 'full' });
-    for (const other of notify) this.sendPeersTo(other);
+    for (const other of notify) {
+      if (batch) batch.add(other);
+      else this.sendPeersTo(other);
+    }
   }
 
   /** Raum und Gruppe verlassen (`leave`, Trennen, Verdrängen, Konto gelöscht oder gesperrt); die übrigen bekommen ihre Liste. */
@@ -1026,7 +1106,8 @@ export class Voice {
     const roomMembers = conn.room === null ? undefined : this.rooms.get(conn.room);
     if (roomMembers) {
       for (const other of roomMembers) {
-        if (other === conn) continue;
+        // Ab 1.14.0: in der Nähe nur, wer dieselbe Server-Gruppe hat (bzw. beide keine)
+        if (other === conn || other.serverGroup !== conn.serverGroup) continue;
         uuids.push(other.uuid);
         listed.add(other);
         if (uuids.length >= MAX_PEERS) break;
@@ -1038,7 +1119,7 @@ export class Voice {
         if (other === conn) continue;
         group.push(other.uuid);
         listed.add(other);
-        if (group.length >= VOICE_MAX_GROUP) break;
+        if (group.length >= groupLimit(conn.group!)) break;
       }
     }
     const muted: string[] = [];
@@ -1078,9 +1159,8 @@ export class Voice {
     const watchers = new Set<Connection>();
     const roomMembers = conn.room === null ? undefined : this.rooms.get(conn.room);
     const groupMembers = conn.group === null ? undefined : this.groups.get(conn.group);
-    for (const members of [roomMembers, groupMembers]) {
-      if (members) for (const other of members) if (other !== conn) watchers.add(other);
-    }
+    for (const other of roomMembers ?? []) if (other !== conn && other.serverGroup === conn.serverGroup) watchers.add(other);
+    for (const other of groupMembers ?? []) if (other !== conn) watchers.add(other);
     const message = { type: 'state', uuid: conn.uuid, muted, deafened };
     for (const other of watchers) this.sendTo(other, message);
   }
@@ -1120,6 +1200,8 @@ export class Voice {
       if (other === conn) continue;
       // Mitglieder der eigenen Gruppe sind schon oben geprüft (höchstens eine Kopie).
       if (conn.group !== null && other.group === conn.group) continue;
+      // Ab 1.14.0: Server-Gruppen hören in der Nähe nur sich selbst; ohne Server-Gruppe nur andere ohne.
+      if (other.serverGroup !== conn.serverGroup) continue;
       const to = this.freshPosition(other, now);
       if (!to) continue;
       const dx = from.x - to.x;

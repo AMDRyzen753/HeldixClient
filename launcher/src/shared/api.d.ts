@@ -140,7 +140,7 @@ export interface WhatsNew {
 
 /** Bereich auf heldixclient.com nach der Anmeldung */
 /** welten = Konto → Meine Welten (dauerhafte Welten, ab Dienst 1.13.0) */
-export type WebTarget = 'profil' | 'freunde' | 'nachrichten' | 'privatsphaere' | 'daten' | 'support' | 'team' | 'welten';
+export type WebTarget = 'profil' | 'freunde' | 'nachrichten' | 'privatsphaere' | 'daten' | 'support' | 'team' | 'welten' | 'oeffentlich' | 'setups';
 
 /** Stand der automatischen Updates (siehe main/core/updater.ts) */
 export interface UpdateState {
@@ -270,7 +270,13 @@ export interface Friend {
   /** UUID ohne Bindestriche, klein */
   uuid: string;
   name: string;
+  /** im Spiel (Verbindung des Spiels zum Dienst) */
   online: boolean;
+  /**
+   * „Im Launcher“ (Dienst 1.14.0): Launcher offen (auch im Infobereich), aber nicht im Spiel – bekommt Nachrichten sofort.
+   * Nie zusammen mit online; Einladen und Beitreten gehen weiter nur im Spiel.
+   */
+  launcher: boolean;
   activity: FriendActivity | null;
   /** Server (nur im Mehrspieler und wenn der Freund ihn zeigt), z. B. "hypixel.net" oder "mc.example.de:25570" */
   server: string | null;
@@ -286,7 +292,7 @@ export interface Friend {
   note: string | null;
   /** sein Statustext (höchstens 40 Zeichen), auch wenn er offline ist */
   statusText: string | null;
-  /** „Nicht stören“ (nur, solange er online ist) */
+  /** „Nicht stören“ (nur, solange er im Spiel oder im Launcher ist; hat in der Anzeige Vorrang) */
   dnd: boolean;
   /** zuletzt online (ms, vom Dienst gerundet), nur offline und wenn er es zeigt */
   lastOnline: number | null;
@@ -316,7 +322,7 @@ export interface SocialOverview {
   error: string | null;
   /** beim Dienst angemeldeter Spieler */
   me: SocialMe | null;
-  /** Favoriten zuerst, dann online, dann nach Name */
+  /** Favoriten zuerst, dann im Spiel, dann im Launcher, dann offline, jeweils nach Name */
   friends: Friend[];
   incoming: FriendRequest[];
   outgoing: FriendRequest[];
@@ -402,6 +408,8 @@ export interface PartyMember {
   leader: boolean;
   /** im Spiel verbunden */
   online: boolean;
+  /** nur der Launcher ist verbunden (Dienst 1.14.0), nie zusammen mit online */
+  launcher: boolean;
   /** gar keine Verbindung (fliegt nach awayUntil raus) */
   away: boolean;
   awayUntil: number | null;
@@ -1282,6 +1290,187 @@ export interface WorldJoinView {
   friend: boolean;
 }
 
+// ---------- Setup teilen (0.14.1, Heldix-Dienst 1.14.0, main/core/setupshare.ts und setupinstall.ts) ----------
+
+/** Listen eines Setups: Mods, Ressourcenpakete und Shaderpacks von Modrinth, Addons aus dem Addon-Store */
+export type SharedSetupKind = 'mods' | 'resourcepacks' | 'shaderpacks' | 'addons';
+/** Ablauf eines geteilten Setups in Tagen (null = läuft nicht ab) */
+export type SharedSetupExpiry = 7 | 30 | 90 | null;
+
+/** Eintrag, der beim Teilen mitgeht */
+export interface SharedSetupDraftItem {
+  kind: SharedSetupKind;
+  title: string;
+}
+
+/** Datei bzw. Addon, das nicht geteilt wird, mit Grund („keine Modrinth-Datei“, „ausgeschaltet“ …) */
+export interface SharedSetupSkipped {
+  kind: SharedSetupKind;
+  name: string;
+  reason: string;
+}
+
+/** Dialog „Setup teilen“: was aus dieser Instanz mitgehen würde */
+export interface SharedSetupDraft {
+  instanceId: string;
+  instanceName: string;
+  minecraft: string;
+  loader: InstanceLoader;
+  heldixClient: boolean;
+  items: SharedSetupDraftItem[];
+  notShared: SharedSetupSkipped[];
+  /** Zahl der Grafik-Werte (options.txt + Heldix-Leistungsprofil), 0 = keine */
+  graphics: number;
+  /** Zahl der Tasten aus options.txt */
+  keys: number;
+  /** warum Teilen gerade nicht geht (kein Dienst, kein Microsoft-Konto), sonst null */
+  problem: string | null;
+}
+
+export interface SharedSetupShareOptions {
+  /** höchstens 40 Zeichen (leer = Name der Instanz) */
+  name: string;
+  /** höchstens 300 Zeichen */
+  description: string;
+  /** Grafik-Einstellungen und Heldix-Leistungsprofil mitteilen */
+  graphics: boolean;
+  /** Tastenbelegung mitteilen */
+  keys: boolean;
+  expiresDays: SharedSetupExpiry;
+}
+
+export interface SharedSetupCreated {
+  code: string;
+  /** Web-Link https://<Webseite>/setup#<code> */
+  url: string;
+  /** heldixclient://setup/<code> */
+  appUrl: string;
+  /** Ablauf (ms seit 1970), null = nie */
+  expires: number | null;
+  items: number;
+  notShared: SharedSetupSkipped[];
+}
+
+/** Eigenes geteiltes Setup (GET /v1/setups) */
+export interface OwnSharedSetup {
+  code: string;
+  name: string;
+  description: string;
+  created: number;
+  expires: number | null;
+  views: number;
+  installs: number;
+  /** widerrufen oder abgelaufen: Link geht nicht mehr */
+  active: boolean;
+  url: string | null;
+}
+
+export interface OwnSharedSetups {
+  /** off = kein Dienst bzw. kein Microsoft-Konto · unsupported = Dienst ohne Setups · error = siehe error */
+  status: 'ok' | 'off' | 'unsupported' | 'error';
+  error: string | null;
+  setups: OwnSharedSetup[];
+}
+
+/** Ein Eintrag der Vorschau */
+export interface SharedSetupPreviewItem {
+  kind: SharedSetupKind;
+  title: string;
+  /** Versionsnummer laut Modrinth bzw. Version im Store (null = unbekannt) */
+  version: string | null;
+  /** Symbol von Modrinth (nur https://cdn.modrinth.com/…) */
+  iconUrl: string | null;
+  /** Symbol aus dem Heldix-Icon-Set (Addons) */
+  icon: string | null;
+  /** ok = wird installiert · warn = wird installiert, siehe note · skip = wird nicht installiert */
+  state: 'ok' | 'warn' | 'skip';
+  note: string | null;
+}
+
+/** Vorschau eines Setups aus einem Link (GET /v1/public/setups/<code>) */
+export interface SharedSetupPreview {
+  code: string;
+  /** missing = gibt es nicht · gone = abgelaufen oder widerrufen · error = siehe error */
+  status: 'ok' | 'missing' | 'gone' | 'error';
+  error: string | null;
+  name: string;
+  description: string;
+  creator: { uuid: string; name: string } | null;
+  created: number;
+  expires: number | null;
+  views: number;
+  installs: number;
+  minecraft: string;
+  loader: InstanceLoader;
+  heldixClient: boolean;
+  items: SharedSetupPreviewItem[];
+  /** lesbare Grafik-Werte („Sichtweite: 12 Chunks“) */
+  graphics: string[];
+  /** Zahl der Tasten im Setup */
+  keys: number;
+  /** warum sich das Setup hier nicht als Instanz anlegen lässt (z. B. keine HeldixClient-Mod für diese Version) */
+  problem: string | null;
+  /** allgemeine Hinweise (ungültige Einträge übersprungen, Modrinth nicht erreichbar) */
+  notes: string[];
+}
+
+export interface SharedSetupInstallOptions {
+  /** Name der neuen Instanz (höchstens 40 Zeichen) */
+  name: string;
+  /** Grafik-Einstellungen übernehmen */
+  graphics: boolean;
+  /** Tastenbelegung übernehmen */
+  keys: boolean;
+}
+
+/** Ergebnis von „Als neue Instanz anlegen“ */
+export interface SharedSetupResult {
+  instanceId: string;
+  instanceName: string;
+  installed: { kind: SharedSetupKind; title: string }[];
+  skipped: { kind: SharedSetupKind; title: string; reason: string }[];
+  notes: string[];
+  /** übernommene Werte; options.txt schreibt der Launcher beim ersten Start */
+  graphics: number;
+  keys: number;
+}
+
+// ---------- Partner-Server (GET /v1/public/partners, Dienst 1.14.0) ----------
+
+export interface PartnerServer {
+  id: string;
+  name: string;
+  description: string;
+  /** https-Adresse oder null */
+  website: string | null;
+  /** Server-Adressen bzw. Domains (eine Domain deckt ihre Subdomains ab) */
+  servers: string[];
+  featured: boolean;
+  /** Adresse für „Beitreten“ (die erste aus servers) */
+  address: string;
+}
+
+export interface PartnerServers {
+  /** off = kein Dienst · unsupported = Dienst ohne Partner · error = siehe error (letzter Stand bleibt) */
+  status: 'ok' | 'off' | 'unsupported' | 'error';
+  error: string | null;
+  /** hervorgehobene zuerst */
+  partners: PartnerServer[];
+}
+
+// ---------- Öffentliches Spielerprofil (GET/PUT /v1/account/public-profile, Dienst 1.14.0) ----------
+
+export interface PublicProfileState {
+  /** unsupported = Dienst ohne öffentliche Profile · no-account / offline-account · error = siehe error */
+  status: 'ok' | 'unsupported' | 'no-account' | 'offline-account' | 'error';
+  error: string | null;
+  /** Profil ist öffentlich */
+  enabled: boolean;
+  /** https://<Webseite>/spieler/<name> */
+  url: string | null;
+  name: string | null;
+}
+
 // ---------- Benachrichtigungen (Glocke, main/core/notifications.ts) ----------
 
 export type NotificationKind = 'friend-request' | 'message' | 'invite-accepted' | 'invite-confirmed' | 'unlock' | 'world-open' | 'world-invite' | 'party-invite' | 'party-follow' | 'update' | 'addons'
@@ -1567,6 +1756,32 @@ export interface HeldixApi {
   /** Startseite „Beliebte Welten“ (Entdecken, bis zu drei); refresh = am Speicher vorbei */
   getPopularWorlds(refresh?: boolean): Promise<PopularWorlds>;
   onPopularWorlds(callback: (popular: PopularWorlds) => void): () => void;
+  /** Partner-Server für „Beliebte Welten“ (hervorgehobene zuerst, 1 h zwischengespeichert); refresh = am Speicher vorbei */
+  getPartners(refresh?: boolean): Promise<PartnerServers>;
+  onPartners(callback: (partners: PartnerServers) => void): () => void;
+
+  // ---------- Setup teilen ----------
+  /** was aus dieser Instanz geteilt würde (liest nur; fragt Modrinth nach unbekannten Dateien und den Store nach Addons) */
+  prepareSetupShare(instanceId: string): Promise<SharedSetupDraft>;
+  /** Setup beim Dienst anlegen (Microsoft-Konto); der Launcher liest die Instanz dafür frisch */
+  createSetupShare(instanceId: string, options: SharedSetupShareOptions): Promise<SharedSetupCreated>;
+  listOwnSetups(): Promise<OwnSharedSetups>;
+  revokeSetup(code: string): Promise<OwnSharedSetups>;
+  /** Code aus einem geöffneten Link heldixclient://setup/<code> abholen (einmal; null = keiner) */
+  takeSetupLink(): Promise<string | null>;
+  /** Ein Setup-Link wurde geöffnet bzw. eingefügt: takeSetupLink() aufrufen */
+  onSetupLinkOpen(callback: () => void): () => void;
+  /** eingefügter Web-Link, heldixclient://setup/…-Link oder Code: öffnet die Vorschau (über onSetupLinkOpen); wirft bei allem anderen */
+  pasteSetupLink(text: string): Promise<string>;
+  getSetupPreview(code: string): Promise<SharedSetupPreview>;
+  /** neue Instanz aus dem Setup: lädt alles von Modrinth bzw. aus dem Store (Prüfsummen), meldet „installiert“ */
+  installSharedSetup(code: string, options: SharedSetupInstallOptions): Promise<SharedSetupResult>;
+
+  // ---------- Öffentliches Profil ----------
+  getPublicProfile(): Promise<PublicProfileState>;
+  setPublicProfile(enabled: boolean): Promise<PublicProfileState>;
+  /** https://<Webseite>/spieler/<name> im Browser öffnen */
+  openPublicProfile(): Promise<void>;
 
   // ---------- Benachrichtigungen ----------
   listNotifications(): Promise<NotificationList>;

@@ -64,9 +64,11 @@ public final class Social {
 	 * die eigenen Angaben, der Freund sieht sie nie), {@code statusText} und {@code dnd} („Nicht stören“, nur online),
 	 * {@code lastOnline} (ms, gerundet vom Dienst, 0 = unbekannt oder ausgeblendet) und {@code badge} (Abzeichen, null =
 	 * normaler HeldixClient-Spieler). Ältere Dienste schicken diese Felder nicht – dann gelten die Standardwerte.
+	 * Ab Dienst 1.14.0 (HeldixClient 0.14.1): {@code launcher} – der Freund ist nicht im Spiel, hat aber den Launcher offen
+	 * (bekommt Nachrichten sofort); {@code online} heißt weiter „im Spiel“.
 	 */
 	public record Friend(UUID uuid, String name, boolean online, String state, String server, long since,
-			boolean favorite, String nickname, String note, String statusText, boolean dnd, long lastOnline, Badge.Role badge) {
+			boolean favorite, String nickname, String note, String statusText, boolean dnd, long lastOnline, Badge.Role badge, boolean launcher) {
 		/** Name für Listen: der eigene Spitzname, sonst der Minecraft-Name */
 		public String shownName() {
 			return nickname != null && !nickname.isBlank() ? nickname : name;
@@ -74,13 +76,38 @@ public final class Social {
 
 		/** „zuletzt online vor 5 Min.“ (nur offline und wenn der Freund es zeigt), sonst null */
 		public String lastOnlineText() {
-			if (online || lastOnline <= 0) return null;
+			if (online || launcher || lastOnline <= 0) return null;
 			return "zuletzt online " + ago(lastOnline);
+		}
+
+		/** Nicht im Spiel, aber im Launcher (bekommt Nachrichten sofort) – ab Dienst 1.14.0 */
+		public boolean inLauncher() {
+			return !online && launcher;
+		}
+
+		/** Im Spiel oder im Launcher – erreichbar für Nachrichten */
+		public boolean reachable() {
+			return online || launcher;
+		}
+
+		/** Reihenfolge in Listen: 0 = im Spiel, 1 = im Launcher, 2 = offline */
+		public int presenceRank() {
+			return online ? 0 : launcher ? 1 : 2;
+		}
+
+		/**
+		 * Farbe des Zustands-Punkts bzw. der Zeile: „Nicht stören“ gelb (hat Vorrang), im Spiel grün, im Launcher
+		 * Heldix-Türkis, offline grau
+		 */
+		public int presenceColor() {
+			if (dnd && reachable()) return dev.heldixclient.ui.Ui.WARNING;
+			return online ? dev.heldixclient.ui.Ui.SUCCESS : launcher ? dev.heldixclient.ui.Ui.LAUNCHER : dev.heldixclient.ui.Ui.FAINT;
 		}
 
 		/** Was der Freund gerade macht, für die Anzeige */
 		public String activity() {
 			if (!online) {
+				if (launcher) return dnd ? "Nicht stören · im Launcher" : LAUNCHER_TEXT;
 				String last = lastOnlineText();
 				return last != null ? "Offline · " + last : "Offline";
 			}
@@ -129,6 +156,8 @@ public final class Social {
 	}
 
 	/** höchstens so viele Zeichen im eigenen Statustext, Spitznamen und in Notizen (wie beim Dienst) */
+	/** Zustand „Im Launcher“ (ab Dienst 1.14.0): Untertitel und Tooltip */
+	public static final String LAUNCHER_TEXT = "Im Launcher – bekommt Nachrichten sofort";
 	public static final int STATUS_MAX = 40;
 	public static final int NICKNAME_MAX = 24;
 	public static final int NOTE_MAX = 200;
@@ -788,8 +817,13 @@ public final class Social {
 				String where = item != null && "cape".equals(item.slot()) ? "Heldix-Menü → Cape" : "Heldix-Menü → Cosmetics";
 				// Name in die zweite Zeile: der Titel bleibt so kurz genug für die Einblendung („Nicht stören“: still)
 				if (!me.dnd()) {
+					// ab Dienst 1.14.0 auch Belohnungen von Partner-Servern (reason "partner", partner = Name des Partners)
+					String partner = "partner".equals(string(message, "reason")) ? string(message, "partner") : null;
+					String origin = "partner".equals(string(message, "reason"))
+							? "Belohnung von " + (partner != null && !partner.isBlank() ? partner : "einem Partner-Server")
+							: "Belohnung fürs Einladen";
 					Invites.notify("freischaltung-" + cosmetic, "Neues Cosmetic freigeschaltet",
-							"„" + (item != null ? item.name() : cosmetic) + "“ – Belohnung fürs Einladen · " + where);
+							"„" + (item != null ? item.name() : cosmetic) + "“ – " + origin + " · " + where);
 				}
 			}
 			// ab Dienst 1.12.0: ein Freund lädt in seine geteilte Welt ein (Heldix-Welten)
@@ -825,6 +859,11 @@ public final class Social {
 		handle(message);
 	}
 
+	/** Nur für automatische Tests: einen eingeschleusten Freund wieder aus der Liste nehmen (nur lokal) */
+	public static void testForgetFriend(UUID uuid) {
+		friends = sorted(new ArrayList<>(friends.stream().filter(friend -> !friend.uuid().equals(uuid)).toList()));
+	}
+
 	/** Eigene Cosmetics (Auswahl, Team, Freischaltungen) neu vom Dienst holen, im Hintergrund */
 	public static CompletableFuture<Void> refreshCosmetics() {
 		CompletableFuture<Void> result = new CompletableFuture<>();
@@ -856,10 +895,10 @@ public final class Social {
 		applyFriends(call("GET", "/v1/friends", null, true));
 	}
 
-	/** Favoriten zuerst, dann online, dann nach (Spitz-)Namen */
+	/** Favoriten zuerst, dann im Spiel, im Launcher, offline, dann nach (Spitz-)Namen */
 	private static List<Friend> sorted(List<Friend> list) {
 		list.sort((a, b) -> a.favorite() != b.favorite() ? (a.favorite() ? -1 : 1)
-				: a.online() != b.online() ? (a.online() ? -1 : 1) : a.shownName().compareToIgnoreCase(b.shownName()));
+				: a.presenceRank() != b.presenceRank() ? Integer.compare(a.presenceRank(), b.presenceRank()) : a.shownName().compareToIgnoreCase(b.shownName()));
 		return List.copyOf(list);
 	}
 
@@ -891,11 +930,13 @@ public final class Social {
 		UUID uuid = uuid(string(object, "uuid"));
 		if (uuid == null) return null;
 		boolean online = bool(object, "online", false);
+		// ab Dienst 1.14.0: nicht im Spiel, aber im Launcher (ältere Dienste schicken das Feld nicht)
+		boolean launcher = !online && bool(object, "launcher", false);
 		JsonElement badge = object.get("badge");
 		return new Friend(uuid, string(object, "name"), online, string(object, "state"), string(object, "server"), number(object, "since"),
 				bool(object, "favorite", false), oneLine(string(object, "nickname"), NICKNAME_MAX), clip(string(object, "note"), NOTE_MAX),
-				oneLine(string(object, "statusText"), STATUS_MAX), online && bool(object, "dnd", false), number(object, "lastOnline"),
-				badge != null && badge.isJsonPrimitive() ? Badge.Role.of(badge.getAsString()) : null);
+				oneLine(string(object, "statusText"), STATUS_MAX), (online || launcher) && bool(object, "dnd", false), number(object, "lastOnline"),
+				badge != null && badge.isJsonPrimitive() ? Badge.Role.of(badge.getAsString()) : null, launcher);
 	}
 
 	private static boolean bool(JsonObject object, String key, boolean fallback) {

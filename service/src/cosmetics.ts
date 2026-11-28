@@ -22,6 +22,8 @@ export const NO_SUCH_COSMETIC = 'Dieses Cosmetic gibt es nicht.';
 export const TEAM_ONLY = 'Dieses Cosmetic gibt es nur für das HeldixClient-Team.';
 /** `access: unlock` ohne Freischaltung (403 mit code LOCKED). */
 export const LOCKED = 'Dieses Cosmetic schaltest du frei, indem du Freunde zu HeldixClient einlädst.';
+/** Ab 1.14.0: Belohnung eines Partner-Servers ohne Freischaltung (403 mit code LOCKED). */
+export const lockedPartner = (partner: string) => `Dieses Cosmetic bekommst du als Belohnung auf ${partner}.`;
 const UNKNOWN_CAPE = 'Unbekanntes Cape.';
 const WRONG_SIGNATURE = 'Die Signatur stimmt nicht.';
 /** Liste: kurz im Cache (ETag spart die Übertragung). */
@@ -83,6 +85,11 @@ export class Cosmetics {
    * gespeicherten (beim Veröffentlichen geprüften) Manifest gelesen, danach aus dem Speicher.
    */
   private readonly formats = new Map<string, number>();
+  /**
+   * Ab 1.14.0: Belohnungen von Partner-Servern (Cosmetic → Partner, partners.ts). Im signierten Manifest steht
+   * `access: "unlock"` (tragen nur mit Freischaltung); Katalog und Team-Bereich zeigen `access: "partner"` mit Partner.
+   */
+  private partnerSource: () => Map<string, { id: string; name: string }> = () => new Map();
 
   constructor(
     private readonly store: Store,
@@ -90,6 +97,17 @@ export class Cosmetics {
     private readonly capes: ReadonlySet<string>,
     private readonly log: (line: string) => void,
   ) {}
+
+  /** Quelle der Partner-Belohnungen setzen (app.ts, sobald es die Partner gibt). */
+  setPartnerSource(source: () => Map<string, { id: string; name: string }>): void {
+    this.partnerSource = source;
+  }
+
+  /** Zugang im Katalog: `partner` (mit ID und Name) für zugeordnete Belohnungen, sonst wie im Manifest. */
+  private catalogAccess(info: CosmeticInfoRow, partners: Map<string, { id: string; name: string }>) {
+    const partner = info.access === 'unlock' ? partners.get(info.id) : undefined;
+    return partner ? { access: 'partner', partner: partner.id, partnerName: partner.name } : { access: info.access };
+  }
 
   private infoMap(): Map<string, CosmeticInfoRow> {
     return new Map(this.store.cosmeticInfos().map((info) => [info.id, info]));
@@ -154,13 +172,17 @@ export class Cosmetics {
   /** Katalog-Cosmetic wählen: `access: team` nur im Team, `access: unlock` nur freigeschaltet (403 LOCKED). */
   private requireAccess(user: UserRow, info: CosmeticInfoRow): void {
     this.requireTeam(user, info.access === 'team');
-    if (info.access === 'unlock' && !this.store.hasUnlock(user.uuid, info.id)) throw new HttpError(403, LOCKED, {}, 'LOCKED');
+    if (info.access === 'unlock' && !this.store.hasUnlock(user.uuid, info.id)) {
+      const partner = this.partnerSource().get(info.id);
+      throw new HttpError(403, partner ? lockedPartner(partner.name) : LOCKED, {}, 'LOCKED');
+    }
   }
 
   // ---------- Öffentlich ----------
 
   /** `GET /v1/cosmetics`: sichtbare Cosmetics nach Slot, dann Name; `format` sagt, ob ein Client es lesen kann. */
   list(): CachedText {
+    const partners = this.partnerSource();
     const cosmetics = this.store
       .cosmeticInfos()
       .filter((info) => !info.hidden)
@@ -172,7 +194,8 @@ export class Cosmetics {
         version: info.version,
         name: info.name,
         description: info.description,
-        access: info.access,
+        // ab 1.14.0: "partner" mit `partner` (ID) und `partnerName` für Belohnungen von Partner-Servern
+        ...this.catalogAccess(info, partners),
         sha256: info.sha256,
         size: info.size,
         date: info.date,
@@ -298,7 +321,8 @@ export class Cosmetics {
 
   // ---------- Team-Bereich ----------
 
-  private teamEntry(info: CosmeticInfoRow, wearers: Map<string, number>) {
+  private teamEntry(info: CosmeticInfoRow, wearers: Map<string, number>, partners: Map<string, { id: string; name: string }>) {
+    const partner = partners.get(info.id);
     return {
       id: info.id,
       slot: info.slot,
@@ -306,7 +330,10 @@ export class Cosmetics {
       version: info.version,
       name: info.name,
       description: info.description,
-      access: info.access,
+      ...this.catalogAccess(info, partners),
+      // Zugang im signierten Manifest; `partner` auch, wenn die Zuordnung gerade nicht wirkt (Manifest nicht unlock)
+      manifestAccess: info.access,
+      ...(partner && info.access !== 'unlock' ? { partner: partner.id, partnerName: partner.name } : {}),
       date: info.date,
       sha256: info.sha256,
       size: info.size,
@@ -321,11 +348,12 @@ export class Cosmetics {
   /** `GET /v1/team/cosmetics`: alle Cosmetics (auch ausgeblendete) mit Zahl der Träger, dazu der Schlüssel. */
   overview(key: KeyObject | null) {
     const wearers = this.store.cosmeticWearers();
+    const partners = this.partnerSource();
     return {
       cosmetics: this.store
         .cosmeticInfos()
         .sort(byCatalogOrder)
-        .map((info) => this.teamEntry(info, wearers)),
+        .map((info) => this.teamEntry(info, wearers, partners)),
       keyConfigured: key !== null,
       publicKey: key === null ? null : String(key.export({ type: 'spki', format: 'pem' })),
     };
@@ -335,7 +363,7 @@ export class Cosmetics {
   teamDetail(id: string) {
     const row = COSMETIC_ID_RE.test(id) ? this.store.getCosmetic(id) : undefined;
     if (!row) throw new HttpError(404, NO_SUCH_COSMETIC);
-    return { cosmetic: this.teamEntry(row, this.store.cosmeticWearers()), manifest: row.manifest, signature: row.signature };
+    return { cosmetic: this.teamEntry(row, this.store.cosmeticWearers(), this.partnerSource()), manifest: row.manifest, signature: row.signature };
   }
 
   /**

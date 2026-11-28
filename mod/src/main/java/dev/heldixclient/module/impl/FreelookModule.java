@@ -44,6 +44,12 @@ public class FreelookModule extends Module {
 		if (hold) toggled = false;
 		boolean want = isEnabled() && mc.player != null
 				&& (hold ? HeldixClient.freelookKey.isDown() && mc.gui.screen() == null : toggled);
+		// Server mit dem Plugin „HeldixClient Server“ kann Freelook per Regel abschalten
+		if (want && !dev.heldixclient.serverlink.ServerRules.allowed("freelook")) {
+			dev.heldixclient.serverlink.ServerRules.notifyBlocked("freelook");
+			want = false;
+			toggled = false;
+		}
 		if (want && blockedServer(mc) != null) {
 			String server = blockedServer(mc);
 			if (!server.equals(blockedNoticeFor)) {

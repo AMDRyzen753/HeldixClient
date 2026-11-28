@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="setup.css">
   <link rel="stylesheet" href="notifications.css">
   <link rel="stylesheet" href="worlds.css">
+  <link rel="stylesheet" href="sharing.css">
 </head>
 <body>
 <div class="splash" id="splash">
@@ -246,7 +247,10 @@
               <h2 class="page-title">Instanzen</h2>
               <p class="page-sub">Jede Instanz hat eigene Welten, Mods, Addons und Einstellungen.</p>
             </div>
-            <button class="primary" id="new-instance"><svg data-icon="plus" class="btn-icon"></svg>Neue Instanz</button>
+            <div class="button-row">
+              <button class="ghost" id="open-setups" title="Geteiltes Setup öffnen oder eigene verwalten"><svg data-icon="send" class="btn-icon"></svg>Setups</button>
+              <button class="primary" id="new-instance"><svg data-icon="plus" class="btn-icon"></svg>Neue Instanz</button>
+            </div>
           </div>
           <div class="instances-toolbar" id="instances-toolbar">
             <div class="search-field">
@@ -281,6 +285,7 @@
               <div class="detail-meta" id="detail-meta"></div>
             </div>
             <div class="detail-actions">
+              <button class="ghost" id="detail-share" title="Mods, Pakete, Addons und Einstellungen dieser Instanz als Link teilen"><svg data-icon="send" class="btn-icon"></svg>Teilen</button>
               <button class="ghost" id="detail-folder"><svg data-icon="folder" class="btn-icon"></svg>Ordner</button>
               <button class="primary big" id="detail-play"><svg data-icon="play" class="btn-icon"></svg>Spielen</button>
             </div>

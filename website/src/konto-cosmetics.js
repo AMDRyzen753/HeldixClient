@@ -6,6 +6,7 @@
 // aus /update-key.js). Cosmetics „nur fürs Team“ sieht und wählt nur, wer im Team ist. Eingebaute Team-Capes (capes.json:
 // "team": true) sehen alle; wählbar sind sie wie im Heldix-Menü nur im Team, sonst gesperrt. Ob der Spieler im
 // Team ist, sagt GET/PUT /v1/me/cosmetics (`team`); ohne diese Antwort gilt die Rolle aus /v1/web/me.
+// Belohnungen von Partner-Servern (access: partner, ab Dienst 1.14.0) genauso, mit „Belohnung auf <Partnername>“.
 // Belohnungen für Einladungen (access: unlock) sehen alle; wählbar sind sie erst, wenn ihre ID in `unlocked` steht
 // (GET/PUT /v1/me/cosmetics, Dienst ab 1.11.0) – sonst mit Schloss und Weg zu Freunde → „Freunde einladen“.
 // Auswahl: GET/PUT /v1/me/cosmetics ({ slot, id | null }); eingebaute Capes wie bisher über PUT /v1/me ({ cape }), so
@@ -20,6 +21,7 @@ import {
   cosmeticAnimated,
   cosmeticAnimations,
   cosmeticsKeyAvailable,
+  cosmeticAccess,
   createCosmeticLayer,
   drawCosmeticPreview,
   loadBuiltinCapes,
@@ -30,6 +32,7 @@ import {
   prepareCosmetic,
   SLOT_HASHES,
 } from './cosmetics-common.js';
+import { loadPartners, partnerRewardText } from './partner-common.js';
 
 const SAVE_DELAY = 350;
 const THUMB = 112;
@@ -338,8 +341,9 @@ export function initCosmetics({ call, enqueue, getMe, applyMe, saveCape, onLook 
       if (entry.slot !== slot) continue;
       const info = state.verified.get(entry.id);
       if (info) {
-        const reward = info.manifest.access === 'unlock';
-        list.push({ id: entry.id, name: info.manifest.name, kind: 'catalog', manifest: info.manifest, team: info.manifest.access === 'team', reward, locked: reward && !state.unlocked.has(entry.id) && entry.id !== current });
+        const { access, partner, partnerName } = cosmeticAccess(entry, info.manifest);
+        const reward = access === 'unlock' || access === 'partner';
+        list.push({ id: entry.id, name: info.manifest.name, kind: 'catalog', manifest: info.manifest, team: access === 'team', reward, partner: access === 'partner' ? partner ?? '' : null, partnerName: access === 'partner' ? partnerName : null, locked: reward && !state.unlocked.has(entry.id) && entry.id !== current });
       }
       else if (!state.rejected.has(entry.id)) list.push({ id: entry.id, name: entry.name, kind: 'pending' });
     }
@@ -354,14 +358,15 @@ export function initCosmetics({ call, enqueue, getMe, applyMe, saveCape, onLook 
     const name = slot === 'cape' ? 'cape' : `cosmetic-${slot}`;
     const pending = option.kind === 'pending';
     const locked = option.locked === true;
+    const rewardLabel = option.partner !== undefined && option.partner !== null ? partnerRewardText(option.partner, option.partnerName) : 'Belohnung für Einladungen';
     const label = locked
       ? option.reward
-        ? `${option.name} (Belohnung für Einladungen, noch gesperrt)`
+        ? `${option.name} (${rewardLabel}, noch gesperrt)`
         : `${option.name} (nur für das HeldixClient-Team, für dich gesperrt)`
       : option.team
         ? `${option.name} (nur fürs Team)`
         : option.reward
-          ? `${option.name} (Belohnung für Einladungen)`
+          ? `${option.name} (${rewardLabel})`
           : option.name;
     const input = h('input', { type: 'radio', name, value: option.id, 'aria-label': label, disabled: pending || locked || undefined, dataset: { focusKey: `${slot}:${option.id}` } });
     input.checked = checked;
@@ -378,7 +383,7 @@ export function initCosmetics({ call, enqueue, getMe, applyMe, saveCape, onLook 
       'label',
       {
         class: `cape-option cos-option${pending ? ' pending' : ''}${option.team ? ' team' : ''}${option.reward ? ' reward' : ''}${locked ? ' locked' : ''}`,
-        title: locked ? (option.reward ? `${option.name} – Belohnung für Einladungen` : `${option.name} – nur für das HeldixClient-Team`) : undefined,
+        title: locked ? (option.reward ? `${option.name} – ${rewardLabel}` : `${option.name} – nur für das HeldixClient-Team`) : undefined,
         dataset: { id: option.id || 'none', art: option.kind },
       },
       input,
@@ -402,7 +407,10 @@ export function initCosmetics({ call, enqueue, getMe, applyMe, saveCape, onLook 
         nodes.push(h('p', { class: 'cos-grid-note', text: loading ? 'Cosmetics werden geladen und geprüft …' : emptyText(slot) }));
       }
       // Gesperrte Belohnungen: wie man sie bekommt
-      if (list.some((option) => option.reward && option.locked)) {
+      if (list.some((option) => option.reward && option.locked && option.partner !== undefined && option.partner !== null)) {
+        nodes.push(h('p', { class: 'cos-lock-note', dataset: { hinweis: 'partner' } }, icon('lock'), h('span', null, 'Mit Schloss und Servernamen: Belohnungen von Partner-Servern – du bekommst sie auf dem Server, zum Beispiel für einen Sieg oder ein Event. ', h('a', { href: '/entdecken', text: 'Partner-Server ansehen' }))));
+      }
+      if (list.some((option) => option.reward && option.locked && (option.partner === undefined || option.partner === null))) {
         nodes.push(
           h(
             'p',
@@ -453,7 +461,9 @@ export function initCosmetics({ call, enqueue, getMe, applyMe, saveCape, onLook 
       if (info) {
         chips.push(h('span', { class: 'chip success' }, icon('check'), 'Signatur geprüft'));
         if (info.manifest.access === 'team') chips.push(h('span', { class: 'chip accent', text: 'Nur fürs Team' }));
-        if (info.manifest.access === 'unlock') chips.push(h('span', { class: 'chip accent', text: 'Belohnung für Einladungen' }));
+        const access = cosmeticAccess(info.entry, info.manifest);
+        if (access.access === 'unlock') chips.push(h('span', { class: 'chip accent', text: 'Belohnung für Einladungen' }));
+        if (access.access === 'partner') chips.push(h('span', { class: 'chip accent', text: partnerRewardText(access.partner, access.partnerName) }));
         if (cosmeticAnimated(info.manifest)) chips.push(h('span', { class: 'chip', text: 'Animiert' }));
         if (info.manifest.glow || info.manifest.particles?.fullbright) chips.push(h('span', { class: 'chip', text: 'Leuchtet' }));
       }
@@ -501,7 +511,8 @@ export function initCosmetics({ call, enqueue, getMe, applyMe, saveCape, onLook 
     const items = SLOTS.map((entry) => {
       const id = state.worn[entry.slot];
       const name = entry.slot === 'cape' && id ? nameOf('cape', id) ?? capeName(id) : nameOf(entry.slot, id);
-      return id && name ? { slot: entry.slot, label: entry.label, name, reward: state.verified.get(id)?.manifest.access === 'unlock' } : null;
+      const access = state.verified.has(id) ? cosmeticAccess(state.verified.get(id).entry, state.verified.get(id).manifest).access : null;
+      return id && name ? { slot: entry.slot, label: entry.label, name, reward: access === 'unlock' || access === 'partner' } : null;
     }).filter(Boolean);
     return {
       capeName: capeId ? nameOf('cape', capeId) ?? capeName(capeId) : null,
@@ -512,6 +523,11 @@ export function initCosmetics({ call, enqueue, getMe, applyMe, saveCape, onLook 
   }
 
   let lookSignature = '';
+  // Namen der Partner-Server für „Belohnung auf …“: einmal laden, danach neu zeichnen
+  loadPartners().then((partners) => {
+    if (partners.length && state.catalog) render();
+  });
+
   function render() {
     for (const entry of SLOTS) renderGrid(entry.slot);
     renderTabs();

@@ -5,25 +5,16 @@
 // Filter, Sortierung, Suche und Seite stehen hinter dem # (#sortierung=neu&tag=bauen&seite=2) – teilbar, aber nicht in
 // Server-Protokollen. Köpfe und Symbole kommen vom Heldix-Dienst (/api/v1/public/heads/…, …/icon.png), nie von Mojang.
 // „Beitreten“ öffnet heldixclient://welt/<code>; „Kopieren“ legt die Adresse für die Serverliste in die Zwischenablage.
-import { copyText, h, icon, toast } from './app-common.js';
+// Die Karten baut entdecken-karten.js (dieselben auf den Spielerprofilen).
+// Ab Dienst 1.14.0: Abschnitt „Partner-Server“ über dem Verzeichnis (GET /v1/public/partners, partner-common.js) –
+// hervorgehobene zuerst, mit Abzeichen „Partner“ und Adresse zum Kopieren. Ohne Partner bleibt der Abschnitt weg.
+import { h } from './app-common.js';
+import { FALLBACK_TAGS, discoverCard } from './entdecken-karten.js';
+import { loadPartners, partnerCard } from './partner-common.js';
 import { publicGet } from './public-cards.js';
 
 const SORTS = { popular: 'beliebt', active: 'aktiv', new: 'neu' };
 const SORT_FROM_HASH = Object.fromEntries(Object.entries(SORTS).map(([id, word]) => [word, id]));
-const FALLBACK_TAGS = [
-  ['survival', 'Survival'],
-  ['kreativ', 'Kreativ'],
-  ['minispiele', 'Minispiele'],
-  ['rollenspiel', 'Rollenspiel'],
-  ['bauen', 'Bauen'],
-  ['parkour', 'Parkour'],
-  ['technik', 'Technik'],
-  ['entspannt', 'Entspannt'],
-  ['hardcore', 'Hardcore'],
-].map(([id, label]) => ({ id, label }));
-const CODE_RE = /^[a-hjkmnp-z2-9]{6}$/;
-const HEAD_RE = /^\/v1\/public\/heads\/[0-9a-f]{32}\.png$/;
-const ICON_RE = /^\/v1\/public\/discover\/[a-hjkmnp-z2-9]{6}\/icon\.png$/;
 const VERSION_RE = /^[A-Za-z0-9._-]{1,32}$/;
 const NUMBER = new Intl.NumberFormat('de-DE');
 
@@ -31,23 +22,6 @@ const $ = (id) => document.getElementById(id);
 const state = { sort: 'popular', tag: '', lang: '', version: '', q: '', page: 1, pages: 1, tags: FALLBACK_TAGS, loading: 0 };
 
 const tagLabel = (id) => state.tags.find((tag) => tag.id === id)?.label ?? id;
-
-/** Zustand einer Welt im Verzeichnis als Text (geteilte Welten: geöffnet; dauerhafte: Zustand). */
-function stateInfo(entry) {
-  switch (entry.state) {
-    case 'running':
-      return { label: 'Läuft', tone: 'online', hint: null };
-    case 'online':
-      return { label: 'Geöffnet', tone: 'online', hint: null };
-    case 'starting':
-      return { label: 'Startet gerade', tone: 'soon', hint: 'In etwa 30 Sekunden kannst du beitreten.' };
-    case 'stopping':
-    case 'sleeping':
-      return { label: 'Schläft', tone: '', hint: 'Beitreten weckt sie – das dauert etwa 30 Sekunden.' };
-    default:
-      return { label: String(entry.state ?? ''), tone: '', hint: null };
-  }
-}
 
 // ---------------------------------------------------------------------------------------------------------
 // Adresse (#…) ⇄ Zustand
@@ -87,82 +61,6 @@ function syncControls() {
   if (document.activeElement !== $('entdecken-version')) $('entdecken-version').value = state.version;
   if (document.activeElement !== $('entdecken-suche')) $('entdecken-suche').value = state.q;
   for (const chip of $('entdecken-tags').querySelectorAll('button[data-tag]')) chip.setAttribute('aria-pressed', String(chip.dataset.tag === state.tag));
-}
-
-// ---------------------------------------------------------------------------------------------------------
-// Karten
-// ---------------------------------------------------------------------------------------------------------
-
-function headImage(entry) {
-  const head = typeof entry.host?.head === 'string' && HEAD_RE.test(entry.host.head) ? entry.host.head : null;
-  const image = h('img', { class: 'kopf discover-card__head', src: '/assets/standard-kopf.svg', width: '28', height: '28', alt: '', loading: 'lazy', decoding: 'async' });
-  if (head) {
-    image.addEventListener('error', () => image.setAttribute('src', '/assets/standard-kopf.svg'), { once: true });
-    image.src = `/api${head}?size=32`;
-  }
-  return image;
-}
-
-function worldIcon(entry) {
-  const src = typeof entry.icon === 'string' && ICON_RE.test(entry.icon) ? `/api${entry.icon}` : null;
-  if (!src) return h('span', { class: `icon-tile discover-card__icon${entry.persistent ? ' icon-tile--online' : ''}`, 'aria-hidden': 'true' }, icon(entry.persistent ? 'server' : 'world'));
-  const image = h('img', { class: 'discover-card__symbol', src, width: '48', height: '48', alt: '', loading: 'lazy', decoding: 'async' });
-  image.addEventListener('error', () => image.replaceWith(h('span', { class: 'icon-tile discover-card__icon', 'aria-hidden': 'true' }, icon('world'))), { once: true });
-  return image;
-}
-
-function card(entry) {
-  const info = stateInfo(entry);
-  const code = CODE_RE.test(entry.code ?? '') ? entry.code : null;
-  const address = typeof entry.address === 'string' ? entry.address : '';
-  const players = Number(entry.players) || 0;
-  const max = Number(entry.maxPlayers) || 0;
-  const live = entry.state === 'running' || entry.state === 'online';
-  const copy = h('button', { type: 'button', class: 'btn btn--ghost btn--sm btn--icon', 'aria-label': `Adresse von ${entry.name} kopieren`, title: 'Adresse kopieren', dataset: { aktion: 'kopieren' } }, icon('copy'));
-  copy.addEventListener('click', async () => {
-    const ok = await copyText(address);
-    toast(ok ? `${address} kopiert – in Minecraft unter Mehrspieler → Server hinzufügen einfügen.` : 'Kopieren ging nicht – bitte von Hand markieren.', ok ? 'success' : 'error');
-  });
-  const tags = Array.isArray(entry.tags) ? entry.tags : [];
-  return h(
-    'article',
-    { class: `card discover-card${live ? ' is-live' : ''}`, dataset: { code: code ?? '', zustand: entry.state ?? '' } },
-    h(
-      'div',
-      { class: 'discover-card__top' },
-      worldIcon(entry),
-      h(
-        'div',
-        { class: 'discover-card__title' },
-        h('h3', { class: 'card__title' }, code ? h('a', { href: `/welt#${code}`, text: entry.name }) : entry.name),
-        h('p', { class: 'discover-card__host' }, headImage(entry), h('span', null, 'von ', h('strong', { text: entry.host?.name ?? 'unbekannt' }))),
-      ),
-    ),
-    h(
-      'div',
-      { class: 'discover-card__chips' },
-      h('span', { class: `chip${info.tone ? ` chip--${info.tone}` : ''}` }, h('span', { class: `dot${live ? ' dot--online' : ''}`, 'aria-hidden': 'true' }), info.label),
-      entry.persistent ? h('span', { class: 'chip chip--accent', title: 'Läuft auf dem Heldix-Server, auch wenn der Besitzer offline ist' }, icon('server'), 'Dauerhaft') : null,
-      tags.map((tag) => h('span', { class: 'chip discover-tag', text: tagLabel(tag) })),
-    ),
-    entry.description ? h('p', { class: 'card__text discover-card__text', text: entry.description }) : h('p', { class: 'card__text discover-card__text text-3', text: 'Ohne Beschreibung.' }),
-    info.hint ? h('p', { class: 'tiny text-3', text: info.hint }) : null,
-    h(
-      'dl',
-      { class: 'discover-card__facts' },
-      h('div', null, h('dt', { text: 'Spieler' }), h('dd', { text: live || entry.state === 'starting' ? `${players} von ${max}` : `bis zu ${max}` })),
-      h('div', null, h('dt', { text: 'Minecraft' }), h('dd', { text: entry.version ?? '–' })),
-      h('div', null, h('dt', { text: 'Sprache' }), h('dd', { text: entry.lang === 'en' ? 'Englisch' : 'Deutsch' })),
-      h('div', null, h('dt', { text: 'Gefällt mir' }), h('dd', { class: 'discover-card__likes' }, icon('heart'), NUMBER.format(Number(entry.likes) || 0))),
-    ),
-    h(
-      'div',
-      { class: 'discover-card__actions' },
-      code ? h('a', { class: 'btn btn--primary btn--sm', href: `heldixclient://welt/${code}`, dataset: { aktion: 'beitreten' } }, icon('play'), 'Beitreten') : null,
-      address ? copy : null,
-      code ? h('a', { class: 'btn btn--secondary btn--sm', href: `/welt#${code}`, dataset: { aktion: 'details' } }, 'Details', icon('chevron-right')) : null,
-    ),
-  );
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -215,7 +113,7 @@ async function load() {
     return load();
   }
   const total = Number(data?.total) || 0;
-  list.replaceChildren(...entries.map(card));
+  list.replaceChildren(...entries.map((entry) => discoverCard(entry, { tagLabel })));
   const filtered = Boolean(state.tag || state.lang || state.version || state.q);
   $('entdecken-leer').hidden = entries.length > 0;
   $('entdecken-leer-text').textContent = filtered ? 'Gerade passt keine Welt zu deiner Auswahl. Probier einen anderen Filter.' : 'Gerade steht keine Welt im Verzeichnis. Trag deine eigene ein!';
@@ -299,6 +197,21 @@ window.addEventListener('hashchange', () => {
   load();
 });
 
+// ---------------------------------------------------------------------------------------------------------
+// Partner-Server
+// ---------------------------------------------------------------------------------------------------------
+
+async function loadPartnerSection() {
+  const section = $('entdecken-partner');
+  if (!section) return;
+  const partners = await loadPartners();
+  section.hidden = !partners.length;
+  if (!partners.length) return;
+  $('entdecken-partner-liste').replaceChildren(...partners.map(partnerCard));
+  $('entdecken-partner-zahl').textContent = partners.length === 1 ? '1 Partner-Server' : `${partners.length} Partner-Server`;
+}
+
 readHash();
 loadMeta();
 load();
+loadPartnerSection();

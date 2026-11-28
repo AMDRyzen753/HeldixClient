@@ -59,11 +59,24 @@ public final class Party {
 		}
 	}
 
-	public record Member(UUID uuid, String name, boolean leader, boolean online, boolean away, long awayUntil, String state, Location location, long joined) {
+	/** Mitglied der Party; {@code launcher} (ab Dienst 1.14.0): nicht im Spiel, aber im Launcher (bekommt Nachrichten sofort) */
+	public record Member(UUID uuid, String name, boolean leader, boolean online, boolean away, long awayUntil, String state, Location location, long joined,
+			boolean launcher) {
+		/** Im Launcher statt im Spiel */
+		public boolean inLauncher() {
+			return !online && launcher;
+		}
+
+		/** Farbe des Zustands-Punkts: im Spiel grün, kurz weg gelb, im Launcher Heldix-Türkis, sonst grau */
+		public int presenceColor() {
+			if (online) return away ? dev.heldixclient.ui.Ui.WARNING : dev.heldixclient.ui.Ui.SUCCESS;
+			return launcher ? dev.heldixclient.ui.Ui.LAUNCHER : dev.heldixclient.ui.Ui.FAINT;
+		}
+
 		/** Wo das Mitglied ist, für die Anzeige */
 		public String where() {
 			if (away) return "Kurz weg";
-			if (!online) return "Nicht im Spiel";
+			if (!online) return launcher ? Social.LAUNCHER_TEXT : "Nicht im Spiel";
 			if (location != null) return location.world() ? "In der Welt „" + location.title() + "“" : "Auf " + location.title();
 			if (state == null) return "Im Spiel";
 			return switch (state) {
@@ -576,7 +589,8 @@ public final class Party {
 			UUID uuid = Social.uuid(Social.string(object, "uuid"));
 			if (uuid == null) continue;
 			members.add(new Member(uuid, name(Social.string(object, "name")), uuid.equals(leader), bool(object, "online"), bool(object, "away"),
-					number(object, "awayUntil"), Social.string(object, "state"), location(object.get("location")), number(object, "joined")));
+					number(object, "awayUntil"), Social.string(object, "state"), location(object.get("location")), number(object, "joined"),
+					!bool(object, "online") && bool(object, "launcher")));
 		}
 		List<Pending> pending = new ArrayList<>();
 		for (JsonElement element : Social.array(json, "invites")) {

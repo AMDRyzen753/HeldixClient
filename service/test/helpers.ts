@@ -140,8 +140,13 @@ export async function api(
   return { status: res.status, body: text === '' ? undefined : JSON.parse(text), headers: res.headers };
 }
 
-/** Macht Stufe 13 (Voice-Moderation: Meldungsart, Voice-Sperren, Zustimmung, Regeln, „Voice aus“, Clips) rückgängig. */
-export const UNDO_SCHEMA_13 = `
+/** Macht Stufe 14 (Server-Partner, Setup teilen, öffentliche Spielerprofile) rückgängig. */
+export const UNDO_SCHEMA_14 = `
+DROP TABLE public_profiles; DROP TABLE setups; DROP TABLE partner_cosmetics; DROP TABLE partner_applications; DROP TABLE partners;
+`;
+
+/** Macht Stufe 13 (Voice-Moderation: Meldungsart, Voice-Sperren, Zustimmung, Regeln, „Voice aus“, Clips) rückgängig (vorher auch Stufe 14). */
+export const UNDO_SCHEMA_13 = `${UNDO_SCHEMA_14}
 DROP TABLE voice_clips; DROP TABLE voice_servers; DROP TABLE voice_settings; DROP TABLE voice_rules; DROP TABLE voice_consents;
 DROP TABLE voice_bans; DROP INDEX reports_kind;
 ALTER TABLE reports DROP COLUMN kind; ALTER TABLE reports DROP COLUMN context; ALTER TABLE reports DROP COLUMN outcome;
@@ -179,6 +184,8 @@ export const ME_DEFAULTS = Object.freeze({
 
 /** Felder, die `Friend` ab 1.12.0 zusätzlich hat (online gesehen, ohne eigene Angaben). */
 export const FRIEND_DEFAULTS = Object.freeze({
+  // ab 1.14.0: „Im Launcher“
+  launcher: false,
   favorite: false,
   nickname: null,
   note: null,

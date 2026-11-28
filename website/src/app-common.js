@@ -225,12 +225,13 @@ export function initials(name) {
 
 /**
  * Farbiges Bild mit Initialen (Bilder von fremden Servern wie Minecraft-Köpfe erlaubt die CSP nicht).
- * online: true/false zeigt einen Status-Punkt, null keinen.
+ * online: true (im Spiel, grün), 'launcher' (nur der Launcher offen, türkis), false (offline) zeigt einen Status-Punkt,
+ * null keinen. Den Wert für Freunde liefert presenceDot(friend).
  */
 export function avatar(name, uuid, { size = '', online = null, skin = defaultSkinSource } = {}) {
   const element = h('span', { class: `avatar${size ? ` avatar-${size}` : ''}`, 'aria-hidden': 'true' }, h('span', { class: 'avatar-initials', text: initials(name) }));
   element.style.setProperty('--hue', String(hueOf(uuid || name)));
-  if (online !== null) element.append(h('span', { class: `presence${online ? ' on' : ''}` }));
+  if (online !== null) element.append(h('span', { class: `presence${online === 'launcher' ? ' launcher' : online ? ' on' : ''}` }));
   // Minecraft-Kopf darüberlegen, sobald (und falls) der Skin da ist. Ohne Skin bleiben die Initialen.
   if (skin && /^[0-9a-f]{32}$/.test(uuid || '')) {
     const entry = loadHead(uuid, skin);
@@ -341,8 +342,28 @@ export const REPORT_REASONS = [
 ];
 export const reasonLabel = (reason) => REPORT_REASONS.find(([id]) => id === reason)?.[1] ?? String(reason);
 
+/**
+ * Zustand eines Freundes (oder Party-Mitglieds): 'game' (online = im Spiel), 'launcher' (Heldix-Dienst ab 1.14.0:
+ * launcher: true – nur der Launcher ist offen, Nachrichten kommen sofort an) oder 'offline'.
+ */
+export function presenceOf(friend) {
+  if (friend?.online) return 'game';
+  if (friend?.launcher === true) return 'launcher';
+  return 'offline';
+}
+
+/** Wert für avatar({ online }): true, 'launcher' oder false. */
+export const presenceDot = (friend) => ({ game: true, launcher: 'launcher', offline: false })[presenceOf(friend)];
+
+/** Rang für Sortierungen: im Spiel vor im Launcher vor offline. */
+export const presenceRank = (friend) => ({ game: 2, launcher: 1, offline: 0 })[presenceOf(friend)];
+
+/** Klasse für Untertitel (row-sub …): online, launcher oder keine. */
+export const presenceClass = (friend) => ({ game: ' online', launcher: ' launcher', offline: '' })[presenceOf(friend)];
+
 /** Was ein Freund gerade macht – dieselben Texte wie im Spiel (Social.Friend#activity). */
 export function activity(friend) {
+  if (friend && !friend.online && friend.launcher === true) return 'Im Launcher';
   if (!friend || !friend.online) return 'Offline';
   switch (friend.state) {
     case 'menu':

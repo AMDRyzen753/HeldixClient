@@ -30,6 +30,10 @@ import java.util.function.IntSupplier;
  *
  * <p>Fair Play: Auf Servern nur die Oberfläche. Höhlenansicht und Nether gibt es nur in Einzelspieler-Welten (das
  * erzwingt auch die API). Keine Spieler, keine Mobs.
+ *
+ * <p>Ab 1.1.0 (Heldix-API 11): Server mit dem Plugin „HeldixClient Server“ können die Minimap (Regel „minimap“), die
+ * Wegpunkte auf der Karte („waypoints“) und die Koordinaten darunter („coordinates“) abschalten. Die Minimap folgt der
+ * Regel über {@code followServerRule} – HeldixClient blendet sie dann aus und zeigt „Auf diesem Server deaktiviert“.
  */
 public final class MinimapAddon implements HeldixAddon {
 	private static final int[] SIZES = {72, 96, 128};
@@ -100,6 +104,8 @@ public final class MinimapAddon implements HeldixAddon {
 		this.api = api;
 		this.world = api.worldMap();
 		module = api.registerHudModule(ModuleSpec.of("minimap", "Minimap", "Karte deiner Umgebung").at(9999, 4).withIcon("map"), new Hud());
+		// API 11: auf Servern mit der Regel „minimap“ (Plugin „HeldixClient Server“) blendet HeldixClient die Karte aus
+		module.followServerRule("minimap");
 		shape = module.addStyleChoice("shape", "Form", List.of("Rund", "Eckig"), 0);
 		size = module.addStyleChoice("size", "Größe", List.of("Klein", "Mittel", "Groß"), 1);
 		rotate = module.addStyleToggle("rotate", "Karte dreht sich mit", true);
@@ -163,7 +169,7 @@ public final class MinimapAddon implements HeldixAddon {
 	// ======================================================================================
 
 	private void tick() {
-		if (!module.isEnabled() || !world.available()) {
+		if (!module.isEnabled() || !world.available() || !api.server().allowed("minimap")) {
 			if (!tiles.isEmpty()) clearTiles();
 			return;
 		}
@@ -370,7 +376,7 @@ public final class MinimapAddon implements HeldixAddon {
 			border(canvas, size, round);
 			float center = size / 2f;
 			double scale = size / viewBlocks;
-			if (showWaypoints.getAsBoolean()) waypoints(canvas, view, size, round, scale, fx, fz, rx, rz);
+			if (showWaypoints.getAsBoolean() && api.server().allowed("waypoints")) waypoints(canvas, view, size, round, scale, fx, fz, rx, rz);
 			if (compass.getAsBoolean()) compassLetters(canvas, style, size, round, fx, fz, rx, rz);
 			arrow(canvas, center, center, turn ? 0 : -Math.sin(Math.toRadians(view.yaw())), turn ? -1 : Math.cos(Math.toRadians(view.yaw())));
 			coordinates(canvas, style, size, view);
@@ -550,7 +556,8 @@ public final class MinimapAddon implements HeldixAddon {
 		}
 
 		private void coordinates(HudCanvas canvas, HudStyle style, int size, WorldMap.View view) {
-			if (!coordinates.getAsBoolean()) return;
+			// Regel „coordinates“ des Servers: keine Koordinaten unter der Karte
+			if (!coordinates.getAsBoolean() || !api.server().allowed("coordinates")) return;
 			String text = String.format(Locale.ROOT, "%d  %d  %d", (int) Math.floor(view.x()), (int) Math.floor(view.y()), (int) Math.floor(view.z()));
 			HudCanvas.TextStyle small = HudCanvas.TextStyle.SMALL;
 			float width = canvas.textWidth(text, small) + 8;

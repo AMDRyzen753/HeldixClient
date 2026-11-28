@@ -859,3 +859,100 @@ dialog.profile-card {
     transition: none;
   }
 }
+
+/* ---------- Meine Setups und Öffentliches Profil (ab Heldix-Dienst 1.14.0) ---------- */
+.setups-head-end {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+.setup-row.is-inactive .row-title span:first-child {
+  color: var(--text-2);
+}
+.setup-row .row-meta code {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.06em;
+}
+.setup-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  margin: 6px 0 0;
+}
+.setup-counts div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.setup-counts dt {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+.setup-counts dd {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.setups-old {
+  margin-top: var(--sp-3);
+}
+.setups-old > summary {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.setups-old > .rows {
+  margin-top: var(--sp-2);
+}
+.public-profile__body {
+  display: grid;
+  gap: var(--sp-4);
+}
+.public-profile__body[hidden] {
+  display: none;
+}
+.public-profile__master {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-accent);
+  background: var(--accent-soft);
+}
+.public-profile__link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+.public-profile__link[hidden] {
+  display: none;
+}
+.public-profile__url {
+  min-width: 0;
+  color: var(--c-blue-300);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.public-profile__link .btn-group {
+  margin-left: auto;
+}
+.public-profile__bio {
+  display: grid;
+  gap: var(--sp-2);
+}
+.public-profile__bio.is-off {
+  opacity: 0.6;
+}
+@media (max-width: 640px) {
+  .public-profile__link .btn-group {
+    margin-left: 0;
+  }
+}

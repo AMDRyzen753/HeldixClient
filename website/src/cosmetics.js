@@ -10,6 +10,8 @@
 // Ohne WebGL zeichnet die Seite eine 2D-Ansicht. Mit Anmeldung: „Mit meinem Skin anprobieren“.
 // Belohnungen für Einladungen (access: unlock) kann jeder anprobieren; sie tragen ein Schloss und den Weg zum
 // Freischalten. Angemeldet fragt die Seite GET /api/v1/me/cosmetics (unlocked), was schon freigeschaltet ist.
+// Ab Dienst 1.14.0: Belohnungen von Partner-Servern (access: partner) mit „Belohnung auf <Partnername>“ – Namen aus
+// GET /api/v1/public/partners (partner-common.js); freigeschaltet werden sie auf dem Partner-Server.
 import { api, h, icon, toast } from './app-common.js';
 import {
   COSMETIC_SLOTS,
@@ -18,6 +20,7 @@ import {
   SLOT_NAMES,
   SLOT_TITLES,
   animationButtons,
+  cosmeticAccess,
   cosmeticAnimated,
   cosmeticAnimations,
   cosmeticsKeyAvailable,
@@ -28,6 +31,7 @@ import {
   prepareBuiltinCape,
   prepareCosmetic,
 } from './cosmetics-common.js';
+import { loadPartners, partnerRewardText } from './partner-common.js';
 
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const DATE = new Intl.DateTimeFormat('de-DE', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -117,7 +121,12 @@ function readBuiltinCapes() {
 /** Nur für das HeldixClient-Team: Katalog-Cosmetics mit access: team und eingebaute Team-Capes. */
 const teamOnly = (item) => (item.builtin ? item.cape.team === true : item.manifest?.access === 'team');
 /** Belohnung für Einladungen (access: unlock) – und ob der angemeldete Spieler sie schon hat. */
-const rewardOnly = (item) => !item.builtin && item.manifest?.access === 'unlock';
+const accessOf = (item) => (item.builtin ? { access: item.cape.team ? 'team' : 'all', partner: null } : cosmeticAccess(item.entry, item.manifest));
+/** Belohnung eines Partner-Servers (access: partner). */
+const partnerReward = (item) => !item.builtin && accessOf(item).access === 'partner';
+const rewardOnly = (item) => !item.builtin && (accessOf(item).access === 'unlock' || accessOf(item).access === 'partner');
+/** Text der Belohnung: für Einladungen oder auf einem Partner-Server. */
+const rewardText = (item) => (partnerReward(item) ? partnerRewardText(accessOf(item).partner, accessOf(item).partnerName) : 'Belohnung für Einladungen');
 const rewardUnlocked = (item) => rewardOnly(item) && state.unlocked?.has(item.id) === true;
 const INVITE_HREF = '/konto#reiter=freunde&teil=einladen';
 
@@ -190,7 +199,7 @@ function pickButton(item) {
     artFor(item),
     h('span', { class: 'cape-pick-name', text: item.name }),
     teamOnly(item) ? h('span', { class: 'cosmetic-pick-badge', title: 'Nur für das HeldixClient-Team' }, icon('shield')) : null,
-    rewardOnly(item) ? h('span', { class: 'cosmetic-pick-badge reward', title: rewardUnlocked(item) ? 'Belohnung für Einladungen – freigeschaltet' : 'Belohnung für Einladungen' }, icon(rewardUnlocked(item) ? 'check' : 'lock')) : null,
+    rewardOnly(item) ? h('span', { class: 'cosmetic-pick-badge reward', title: rewardUnlocked(item) ? `${rewardText(item)} – freigeschaltet` : rewardText(item) }, icon(rewardUnlocked(item) ? 'check' : 'lock')) : null,
   );
 }
 
@@ -260,8 +269,8 @@ function renderInfo() {
     const { manifest } = item;
     chips.push(chip('Signatur geprüft', 'success', 'check', 'Vom HeldixClient-Team signiert – in deinem Browser geprüft'));
     if (manifest.access === 'team') chips.push(chip('Nur fürs Team', 'warning', 'shield', 'Tragen können es nur Mitglieder des HeldixClient-Teams'));
-    if (manifest.access === 'unlock') {
-      chips.push(chip('Belohnung für Einladungen', 'accent', rewardUnlocked(item) ? 'sparkles' : 'lock', 'Tragen kann es, wer es über Einladungen freigeschaltet hat'));
+    if (rewardOnly(item)) {
+      chips.push(chip(rewardText(item), 'accent', rewardUnlocked(item) ? 'sparkles' : 'lock', partnerReward(item) ? 'Tragen kann es, wer es auf diesem Partner-Server freigeschaltet hat' : 'Tragen kann es, wer es über Einladungen freigeschaltet hat'));
       if (rewardUnlocked(item)) chips.push(chip('Freigeschaltet', 'success', 'check', 'Du hast es freigeschaltet'));
     }
     if (manifest.glow) chips.push(chip('leuchtet', 'accent'));
@@ -322,6 +331,8 @@ function renderRewardHint(item) {
   }
   if (rewardUnlocked(item)) {
     box.replaceChildren(icon('sparkles'), h('span', null, 'Du hast es freigeschaltet. ', h('a', { href: `/konto#reiter=profil&platz=${SLOT_HASHES[item.slot]}`, text: 'Im Konto tragen' })));
+  } else if (partnerReward(item)) {
+    box.replaceChildren(icon('lock'), h('span', null, `${rewardText(item)}: Du bekommst es auf diesem Partner-Server, zum Beispiel für einen Sieg oder ein Event. `, h('a', { href: '/entdecken', text: 'Partner-Server ansehen' })));
   } else {
     box.replaceChildren(icon('lock'), h('span', null, 'Belohnung für Einladungen: Lade Freunde zu HeldixClient ein – kommen sie neu dazu und spielen 30 Minuten, schaltest du es frei. ', h('a', { href: INVITE_HREF, text: 'Freunde einladen' })));
   }
@@ -362,7 +373,7 @@ function renderOverview() {
             h('a', { href: `#${SLOT_HASHES[slot]}/${item.id}`, text: item.name }),
             item.description ? ` – ${item.description}` : '',
             teamOnly(item) ? h('span', { class: 'chip warning', text: 'nur Team' }) : null,
-            rewardOnly(item) ? h('span', { class: 'chip accent', text: 'Belohnung für Einladungen' }) : null,
+            rewardOnly(item) ? h('span', { class: 'chip accent', text: rewardText(item) }) : null,
           ),
         ),
       ),
@@ -813,3 +824,10 @@ window.addEventListener('hashchange', () => {
 });
 loadCatalog();
 offerOwnSkin();
+// Namen der Partner-Server für „Belohnung auf …“ (fehlen sie, steht „Belohnung eines Partner-Servers“)
+loadPartners().then((partners) => {
+  if (!partners.length) return;
+  renderPicker();
+  renderInfo();
+  renderOverview();
+});

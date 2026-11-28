@@ -1,0 +1,49 @@
+// Server-Plugin „HeldixClient Server“ für Paper: Kanal heldixclient:server zu HeldixClient-Spielern (Regeln, HUD-Elemente,
+// Einblendungen), Schnittstelle für andere Plugins (Bukkit ServicesManager) und – mit Partner-Schlüssel – Voice-Gruppen und
+// Belohnungs-Cosmetics über den Heldix-Dienst. Eigene Version, Ergebnis build/libs/HeldixClient-Server-<version>.jar.
+// Doku: docs/server-plugin.md
+plugins {
+	id 'java'
+}
+
+group = 'dev.heldixclient'
+version = rootProject.heldix_server_version
+
+base {
+	archivesName = 'HeldixClient-Server'
+}
+
+// Paper-API passend zur Minecraft-Version (26.3 → io.papermc.paper:paper-api:26.3.build.<build>), aus repo.papermc.io
+def paperApi = "${rootProject.minecraft_version}.build.${rootProject.paper_api_build}"
+
+dependencies {
+	compileOnly "io.papermc.paper:paper-api:${paperApi}"
+}
+
+java {
+	// Plugins anderer Entwickler kompilieren gegen dieses Jar: Quellen mitliefern (Javadoc in der IDE)
+	withSourcesJar()
+	// Die Paper-API für 26.x ist selbst mit Java 25 gebaut; das Plugin bleibt trotzdem Java-21-Bytecode (release 21).
+	// Ohne das lehnt Gradle die Abhängigkeit ab („only compatible with JVM runtime version 25“).
+	disableAutoTargetJvm()
+}
+
+tasks.withType(JavaCompile).configureEach {
+	// Java-21-kompatibel kompiliert (Paper für 26.x läuft selbst mit Java 25)
+	it.options.release = 21
+	it.options.encoding = 'UTF-8'
+}
+
+processResources {
+	def props = [version: project.version, paperApi: paperApi, minecraft: rootProject.minecraft_version]
+	inputs.properties props
+	filesMatching('plugin.yml') {
+		expand props
+	}
+}
+
+jar {
+	manifest {
+		attributes('Implementation-Title': 'HeldixClient Server', 'Implementation-Version': project.version)
+	}
+}

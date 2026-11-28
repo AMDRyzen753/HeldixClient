@@ -126,6 +126,7 @@ interface RawFriend {
   uuid?: unknown;
   name?: unknown;
   online?: unknown;
+  launcher?: unknown;
   state?: unknown;
   server?: unknown;
   since?: unknown;
@@ -219,9 +220,14 @@ export function displayName(friend: Pick<Friend, 'name' | 'nickname'>): string {
   return friend.nickname?.trim() || friend.name;
 }
 
-/** Freunde: Favoriten zuerst, dann online, dann nach Name (Spitzname, wenn vergeben). */
+/** Rang für die Sortierung: im Spiel vor „Im Launcher“ vor offline */
+export function presenceRank(friend: Pick<Friend, 'online' | 'launcher'>): number {
+  return friend.online ? 2 : friend.launcher ? 1 : 0;
+}
+
+/** Freunde: Favoriten zuerst, dann im Spiel, dann im Launcher, dann offline, jeweils nach Name (Spitzname, wenn vergeben). */
 export function sortFriends(friends: Friend[]): Friend[] {
-  return friends.sort((a, b) => Number(b.favorite) - Number(a.favorite) || Number(b.online) - Number(a.online)
+  return friends.sort((a, b) => Number(b.favorite) - Number(a.favorite) || presenceRank(b) - presenceRank(a)
     || displayName(a).localeCompare(displayName(b), 'de', { sensitivity: 'base' }) || a.name.localeCompare(b.name, 'de'));
 }
 
@@ -230,11 +236,14 @@ export function mapFriend(f: RawFriend, unread = 0): Friend {
   const uuid = str(f.uuid);
   const activity = ACTIVITIES.includes(f.state as FriendActivity) ? (f.state as FriendActivity) : null;
   const online = f.online === true;
+  // „Im Launcher“ (Dienst 1.14.0): Launcher verbunden, Spiel nicht – im Spiel hat Vorrang
+  const launcher = !online && f.launcher === true;
   const lastOnline = typeof f.lastOnline === 'number' && Number.isFinite(f.lastOnline) && f.lastOnline > 0 ? f.lastOnline : null;
   return {
     uuid,
     name: str(f.name) || uuid,
     online,
+    launcher,
     activity: online ? activity : null,
     server: online && activity === 'multiplayer' && typeof f.server === 'string' && f.server ? f.server : null,
     since: num(f.since),
@@ -243,8 +252,8 @@ export function mapFriend(f: RawFriend, unread = 0): Friend {
     nickname: textOrNull(f.nickname) ? [...cleanLine(f.nickname)].slice(0, NICKNAME_MAX).join('') || null : null,
     note: textOrNull(f.note) ? [...cleanLine(f.note)].slice(0, NOTE_MAX).join('') || null : null,
     statusText: textOrNull(f.statusText) ? [...cleanLine(f.statusText)].slice(0, STATUS_MAX).join('') || null : null,
-    dnd: online && f.dnd === true,
-    lastOnline: online ? null : lastOnline,
+    dnd: (online || launcher) && f.dnd === true,
+    lastOnline: online || launcher ? null : lastOnline,
     badge: badgeOf(f.badge),
   };
 }

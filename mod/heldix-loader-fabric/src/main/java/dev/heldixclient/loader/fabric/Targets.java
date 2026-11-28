@@ -46,6 +46,12 @@ public final class Targets {
 	public static final String PLAYER_LIST = "net.minecraft.server.players.PlayerList";
 	public static final String INTEGRATED_SERVER = "net.minecraft.client.server.IntegratedServer";
 	public static final String INTEGRATED_PLAYER_LIST = "net.minecraft.client.server.IntegratedPlayerList";
+	/**
+	 * Server-Schnittstelle (Loader 2.5.0, HeldixClient 0.14.1): Kanal {@code heldixclient:server} zum Server-Plugin. Minecraft
+	 * verwirft unbekannte Custom-Payloads seit 1.20.5 schon beim Lesen ({@code DiscardedPayload.codec}); der Eingriff liefert
+	 * für den Kanal (und zum Senden von {@code minecraft:register}) einen eigenen Codec.
+	 */
+	public static final String DISCARDED_PAYLOAD = "net.minecraft.network.protocol.common.custom.DiscardedPayload";
 
 	public static final List<String> ALL = List.of(
 			MINECRAFT,
@@ -79,7 +85,8 @@ public final class Targets {
 			ITEM_ENTITY_RENDER_STATE,
 			PLAYER_LIST,
 			INTEGRATED_SERVER,
-			INTEGRATED_PLAYER_LIST);
+			INTEGRATED_PLAYER_LIST,
+			DISCARDED_PAYLOAD);
 
 	private Targets() {
 	}

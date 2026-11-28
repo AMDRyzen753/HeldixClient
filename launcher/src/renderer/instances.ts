@@ -22,6 +22,7 @@ import {
   uiIcon,
 } from './core.js';
 import { openStoreAddon } from './store.js';
+import { openSetupsDialog, openShareDialog } from './setupshare.js';
 
 const COLORS = ['#3b82f6', '#06b6d4', '#10b981', '#8b5cf6', '#f59e0b', '#f43f5e'];
 /** Reiter der Detailansicht; 'mods' und 'addons' (die früheren Reiter) öffnen „Mods & Addons“ */
@@ -47,6 +48,9 @@ export function initInstances(showView: (view: string) => void): void {
     if (detailId) void launchInstance(detailId, showView);
   });
   $('#detail-folder').addEventListener('click', () => detailId && api.openFolder('instance', detailId));
+  // Setup teilen (setupshare.ts): diese Instanz als Link; „Setups“ = Link öffnen und eigene verwalten
+  $('#detail-share').addEventListener('click', () => detailId && openShareDialog(detailId));
+  $('#open-setups').addEventListener('click', () => openSetupsDialog());
   document.querySelectorAll<HTMLButtonElement>('#detail-tabs button').forEach((button) =>
     button.addEventListener('click', () => switchTab(button.dataset.tab as Tab)));
   $('#content-filter').addEventListener('input', renderContent);

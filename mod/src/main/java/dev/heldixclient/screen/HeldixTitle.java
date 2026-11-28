@@ -546,7 +546,9 @@ public class HeldixTitle {
 			}
 			List<Social.Friend> friends = Social.online() ? Social.friends() : List.of();
 			long online = friends.stream().filter(Social.Friend::online).count();
-			panel(g, l, l.friendsY(), l.friendsH(), "friends", "Freunde", friends.isEmpty() ? null : online + " von " + friends.size() + " online");
+			long launcher = friends.stream().filter(Social.Friend::inLauncher).count();
+			String count = online + " von " + friends.size() + " online" + (launcher > 0 ? "  ·  " + launcher + " im Launcher" : "");
+			panel(g, l, l.friendsY(), l.friendsH(), "friends", "Freunde", friends.isEmpty() ? null : count);
 			String hint = FriendWidget.serviceHint();
 			if (hint == null && friends.isEmpty()) hint = "Noch keine Freunde – unter „Alle“ fügst du welche hinzu.";
 			if (hint != null) {

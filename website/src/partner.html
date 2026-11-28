@@ -1,0 +1,196 @@
+<!--seite {"titel":"Partner-Server","beschreibung":"Das kostenlose Partner-Programm von HeldixClient für Minecraft-Server: Voice-Gruppen je Team, eigene Anzeigen im HUD, Belohnungs-Cosmetics, maschinenlesbare Server-Regeln und das Abzeichen „Partner“ – jetzt Antrag stellen."}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
+<link rel="stylesheet" href="/entdecken.css">
+<link rel="stylesheet" href="/oeffentlich.css">
+<script type="module" src="/partner.js"></script>
+</head>
+<body data-seite="partner">
+{{include:nav.html}}
+
+<main id="inhalt" class="partner-page">
+  <section class="page-hero" aria-labelledby="seite-titel">
+    <div class="container">
+      <div class="page-hero__inner">
+        <span class="eyebrow">{{abzeichen:partner}}Partner-Programm</span>
+        <h1 class="h1" id="seite-titel">HeldixClient für <span class="text-gradient">deinen Server</span></h1>
+        <p class="lead">Mit dem Partner-Programm bekommt dein Minecraft-Server Funktionen, die HeldixClient-Spieler direkt im Spiel sehen: Voice-Gruppen je Team, eigene Anzeigen im HUD, Belohnungs-Cosmetics und Server-Regeln. Das Programm ist kostenlos.</p>
+        <div class="page-hero__actions">
+          <a class="btn btn--primary" href="#antrag">{{icon:send}}Antrag stellen</a>
+          <a class="btn btn--secondary" href="/entwickler/server-plugin">{{icon:code}}Zur Schnittstelle</a>
+        </div>
+        <!-- Server-Plugin zum Herunterladen (der Bau setzt Version, Größe und SHA-256 ein; ohne passende Datei der Hinweis) -->
+        {{#serverplugin}}{{SERVER_PLUGIN_HTML}}{{/serverplugin}}
+        {{^serverplugin}}<p class="notice partner-notice">{{icon:info}}<span><strong>Das Server-Plugin zum Herunterladen kommt bald.</strong> Die Schnittstelle ist schon beschrieben – so kannst du dich jetzt bewerben und alles vorbereiten.</span></p>{{/serverplugin}}
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight" aria-labelledby="funktionen-titel">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">{{icon:sparkles}}Was Partner-Server können</span>
+        <h2 class="h2" id="funktionen-titel">Fünf Bausteine für deinen Server</h2>
+        <p class="lead">Alles läuft über ein kleines Plugin auf deinem Server und den Heldix-Dienst. Spieler ohne HeldixClient merken davon nichts und spielen ganz normal weiter.</p>
+      </div>
+      <div class="partner-features">
+        <article class="card">
+          <span class="icon-tile icon-tile--voice">{{icon:headphones}}</span>
+          <h3 class="card__title">Voice-Gruppen</h3>
+          <p class="card__text">Dein Server teilt Spieler in Gruppen ein, zum Beispiel je Team oder Runde. Wer in einer Gruppe ist, hört in der Nähe nur seine Gruppe und spricht im Gruppenkanal mit ihr – über die ganze Karte. Die Gruppen speichert der Dienst nicht; sie gelten nur, solange dein Server sie schickt.</p>
+        </article>
+        <article class="card">
+          <span class="icon-tile">{{icon:hud}}</span>
+          <h3 class="card__title">Server-HUD</h3>
+          <p class="card__text">Bis zu acht eigene Anzeigen im Heldix-Stil: Text, Fortschrittsbalken oder kurze Listen – etwa für Punkte, Runden oder Ziele. Dazu kurze Hinweise am Bildrand. Spieler können das Server-HUD in ihren Einstellungen ausschalten.</p>
+        </article>
+        <article class="card">
+          <span class="icon-tile icon-tile--reward">{{icon:gift}}</span>
+          <h3 class="card__title">Belohnungs-Cosmetics</h3>
+          <p class="card__text">Das Team gibt für deinen Server eigene Cosmetics frei. Dein Server schaltet sie für Spieler frei, zum Beispiel für einen Sieg oder ein Event. Im Katalog stehen sie für alle sichtbar mit „Belohnung auf“ und dem Namen deines Servers.</p>
+        </article>
+        <article class="card">
+          <span class="icon-tile icon-tile--soon">{{icon:shield}}</span>
+          <h3 class="card__title">Server-Regeln</h3>
+          <p class="card__text">Dein Server sagt HeldixClient, welche Funktionen bei dir aus sind, zum Beispiel Freelook, Zoom, Minimap, Weltkarte, Wegpunkte, Koordinaten oder Dauersprint. Versucht ein Spieler sie zu nutzen, sieht er „Auf diesem Server deaktiviert“.</p>
+        </article>
+        <article class="card">
+          <span class="icon-tile icon-tile--online">{{icon:star}}</span>
+          <h3 class="card__title">Abzeichen „Partner“</h3>
+          <p class="card__text">Dein Server trägt in der Serverliste und im Pausemenü von HeldixClient das Abzeichen „Partner“ und steht auf der Webseite unter Entdecken bei den Partner-Servern. Hervorgehobene Partner stehen dort ganz oben.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight" aria-labelledby="ablauf-titel">
+    <div class="container">
+      <div class="partner-steps-layout">
+        <div class="card">
+          <h2 class="h3" id="ablauf-titel">So wirst du Partner</h2>
+          <ol class="mini-steps">
+            <li><span><strong>Antrag stellen</strong> – unten auf dieser Seite, angemeldet mit deinem Minecraft-Konto.</span></li>
+            <li><span><strong>Das Team prüft</strong> deinen Server und meldet sich über die Kontaktangabe aus dem Antrag. Den Stand siehst du hier.</span></li>
+            <li><span><strong>Partner-Schlüssel</strong> – das Team legt deinen Server an und gibt dir einen geheimen Schlüssel für das Plugin.</span></li>
+            <li><span><strong>Plugin einrichten</strong> – Schlüssel in die <code>config.yml</code> eintragen, fertig. Über die Java-Schnittstelle steuern andere Plugins Voice-Gruppen, HUD, Regeln und Belohnungen.</span></li>
+          </ol>
+        </div>
+        <div class="card">
+          <span class="icon-tile">{{icon:code}}</span>
+          <h2 class="h4">Für Entwickler</h2>
+          <p class="card__text">Wie das Plugin mit HeldixClient spricht, welche Regeln es gibt und wie andere Plugins es nutzen: alles auf der Entwickler-Seite zum Server-Plugin.</p>
+          <a class="link-arrow" href="/entwickler/server-plugin">Server-Plugin und Schnittstelle{{icon:chevron-right}}</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Schon dabei (GET /v1/public/partners): nur, wenn es aktive Partner gibt -->
+  <section class="section section--tight" id="partner-liste-bereich" aria-labelledby="partner-liste-titel" hidden>
+    <div class="container">
+      <h2 class="h3 page-section-title" id="partner-liste-titel">Diese Server sind schon dabei</h2>
+      <div class="partner-grid" id="partner-liste"></div>
+    </div>
+  </section>
+
+  <!-- Antrag (partner.js): angemeldet Formular und eigene Anträge, sonst Anmelden -->
+  <section class="section section--tight" id="antrag" aria-labelledby="antrag-titel">
+    <div class="container">
+      <div class="card card--accent partner-apply" id="partner-antrag" data-zustand="laden" aria-live="polite">
+        <div class="partner-apply__head">
+          <span class="icon-tile icon-tile--lg">{{icon:send}}</span>
+          <div>
+            <h2 class="h3" id="antrag-titel">Antrag stellen</h2>
+            <p class="text-2 small">Für Betreiber von Minecraft-Servern. Du brauchst nur dein Minecraft-Konto – angemeldet wird ohne Passwort.</p>
+          </div>
+        </div>
+
+        <div class="app-loading" id="antrag-laden" role="status"><span class="spinner" aria-hidden="true"></span><span>Anmeldung wird geprüft …</span></div>
+
+        <!-- Nicht angemeldet -->
+        <div class="partner-apply__gate" id="antrag-gast" hidden>
+          <p>Zum Antrag meldest du dich mit deinem Minecraft-Konto an. Danach kommst du hierher zurück.</p>
+          <div class="btn-group">
+            <a class="btn btn--primary" id="antrag-anmelden" href="/konto">{{icon:user}}Anmelden</a>
+            <a class="btn btn--secondary" href="/download" data-download>{{icon:download}}<span data-download-label>{{t:download.knopf}}</span></a>
+          </div>
+        </div>
+
+        <!-- Dienst ohne Partner-Programm oder nicht erreichbar -->
+        <p class="notice" id="antrag-aus" hidden></p>
+
+        <!-- Eigene Anträge -->
+        <div class="partner-apply__mine" id="antrag-eigene" hidden>
+          <h3 class="h4">Deine Anträge</h3>
+          <ul class="partner-applications" id="antrag-eigene-liste"></ul>
+        </div>
+
+        <!-- Formular -->
+        <form class="partner-apply__form" id="antrag-form" novalidate hidden>
+          <div class="partner-apply__grid">
+            <div class="field">
+              <label class="field__label" for="antrag-server">Server-Adresse</label>
+              <input class="input" id="antrag-server" name="server" maxlength="255" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="z. B. play.example.net" required>
+              <span class="field__help">So, wie Spieler sie in Minecraft eintragen. Eine Domain gilt auch für ihre Subdomains.</span>
+            </div>
+            <div class="field">
+              <span class="field-row"><label class="field__label" for="antrag-name">Name des Servers</label><span class="counter" id="antrag-name-zaehler"></span></span>
+              <input class="input" id="antrag-name" name="name" maxlength="40" autocomplete="off" required>
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-row"><label class="field__label" for="antrag-beschreibung">Beschreibung</label><span class="counter" id="antrag-beschreibung-zaehler"></span></span>
+            <textarea class="input textarea" id="antrag-beschreibung" name="description" maxlength="300" rows="4" placeholder="Was erwartet Spieler auf deinem Server? Welche Spielmodi gibt es, und wie willst du die Funktionen nutzen?" required></textarea>
+          </div>
+          <div class="field">
+            <span class="field-row"><label class="field__label" for="antrag-kontakt">Kontakt</label><span class="counter" id="antrag-kontakt-zaehler"></span></span>
+            <input class="input" id="antrag-kontakt" name="contact" maxlength="200" autocomplete="off" placeholder="Wie erreicht dich das Team? Zum Beispiel ein Discord-Name oder eine E-Mail-Adresse." required>
+            <span class="field__help">Sieht nur das Team. Antworten zum Stand bekommst du außerdem hier auf dieser Seite.</span>
+          </div>
+          <label class="check-row"><input type="checkbox" id="antrag-bestaetigen"><span>Ich betreibe diesen Server oder darf ihn vertreten.</span></label>
+          <p class="form-error" id="antrag-fehler" role="alert" hidden></p>
+          <div class="btn-group">
+            <button class="btn btn--primary" type="submit" id="antrag-senden">{{icon:send}}Antrag senden</button>
+          </div>
+          <p class="tiny text-3">Höchstens ein offener Antrag je Spieler. Gespeichert werden deine Angaben, deine Minecraft-UUID und der Stand des Antrags. Mehr in der <a href="/datenschutz#partner">Datenschutzerklärung</a>.</p>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight" aria-labelledby="fragen-titel">
+    <div class="container">
+      <h2 class="h3 page-section-title" id="fragen-titel">Fragen</h2>
+      <div class="accordion">
+        <details>
+          <summary>Was kostet das Partner-Programm?</summary>
+          <div class="accordion__body"><p>Nichts. Das Partner-Programm ist kostenlos – für deinen Server und für deine Spieler.</p></div>
+        </details>
+        <details>
+          <summary>Was braucht mein Server?</summary>
+          <div class="accordion__body"><p>Einen Paper-Server mit der Minecraft-Version von HeldixClient und das Plugin „HeldixClient Server“. Hinter Velocity oder BungeeCord funktioniert es auch: Die Proxys reichen den Kanal einfach durch, auf dem Proxy selbst brauchst du nichts. {{#serverplugin}}Das Plugin (Version {{SERVER_PLUGIN_VERSION}}, für Paper {{SERVER_PLUGIN_MINECRAFT}}) lädst du <a href="#plugin-herunterladen">oben auf dieser Seite</a> herunter.{{/serverplugin}}{{^serverplugin}}Das Plugin zum Herunterladen kommt bald.{{/serverplugin}}</p></div>
+        </details>
+        <details>
+          <summary>Was sieht mein Server von den Spielern?</summary>
+          <div class="accordion__body"><p>Dein Server erfährt nur, welche Spieler HeldixClient nutzen, mit welcher Version und in welcher Sprache. Voice-Gespräche hört er nicht, und die Voice-Gruppen bleiben nur im Arbeitsspeicher des Heldix-Dienstes, bis dein Server sie nicht mehr schickt.</p></div>
+        </details>
+        <details>
+          <summary>Was passiert mit dem Partner-Schlüssel?</summary>
+          <div class="accordion__body"><p>Der Schlüssel ist wie ein Passwort für deinen Server. Er erscheint nur einmal, wenn das Team ihn erzeugt – bewahre ihn sicher auf und gib ihn nicht weiter. Geht er verloren, erzeugt das Team einen neuen; der alte gilt dann nicht mehr.</p></div>
+        </details>
+        <details>
+          <summary>Kann das Team eine Partnerschaft beenden?</summary>
+          <div class="accordion__body"><p>Ja. Das Team kann einen Partner pausieren, etwa bei Missbrauch der Funktionen. Solange ist der Schlüssel gesperrt, das Abzeichen verschwindet, und der Server steht nicht mehr bei den Partner-Servern.</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+{{ICONS_ALLE_HTML}}
+{{include:footer.html}}
+</body>
+</html>

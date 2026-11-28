@@ -520,3 +520,55 @@ a.kpi:hover {
     font-size: var(--fs-lg);
   }
 }
+
+/* ---------- Partner-Server (team-partner.js, ab Heldix-Dienst 1.14.0) ---------- */
+.toolbar-end {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.partner-row.is-paused .row-title > span:first-child {
+  color: var(--text-2);
+}
+.partner-row .row-meta a {
+  color: var(--accent-text);
+}
+.partner-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.partner-application-row .row-main > p {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+.partner-key-row {
+  display: flex;
+  gap: var(--sp-2);
+}
+.partner-key-row .input {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+.report-target a {
+  color: var(--accent-text);
+}
+.cosmetic-access {
+  display: grid;
+  gap: var(--sp-2);
+}
+.cosmetic-access .check-row {
+  align-items: center;
+}
+.cosmetic-access select {
+  width: 100%;
+}
+@media (max-width: 640px) {
+  .partner-key-row {
+    flex-direction: column;
+  }
+  .partner-actions {
+    justify-content: flex-start;
+  }
+}

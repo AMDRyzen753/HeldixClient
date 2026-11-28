@@ -86,4 +86,22 @@ public interface HeldixEvents {
 	interface HealthListener {
 		void onChange(float previous, float current);
 	}
+
+	// --- ab API 11 --------------------------------------------------------------------------
+
+	/**
+	 * Server-Info oder Server-Regeln haben sich geändert ({@link HeldixApi#server()}): Der Server hat sich als Heldix-Server
+	 * gemeldet, neue Regeln geschickt, die Partnerliste hat ihn erkannt – oder der Spieler hat den Server verlassen (dann
+	 * ist wieder alles erlaubt). Bekommt den neuen Stand.
+	 *
+	 * @since 11
+	 */
+	Registration onServerInfoChange(Consumer<ServerInfo> listener);
+
+	/**
+	 * Die Sprache für Addons hat gewechselt ({@link HeldixApi#language()}), mit der neuen: "de" oder "en".
+	 *
+	 * @since 11
+	 */
+	Registration onLanguageChange(Consumer<String> listener);
 }

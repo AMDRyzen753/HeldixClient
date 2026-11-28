@@ -1,0 +1,617 @@
+/* HeldixClient – Webseite: öffentliche Seiten von 0.14.1 – Partner-Programm (/partner), geteiltes Setup (/setup#code)
+   und öffentliches Spielerprofil (/spieler/<name>). Nur Besonderheiten; alles Gemeinsame steht in design.css,
+   seiten.css und entdecken.css (Karten der Welten und Partner-Server). Nur Tokens aus design.css. */
+
+/* ---------- Gemeinsam: Laden, „gibt es nicht“, Zähler, Häkchen ---------- */
+.setup-page .app-loading,
+.player-page .app-loading,
+.partner-apply .app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: var(--sp-9) 0;
+  color: var(--text-2);
+}
+.partner-apply .app-loading {
+  padding: var(--sp-5) 0;
+}
+.app-loading[hidden],
+.public-state[hidden],
+.setup-layout[hidden],
+.player-layout[hidden] {
+  display: none;
+}
+.public-state {
+  max-width: 640px;
+  margin: var(--sp-6) auto 0;
+  justify-items: center;
+  text-align: center;
+  gap: var(--sp-3);
+}
+.public-state .btn-group {
+  justify-content: center;
+}
+.public-state p {
+  margin: 0;
+}
+.partner-page .counter,
+.setup-page .counter {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.partner-page .counter.near {
+  color: var(--c-amber-300);
+}
+.partner-page .check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.partner-page .check-row input {
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  flex: none;
+  accent-color: var(--accent);
+}
+.partner-page .quote {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--line-accent);
+  border-radius: var(--r-xs);
+  background: var(--bg-raised);
+  color: var(--text-2);
+}
+
+/* ---------- Partner-Programm ---------- */
+.partner-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: 0;
+}
+.partner-notice .icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin-top: 2px;
+}
+.partner-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: var(--sp-4);
+}
+.partner-features .card__title,
+.partner-features .card__text {
+  margin: 0;
+}
+.partner-steps-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.partner-steps-layout .card > * {
+  margin: 0;
+}
+.partner-apply {
+  gap: var(--sp-4);
+}
+.partner-apply__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.partner-apply__head h2,
+.partner-apply__head p {
+  margin: 0;
+}
+.partner-apply__gate {
+  display: grid;
+  gap: var(--sp-3);
+}
+.partner-apply__gate p {
+  margin: 0;
+  color: var(--text-2);
+}
+.partner-apply__gate[hidden],
+.partner-apply__mine[hidden],
+.partner-apply__form[hidden] {
+  display: none;
+}
+.partner-apply__form {
+  display: grid;
+  gap: var(--sp-4);
+}
+.partner-apply__form.is-blocked .field,
+.partner-apply__form.is-blocked .check-row {
+  opacity: 0.6;
+}
+.partner-apply__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+.partner-apply__form .tiny {
+  margin: 0;
+}
+.partner-apply__mine {
+  display: grid;
+  gap: var(--sp-3);
+}
+.partner-apply__mine h3 {
+  margin: 0;
+}
+.partner-applications {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.partner-application {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+.partner-application p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.partner-application__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+/* ---------- Geteiltes Setup ---------- */
+.setup-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  grid-template-areas:
+    "hero hero"
+    "inhalt einstellungen"
+    "inhalt seite";
+  gap: var(--sp-4);
+  align-items: start;
+}
+.setup-hero {
+  grid-area: hero;
+  gap: var(--sp-4);
+}
+.setup-content {
+  grid-area: inhalt;
+}
+.setup-settings {
+  grid-area: einstellungen;
+}
+.setup-side {
+  grid-area: seite;
+}
+.setup-hero > p {
+  margin: 0;
+}
+.setup-hero__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.setup-hero__title {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.setup-hero__title .h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.setup-creator {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--text-2);
+}
+.setup-creator img {
+  border-radius: 6px;
+  image-rendering: pixelated;
+}
+.setup-description {
+  max-width: 72ch;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.setup-description[hidden],
+.setup-report-hint[hidden] {
+  display: none;
+}
+.setup-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.setup-chips strong {
+  color: var(--text);
+}
+.setup-hero .notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+.setup-hero .notice[hidden] {
+  display: none;
+}
+.setup-hero .notice .icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin-top: 3px;
+}
+.setup-code {
+  display: grid;
+  gap: var(--sp-2);
+}
+.setup-code p {
+  margin: 0;
+}
+.setup-code code {
+  letter-spacing: 0.08em;
+}
+.setup-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.setup-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-5);
+  margin: 0;
+}
+.setup-stats div {
+  display: grid;
+  gap: 2px;
+}
+.setup-stats dt {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.setup-stats dd {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.setup-group {
+  display: grid;
+  gap: var(--sp-2);
+}
+.setup-group + .setup-group {
+  margin-top: var(--sp-4);
+}
+.setup-group__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--fs-base);
+}
+.setup-group__title .icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent-text);
+}
+.setup-items {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.setup-item {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+.setup-item__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-xs);
+  background: var(--accent-soft);
+  color: var(--c-blue-300);
+}
+.setup-item[data-quelle="store"] .setup-item__icon {
+  background: var(--voice-soft);
+  color: var(--c-violet-300);
+}
+.setup-item__icon .icon,
+.setup-item__go .icon {
+  width: 16px;
+  height: 16px;
+}
+.setup-item__main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.setup-item__title {
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+.setup-item__title:hover {
+  color: var(--accent-text);
+  text-decoration: underline;
+}
+.setup-item__meta {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+.setup-item__go {
+  color: var(--text-3);
+}
+.setup-more {
+  justify-self: start;
+}
+.setup-details {
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+.setup-details + .setup-details {
+  margin-top: var(--sp-3);
+}
+.setup-details summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  font-weight: 600;
+  cursor: pointer;
+}
+.setup-details summary .icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent-text);
+}
+.setup-dl {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0 var(--sp-4) var(--sp-3);
+}
+.setup-dl div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-3);
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+}
+.setup-dl dt {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+.setup-dl dd {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-align: right;
+}
+.setup-facts {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.setup-facts li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: var(--sp-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.setup-facts .icon {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  color: var(--accent-text);
+}
+.setup-side h2 {
+  margin: 0;
+}
+
+/* ---------- Öffentliches Spielerprofil ---------- */
+.player-layout {
+  display: grid;
+  gap: var(--sp-5);
+}
+.player-hero {
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-6);
+}
+.player-figure {
+  position: relative;
+  display: grid;
+  margin: 0;
+  overflow: hidden;
+  aspect-ratio: 1;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
+  background: radial-gradient(70% 60% at 50% 40%, rgba(59, 130, 246, 0.25), transparent 70%), var(--surface-2);
+}
+.player-figure canvas {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+.player-figure canvas:active {
+  cursor: grabbing;
+}
+.player-figure .figur__ersatz {
+  display: grid;
+  place-items: center;
+}
+.player-figure .figur__ersatz[hidden],
+.player-figure canvas[hidden],
+.player-figure figcaption[hidden] {
+  display: none;
+}
+.player-figure figcaption {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  background: rgba(7, 10, 18, 0.72);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.player-figure figcaption .icon {
+  width: 14px;
+  height: 14px;
+}
+.player-figure .avatar {
+  --hue: 215;
+  display: grid;
+  place-items: center;
+  width: 160px;
+  height: 160px;
+  border-radius: var(--r-lg);
+  background: linear-gradient(135deg, hsl(var(--hue) 55% 46%), hsl(calc(var(--hue) + 35) 55% 28%));
+  color: #fff;
+  font-size: 56px;
+  font-weight: 700;
+}
+.player-hero__text {
+  display: grid;
+  justify-items: start;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.player-name {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.player-badges,
+.player-look {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.player-badges[hidden],
+.player-look[hidden],
+.player-bio[hidden],
+.player-friend-state[hidden],
+.player-worlds[hidden] {
+  display: none;
+}
+.player-badge img.rolle {
+  height: 18px;
+}
+.player-bio {
+  max-width: 60ch;
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-md);
+  overflow-wrap: anywhere;
+}
+.player-hero__text > p {
+  margin: 0;
+}
+.player-friend-state {
+  margin: 0;
+}
+.player-together__body {
+  display: grid;
+  gap: var(--sp-3);
+}
+.player-together__body p {
+  margin: 0;
+}
+.player-together__body p .icon {
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+}
+.player-worlds {
+  display: grid;
+  gap: var(--sp-3);
+}
+.player-worlds h2 {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .setup-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "hero"
+      "inhalt"
+      "einstellungen"
+      "seite";
+  }
+  .partner-steps-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 720px) {
+  .player-hero {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+  .player-figure {
+    width: min(100%, 300px);
+  }
+  .partner-apply__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 480px) {
+  .setup-code .world-address__row {
+    flex-wrap: wrap;
+    padding: var(--sp-2);
+  }
+  .setup-code .world-address__row code {
+    flex-basis: 100%;
+  }
+  .setup-hero__head,
+  .partner-apply__head {
+    align-items: flex-start;
+  }
+}

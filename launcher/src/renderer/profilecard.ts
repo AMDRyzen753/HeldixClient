@@ -136,7 +136,7 @@ function render(profile: FriendProfile, actions: ProfileActions, modal: HTMLElem
   const name = friend.nickname || friend.name;
   const figureBox = h('div', { class: 'friends-profile-figure', id: 'friend-profile-figure' }, h('div', { class: 'friends-spinner' }));
   const badge = h('span', { class: 'friends-profile-badge', id: 'friend-profile-badge' }, badgeIcon(friend.badge, 22), h('span', { text: badgeLabel(friend.badge) }));
-  const presence = h('div', { class: `friends-profile-presence${friend.online ? ' online' : ''}${friend.dnd ? ' dnd' : ''}`, id: 'friend-profile-presence' },
+  const presence = h('div', { class: `friends-profile-presence${friend.online ? ' online' : friend.launcher ? ' launcher' : ''}${friend.dnd ? ' dnd' : ''}`, id: 'friend-profile-presence' },
     h('span', { class: 'friends-profile-dot' }), actions.presence(friend));
   const mutual = profile.mutual.length
     ? h('span', { class: 'friends-profile-mutual' }, ...profile.mutual.slice(0, 8).map((m) => h('span', { class: 'friends-profile-mate', title: m.name }, actions.head(m.uuid, m.name, 'sm'))),
@@ -144,7 +144,7 @@ function render(profile: FriendProfile, actions: ProfileActions, modal: HTMLElem
     : 'Keine';
   const facts = h('div', { class: 'invite-facts friends-profile-facts' },
     fact('friends', 'Befreundet seit', formatDate(friend.since), 'friend-profile-since'),
-    fact('clock', 'Zuletzt online', friend.online ? 'Gerade online' : friend.lastOnline ? actions.presence({ ...friend, statusText: null }) : 'Nicht sichtbar', 'friend-profile-last'),
+    fact('clock', 'Zuletzt online', friend.online ? 'Gerade online' : friend.launcher ? 'Gerade im Launcher' : friend.lastOnline ? actions.presence({ ...friend, statusText: null }) : 'Nicht sichtbar', 'friend-profile-last'),
     fact('user-plus', 'Gemeinsame Freunde', mutual, 'friend-profile-mutual'));
   const looks = h('span', { text: '…' });
   void cosmeticNames(profile).then((names) => {

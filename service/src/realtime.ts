@@ -1,7 +1,9 @@
 // Echtzeit über WebSocket: wer ist verbunden, welcher Status gilt, wer bekommt welche Nachricht.
 // Ab 1.12.0 gibt es zwei Arten von Verbindungen: aus dem Spiel (Bearer-Token) und Begleiter (Webseite mit Cookie,
 // Launcher mit `?client=launcher`). Begleiter bekommen alle Nachrichten, zählen aber nicht als „online im Spiel“:
-// Online-Status, Server, Spielzeit, „zuletzt online“ und /v1/status hängen nur an Verbindungen aus dem Spiel.
+// Online-Status, Server, Spielzeit und /v1/status hängen nur an Verbindungen aus dem Spiel. Ab 1.14.0 zählt der Dienst
+// Launcher-Verbindungen getrennt (Art `launcher`): Freunde sehen dann „Im Launcher“ (`launcher: true`), und „zuletzt
+// online“ zählt auch den Launcher.
 import { WebSocket, type RawData } from 'ws';
 import type { FriendViewerRow, Store, UserRow } from './db';
 import { friendView, friendsPayload, type Presence, type PresenceSource } from './friends';
@@ -23,8 +25,11 @@ export interface RealtimeOptions {
   sessionAlive?: (sessionId: string) => boolean;
 }
 
-/** Wo die Verbindung herkommt: aus dem Spiel oder als Begleiter (Webseite, Launcher). */
-export type ConnectionKind = 'game' | 'companion';
+/**
+ * Wo die Verbindung herkommt: aus dem Spiel, als Begleiter (Webseite) oder (ab 1.14.0) aus dem Launcher – auch ein
+ * Begleiter, aber getrennt gezählt für „Im Launcher“.
+ */
+export type ConnectionKind = 'game' | 'companion' | 'launcher';
 
 export interface AttachOptions {
   kind?: ConnectionKind;
@@ -89,6 +94,8 @@ export class Realtime implements PresenceSource {
   private readonly connections = new Map<string, Set<Connection>>();
   /** Verbindungen aus dem Spiel je Spieler (nur Spieler mit mindestens einer). */
   private readonly games = new Map<string, number>();
+  /** Verbindungen aus dem Launcher je Spieler (ab 1.14.0; nur Spieler mit mindestens einer). */
+  private readonly launchers = new Map<string, number>();
   /** Zuletzt gemeldeter Status pro Spieler (gilt für alle seine Verbindungen aus dem Spiel). */
   private readonly status = new Map<string, Status>();
   /** Weitere Verbindungen, die disconnectUser mit schließt (Voice Chat). */
@@ -113,6 +120,11 @@ export class Realtime implements PresenceSource {
   /** Mit mindestens einer Verbindung aus dem Spiel verbunden (Nachschlagen, Team-Bereich). */
   isConnected(uuid: string): boolean {
     return this.games.has(uuid);
+  }
+
+  /** Nur im Launcher: kein Spiel, aber mindestens ein Launcher verbunden (ohne Rücksicht auf die Privatsphäre, für die Party). */
+  inLauncherOnly(uuid: string): boolean {
+    return !this.games.has(uuid) && this.launchers.has(uuid);
   }
 
   /** Mit irgendeiner Verbindung verbunden (Spiel oder Begleiter). */
@@ -233,17 +245,22 @@ export class Realtime implements PresenceSource {
     this.emit(this.playingListeners, 'der Spielzeit', uuid, playing);
   }
 
-  /** Was Freunde sehen. Bei `presence` aus immer offline, Server nur mit `showServer` im Mehrspieler. */
+  /**
+   * Was Freunde sehen. Bei `presence` aus immer offline (auch nicht „Im Launcher“), Server nur mit `showServer` im
+   * Mehrspieler. Ab 1.14.0: `launcher` = kein Spiel, aber ein Launcher verbunden; dann gilt `dnd`, und „zuletzt online“
+   * fehlt (er ist ja gerade erreichbar).
+   */
   presenceOf(user: UserRow): Presence {
     const statusText = user.statusText === '' ? null : user.statusText;
     if (!user.presence || !this.games.has(user.uuid)) {
-      const lastOnline = user.presence && user.showLastOnline && user.lastOnline !== null ? roundLastOnline(user.lastOnline) : null;
-      return { online: false, state: null, server: null, statusText, dnd: false, lastOnline };
+      const launcher = user.presence && this.launchers.has(user.uuid);
+      const lastOnline = user.presence && !launcher && user.showLastOnline && user.lastOnline !== null ? roundLastOnline(user.lastOnline) : null;
+      return { online: false, launcher, state: null, server: null, statusText, dnd: launcher ? user.dnd : false, lastOnline };
     }
     const status = this.status.get(user.uuid);
     const state = status?.state ?? null;
     const server = user.showServer && state === 'multiplayer' ? (status?.server ?? null) : null;
-    return { online: true, state, server, statusText, dnd: user.dnd, lastOnline: null };
+    return { online: true, launcher: false, state, server, statusText, dnd: user.dnd, lastOnline: null };
   }
 
   badgesOf(uuids: readonly string[]): Map<string, Exclude<PlayerBadge, null>> {
@@ -274,13 +291,16 @@ export class Realtime implements PresenceSource {
     set.add(conn);
     const firstGame = kind === 'game' && !this.games.has(uuid);
     if (kind === 'game') this.games.set(uuid, (this.games.get(uuid) ?? 0) + 1);
+    const firstLauncher = kind === 'launcher' && !this.launchers.has(uuid);
+    if (kind === 'launcher') this.launchers.set(uuid, (this.launchers.get(uuid) ?? 0) + 1);
     this.resetIdle(conn);
     if (kind === 'game') this.store.touch(uuid, Date.now());
 
     this.sendTo(conn, { type: 'friends', ...friendsPayload(this.store, this, uuid) });
-    if (kind === 'game') this.announce(uuid, before);
+    // Spiel bzw. erster Launcher: Freunde sehen online bzw. „Im Launcher“ (nur bei einer Änderung)
+    if (kind === 'game' || firstLauncher) this.announce(uuid, before);
     if (first) this.emit(this.connectionListeners, 'einer Verbindung', uuid, true);
-    if (firstGame) this.emit(this.changeListeners, 'einer Statusänderung', uuid);
+    if (firstGame || firstLauncher) this.emit(this.changeListeners, 'einer Statusänderung', uuid);
   }
 
   /** Nachricht an alle Verbindungen eines Spielers. */
@@ -345,6 +365,7 @@ export class Realtime implements PresenceSource {
     const set = this.connections.get(uuid);
     this.connections.delete(uuid);
     this.games.delete(uuid);
+    this.launchers.delete(uuid);
     this.status.delete(uuid);
     if (playing) this.emitPlaying(uuid, false);
     if (!set) return;
@@ -369,7 +390,7 @@ export class Realtime implements PresenceSource {
   closeAll(): void {
     this.closing = true;
     try {
-      this.store.setLastOnline([...this.games.keys()], Date.now());
+      this.store.setLastOnline([...new Set([...this.games.keys(), ...this.launchers.keys()])], Date.now());
     } catch (err) {
       this.options.log(`„Zuletzt online“ nicht gespeichert: ${(err as Error).message}`);
     }
@@ -381,6 +402,7 @@ export class Realtime implements PresenceSource {
     }
     this.connections.clear();
     this.games.clear();
+    this.launchers.clear();
     this.status.clear();
   }
 
@@ -467,6 +489,21 @@ export class Realtime implements PresenceSource {
           this.options.log(`Fehler beim Trennen einer Verbindung: ${(err as Error).message}`);
         }
         if (wasPlaying) this.emitPlaying(conn.uuid, false);
+        this.emit(this.changeListeners, 'einer Statusänderung', conn.uuid);
+      }
+    } else if (conn.kind === 'launcher') {
+      const left = (this.launchers.get(conn.uuid) ?? 1) - 1;
+      if (left > 0) {
+        this.launchers.set(conn.uuid, left);
+      } else {
+        // Letzter Launcher zu (ab 1.14.0): ohne Spiel ist der Spieler ab jetzt „zuletzt online“.
+        this.launchers.delete(conn.uuid);
+        try {
+          if (!this.games.has(conn.uuid)) this.store.setLastOnline([conn.uuid], Date.now());
+          this.announce(conn.uuid, before);
+        } catch (err) {
+          this.options.log(`Fehler beim Trennen einer Verbindung: ${(err as Error).message}`);
+        }
         this.emit(this.changeListeners, 'einer Statusänderung', conn.uuid);
       }
     }

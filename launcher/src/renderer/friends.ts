@@ -230,9 +230,14 @@ export function lastOnlineAgo(at: number, now = Date.now()): string {
   return days === 1 ? 'vor 1 Tag' : `vor ${days} Tagen`;
 }
 
-/** Was in der Liste unter dem Namen steht: Aktivität (online) bzw. „Zuletzt online vor …“ */
+/** „Im Launcher“ (Dienst 1.14.0): Launcher offen, nicht im Spiel – Nachrichten kommen sofort an */
+export const LAUNCHER_PRESENCE = 'Im Launcher – bekommt Nachrichten sofort';
+export const LAUNCHER_PRESENCE_DND = 'Im Launcher · Nicht stören';
+
+/** Was in der Liste unter dem Namen steht: Aktivität (im Spiel), „Im Launcher“ bzw. „Zuletzt online vor …“ */
 function presenceText(friend: Friend): string {
   if (friend.online) return `${activityText(friend)}${friend.dnd ? ' · Nicht stören' : ''}`;
+  if (friend.launcher) return friend.dnd ? LAUNCHER_PRESENCE_DND : LAUNCHER_PRESENCE;
   return friend.lastOnline ? `Zuletzt online ${lastOnlineAgo(friend.lastOnline)}` : 'Offline';
 }
 
@@ -242,7 +247,7 @@ function isTyping(uuid: string): boolean {
 
 /** Was der Freund gerade macht, z. B. „Auf hypixel.net“ oder „Teilt ‚Meine Welt‘“ */
 function activityText(friend: Friend): string {
-  if (!friend.online) return 'Offline';
+  if (!friend.online) return friend.launcher ? 'Im Launcher' : 'Offline';
   // geteilte Welten (Welt teilen): nie die Adresse zeigen
   const world = hostedWorld(friend.uuid);
   if (world) return `Teilt „${world.name}“`;
@@ -332,8 +337,13 @@ export function playerHead(uuid: string, name: string, size: 'sm' | 'md' = 'sm')
   return head(uuid, name, size);
 }
 
-/** Kopf des Spielers; bis das Gesicht geladen ist (oder ohne Skin) der Anfangsbuchstabe. status 'dnd' = online, „Nicht stören“ */
-function head(uuid: string, name: string, size: 'sm' | 'md' = 'sm', status?: 'online' | 'offline' | 'dnd'): HTMLElement {
+/** Punkt am Kopf: im Spiel (grün), im Launcher (türkis), „Nicht stören“ (rot, hat Vorrang), offline (grau) */
+export type PresenceDot = 'online' | 'launcher' | 'offline' | 'dnd';
+
+const DOT_TITLES: Record<PresenceDot, string> = { online: 'Online', launcher: LAUNCHER_PRESENCE, dnd: 'Nicht stören', offline: 'Offline' };
+
+/** Kopf des Spielers; bis das Gesicht geladen ist (oder ohne Skin) der Anfangsbuchstabe. status 'dnd' = „Nicht stören“ */
+function head(uuid: string, name: string, size: 'sm' | 'md' = 'sm', status?: PresenceDot): HTMLElement {
   const face = faces.get(uuid);
   let inner: HTMLElement;
   if (face) inner = faceImage(face);
@@ -346,11 +356,18 @@ function head(uuid: string, name: string, size: 'sm' | 'md' = 'sm', status?: 'on
   }
   return h('span', { class: `friends-avatar ${size}${status ? ` ${status === 'dnd' ? 'online dnd' : status}` : ''}` },
     inner,
-    status ? h('span', { class: 'friends-dot', title: status === 'dnd' ? 'Online · Nicht stören' : status === 'online' ? 'Online' : 'Offline' }) : null);
+    status ? h('span', { class: 'friends-dot', title: DOT_TITLES[status] }) : null);
 }
 
-function friendStatus(friend: Friend): 'online' | 'offline' | 'dnd' {
-  return friend.online ? (friend.dnd ? 'dnd' : 'online') : 'offline';
+/** Zustand für Punkt und Klassen: „Nicht stören“ vor im Spiel vor im Launcher vor offline */
+export function friendStatus(friend: Pick<Friend, 'online' | 'launcher' | 'dnd'>): PresenceDot {
+  if (friend.dnd && (friend.online || friend.launcher)) return 'dnd';
+  return friend.online ? 'online' : friend.launcher ? 'launcher' : 'offline';
+}
+
+/** Klasse für Zeilen und Texte: online, launcher oder offline (dnd kommt als eigene Klasse dazu) */
+function presenceClass(friend: Pick<Friend, 'online' | 'launcher'>): 'online' | 'launcher' | 'offline' {
+  return friend.online ? 'online' : friend.launcher ? 'launcher' : 'offline';
 }
 
 // ---------- Abzeichen in der Seitenleiste ----------
@@ -738,10 +755,12 @@ function renderList(): void {
   const matchFriend = (f: Friend) => match(f.name) || (!!f.nickname && match(f.nickname));
   const incoming = overview.incoming.filter((r) => match(r.name));
   const outgoing = overview.outgoing.filter((r) => match(r.name));
-  // Favoriten oben (online zuerst), dann online, dann offline – sortiert kommt die Liste schon aus dem Main-Prozess
+  // Favoriten oben (im Spiel zuerst), dann im Spiel, im Launcher, offline – sortiert kommt die Liste schon aus dem Main-Prozess
   const favorites = overview.friends.filter((f) => f.favorite && matchFriend(f));
   const online = overview.friends.filter((f) => !f.favorite && f.online && matchFriend(f));
-  const offline = overview.friends.filter((f) => !f.favorite && !f.online && matchFriend(f));
+  // „Im Launcher“ (Dienst 1.14.0): nach den Freunden im Spiel, vor den Offline-Freunden
+  const inLauncher = overview.friends.filter((f) => !f.favorite && !f.online && f.launcher && matchFriend(f));
+  const offline = overview.friends.filter((f) => !f.favorite && !f.online && !f.launcher && matchFriend(f));
 
   if (incoming.length) {
     list.append(section('Anfragen', incoming.length));
@@ -758,6 +777,10 @@ function renderList(): void {
   if (online.length) {
     list.append(section('Online', online.length));
     for (const friend of online) list.append(friendRow(friend));
+  }
+  if (inLauncher.length) {
+    list.append(section('Im Launcher', inLauncher.length));
+    for (const friend of inLauncher) list.append(friendRow(friend));
   }
   if (offline.length) {
     list.append(section('Offline', offline.length));
@@ -785,7 +808,7 @@ function friendRow(friend: Friend): HTMLElement {
   const name = displayName(friend);
   return h('button', {
     type: 'button',
-    class: `friends-row${friend.uuid === selected ? ' active' : ''}${friend.online ? ' online' : ' offline'}${friend.unread ? ' unread' : ''}${friend.dnd ? ' dnd' : ''}`,
+    class: `friends-row${friend.uuid === selected ? ' active' : ''} ${presenceClass(friend)}${friend.unread ? ' unread' : ''}${friend.dnd ? ' dnd' : ''}`,
     'data-uuid': friend.uuid,
     title: friend.nickname ? `${friend.nickname} (${friend.name})` : friend.name,
     onclick: () => selectFriend(friend.uuid),
@@ -1238,7 +1261,7 @@ function renderChatHead(friend: Friend): void {
           h('span', { text: displayName(friend) }),
           friend.nickname ? h('span', { class: 'friends-chat-realname', text: friend.name }) : null,
           friend.badge ? badgeIcon(friend.badge, 16) : null),
-        h('span', { class: `friends-chat-status${friend.online ? ' online' : ''}${typing ? ' typing' : ''}${friend.dnd ? ' dnd' : ''}`, id: 'friends-chat-status',
+        h('span', { class: `friends-chat-status${friend.online ? ' online' : friend.launcher ? ' launcher' : ''}${typing ? ' typing' : ''}${friend.dnd ? ' dnd' : ''}`, id: 'friends-chat-status',
           text: typing ? 'schreibt …' : `${presenceText(friend)}${friend.statusText ? ` · „${friend.statusText}“` : ''}` }))),
     ...(join ? [join] : []),
     h('button', {
@@ -2367,7 +2390,7 @@ async function loadPrivacy(): Promise<void> {
 type PrivacySwitch = Exclude<keyof SocialPrivacy, 'onlineNotify'>;
 
 const PRIVACY: { key: PrivacySwitch; label: string; sub: string }[] = [
-  { key: 'presence', label: 'Online-Status zeigen', sub: 'Freunde sehen, ob du online bist und was du spielst' },
+  { key: 'presence', label: 'Online-Status zeigen', sub: 'Freunde sehen, ob du im Spiel oder im Launcher bist und was du spielst' },
   { key: 'showServer', label: 'Server zeigen', sub: 'Freunde sehen deinen Server und können beitreten' },
   { key: 'showLastOnline', label: 'Zuletzt online zeigen', sub: 'Freunde sehen „zuletzt online vor …“ (gerundet auf 5 Minuten, Stunden bzw. Tage)' },
   { key: 'messages', label: 'Nachrichten annehmen', sub: 'Aus: Freunde können dir nicht schreiben, du ihnen schon' },

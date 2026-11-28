@@ -71,7 +71,23 @@ public abstract class Module {
 	}
 
 	public void toggle() {
-		setEnabled(!isEnabled());
+		boolean on = !isEnabled();
+		setEnabled(on);
+		// Einschalten auf einem Server, der das Modul gesperrt hat: die Einstellung bleibt, aber Hinweis
+		if (on) {
+			String rule = dev.heldixclient.serverlink.ServerRules.blockingRule(this);
+			if (rule != null) dev.heldixclient.serverlink.ServerRules.notifyBlocked(rule);
+		}
+	}
+
+	/** Hat der aktuelle Server dieses Modul mit seinen Regeln gesperrt? (Server-Plugin „HeldixClient Server“) */
+	public boolean blockedByServer() {
+		return dev.heldixclient.serverlink.ServerRules.blocks(this);
+	}
+
+	/** Eingeschaltet und auf diesem Server erlaubt (nur dann zeichnen bzw. wirken) */
+	public boolean activeHere() {
+		return isEnabled() && !blockedByServer();
 	}
 
 	protected void onEnable() {

@@ -5,5 +5,5 @@
 	"description": "Sprich mit HeldixClient-Spielern in deiner Nähe – auf jedem Server, ohne Plugin. Push-to-Talk oder Sprachaktivierung, Gruppen, Freunde im Browser, Melden und Lautstärke-Schutz.",
 	"authors": ["HeldixClient"],
 	"entrypoint": "dev.heldixclient.addons.voicechat.VoiceChatAddon",
-	"api": 10
+	"api": 11
 }

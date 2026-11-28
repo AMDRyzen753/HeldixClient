@@ -1,4 +1,4 @@
-<!--seite {"titel":"Entdecken","beschreibung":"Offene Minecraft-Welten anderer HeldixClient-Spieler: geteilte Welten, die gerade geöffnet sind, und dauerhafte Welten, die rund um die Uhr laufen – mit Filtern, Suche und Beitreten mit einem Klick.","og":"zusammen"}-->
+<!--seite {"titel":"Entdecken","beschreibung":"Offene Minecraft-Welten anderer HeldixClient-Spieler: geteilte Welten, die gerade geöffnet sind, dauerhafte Welten, die rund um die Uhr laufen, und Partner-Server – mit Filtern, Suche und Beitreten mit einem Klick.","og":"zusammen"}-->
 <!doctype html>
 <html lang="de">
 <head>
@@ -22,6 +22,24 @@
           <a class="btn btn--secondary" href="/hilfe/entdecken">{{icon:help-circle}}So funktioniert das Verzeichnis</a>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- Partner-Server (ab Heldix-Dienst 1.14.0, entdecken.js): erscheint nur, wenn es aktive Partner gibt -->
+  <section class="section section--tight partner-section" id="entdecken-partner" aria-labelledby="entdecken-partner-titel" hidden>
+    <div class="container container--wide">
+      <div class="partner-section__head">
+        <div>
+          <span class="eyebrow">{{abzeichen:partner}}Partner-Server</span>
+          <h2 class="h3" id="entdecken-partner-titel">Server, die HeldixClient mitdenken</h2>
+          <p class="text-2 small">Partner-Server bieten zum Beispiel Voice-Gruppen je Team, eigene Anzeigen im HUD und Belohnungs-Cosmetics. Adresse kopieren und in Minecraft unter Mehrspieler → Server hinzufügen einfügen.</p>
+        </div>
+        <div class="partner-section__side">
+          <span class="chip" id="entdecken-partner-zahl"></span>
+          <a class="link-arrow" href="/partner">Partner werden{{icon:chevron-right}}</a>
+        </div>
+      </div>
+      <div class="partner-grid" id="entdecken-partner-liste"></div>
     </div>
   </section>
 

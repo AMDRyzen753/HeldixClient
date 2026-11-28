@@ -45,7 +45,9 @@ import java.util.function.Supplier;
  * Melden aus Spielermenü und Anzeige (Dialog von HeldixClient, mit Lautstärke-Verlauf und – bei aktiven Aufnahmen – den
  * letzten Minuten des Gemeldeten), Lautstärke-Schutz je Sprecher, Knöpfe für Gastgeber, Operatoren und Party-Leiter (für
  * alle stummschalten, aus dem Voice entfernen), Hinweise bei Sperre und Moderation und die Voice-Regeln vor der ersten
- * Verbindung. Opus kommt aus Concentus (reines Java).
+ * Verbindung. Ab 1.4.0 (Heldix-API 11, Dienst 1.14.0): Server-Gruppen von Partner-Servern (Plugin „HeldixClient Server“) – die
+ * Anzeige zeigt die Server-Gruppe statt der eigenen, eine Einblendung meldet Eintritt und Austritt. Opus kommt aus Concentus
+ * (reines Java).
  */
 public final class VoiceChatAddon implements HeldixAddon {
 	static final int SPEAKING = HeldixColors.SUCCESS;
@@ -127,6 +129,8 @@ public final class VoiceChatAddon implements HeldixAddon {
 	private long groupJoinedAt;
 	private boolean groupSummaryDone = true;
 	private Set<UUID> knownMembers = Set.of();
+	// Server-Gruppe (API 11): zuletzt gemeldete, für die Einblendung beim Wechsel
+	private String knownServerGroup;
 
 	@Override
 	public void onEnable(HeldixApi api) {
@@ -209,6 +213,7 @@ public final class VoiceChatAddon implements HeldixAddon {
 					+ keyName() + " halten.");
 		}
 		updateGroup(voice, on, now);
+		updateServerGroup(voice, on);
 
 		Map<UUID, VoiceEngine.Position> where = new HashMap<>();
 		List<NearbyPlayer> nearby = on ? api.nearbyPlayers() : List.of();
@@ -274,6 +279,25 @@ public final class VoiceChatAddon implements HeldixAddon {
 		}
 	}
 
+	/**
+	 * Server-Gruppe eines Partner-Servers (API 11): Eintritt und Austritt melden. Solange sie gilt, ist sie die Gruppe im
+	 * Sprachkanal; die eigene Gruppe aus den Einstellungen ist auf diesem Server so lange aus.
+	 */
+	private void updateServerGroup(VoiceChannel voice, boolean on) {
+		String group = on ? voice.serverGroup() : null;
+		if (java.util.Objects.equals(group, knownServerGroup)) return;
+		String previous = knownServerGroup;
+		knownServerGroup = group;
+		if (group != null) {
+			String partner = voice.serverGroupPartner();
+			api.notify("Server-Gruppe „" + group + "“", partner.isEmpty()
+					? "Der Server hat dich in diese Voice-Gruppe gesetzt. Deine eigene Gruppe ist hier so lange aus."
+					: partner + " hat dich in diese Voice-Gruppe gesetzt. Deine eigene Gruppe ist hier so lange aus.");
+		} else if (previous != null && on) {
+			api.notify("Server-Gruppe „" + previous + "“", "Du bist in keiner Server-Gruppe mehr.");
+		}
+	}
+
 	/** Gruppe aus den Einstellungen übernehmen (entprellt) und Kommen und Gehen melden */
 	private void updateGroup(VoiceChannel voice, boolean on, long now) {
 		String name = groupName.get().strip();
@@ -290,7 +314,8 @@ public final class VoiceChatAddon implements HeldixAddon {
 		}
 		if (groupInputAt == 0 || now - groupInputAt >= GROUP_DEBOUNCE_MS) voice.setGroup(name, password);
 		String current = voice.group();
-		if (current == null) {
+		if (current == null || voice.serverGroup() != null) {
+			// ohne eigene Gruppe – oder eine Server-Gruppe gilt (dann ist die eigene hier aus)
 			joinedGroupName = null;
 			knownMembers = Set.of();
 			return;
@@ -947,6 +972,13 @@ public final class VoiceChatAddon implements HeldixAddon {
 			if (!module.isEnabled() || api.voice().status() != VoiceChannel.Status.CONNECTED) {
 				return preview ? "2 hier · Gruppe „Bau“ · 3" : null;
 			}
+			// Server-Gruppe eines Partner-Servers (API 11) hat Vorrang vor der eigenen Gruppe
+			String serverGroup = api.voice().serverGroup();
+			if (serverGroup != null) {
+				String shortName = serverGroup.length() > 14 ? serverGroup.substring(0, 13) + "…" : serverGroup;
+				String members = "Server-Gruppe „" + shortName + "“ · " + api.voice().groupMembers().size();
+				return inRange.isEmpty() ? members : inRange.size() + " hier · " + members;
+			}
 			String problem = api.voice().groupProblem();
 			if (problem != null) return problem;
 			String group = api.voice().group();
@@ -958,7 +990,7 @@ public final class VoiceChatAddon implements HeldixAddon {
 		}
 
 		private int infoColor() {
-			return api.voice().groupProblem() != null ? HeldixColors.WARNING : HeldixColors.MUTED;
+			return api.voice().serverGroup() == null && api.voice().groupProblem() != null ? HeldixColors.WARNING : HeldixColors.MUTED;
 		}
 
 		private List<Speaker> speakers(boolean preview) {

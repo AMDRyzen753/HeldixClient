@@ -1,0 +1,23 @@
+# HeldixClient Server – Einstellungen. Anleitung: https://heldixclient.com (docs/server-plugin.md im Projekt).
+# Nach Änderungen: /heldix reload
+
+# Partner-Schlüssel (hxp_ und 40 Zeichen) aus dem Partner-Programm von HeldixClient. Leer = ohne Partner-Funktionen:
+# Regeln, HUD-Elemente und Einblendungen gehen trotzdem, Voice-Gruppen und Belohnungen nicht.
+# Den Schlüssel nie öffentlich zeigen – wer ihn hat, handelt im Namen deines Servers.
+partner-key: ""
+
+# Name, den HeldixClient-Spieler für diesen Server sehen (höchstens 40 Zeichen). Leer = Text der MOTD.
+server-name: ""
+
+# Adresse, unter der Spieler den Server betreten (z. B. play.example.net) – nur für Voice-Gruppen; muss zu den Servern
+# deines Partner-Eintrags passen. Leer = die erste Adresse, die der Heldix-Dienst für deinen Partner kennt.
+server-address: ""
+
+rules:
+  # Funktionen von HeldixClient, die auf diesem Server aus sind. HeldixClient zeigt beim Versuch „Auf diesem Server
+  # deaktiviert“. Bekannt: freelook, zoom, minimap, worldmap, waypoints, coordinates, fullbright, togglesprint
+  # Beispiel: disable: [freelook, minimap, coordinates]
+  disable: []
+
+# Heldix-Dienst (nur ändern, wenn das Team es sagt)
+api-url: "https://api.heldixclient.com"

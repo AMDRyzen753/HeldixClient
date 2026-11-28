@@ -227,6 +227,7 @@ final class VoiceModerationTests {
 		t.waitSoft(mc -> mc.gui.screen() instanceof VoiceRulesScreen rules && rules.loaded(), 10);
 		t.check("Regeln-Dialog: öffnet sich und lädt den Text", t.compute(mc -> mc.gui.screen() instanceof VoiceRulesScreen rules && rules.loaded()
 				&& rules.lineCount() > 5));
+		t.check("Regeln-Dialog: Text sichtbar (Zeilen im Textbereich, deckende Farbe)", t.compute(mc -> ((VoiceRulesScreen) mc.gui.screen()).linesVisible()));
 		t.check("Regeln-Dialog: ohne Veröffentlichung keine Fassung", t.compute(mc -> ((VoiceRulesScreen) mc.gui.screen()).shownVersion() == 0));
 		t.moveMouse(5, 5);
 		t.screenshot("voice-regeln-01-unveroeffentlicht");
@@ -243,6 +244,7 @@ final class VoiceModerationTests {
 		t.check("Regeln: 4012 → der Voice Chat öffnet den Dialog von selbst (" + t.compute(mc -> VoiceLink.statusText()) + ")",
 				t.compute(mc -> mc.gui.screen() instanceof VoiceRulesScreen rules && rules.shownVersion() == version));
 		t.check("Regeln: ohne Zustimmung keine Verbindung", t.compute(mc -> VoiceLink.status() != VoiceLink.Status.CONNECTED && VoiceModeration.rulesRequired()));
+		t.check("Regeln: veröffentlichter Text sichtbar (Zeilen im Textbereich, deckende Farbe)", t.compute(mc -> ((VoiceRulesScreen) mc.gui.screen()).linesVisible()));
 		boolean longText = t.compute(mc -> !((VoiceRulesScreen) mc.gui.screen()).canAccept());
 		if (longText) t.log("Regeln: „Annehmen“ erst nach dem Lesen bis zum Ende");
 		t.moveMouse(5, 5);

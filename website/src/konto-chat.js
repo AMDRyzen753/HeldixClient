@@ -5,7 +5,7 @@
 // - Nachricht: Antworten (Zitat), Reaktion (acht feste Emojis, eine je Person), eigene löschen (für beide).
 // - Beitreten-Karten (Server, Welt, Einladung) mit „Beitreten“; Knopf „+“ teilt Server, eigene Welt oder Einladung.
 // - Echtzeit: message, read, message-deleted, reaction, typing (über konto-live.js), sonst Abfrage.
-import { avatar, bindCounter, busy, confirmAction, dayLabel, emptyState, formatTime, h, icon, loadingState, openDialog, rerender, shortWhen, showError, timeEl, toast, uid } from './app-common.js';
+import { avatar, bindCounter, busy, confirmAction, dayLabel, emptyState, formatTime, h, icon, loadingState, openDialog, presenceDot, presenceOf, rerender, shortWhen, showError, timeEl, toast, uid } from './app-common.js';
 import { shellIcon } from './app-shell.js';
 import { badgeMark, displayName, friendLine, joinCard, REACTIONS, reactionEmoji, reactionLabel, WORLD_CODE_RE } from './konto-sozial.js';
 
@@ -59,7 +59,7 @@ export function initChat(ctx) {
     const others = store.friends.friends.filter((friend) => !withChat.has(friend.uuid)).sort((a, b) => collator.compare(displayName(a), displayName(b)));
     const openUuid = local.chat?.uuid ?? '';
     const typing = [...local.typing.keys()];
-    const signature = JSON.stringify([conversations, others.map((friend) => [friend.uuid, friend.name, friend.nickname, friend.online]), openUuid, typing, conversations.map((c) => friendByUuid(c.uuid)?.online)]);
+    const signature = JSON.stringify([conversations, others.map((friend) => [friend.uuid, friend.name, friend.nickname, presenceOf(friend)]), openUuid, typing, conversations.map((c) => (friendByUuid(c.uuid) ? presenceOf(friendByUuid(c.uuid)) : null))]);
     rerender(list, signature, () => {
       if (!conversations.length && !others.length) return emptyState('Noch keine Freunde – Nachrichten gehen nur an Freunde.', 'chat');
       const parts = [];
@@ -84,7 +84,7 @@ export function initChat(ctx) {
                     dataset: { focusKey: `conv:${conversation.uuid}`, uuid: conversation.uuid },
                     onClick: () => openChat(conversation.uuid),
                   },
-                  avatar(conversation.name, conversation.uuid, { online: friend ? Boolean(friend.online) : null }),
+                  avatar(conversation.name, conversation.uuid, { online: friend ? presenceDot(friend) : null }),
                   h(
                     'span',
                     { class: 'conv-main' },
@@ -115,7 +115,7 @@ export function initChat(ctx) {
                 h(
                   'button',
                   { type: 'button', class: 'conv', 'aria-current': friend.uuid === openUuid ? 'true' : undefined, dataset: { focusKey: `conv:${friend.uuid}`, uuid: friend.uuid }, onClick: () => openChat(friend.uuid) },
-                  avatar(friend.name, friend.uuid, { online: Boolean(friend.online) }),
+                  avatar(friend.name, friend.uuid, { online: presenceDot(friend) }),
                   h('span', { class: 'conv-main' }, h('span', { class: 'conv-top' }, h('span', { class: 'conv-name', text: displayName(friend) })), h('span', { class: 'conv-bottom' }, h('span', { class: 'conv-preview muted', text: 'Unterhaltung beginnen' }))),
                 ),
               ),
@@ -191,12 +191,13 @@ export function initChat(ctx) {
     const { chat } = local;
     if (!chat) return;
     const friend = friendByUuid(chat.uuid);
-    $('chat-avatar').replaceChildren(avatar(chat.name, chat.uuid, { online: friend ? Boolean(friend.online) : null }));
+    $('chat-avatar').replaceChildren(avatar(chat.name, chat.uuid, { online: friend ? presenceDot(friend) : null }));
     const name = $('chat-name');
     name.replaceChildren(document.createTextNode(friend ? displayName(friend) : chat.name), badgeMark(friend?.badge) ?? '');
     const status = $('chat-status');
     status.textContent = friend ? friendLine(friend) : '';
     status.classList.toggle('online', Boolean(friend?.online));
+    status.classList.toggle('launcher', Boolean(friend) && presenceOf(friend) === 'launcher');
     $('chat-profil').disabled = !friend;
     $('chat-party').hidden = !(friend && ctx.canInviteToParty(friend.uuid));
   }

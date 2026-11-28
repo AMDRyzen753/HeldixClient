@@ -164,6 +164,22 @@ const api: HeldixApi = {
   openWorldDialog: (code) => ipcRenderer.invoke('worlds:open', code),
   getPopularWorlds: (refresh) => ipcRenderer.invoke('discover:popular', refresh),
   onPopularWorlds: (callback) => subscribe('discover:update', callback),
+  getPartners: (refresh) => ipcRenderer.invoke('partners:get', refresh),
+  onPartners: (callback) => subscribe('partners:update', callback),
+
+  prepareSetupShare: (instanceId) => ipcRenderer.invoke('setups:prepare', instanceId),
+  createSetupShare: (instanceId, options) => ipcRenderer.invoke('setups:create', instanceId, options),
+  listOwnSetups: () => ipcRenderer.invoke('setups:mine'),
+  revokeSetup: (code) => ipcRenderer.invoke('setups:revoke', code),
+  takeSetupLink: () => ipcRenderer.invoke('setups:take'),
+  onSetupLinkOpen: (callback) => subscribe('setups:open', () => callback()),
+  pasteSetupLink: (text) => ipcRenderer.invoke('setups:paste', text),
+  getSetupPreview: (code) => ipcRenderer.invoke('setups:preview', code),
+  installSharedSetup: (code, options) => ipcRenderer.invoke('setups:install', code, options),
+
+  getPublicProfile: () => ipcRenderer.invoke('publicProfile:get'),
+  setPublicProfile: (enabled) => ipcRenderer.invoke('publicProfile:set', enabled),
+  openPublicProfile: () => ipcRenderer.invoke('publicProfile:open'),
 
   listNotifications: () => ipcRenderer.invoke('notifications:list'),
   markNotificationRead: (id) => ipcRenderer.invoke('notifications:read', id),

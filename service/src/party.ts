@@ -92,6 +92,8 @@ export interface PartyMemberView {
   leader: boolean;
   /** im Spiel verbunden */
   online: boolean;
+  /** Ab 1.14.0: nicht im Spiel, aber im Launcher verbunden */
+  launcher: boolean;
   /** gar keine Verbindung (Gnadenfrist läuft bis `awayUntil`) */
   away: boolean;
   awayUntil: number | null;
@@ -172,6 +174,7 @@ export class Parties {
       name: user?.name ?? '',
       leader: member.uuid === party.leader,
       online: this.realtime.isConnected(member.uuid),
+      launcher: this.realtime.inLauncherOnly(member.uuid),
       away: member.awaySince !== null,
       awayUntil: member.awaySince === null ? null : member.awaySince + this.options.graceMs,
       state: status?.state ?? null,

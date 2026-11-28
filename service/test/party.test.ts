@@ -59,7 +59,8 @@ describe('Party', () => {
     assert.match(party.id, /^[0-9a-f]{32}$/);
     assert.deepEqual([party.leader, party.max, party.members.length, party.invites.map((i: { uuid: string }) => i.uuid)], [leo.uuid, 8, 1, [mia.uuid]]);
     assert.deepEqual(Object.keys(party).sort(), ['created', 'id', 'invites', 'leader', 'max', 'members', 'target', 'voice']);
-    assert.deepEqual(Object.keys(party.members[0]).sort(), ['away', 'awayUntil', 'joined', 'leader', 'location', 'name', 'online', 'state', 'uuid']);
+    // ab 1.14.0 dazu launcher („Im Launcher“)
+    assert.deepEqual(Object.keys(party.members[0]).sort(), ['away', 'awayUntil', 'joined', 'launcher', 'leader', 'location', 'name', 'online', 'state', 'uuid']);
 
     // Einladung kommt per Echtzeit, mit der Liste aller offenen Einladungen
     const invite = await miaWs.next('party-invite');

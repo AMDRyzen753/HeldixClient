@@ -241,6 +241,16 @@ function readUpdateKey(raw: string | undefined): string | null {
   }
 }
 
+/**
+ * HELDIX_DIENST_WEBSITE_DIR (ab 1.14.0): Ordner der gebauten Webseite (darin spieler.html für `/spieler/<name>`).
+ * Standard: der Ordner website neben dist (so liegt er nach dem Installer in /opt/heldix-dienst/app/website). Fehlt die
+ * Datei, liefert der Dienst eine kleine eingebaute Seite mit denselben Vorschau-Angaben.
+ */
+function readWebsiteDir(raw: string | undefined): string {
+  const dir = raw?.trim();
+  return path.resolve(dir || path.join(__dirname, '..', 'website'));
+}
+
 const env = process.env;
 const port = readPort(env.PORT);
 const host = env.HOST?.trim() || undefined;
@@ -264,6 +274,7 @@ const weltPort = readWorldPort(env.HELDIX_DIENST_WELT_PORT);
 const weltBind = readWorldBind(env.HELDIX_DIENST_WELT_BIND);
 const liveStatsMinOnline = readLiveMin(env.HELDIX_DIENST_LIVE_MIN);
 const hostingMax = readHostingMax(env.HELDIX_DIENST_WELTEN_MAX);
+const websiteDir = readWebsiteDir(env.HELDIX_DIENST_WEBSITE_DIR);
 let hostingVersion = 'unbekannt';
 try {
   hostingVersion = (JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')) as { version?: string }).version ?? hostingVersion;
@@ -313,6 +324,7 @@ const service = createService({
   liveStatsMinOnline,
   hostingRunner: hosting.runner,
   hostingMax,
+  websiteDir,
   log,
 });
 
@@ -333,6 +345,7 @@ service.server.listen(port, host, () => {
   );
   if (weltDomain === null) log('Welt teilen: aus (keine HELDIX_DIENST_WELT_DOMAIN)');
   log(`Dauerhafte Welten: ${weltDomain === null ? 'aus (braucht Welt teilen)' : hosting.status}`);
+  log(`Spielerprofile (/spieler/…): ${fs.existsSync(path.join(websiteDir, 'spieler.html')) ? `Seite aus ${websiteDir}` : `eingebaute Seite (keine spieler.html in ${websiteDir})`}`);
 });
 
 let stopping = false;

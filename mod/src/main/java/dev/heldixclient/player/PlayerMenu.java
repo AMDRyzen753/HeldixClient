@@ -72,6 +72,14 @@ public final class PlayerMenu {
 			mc.keyboardHandler.setClipboard(target.name());
 			Notifications.show("player-menu", "Name kopiert", target.name(), null);
 		}));
+		// öffentliches Profil (ab Heldix-Dienst 1.14.0): nur wenn der Spieler es öffentlich gemacht hat
+		String profile = target.heldixPlayer() ? PublicProfiles.url(target.name()) : null;
+		if (profile != null && PublicProfiles.state(target.uuid()) == PublicProfiles.State.PUBLIC) {
+			list.add(new Action("profile", "Profil im Browser", "external", true, null, false, () -> {
+				com.mojang.blaze3d.Blaze3D.openUri(java.net.URI.create(profile));
+				Notifications.show("player-menu", "Profil geöffnet", "Das Profil von " + target.name() + " ist im Browser geöffnet.", null);
+			}));
+		}
 		for (AddonEntry addon : ENTRIES) {
 			String label;
 			String icon;

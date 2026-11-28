@@ -14,7 +14,8 @@ const API = 'https://api.modrinth.com/v2';
 export const IRIS_PROJECT = 'YL57xq9U';
 export const SODIUM_PROJECT = 'AANobbMI';
 export const SHADERPACK_DIR = 'shaderpacks';
-const SHADERPACK_INDEX = '.heldix-shaderpacks.json';
+/** Shaderpacks von Modrinth: Datei → Projekt, Version, Titel (auch für „Setup teilen“, core/setupinstall.ts) */
+export const SHADERPACK_INDEX = '.heldix-shaderpacks.json';
 const IRIS_CONFIG = path.join('config', 'iris.properties');
 
 type ShaderpackIndex = Record<string, { projectId: string; versionId: string; title: string }>;

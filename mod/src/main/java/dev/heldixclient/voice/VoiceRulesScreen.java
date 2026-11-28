@@ -42,7 +42,8 @@ public final class VoiceRulesScreen extends Screen {
 		SENDING
 	}
 
-	private record Line(FormattedCharSequence text, int x, int y, int color, boolean bullet) {
+	/** Eine Zeile des Texts: Reihenfolge wie beim Anlegen in {@link #layoutText()} (x, Farbe, y). */
+	private record Line(FormattedCharSequence text, int x, int color, int y, boolean bullet) {
 	}
 
 	private final Screen parent;
@@ -451,6 +452,18 @@ public final class VoiceRulesScreen extends Screen {
 	/** Zeilen des Texts (für Prüfungen) */
 	public int lineCount() {
 		return lines.size();
+	}
+
+	/**
+	 * Werden alle Zeilen sichtbar gezeichnet? Jede Zeile liegt im Textbereich (0 ≤ y &lt; Gesamthöhe), hat eine deckende
+	 * Farbe und Text, und die erste Zeile steht ganz oben – fängt vertauschte Felder ab (0.14.0 zeigte eine leere Fläche).
+	 */
+	public boolean linesVisible() {
+		if (lines.isEmpty() || lines.get(0).y() != 0) return false;
+		for (Line line : lines) {
+			if (line.y() < 0 || line.y() >= contentH || (line.color() >>> 24) < 0x80 || font.width(line.text()) <= 0) return false;
+		}
+		return true;
 	}
 
 	/** bis zum Ende scrollen (wie mit der Taste Ende) */

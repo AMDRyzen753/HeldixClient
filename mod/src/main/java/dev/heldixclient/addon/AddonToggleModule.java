@@ -145,6 +145,13 @@ final class AddonToggleModule extends Module implements ModuleHandle {
 		keys.add(new Setting.Key(label == null || label.isBlank() ? handle.mapping().getName() : label, AddonSettings.text(description), handle.mapping()));
 	}
 
+	// --- API 11: Server-Regeln ---------------------------------------------------------------
+
+	@Override
+	public void followServerRule(String rule) {
+		dev.heldixclient.serverlink.ServerRules.follow(id(), rule);
+	}
+
 	@Override
 	public List<Setting> keys() {
 		List<Setting> list = new ArrayList<>(keys);

@@ -137,6 +137,18 @@ final class AddonContext implements HeldixApi {
 			public Registration onHealthChange(HealthListener listener) {
 				return listen(AddonManager.HEALTH, listener);
 			}
+
+			// --- API 11 ---
+
+			@Override
+			public Registration onServerInfoChange(Consumer<dev.heldixclient.api.ServerInfo> listener) {
+				return listen(AddonManager.SERVER_INFO, listener);
+			}
+
+			@Override
+			public Registration onLanguageChange(Consumer<String> listener) {
+				return listen(AddonManager.LANGUAGE, listener);
+			}
 		};
 	}
 
@@ -402,6 +414,8 @@ final class AddonContext implements HeldixApi {
 	public List<dev.heldixclient.api.WaypointInfo> waypoints() {
 		Minecraft minecraft = Minecraft.getInstance();
 		if (!minecraft.isSameThread()) throw new IllegalStateException("waypoints() nur im Haupt-Thread aufrufen");
+		// ab 0.14.1: Server mit der Regel „waypoints“ (Plugin „HeldixClient Server“) – dort keine Wegpunkte für Addons
+		if (!dev.heldixclient.serverlink.ServerRules.allowed("waypoints")) return List.of();
 		List<dev.heldixclient.api.WaypointInfo> list = new java.util.ArrayList<>();
 		for (dev.heldixclient.waypoint.Waypoints.Waypoint waypoint : dev.heldixclient.waypoint.Waypoints.current(minecraft)) {
 			if (!waypoint.visible) continue;
@@ -422,5 +436,17 @@ final class AddonContext implements HeldixApi {
 		String clean = text.replaceAll("[\\p{Cc}&&[^\\n\\t]]", "");
 		if (clean.length() > 2000) clean = clean.substring(0, 2000);
 		minecraft.keyboardHandler.setClipboard(clean);
+	}
+
+	// --- API 11: Server-Info und Regeln, Sprache -------------------------------------------------
+
+	@Override
+	public dev.heldixclient.api.ServerInfo server() {
+		return dev.heldixclient.serverlink.ServerLink.info();
+	}
+
+	@Override
+	public String language() {
+		return dev.heldixclient.ui.Language.current();
 	}
 }

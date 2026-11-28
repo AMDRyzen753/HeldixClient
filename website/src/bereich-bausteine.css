@@ -227,6 +227,9 @@
 .avatar .presence.on {
   background: var(--success);
 }
+.avatar .presence.launcher {
+  background: #22d3ee;
+}
 .unread-badge {
   display: inline-grid;
   place-items: center;
@@ -397,6 +400,9 @@
 }
 .row-sub.online {
   color: var(--success);
+}
+.row-sub.launcher {
+  color: #67e8f9;
 }
 .row-meta {
   color: var(--faint);

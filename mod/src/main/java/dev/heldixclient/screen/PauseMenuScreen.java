@@ -463,7 +463,7 @@ public class PauseMenuScreen extends ShellScreen {
 	private static Social.Friend friendAt(int index) {
 		if (!Social.online()) return null;
 		List<Social.Friend> friends = new ArrayList<>(Social.friends());
-		friends.sort(java.util.Comparator.comparing((Social.Friend f) -> !f.online()));
+		friends.sort(java.util.Comparator.comparingInt(Social.Friend::presenceRank));
 		return index < friends.size() ? friends.get(index) : null;
 	}
 
@@ -498,6 +498,13 @@ public class PauseMenuScreen extends ShellScreen {
 	private void leave() {
 		disconnect.active = false;
 		minecraft.getReportingContext().draftReportHandled(minecraft, this, () -> minecraft.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE), true);
+	}
+
+	/** Abzeichen „Partner“ hinter dem Server, wenn seine Adresse in der Partnerliste des Heldix-Dienstes steht */
+	@Override
+	protected String subtitleBadge() {
+		ServerData server = currentServer();
+		return server != null && !server.isRealm() && dev.heldixclient.serverlink.Partners.isPartner(server.ip) ? "Partner" : null;
 	}
 
 	@Override
@@ -615,6 +622,8 @@ public class PauseMenuScreen extends ShellScreen {
 			time = minutes < 60 ? minutes + " min" : minutes / 60 + " h " + String.format("%02d", minutes % 60) + " min";
 		}
 		String position = minecraft.player == null ? "–"
+				// Regel „coordinates“ des Servers (Plugin „HeldixClient Server“)
+				: !dev.heldixclient.serverlink.ServerRules.allowed("coordinates") ? "Auf diesem Server aus"
 				: minecraft.player.getBlockX() + ", " + minecraft.player.getBlockY() + ", " + minecraft.player.getBlockZ();
 		String[] third;
 		String[] fourth;

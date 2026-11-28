@@ -163,8 +163,13 @@ export interface ReportRow {
   doneAt: number | null;
   /** Name des Team-Mitglieds; null = über die Server-Konsole (heldix-dienst-admin) */
   doneBy: string | null;
-  /** Ab 1.13.0: `chat` (Nachrichten als Beleg) oder `voice` (Kontext, Lautstärke-Verlauf, ggf. Clip; voice-moderation.ts) */
+  /**
+   * Ab 1.13.0: `chat` (Nachrichten als Beleg) oder `voice` (Kontext, Lautstärke-Verlauf, ggf. Clip; voice-moderation.ts);
+   * ab 1.14.0 auch `setup` (geteiltes Setup) und `profile` (öffentliches Spielerprofil), siehe reports.ts.
+   */
   kind: string;
+  /** JSON mit dem Kontext (Voice) bzw. dem Stand des gemeldeten Setups oder Profils; sonst null */
+  context: string | null;
 }
 
 export type ReportStatus = 'open' | 'done';
@@ -1177,6 +1182,86 @@ CREATE TABLE voice_clips (
 ) STRICT;
 CREATE INDEX voice_clips_created ON voice_clips (created_at);
 `,
+  // 14: Server-Partner (Partner, Anträge, Belohnungen), Setup teilen und öffentliche Spielerprofile (1.14.0)
+  `
+-- Partner-Server, vom Team angelegt. id: [a-z0-9-]{3,32}; servers: JSON-Liste normalisierter Adressen (eine Domain deckt
+-- ihre Subdomains ab); status: active | paused. key_hash: SHA-256 des Partner-Schlüssels (den Schlüssel selbst zeigt der
+-- Dienst nur einmal beim Erzeugen). contact_uuid: Spieler, der den Antrag gestellt hat (geht mit dem Konto auf NULL).
+CREATE TABLE partners (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  website TEXT,
+  servers TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  featured INTEGER NOT NULL DEFAULT 0,
+  created INTEGER NOT NULL,
+  key_hash TEXT UNIQUE,
+  key_created INTEGER,
+  contact_uuid TEXT REFERENCES users (uuid) ON DELETE SET NULL
+) STRICT, WITHOUT ROWID;
+
+-- Anträge von Spielern auf das Partner-Programm (gehen mit dem Konto). status: open | accepted | declined;
+-- note: Antwort des Teams, decided_by: Name des Team-Mitglieds.
+CREATE TABLE partner_applications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  server TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  contact TEXT NOT NULL,
+  created INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  note TEXT NOT NULL DEFAULT '',
+  decided_at INTEGER,
+  decided_by TEXT
+) STRICT;
+CREATE INDEX partner_applications_uuid ON partner_applications (uuid, status);
+CREATE INDEX partner_applications_status ON partner_applications (status, id);
+
+-- Cosmetics als Belohnung eines Partners (im Katalog access: "partner"); das signierte Manifest sagt access: "unlock".
+-- Geht mit dem Cosmetic bzw. dem Partner; schon vergebene Freischaltungen (unlocks, reason partner:<id>) bleiben.
+CREATE TABLE partner_cosmetics (
+  cosmetic TEXT PRIMARY KEY REFERENCES cosmetics (id) ON DELETE CASCADE,
+  partner TEXT NOT NULL REFERENCES partners (id) ON DELETE CASCADE
+) STRICT, WITHOUT ROWID;
+CREATE INDEX partner_cosmetics_partner ON partner_cosmetics (partner);
+
+-- Geteilte Setups (Instanz per Link). code: 10 Zeichen wie Einladungen; content: kanonisches JSON (≤ 64 KiB),
+-- hash: SHA-256 davon; expires NULL = nie. Gehen mit dem Konto; abgelaufene und widerrufene löscht der Dienst nach 30
+-- Tagen. views/installs sind nur Zahlen (wer und welche IP merkt sich der Dienst nur kurz im Arbeitsspeicher).
+CREATE TABLE setups (
+  code TEXT PRIMARY KEY,
+  uuid TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  content TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  created INTEGER NOT NULL,
+  expires INTEGER,
+  revoked INTEGER NOT NULL DEFAULT 0,
+  revoked_at INTEGER,
+  revoked_by TEXT,
+  views INTEGER NOT NULL DEFAULT 0,
+  installs INTEGER NOT NULL DEFAULT 0
+) STRICT, WITHOUT ROWID;
+CREATE INDEX setups_uuid ON setups (uuid, created);
+
+-- Öffentliches Spielerprofil (freiwillig, Standard aus). hidden: vom Team ausgeblendet (hidden_by = Name).
+CREATE TABLE public_profiles (
+  uuid TEXT PRIMARY KEY REFERENCES users (uuid) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  bio TEXT NOT NULL DEFAULT '',
+  show_cosmetics INTEGER NOT NULL DEFAULT 1,
+  show_worlds INTEGER NOT NULL DEFAULT 1,
+  show_badges INTEGER NOT NULL DEFAULT 1,
+  show_friends_button INTEGER NOT NULL DEFAULT 1,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  hidden_at INTEGER,
+  hidden_by TEXT,
+  updated INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+`,
 ];
 
 const SCHEMA_VERSION = MIGRATIONS.length;
@@ -1187,7 +1272,7 @@ const USER_COLUMNS = `u.uuid, u.name, u.cape, u.visible, u.presence, u.show_serv
 const MESSAGE_COLUMNS = 'm.id, m.from_uuid, m.to_uuid, m.text, m.at, m.is_read, m.reply_to, m.card';
 /** Rang der Team-Rollen in SQL (wie roleRank): Admin zuerst. */
 const ROLE_ORDER = `CASE t.role ${TEAM_ROLES.map((role, i) => `WHEN '${role}' THEN ${i}`).join(' ')} ELSE ${TEAM_ROLES.length} END`;
-const REPORT_COLUMNS = 'id, reporter, reporter_name, reported, reported_name, reason, note, messages, at, status, done_at, done_by, kind';
+const REPORT_COLUMNS = 'id, reporter, reporter_name, reported, reported_name, reason, note, messages, at, status, done_at, done_by, kind, context';
 const BAN_COLUMNS = 'uuid, name, reason, at, by_name';
 const SESSION_COLUMNS = 'id, uuid, device, created_at, last_used_at, expires_at, verified_at';
 const TEAM_COLUMNS = 't.uuid, u.name, t.role, t.added_at, t.added_by, t.totp_secret, t.totp_pending, t.totp_last_step, t.public, t.title, t.about';
@@ -1524,7 +1609,8 @@ function toReport(row: Row): ReportRow {
     status: row.status === 'done' ? 'done' : 'open',
     doneAt: nullableNumber(row.done_at),
     doneBy: nullableString(row.done_by),
-    kind: row.kind === 'voice' ? 'voice' : 'chat',
+    kind: row.kind === 'voice' || row.kind === 'setup' || row.kind === 'profile' ? String(row.kind) : 'chat',
+    context: nullableString(row.context),
   };
 }
 

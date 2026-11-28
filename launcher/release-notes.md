@@ -2,26 +2,41 @@
 # Jede Zeile mit "- " erscheint im Launcher unter „Was ist neu“ und im Versionsverlauf auf heldixclient.com.
 # Vor jedem "npm run release" anpassen. Zeilen mit # werden ignoriert.
 
-# ---------- 0.14.0 ----------
-- Mac: HeldixClient aktualisiert sich jetzt selbst – beim Start und im laufenden Launcher, wie unter Windows. Läuft die App noch aus dem DMG, erinnert sie daran, sie in Programme zu ziehen
-- Mac: Kürzel zeigen ⌘ statt Strg – im Launcher und im Spiel (⌘K Schnellsuche, ⌘Z im HUD-Editor, ⌘-Klick kopiert eine Chat-Nachricht)
-- Mac: Das Dock zeigt ungelesene Nachrichten und Freundschaftsanfragen; per Rechtsklick aufs Dock-Symbol startest du deine zuletzt gespielten Instanzen; „Einstellungen …“ mit ⌘,
-- Mac: schöneres DMG mit Pfeil – einfach HeldixClient auf Programme ziehen
-- Windows: Im Hintergrund bereit für Nachrichten – schließt du das Fenster, bleibt HeldixClient im Infobereich und meldet Nachrichten, Anfragen und Einladungen als Windows-Benachrichtigung. Ein Klick öffnet direkt den Chat
-- Windows: Die Taskleiste zeigt die Zahl ungelesener Nachrichten und Anfragen am Symbol und blinkt kurz bei einer neuen Nachricht
-- Neu: Mit Windows starten (Mac: bei der Anmeldung) – unsichtbar im Hintergrund, damit Nachrichten gleich ankommen; einschaltbar in der Einrichtung und unter Einstellungen → Allgemein
-- Das Menü im Infobereich hat „Nicht stören“ zum Umschalten und führt direkt zu deinen Freunden
-- Spotify-Addon 2.3.0 im Store: auf dem Mac auch Apple Music (Einstellung „Nur Spotify“ ausschalten)
-- Voice Chat 1.3.0 im Store: Melden direkt aus dem Voice (mit Lautstärke-Verlauf), Lautstärke-Schutz gegen Anschreien und Dauerlärm, Gastgeber, Operatoren und Party-Leiter können für alle stummschalten oder für 10 Minuten entfernen
-- Voice-Regeln: Hat das Team sie veröffentlicht, stimmst du ihnen vor der ersten Voice-Verbindung zu – das Melden kann dann die letzten Minuten des Gemeldeten enthalten
-- Neu: Addon-API Stufe 10 für Entwickler – Moderation im Sprachkanal (Ereignisse, eigene Rechte im Raum, Melden)
-- Neu (Beta): Dauerhafte Welten – stell eine deiner Welten dauerhaft online. Sie läuft auf dem Heldix-Server weiter, auch wenn du offline bist, schläft, wenn niemand drin ist, und wacht beim Beitreten auf. Im Spiel unter Heldix-Welten → Deine Welten oder im Pausemenü bei „Welt teilen“
-- Dauerhafte Welten in Heldix-Welten mit Zustand und Spielerzahl, „Beitreten“, „Auf der Webseite verwalten“ (Plugins, Konsole, Sicherungen) und „Herunterladen“ als neue Einzelspielerwelt – deine Einzelspielerwelt bleibt dabei, wie sie ist
-- Schläft eine dauerhafte Welt, weckt sie dein Beitritt: HeldixClient wartet die etwa 30 Sekunden und tritt dann von selbst bei
-- Klopft jemand an deine dauerhafte Welt, kommt das im Spiel als Einblendung mit H/N – ohne laufendes Spiel in der Glocke des Launchers
-- Neu: Entdecken – öffentliche Welten in Heldix-Welten, sortiert nach beliebt, neu oder gerade aktiv, mit Tags, Suche, „Gefällt mir“ und „Melden“. Die beliebtesten drei stehen auf der Startseite des Launchers
-- Heldix+ – bald: Dauerhafte Welten sind gerade eine Beta. Trag dich in Heldix-Welten auf die Warteliste ein – sobald du freigeschaltet bist, sagen dir das Spiel und die Glocke Bescheid
-- Startseite: „Offene Welten deiner Freunde“ zeigt jetzt auch dauerhafte Welten mit ihrem Zustand; die Glocke meldet, wenn eine deiner dauerhaften Welten ein Problem hat
+# ---------- 0.14.1 ----------
+- Neu: Setup teilen – teile eine Instanz als Link: Mods, Ressourcenpakete, Shader und Addons, auf Wunsch auch Grafik-Einstellungen und Tasten. Wer den Link öffnet, sieht eine Vorschau und baut alles mit einem Klick als neue Instanz nach – nur aus Modrinth und dem Addon-Store, mit Prüfsummen
+- Eigene Setups siehst du unter Instanzen → Setups und auf der Webseite unter „Meine Setups“ mit Aufrufen und Installationen; zurückziehen geht jederzeit
+- Neu: „Im Launcher“ – Freunde, die nur den Launcher offen haben (auch im Hintergrund), erscheinen jetzt mit türkisem Punkt statt offline: Sie bekommen deine Nachrichten sofort. Im Spiel, im Launcher und auf der Webseite
+- Neu: Öffentliches Profil – auf Wunsch bekommst du eine eigene Seite heldixclient.com/spieler/<name> mit 3D-Figur, Cape und Cosmetics, Abzeichen, kurzem Text und deinen öffentlichen Welten; einschalten unter Skins & Cosmetics oder im Konto auf der Webseite
+- Neu: Partner-Server – Server mit dem neuen Plugin „HeldixClient Server“ bekommen das Abzeichen „Partner“ in der Serverliste, im Pausemenü, unter „Beliebte Welten“ und in Entdecken auf der Webseite
+- Partner-Server können eigene HUD-Anzeigen (Text, Fortschritt, Listen) und Einblendungen schicken – unter Einstellungen → HUD kannst du „Server-HUD“ und „Server-Einblendungen“ ausschalten
+- Partner-Server können Funktionen wie Freelook, Zoom, Minimap oder Wegpunkte für ihren Server abschalten – dann steht dort „Auf diesem Server deaktiviert“, deine Einstellung bleibt erhalten
+- Voice Chat 1.4.0 im Store: Partner-Server können dich in eine Voice-Gruppe setzen (z. B. je Team einer Runde); die Anzeige zeigt die Server-Gruppe
+- Minimap 1.1.0 im Store: beachtet die Regeln von Partner-Servern für Minimap, Wegpunkte und Koordinaten
+- Partner-Server können dir Belohnungs-Cosmetics freischalten – die Einblendung sagt, von welchem Server sie kommen
+- Für Serverbetreiber: das kostenlose Partner-Programm mit Antrag unter heldixclient.com/partner und das Server-Plugin mit Java-Schnittstelle (Voice-Gruppen, HUD, Belohnungen, Regeln)
+- Neu: Addon-API Stufe 11 für Entwickler – Server-Infos und Server-Regeln, Sprache des Spielers und Server-Gruppe im Voice Chat
+- Behoben: Im Dialog „Voice-Regeln“ im Spiel war der Text der Regeln nicht zu sehen
+
+# ---------- 0.14.0 (veröffentlicht – nicht noch einmal ausliefern) ----------
+# - Mac: HeldixClient aktualisiert sich jetzt selbst – beim Start und im laufenden Launcher, wie unter Windows. Läuft die App noch aus dem DMG, erinnert sie daran, sie in Programme zu ziehen
+# - Mac: Kürzel zeigen ⌘ statt Strg – im Launcher und im Spiel (⌘K Schnellsuche, ⌘Z im HUD-Editor, ⌘-Klick kopiert eine Chat-Nachricht)
+# - Mac: Das Dock zeigt ungelesene Nachrichten und Freundschaftsanfragen; per Rechtsklick aufs Dock-Symbol startest du deine zuletzt gespielten Instanzen; „Einstellungen …“ mit ⌘,
+# - Mac: schöneres DMG mit Pfeil – einfach HeldixClient auf Programme ziehen
+# - Windows: Im Hintergrund bereit für Nachrichten – schließt du das Fenster, bleibt HeldixClient im Infobereich und meldet Nachrichten, Anfragen und Einladungen als Windows-Benachrichtigung. Ein Klick öffnet direkt den Chat
+# - Windows: Die Taskleiste zeigt die Zahl ungelesener Nachrichten und Anfragen am Symbol und blinkt kurz bei einer neuen Nachricht
+# - Neu: Mit Windows starten (Mac: bei der Anmeldung) – unsichtbar im Hintergrund, damit Nachrichten gleich ankommen; einschaltbar in der Einrichtung und unter Einstellungen → Allgemein
+# - Das Menü im Infobereich hat „Nicht stören“ zum Umschalten und führt direkt zu deinen Freunden
+# - Spotify-Addon 2.3.0 im Store: auf dem Mac auch Apple Music (Einstellung „Nur Spotify“ ausschalten)
+# - Voice Chat 1.3.0 im Store: Melden direkt aus dem Voice (mit Lautstärke-Verlauf), Lautstärke-Schutz gegen Anschreien und Dauerlärm, Gastgeber, Operatoren und Party-Leiter können für alle stummschalten oder für 10 Minuten entfernen
+# - Voice-Regeln: Hat das Team sie veröffentlicht, stimmst du ihnen vor der ersten Voice-Verbindung zu – das Melden kann dann die letzten Minuten des Gemeldeten enthalten
+# - Neu: Addon-API Stufe 10 für Entwickler – Moderation im Sprachkanal (Ereignisse, eigene Rechte im Raum, Melden)
+# - Neu (Beta): Dauerhafte Welten – stell eine deiner Welten dauerhaft online. Sie läuft auf dem Heldix-Server weiter, auch wenn du offline bist, schläft, wenn niemand drin ist, und wacht beim Beitreten auf. Im Spiel unter Heldix-Welten → Deine Welten oder im Pausemenü bei „Welt teilen“
+# - Dauerhafte Welten in Heldix-Welten mit Zustand und Spielerzahl, „Beitreten“, „Auf der Webseite verwalten“ (Plugins, Konsole, Sicherungen) und „Herunterladen“ als neue Einzelspielerwelt – deine Einzelspielerwelt bleibt dabei, wie sie ist
+# - Schläft eine dauerhafte Welt, weckt sie dein Beitritt: HeldixClient wartet die etwa 30 Sekunden und tritt dann von selbst bei
+# - Klopft jemand an deine dauerhafte Welt, kommt das im Spiel als Einblendung mit H/N – ohne laufendes Spiel in der Glocke des Launchers
+# - Neu: Entdecken – öffentliche Welten in Heldix-Welten, sortiert nach beliebt, neu oder gerade aktiv, mit Tags, Suche, „Gefällt mir“ und „Melden“. Die beliebtesten drei stehen auf der Startseite des Launchers
+# - Heldix+ – bald: Dauerhafte Welten sind gerade eine Beta. Trag dich in Heldix-Welten auf die Warteliste ein – sobald du freigeschaltet bist, sagen dir das Spiel und die Glocke Bescheid
+# - Startseite: „Offene Welten deiner Freunde“ zeigt jetzt auch dauerhafte Welten mit ihrem Zustand; die Glocke meldet, wenn eine deiner dauerhaften Welten ein Problem hat
 
 # ---------- 0.13.9 (veröffentlicht – nicht noch einmal ausliefern) ----------
 # - Neues Hauptmenü: „Weiterspielen“ zeigt den Live-Stand deines letzten Servers – wie viele Spieler online sind und deinen Ping

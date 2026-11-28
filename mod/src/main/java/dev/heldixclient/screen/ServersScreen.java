@@ -240,7 +240,20 @@ public class ServersScreen extends ShellScreen {
 
 		int textX = iconX + size + 10;
 		int nameW = signalX - 12 - rightW - textX;
-		Ui.text(g, Ui.ellipsize(displayName(server), nameW, Ui.Font.LABEL), textX, y + 8, Ui.TEXT, Ui.Font.LABEL);
+		// Abzeichen „Partner“: Adresse steht in der Partnerliste des Heldix-Dienstes (GET /v1/public/partners, 1 h zwischengespeichert)
+		dev.heldixclient.serverlink.Partners.Partner partner = server.isRealm() ? null : dev.heldixclient.serverlink.Partners.forAddress(server.ip);
+		int badgeW = partner == null ? 0 : Ui.width("Partner", Ui.Font.SMALL) + 12;
+		String name = Ui.ellipsize(displayName(server), nameW - (badgeW > 0 ? badgeW + 6 : 0), Ui.Font.LABEL);
+		Ui.text(g, name, textX, y + 8, Ui.TEXT, Ui.Font.LABEL);
+		if (partner != null) {
+			int bx = textX + Ui.width(name, Ui.Font.LABEL) + 6;
+			Ui.rect(g, bx, y + 6, badgeW, 12, 6, 0x33FBBF24);
+			Ui.outline(g, bx, y + 6, badgeW, 12, 6, 0x80FBBF24);
+			Ui.text(g, "Partner", bx + 6, y + 8, 0xFFFDE68A, Ui.Font.SMALL);
+			if (Ui.inside(mouseX, mouseY, bx, y + 6, badgeW, 12)) {
+				Ui.requestTooltip("Partner-Server von HeldixClient: " + partner.name(), mouseX, mouseY);
+			}
+		}
 		int motdRight = isSelected ? rowButtons(y)[0][0] - 8 : x + w - 10;
 		Component motd = server.motd == null ? Component.empty() : Ui.styled(server.motd, Ui.Font.SMALL);
 		List<FormattedCharSequence> lines = font.split(motd, Math.max(10, motdRight - textX));

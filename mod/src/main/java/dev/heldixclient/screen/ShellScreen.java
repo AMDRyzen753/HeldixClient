@@ -208,6 +208,11 @@ public abstract class ShellScreen extends Screen {
 		return null;
 	}
 
+	/** Abzeichen hinter dem Untertitel, z. B. „Partner“ im Pausemenü auf Partner-Servern (null = keins) */
+	protected String subtitleBadge() {
+		return null;
+	}
+
 	/** Eigenes Bild statt des Icons in der Detailansicht (z. B. Kopf eines Spielers); true = gezeichnet */
 	protected boolean drawHeaderImage(GuiGraphicsExtractor g, int x, int y, int size) {
 		return false;
@@ -320,14 +325,26 @@ public abstract class ShellScreen extends Screen {
 		}
 		if (!tabs.isEmpty()) {
 			drawTabGroup(g);
-			if (!tabsInline) {
-				String sub = subtitle();
-				if (sub != null) Ui.text(g, Ui.ellipsize(sub, right - contentX, Ui.Font.BODY), contentX, cy - 4, Ui.withAlpha(Ui.MUTED, fade), Ui.Font.BODY);
-			}
+			if (!tabsInline) drawSubtitle(g, right, cy);
 			return;
 		}
+		drawSubtitle(g, right, cy);
+	}
+
+	/** Untertitel in der Werkzeugzeile, dahinter das Abzeichen ({@link #subtitleBadge()}) */
+	private void drawSubtitle(GuiGraphicsExtractor g, int right, int cy) {
 		String sub = subtitle();
-		if (sub != null) Ui.text(g, Ui.ellipsize(sub, right - contentX, Ui.Font.BODY), contentX, cy - 4, Ui.withAlpha(Ui.MUTED, fade), Ui.Font.BODY);
+		if (sub == null) return;
+		String badge = subtitleBadge();
+		int badgeW = badge == null ? 0 : Ui.width(badge, Ui.Font.SMALL) + 12;
+		String text = Ui.ellipsize(sub, right - contentX - (badgeW > 0 ? badgeW + 8 : 0), Ui.Font.BODY);
+		Ui.text(g, text, contentX, cy - 4, Ui.withAlpha(Ui.MUTED, fade), Ui.Font.BODY);
+		if (badge != null) {
+			int bx = contentX + Ui.width(text, Ui.Font.BODY) + 8;
+			Ui.rect(g, bx, cy - 6, badgeW, 13, 6.5f, Ui.withAlpha(0x33FBBF24, fade));
+			Ui.outline(g, bx, cy - 6, badgeW, 13, 6.5f, Ui.withAlpha(0x80FBBF24, fade));
+			Ui.text(g, badge, bx + 6, cy - 3, Ui.withAlpha(0xFFFDE68A, fade), Ui.Font.SMALL);
+		}
 	}
 
 	/** Fläche hinter den Reitern und die Pille hinter dem aktiven; sie gleitet zum neuen Reiter */

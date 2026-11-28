@@ -1,0 +1,16 @@
+name: HeldixClient-Server
+version: '${version}'
+main: dev.heldixclient.server.HeldixServerPlugin
+api-version: '${minecraft}'
+description: 'HeldixClient Server: Server-Regeln, HUD-Elemente und Einblendungen für HeldixClient-Spieler, mit Partner-Schlüssel auch Voice-Gruppen und Belohnungen.'
+authors: [HeldixClient]
+website: https://heldixclient.com
+commands:
+  heldix:
+    description: 'HeldixClient Server: Stand zeigen, config.yml neu laden, HUD testen'
+    usage: '/heldix status | reload | test-hud <Spieler>'
+    permission: heldix.admin
+permissions:
+  heldix.admin:
+    description: 'Darf /heldix benutzen'
+    default: op

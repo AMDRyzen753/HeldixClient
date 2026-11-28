@@ -50,7 +50,15 @@ export const MODEL_SLOTS = Object.freeze(['head', 'back', 'companion']);
 /** Slots, die Format 2 kennt (kein Cape). */
 export const MESH_SLOTS = Object.freeze(['head', 'back', 'aura', 'companion']);
 /** Wer ein Cosmetic tragen darf: alle, nur das Team oder nur, wer es freigeschaltet hat (Belohnung für Einladungen). */
+/** Zugänge im signierten Manifest. */
 export const COSMETIC_ACCESS = Object.freeze(['all', 'team', 'unlock']);
+/**
+ * Zugänge im Katalog (GET /v1/cosmetics): dazu „partner“ (Heldix-Dienst ab 1.14.0) – eine Belohnung (Manifest bleibt
+ * access: unlock), die das Team einem Partner-Server zugeordnet hat; der Katalog nennt dann partner und partnerName.
+ */
+export const CATALOG_ACCESS = Object.freeze([...COSMETIC_ACCESS, 'partner']);
+/** Partner-ID (Heldix-Dienst ab 1.14.0). */
+export const PARTNER_ID_RE = /^[a-z0-9-]{3,32}$/;
 export const ANIMATION_TYPES = Object.freeze(['flap', 'sway', 'spin', 'bob']);
 export const ANIMATION_AXES = Object.freeze(['x', 'y', 'z']);
 export const PARTICLE_MOTIONS = Object.freeze(['rise', 'fall', 'orbit', 'spark', 'float']);
@@ -1167,6 +1175,17 @@ export async function verifyCosmeticEnvelope(envelope, { publicKey = UPDATE_PUBL
 // Katalog (GET /api/v1/cosmetics, GET /api/v1/cosmetics/<id>?v=<sha256>)
 // ---------------------------------------------------------------------------------------------------------
 
+/**
+ * Zugang eines Cosmetics: aus dem signierten Manifest; hat das Team eine Belohnung (Manifest access: unlock) einem
+ * Partner-Server zugeordnet, meldet der Katalog access: partner – dann gilt der. Ergebnis: { access, partner,
+ * partnerName } (die beiden letzten nur bei access: partner).
+ */
+export function cosmeticAccess(entry, manifest) {
+  if (entry?.access === 'partner') return { access: 'partner', partner: entry.partner ?? null, partnerName: entry.partnerName ?? null };
+  const access = COSMETIC_ACCESS.includes(manifest?.access) ? manifest.access : 'all';
+  return { access, partner: null, partnerName: null };
+}
+
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const clean = (value, max) => (typeof value === 'string' && !FORBIDDEN_TEXT_RE.test(value) ? value.trim().slice(0, max) : '');
 
@@ -1180,7 +1199,9 @@ export function normalizeCatalogEntry(entry) {
     version: Number.isInteger(entry.version) && entry.version > 0 ? entry.version : null,
     name: clean(entry.name, COSMETIC_LIMITS.nameMax) || entry.id,
     description: clean(entry.description, COSMETIC_LIMITS.descriptionMax),
-    access: COSMETIC_ACCESS.includes(entry.access) ? entry.access : 'all',
+    access: CATALOG_ACCESS.includes(entry.access) ? entry.access : 'all',
+    partner: entry.access === 'partner' && typeof entry.partner === 'string' && PARTNER_ID_RE.test(entry.partner) ? entry.partner : null,
+    partnerName: entry.access === 'partner' ? clean(entry.partnerName, 40) || null : null,
     sha256: typeof entry.sha256 === 'string' && SHA256_RE.test(entry.sha256) ? entry.sha256 : '',
     size: Number.isInteger(entry.size) && entry.size > 0 ? entry.size : null,
     date: typeof entry.date === 'string' && Number.isFinite(Date.parse(entry.date)) ? entry.date : null,

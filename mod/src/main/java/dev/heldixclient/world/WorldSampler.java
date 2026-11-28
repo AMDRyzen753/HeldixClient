@@ -68,7 +68,12 @@ public final class WorldSampler implements WorldMap {
 
 	@Override
 	public boolean available() {
-		return level() != null;
+		return level() != null && !mapsBlocked();
+	}
+
+	/** Server (Plugin „HeldixClient Server“) hat Minimap und Weltkarte abgeschaltet: keine Welt von oben für Addons */
+	private static boolean mapsBlocked() {
+		return !dev.heldixclient.serverlink.ServerRules.allowed("minimap") && !dev.heldixclient.serverlink.ServerRules.allowed("worldmap");
 	}
 
 	@Override
@@ -121,12 +126,17 @@ public final class WorldSampler implements WorldMap {
 
 	@Override
 	public int sampleSurface(int minX, int minZ, int width, int depth, Colors mode, int[] colors, int[] heights, int[] waterDepths) {
+		if (mapsBlocked()) {
+			check(width, depth, colors, heights, waterDepths);
+			java.util.Arrays.fill(colors, 0, width * depth, 0);
+			return 0;
+		}
 		return sample(minX, minZ, width, depth, Integer.MAX_VALUE, mode, colors, heights, waterDepths);
 	}
 
 	@Override
 	public int sampleBelow(int minX, int minZ, int width, int depth, int topY, Colors mode, int[] colors, int[] heights, int[] waterDepths) {
-		if (!undergroundAllowed()) {
+		if (!undergroundAllowed() || mapsBlocked()) {
 			check(width, depth, colors, heights, waterDepths);
 			java.util.Arrays.fill(colors, 0, width * depth, 0);
 			return 0;

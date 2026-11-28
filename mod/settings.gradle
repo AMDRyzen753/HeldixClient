@@ -3,6 +3,8 @@ dependencyResolutionManagement {
 		mavenCentral()
 		// nur für die Fabric-Variante des Loaders (Fabric Loader und Mixin zum Kompilieren)
 		maven { url = "https://maven.fabricmc.net/" }
+		// nur für das Server-Plugin „HeldixClient Server“ (Paper-API)
+		maven { url = "https://repo.papermc.io/repository/maven-public/" }
 	}
 }
 
@@ -22,6 +24,8 @@ include 'addons:itemphysics'
 include 'addons:voicechat'
 include 'addons:minimap'
 include 'addons:emoterad'
+// Server-Plugin „HeldixClient Server“ für Paper (eigene Version, Kanal heldixclient:server, docs/server-plugin.md)
+include 'heldix-server'
 // Automatischer Test im echten Spiel (wird nicht ausgeliefert)
 include 'autotest'
 // Test-Addons mit Zugriff auf Minecraft für den Autotest (werden nicht ausgeliefert)

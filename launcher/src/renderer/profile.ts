@@ -33,6 +33,7 @@ import type {
 } from '../shared/api';
 import { CosmeticRig, CosmeticThumbnails, type RigViewer } from './cosmetic-scene.js';
 import { api, confirmDialog, errorMessage, h, state, toast, uiIcon } from './core.js';
+import { publicProfileCard, refreshPublicProfile } from './publicprofile.js';
 
 // ---------- skinview3d (nur die Teile, die hier gebraucht werden) ----------
 interface ViewerAnimation {
@@ -965,6 +966,7 @@ function onAccountsChanged(): void {
     if (page.busy) return; // die laufende Änderung liefert den neuen Stand selbst
     const changed = page.accountKey !== null && activeAccountKey() !== page.accountKey;
     void load({ silent: !changed, reset: changed });
+    if (changed) void refreshPublicProfile();
   }, 400);
 }
 
@@ -1858,7 +1860,9 @@ function build(root: HTMLElement): Ui {
   });
   const stage = h('div', { class: 'profile-stage' },
     stageView,
-    h('div', { class: 'profile-stage-foot' }, h('div', { class: 'profile-stage-text' }, stageName, stageSub), elytra));
+    h('div', { class: 'profile-stage-foot' }, h('div', { class: 'profile-stage-text' }, stageName, stageSub), elytra),
+    // Öffentliches Profil (publicprofile.ts)
+    publicProfileCard());
 
   const skinCount = h('span', { class: 'profile-count' });
   const tabSkins = h('button', { type: 'button', role: 'tab', class: 'active', onclick: () => setTab('skins') }, 'Skins', skinCount);
@@ -1907,6 +1911,7 @@ export function activateProfile(): void {
   if (!ui) return;
   setActive(true);
   ensureViewer();
+  void refreshPublicProfile();
   const accountChanged = page.accountKey !== null && activeAccountKey() !== page.accountKey;
   if (page.accountKey === null || accountChanged) void load({ reset: accountChanged });
   else if (!page.loading && (page.stale || !page.profile || Date.now() - page.loadedAt > 60_000)) void load({ silent: !!page.profile });

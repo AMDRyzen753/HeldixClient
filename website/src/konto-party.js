@@ -8,7 +8,7 @@
 // - „Folgen“: Wechselt der Leiter den Ort, zeigt die Seite „<Leiter> ist auf <Ziel> – Beitreten“.
 // - Echtzeit: party, party-invite, party-chat, party-follow (konto-live.js). Mit der Seite offen bist du für die Party
 //   verbunden (keine Gnadenfrist).
-import { avatar, bindCounter, busy, confirmAction, emptyState, h, icon, relativeTime, rerender, showError, timeEl, formatTime, toast } from './app-common.js';
+import { avatar, bindCounter, busy, confirmAction, emptyState, h, icon, presenceClass, presenceDot, presenceOf, presenceRank, relativeTime, rerender, showError, timeEl, formatTime, toast } from './app-common.js';
 import { shellIcon } from './app-shell.js';
 import { displayName, joinButton, joinTarget } from './konto-sozial.js';
 
@@ -179,6 +179,9 @@ export function initParty(ctx) {
 
   function memberLine(member) {
     if (member.away) return member.awayUntil ? `Gerade nicht verbunden · bleibt bis ${formatTime(member.awayUntil)} Uhr` : 'Gerade nicht verbunden';
+    // Ab Dienst 1.14.0 sagt launcher, ob das Mitglied den Launcher offen hat (älterer Dienst: Feld fehlt)
+    if (!member.online && member.launcher === true) return 'Im Launcher – bekommt Nachrichten sofort';
+    if (!member.online && member.launcher === false) return 'Nicht im Spiel · über die Webseite dabei';
     if (!member.online) return 'Nicht im Spiel · mit Launcher oder Webseite dabei';
     if (member.location) return `${member.location.kind === 'world' ? 'In der Welt' : 'Auf'} ${member.location.title}`;
     switch (member.state) {
@@ -241,12 +244,12 @@ export function initParty(ctx) {
     return h(
       'li',
       { class: `row party-member${member.away ? ' is-away' : ''}`, dataset: { uuid: member.uuid } },
-      avatar(member.name, member.uuid, { online: member.away ? null : Boolean(member.online) }),
+      avatar(member.name, member.uuid, { online: member.away ? null : presenceDot(member) }),
       h(
         'div',
         { class: 'row-main' },
         h('div', { class: 'row-title' }, h('span', { text: me ? `${member.name} (du)` : displayName(friendByUuid(member.uuid)) || member.name }), member.leader ? h('span', { class: 'chip chip--reward chip--xs' }, shellIcon('crown'), 'Leitung') : null),
-        h('div', { class: `row-sub${member.online && !member.away ? ' online' : ''}`, text: memberLine(member) }),
+        h('div', { class: `row-sub${member.away ? '' : presenceClass(member)}`, text: memberLine(member) }),
       ),
       h(
         'div',
@@ -263,7 +266,7 @@ export function initParty(ctx) {
     if (current && !isLeader()) return null;
     const friends = (store.friends?.friends ?? []).filter((friend) => canInvite(friend.uuid));
     if (!friends.length) return null;
-    friends.sort((a, b) => Number(Boolean(b.online)) - Number(Boolean(a.online)) || displayName(a).localeCompare(displayName(b), 'de'));
+    friends.sort((a, b) => presenceRank(b) - presenceRank(a) || displayName(a).localeCompare(displayName(b), 'de'));
     return h(
       'section',
       { class: 'card', 'aria-labelledby': 'party-einladen-titel' },
@@ -275,8 +278,8 @@ export function initParty(ctx) {
           h(
             'li',
             { class: 'row', dataset: { uuid: friend.uuid } },
-            avatar(friend.name, friend.uuid, { online: Boolean(friend.online) }),
-            h('div', { class: 'row-main' }, h('div', { class: 'row-title', text: displayName(friend) }), h('div', { class: `row-sub${friend.online ? ' online' : ''}`, text: friend.online ? 'Online' : 'Offline – sieht die Einladung im Launcher oder hier' })),
+            avatar(friend.name, friend.uuid, { online: presenceDot(friend) }),
+            h('div', { class: 'row-main' }, h('div', { class: 'row-title', text: displayName(friend) }), h('div', { class: `row-sub${presenceClass(friend)}`, text: { game: 'Online', launcher: 'Im Launcher – sieht die Einladung sofort', offline: 'Offline – sieht die Einladung im Launcher oder hier' }[presenceOf(friend)] })),
             h('div', { class: 'row-actions' }, h('button', { type: 'button', class: 'btn btn--social btn--sm', dataset: { aktion: 'einladen' }, onClick: (event) => invite(friend, event.currentTarget) }, shellIcon('party'), 'Einladen')),
           ),
         ),
@@ -317,7 +320,7 @@ export function initParty(ctx) {
       return;
     }
     const current = party();
-    const signature = JSON.stringify([current && { ...current, chat: undefined }, store.friends?.friends.map((friend) => [friend.uuid, friend.online, friend.nickname]), local.follow]);
+    const signature = JSON.stringify([current && { ...current, chat: undefined }, store.friends?.friends.map((friend) => [friend.uuid, presenceOf(friend), friend.nickname]), local.follow]);
     if (box.dataset.signature === signature && box.firstChild) return;
     const keepChat = $('party-chat-text')?.value ?? '';
     const focusChat = document.activeElement?.id === 'party-chat-text';
