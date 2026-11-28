@@ -1,29 +1,66 @@
-// HeldixClient – Webseite: Startseite. Neuigkeiten (die neuesten drei, gekürzt mit „Weiterlesen“; leer oder nicht
-// erreichbar: Abschnitt bleibt versteckt), die drei beliebtesten Addons im Band zum Addon-Store (sonst nur Text und
-// Link) und Download-Knöpfe mit dem erkannten System beschriften.
+// HeldixClient – Webseite: Startseite.
+// - Live-Zahlen: GET /api/v1/public/stats → { online, voice, worlds } (nur Summen; unter 50 Spielern online liefert der
+//   Dienst null – dann bleibt die Leiste ausgeblendet, ebenso ohne Dienst)
+// - Addon-Store: die beliebtesten Addons (bis zu 6) ersetzen die feste Liste; ohne Dienst bleibt die feste Liste
+// - Neuigkeiten: die neuesten drei, gekürzt mit „Weiterlesen“; leer oder nicht erreichbar: Abschnitt bleibt versteckt
 import { h } from './app-common.js';
 import { addonIcon, loadAddons } from './addon-common.js';
 import { clampLongNews, newsCard, publicGet } from './public-cards.js';
-import { detectSystem } from './system.js';
 
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// --- Live-Zahlen
+const bar = document.querySelector('[data-live-bar]');
+if (bar) {
+  const fields = { online: 'online', voice: 'voice', worlds: 'welten' };
+  const show = (field, value) => {
+    const num = field.querySelector('.live__num');
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      field.hidden = true;
+      return;
+    }
+    field.dataset.state = 'da';
+    if (reduceMotion) {
+      num.textContent = value.toLocaleString('de-DE');
+      return;
+    }
+    const start = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / 700);
+      num.textContent = Math.round(value * (1 - (1 - t) ** 3)).toLocaleString('de-DE');
+      if (t < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  };
+  publicGet('/v1/public/stats')
+    .then((data) => {
+      if (typeof data?.online !== 'number') return; // unter der Schwelle: alles null → nichts zeigen
+      bar.hidden = false;
+      bar.dataset.state = 'da';
+      for (const [key, name] of Object.entries(fields)) show(bar.querySelector(`[data-live="${name}"]`), data[key]);
+    })
+    .catch(() => {});
+}
+
+// --- Addon-Store: beliebteste Addons
 const storeList = document.getElementById('start-addons');
 if (storeList) {
   loadAddons()
     .then((addons) => {
       if (!addons.length) return;
       storeList.replaceChildren(
-        ...addons.slice(0, 3).map((addon) =>
-          h('a', { class: 'store-mini', href: `/addons#${addon.id}` }, addonIcon(addon.icon), h('span', { class: 'store-mini-text' }, h('strong', { text: addon.name }), h('span', { text: addon.summary }))),
+        ...addons.slice(0, 6).map((addon) =>
+          h('li', {}, h('a', { class: 'addon', href: `/addons#${addon.id}` }, addonIcon(addon.icon, 'icon-tile'), h('span', {}, h('strong', { text: addon.name }), h('span', { text: addon.summary })))),
         ),
       );
-      storeList.hidden = false;
+      storeList.dataset.quelle = 'store';
     })
     .catch(() => {});
 }
 
+// --- Neuigkeiten
 const section = document.getElementById('neuigkeiten');
 const list = document.getElementById('neuigkeiten-liste');
-
 if (section && list) {
   publicGet('/v1/news?limit=3')
     .then((data) => {
@@ -37,19 +74,3 @@ if (section && list) {
     })
     .catch(() => {});
 }
-
-detectSystem().then((system) => {
-  const label = system.os === 'windows' ? 'Für Windows herunterladen' : system.os === 'mac' ? 'Für Mac herunterladen' : 'Downloads ansehen';
-  const sub =
-    system.os === 'windows'
-      ? 'Windows 10 und 11 · 64 Bit · kostenlos'
-      : system.os === 'mac'
-        ? 'macOS 11 oder neuer · Apple Silicon und Intel'
-        : 'Für Windows und Mac – auf dem PC herunterladen';
-  for (const button of document.querySelectorAll('[data-download-cta]')) {
-    const text = button.querySelector('.cta-label');
-    if (text) text.textContent = label;
-    button.dataset.system = system.os;
-  }
-  for (const element of document.querySelectorAll('[data-download-sub]')) element.textContent = sub;
-});

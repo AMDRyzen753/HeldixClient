@@ -1,58 +1,69 @@
-<!--seite {"titel":"Status","beschreibung":"Läuft der Heldix-Dienst? Freunde, Nachrichten und Capes im Überblick."}-->
+<!--seite {"titel":"Status","beschreibung":"Läuft der Heldix-Dienst? Freunde, Party, Nachrichten, Welt teilen und Capes im Überblick."}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
 <script type="module" src="/status.js"></script>
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="status">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap public-page">
-  <div class="page-head">
-    <span class="eyebrow">Status</span>
-    <h1>Status des Heldix-Dienstes</h1>
-    <p class="lead">Der Heldix-Dienst stellt Freunde, Nachrichten, Capes für andere und Updates bereit. Diese Seite fragt alle 30 Sekunden neu nach, solange sie geöffnet ist.</p>
-  </div>
+<main id="inhalt" class="public-page">
+  <section class="page-hero" aria-labelledby="seite-titel">
+    <div class="container">
+      <div class="page-hero__inner">
+        <span class="eyebrow">{{icon:signal}}Status</span>
+        <h1 class="h1" id="seite-titel">Status des Heldix-Dienstes</h1>
+        <p class="lead">Der Heldix-Dienst stellt Freunde, Party, Nachrichten, Welt teilen, Capes für andere und Updates bereit. Diese Seite fragt alle 30 Sekunden neu nach, solange sie geöffnet ist.</p>
+      </div>
+    </div>
+  </section>
 
-  <div class="status-hero" id="status-hero" data-state="unknown" role="status" aria-live="polite">
-    <span class="status-icon" id="status-icon" aria-hidden="true"><span class="spinner"></span></span>
-    <div class="status-text">
-      <h2 id="status-titel">Wird geprüft …</h2>
-      <p id="status-zeile">Einen Moment.</p>
+  <div class="container">
+    <div class="card status-hero" id="status-hero" data-state="unknown" role="status" aria-live="polite">
+      <span class="status-icon" id="status-icon" aria-hidden="true"><span class="spinner"></span></span>
+      <div class="status-text">
+        <h2 id="status-titel">Wird geprüft …</h2>
+        <p id="status-zeile">Einen Moment.</p>
+      </div>
+      <button class="btn btn--secondary btn--sm" type="button" id="status-neu">{{icon:refresh}}Jetzt prüfen</button>
     </div>
-    <button class="button small ghost" type="button" id="status-neu">{{icon:refresh}}Jetzt prüfen</button>
-  </div>
 
-  <div class="stat-grid" id="status-werte">
-    <div class="stat-tile">
-      <p class="stat-label">Heldix-Dienst</p>
-      <p class="stat-value" id="wert-dienst">–</p>
-      <p class="stat-note" id="wert-dienst-version"></p>
+    <div class="stat-grid section--tight" id="status-werte">
+      <div class="stat-tile">
+        <p class="stat-label">Heldix-Dienst</p>
+        <p class="stat-value" id="wert-dienst">–</p>
+        <p class="stat-note" id="wert-dienst-version"></p>
+      </div>
+      <div class="stat-tile">
+        <p class="stat-label">Spieler online</p>
+        <p class="stat-value" id="wert-online">–</p>
+        <p class="stat-note">mit HeldixClient verbunden</p>
+      </div>
+      <div class="stat-tile">
+        <p class="stat-label">Spieler insgesamt</p>
+        <p class="stat-value" id="wert-spieler">–</p>
+        <p class="stat-note">schon einmal angemeldet</p>
+      </div>
+      <div class="stat-tile" id="kachel-welten" hidden>
+        <p class="stat-label">Offene Welten</p>
+        <p class="stat-value" id="wert-welten">–</p>
+        <p class="stat-note"><a href="/zusammen#welt">Welt teilen</a></p>
+      </div>
+      <div class="stat-tile">
+        <p class="stat-label">Aktuelle Launcher-Version</p>
+        <p class="stat-value" id="wert-launcher">–</p>
+        <p class="stat-note"><a href="/neuigkeiten#versionen">Versionsverlauf</a></p>
+      </div>
+      <div class="stat-tile">
+        <p class="stat-label">Läuft seit</p>
+        <p class="stat-value" id="wert-seit">–</p>
+        <p class="stat-note" id="wert-seit-datum"></p>
+      </div>
     </div>
-    <div class="stat-tile">
-      <p class="stat-label">Spieler online</p>
-      <p class="stat-value" id="wert-online">–</p>
-      <p class="stat-note">mit HeldixClient verbunden</p>
-    </div>
-    <div class="stat-tile">
-      <p class="stat-label">Spieler insgesamt</p>
-      <p class="stat-value" id="wert-spieler">–</p>
-      <p class="stat-note">schon einmal angemeldet</p>
-    </div>
-    <div class="stat-tile">
-      <p class="stat-label">Aktuelle Launcher-Version</p>
-      <p class="stat-value" id="wert-launcher">–</p>
-      <p class="stat-note"><a href="/neuigkeiten#versionen">Versionsverlauf</a></p>
-    </div>
-    <div class="stat-tile">
-      <p class="stat-label">Läuft seit</p>
-      <p class="stat-value" id="wert-seit">–</p>
-      <p class="stat-note" id="wert-seit-datum"></p>
-    </div>
+    <p class="text-3 small center">Hier stehen nur Summen – keine Namen, keine einzelnen Spieler.</p>
   </div>
-  <p class="hint center">Hier stehen nur Summen – keine Namen, keine einzelnen Spieler.</p>
 </main>
 
 {{include:icons.html}}

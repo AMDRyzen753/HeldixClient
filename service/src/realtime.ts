@@ -1,8 +1,12 @@
 // Echtzeit über WebSocket: wer ist verbunden, welcher Status gilt, wer bekommt welche Nachricht.
+// Ab 1.12.0 gibt es zwei Arten von Verbindungen: aus dem Spiel (Bearer-Token) und Begleiter (Webseite mit Cookie,
+// Launcher mit `?client=launcher`). Begleiter bekommen alle Nachrichten, zählen aber nicht als „online im Spiel“:
+// Online-Status, Server, Spielzeit, „zuletzt online“ und /v1/status hängen nur an Verbindungen aus dem Spiel.
 import { WebSocket, type RawData } from 'ws';
-import type { Store, UserRow } from './db';
+import type { FriendViewerRow, Store, UserRow } from './db';
 import { friendView, friendsPayload, type Presence, type PresenceSource } from './friends';
-import { isState, normalizeServer, type State } from './validate';
+import type { PlayerBadge } from './roles';
+import { isState, isUuid, normalizeServer, type State } from './validate';
 
 export interface RealtimeOptions {
   /** Ohne Nachricht so lange wird die Verbindung geschlossen (Standard 90 s). */
@@ -11,6 +15,21 @@ export interface RealtimeOptions {
   messageLimit: number;
   messageWindowMs: number;
   log: (line: string) => void;
+  /** Abzeichen mehrerer Spieler (Freundesliste); ohne: keine Abzeichen. */
+  badges?: (uuids: readonly string[]) => Map<string, Exclude<PlayerBadge, null>>;
+  /** Server aus `status` prüfen (Standard normalizeServer; app.ts lässt zusätzlich Adressen geteilter Welten zu). */
+  normalizeServer?: (value: unknown) => string | null;
+  /** Gilt die Web-Sitzung einer Begleiter-Verbindung noch? (beim `ping` geprüft) */
+  sessionAlive?: (sessionId: string) => boolean;
+}
+
+/** Wo die Verbindung herkommt: aus dem Spiel oder als Begleiter (Webseite, Launcher). */
+export type ConnectionKind = 'game' | 'companion';
+
+export interface AttachOptions {
+  kind?: ConnectionKind;
+  /** ID der Web-Sitzung (nur bei Verbindungen mit Cookie), damit Abmelden die Verbindung schließt */
+  sessionId?: string | null;
 }
 
 interface Status {
@@ -21,6 +40,8 @@ interface Status {
 interface Connection {
   ws: WebSocket;
   uuid: string;
+  kind: ConnectionKind;
+  sessionId: string | null;
   idleTimer?: NodeJS.Timeout;
   killTimer?: NodeJS.Timeout;
   windowStart: number;
@@ -29,14 +50,40 @@ interface Connection {
 
 /** Schickt ein langsamer Client nichts mehr ab, wird die Verbindung ab dieser Puffergröße getrennt. */
 const MAX_BUFFERED = 1024 * 1024;
-const OFFLINE: Presence = Object.freeze({ online: false, state: null, server: null });
+/** Schließcode, wenn die Web-Sitzung einer Begleiter-Verbindung endet (Abmelden, abgelaufen). */
+export const CLOSE_SIGNED_OUT = 4008;
+
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+/**
+ * „Zuletzt online“ gerundet (abgerundet): vor weniger als einer Stunde auf 5 Minuten, vor weniger als einem Tag auf
+ * volle Stunden, sonst auf volle Tage (UTC). So verrät die Angabe nie den genauen Zeitpunkt.
+ */
+export function roundLastOnline(at: number, now = Date.now()): number {
+  const age = now - at;
+  const step = age < HOUR ? 5 * MINUTE : age < DAY ? HOUR : DAY;
+  return Math.floor(at / step) * step;
+}
 
 export class Realtime implements PresenceSource {
+  /** Alle Verbindungen je Spieler (Spiel und Begleiter). */
   private readonly connections = new Map<string, Set<Connection>>();
-  /** Zuletzt gemeldeter Status pro Spieler (gilt für alle seine Verbindungen). */
+  /** Verbindungen aus dem Spiel je Spieler (nur Spieler mit mindestens einer). */
+  private readonly games = new Map<string, number>();
+  /** Zuletzt gemeldeter Status pro Spieler (gilt für alle seine Verbindungen aus dem Spiel). */
   private readonly status = new Map<string, Status>();
   /** Weitere Verbindungen, die disconnectUser mit schließt (Voice Chat). */
   private readonly disconnectListeners: ((uuid: string, code: number, reason: string) => void)[] = [];
+  /** Beginn und Ende der Zeit im Spiel (für die Bestätigung von Einladungen). */
+  private readonly playingListeners: ((uuid: string, playing: boolean) => void)[] = [];
+  /** Online im Spiel oder Status/Server geändert (Party: Ort der Mitglieder, Folgen). */
+  private readonly changeListeners: ((uuid: string) => void)[] = [];
+  /** Erste Verbindung (gleich welcher Art) auf bzw. letzte zu (Party: Gnadenfrist). */
+  private readonly connectionListeners: ((uuid: string, connected: boolean) => void)[] = [];
+  /** `typing` vom Client (Nachrichten: „schreibt …“). */
+  private readonly typingListeners: ((from: string, to: string) => void)[] = [];
   private closing = false;
 
   constructor(
@@ -44,32 +91,96 @@ export class Realtime implements PresenceSource {
     private readonly options: RealtimeOptions,
   ) {}
 
+  /** Mit mindestens einer Verbindung aus dem Spiel verbunden (Nachschlagen, Team-Bereich). */
   isConnected(uuid: string): boolean {
+    return this.games.has(uuid);
+  }
+
+  /** Mit irgendeiner Verbindung verbunden (Spiel oder Begleiter). */
+  hasConnection(uuid: string): boolean {
     return this.connections.has(uuid);
   }
 
-  /** Spieler mit mindestens einer offenen Verbindung (für /v1/status; Web-Sitzungen zählen nicht). */
+  /** Spieler mit mindestens einer Verbindung aus dem Spiel (für /v1/status; Begleiter zählen nicht). */
   onlineCount(): number {
-    return this.connections.size;
+    return this.games.size;
   }
 
+  /** Alle offenen Verbindungen eines Spielers (für die Grenze je Spieler). */
   connectionCount(uuid: string): number {
     return this.connections.get(uuid)?.size ?? 0;
   }
 
+  /** Im Spiel: verbunden, und das Spiel hat einen Status gemeldet (Hauptmenü, Welt, Server …). */
+  isPlaying(uuid: string): boolean {
+    return this.games.has(uuid) && (this.status.get(uuid)?.state ?? null) !== null;
+  }
+
+  /** Gemeldeter Status aus dem Spiel ohne Rücksicht auf die Privatsphäre (nur für die Party), sonst null. */
+  statusOf(uuid: string): Status | null {
+    if (!this.games.has(uuid)) return null;
+    return this.status.get(uuid) ?? { state: null, server: null };
+  }
+
+  /**
+   * Meldet, wann ein Spieler ins Spiel kommt (erster Status) und wann er es verlässt (letzte Verbindung zu, Konto
+   * gelöscht oder gesperrt). Beim Herunterfahren kommt keine Meldung.
+   */
+  onPlaying(listener: (uuid: string, playing: boolean) => void): void {
+    this.playingListeners.push(listener);
+  }
+
+  /** Online im Spiel, Status oder Server eines Spielers haben sich (vielleicht) geändert. */
+  onChange(listener: (uuid: string) => void): void {
+    this.changeListeners.push(listener);
+  }
+
+  /** Erste Verbindung eines Spielers (Spiel oder Begleiter) bzw. die letzte ist zu. Nicht bei disconnectUser. */
+  onConnection(listener: (uuid: string, connected: boolean) => void): void {
+    this.connectionListeners.push(listener);
+  }
+
+  /** `{ type: 'typing', to }` von einer Verbindung des Spielers `from`. */
+  onTyping(listener: (from: string, to: string) => void): void {
+    this.typingListeners.push(listener);
+  }
+
+  private emit<T extends unknown[]>(listeners: ((...args: T) => void)[], what: string, ...args: T): void {
+    for (const listener of listeners) {
+      try {
+        listener(...args);
+      } catch (err) {
+        this.options.log(`Fehler bei ${what}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  private emitPlaying(uuid: string, playing: boolean): void {
+    this.emit(this.playingListeners, 'der Spielzeit', uuid, playing);
+  }
+
   /** Was Freunde sehen. Bei `presence` aus immer offline, Server nur mit `showServer` im Mehrspieler. */
   presenceOf(user: UserRow): Presence {
-    if (!user.presence || !this.connections.has(user.uuid)) return OFFLINE;
+    const statusText = user.statusText === '' ? null : user.statusText;
+    if (!user.presence || !this.games.has(user.uuid)) {
+      const lastOnline = user.presence && user.showLastOnline && user.lastOnline !== null ? roundLastOnline(user.lastOnline) : null;
+      return { online: false, state: null, server: null, statusText, dnd: false, lastOnline };
+    }
     const status = this.status.get(user.uuid);
     const state = status?.state ?? null;
     const server = user.showServer && state === 'multiplayer' ? (status?.server ?? null) : null;
-    return { online: true, state, server };
+    return { online: true, state, server, statusText, dnd: user.dnd, lastOnline: null };
+  }
+
+  badgesOf(uuids: readonly string[]): Map<string, Exclude<PlayerBadge, null>> {
+    return this.options.badges?.(uuids) ?? new Map();
   }
 
   /** Neue, bereits angemeldete Verbindung übernehmen. */
-  attach(ws: WebSocket, uuid: string): void {
+  attach(ws: WebSocket, uuid: string, attachOptions: AttachOptions = {}): void {
+    const kind = attachOptions.kind ?? 'game';
     const before = this.snapshot(uuid);
-    const conn: Connection = { ws, uuid, windowStart: Date.now(), messages: 0 };
+    const conn: Connection = { ws, uuid, kind, sessionId: attachOptions.sessionId ?? null, windowStart: Date.now(), messages: 0 };
     // Zuerst die Ereignisse anmelden: Geht danach etwas schief, räumt 'close' auf.
     ws.on('message', (data, isBinary) => this.onMessage(conn, data, isBinary));
     // Auch Ping/Pong-Frames des Protokolls zählen als Lebenszeichen.
@@ -81,16 +192,21 @@ export class Realtime implements PresenceSource {
     ws.on('close', () => this.onClose(conn));
 
     let set = this.connections.get(uuid);
+    const first = !set;
     if (!set) {
       set = new Set();
       this.connections.set(uuid, set);
     }
     set.add(conn);
+    const firstGame = kind === 'game' && !this.games.has(uuid);
+    if (kind === 'game') this.games.set(uuid, (this.games.get(uuid) ?? 0) + 1);
     this.resetIdle(conn);
-    this.store.touch(uuid, Date.now());
+    if (kind === 'game') this.store.touch(uuid, Date.now());
 
     this.sendTo(conn, { type: 'friends', ...friendsPayload(this.store, this, uuid) });
-    this.announce(uuid, before);
+    if (kind === 'game') this.announce(uuid, before);
+    if (first) this.emit(this.connectionListeners, 'einer Verbindung', uuid, true);
+    if (firstGame) this.emit(this.changeListeners, 'einer Statusänderung', uuid);
   }
 
   /** Nachricht an alle Verbindungen eines Spielers. */
@@ -107,23 +223,37 @@ export class Realtime implements PresenceSource {
     this.send(uuid, { type: 'friends', ...friendsPayload(this.store, this, uuid) });
   }
 
-  /** Stand vor einer Änderung merken, um danach nur bei echten Änderungen zu senden. */
+  /**
+   * Stand vor einer Änderung merken, um danach nur bei echten Änderungen zu senden. „Zuletzt online“ selbst gehört
+   * nicht dazu (es ändert sich mit der Zeit), nur ob es gezeigt wird.
+   */
   snapshot(uuid: string): string {
     const user = this.store.getUser(uuid);
-    return user ? JSON.stringify(this.presenceOf(user)) : '';
+    if (!user) return '';
+    const { lastOnline, ...rest } = this.presenceOf(user);
+    return JSON.stringify({ ...rest, lastOnline: lastOnline !== null });
   }
 
-  /** Hat sich die Sicht der Freunde auf `uuid` geändert, bekommen alle verbundenen Freunde eine `friend`-Nachricht. */
+  /**
+   * Hat sich die Sicht der Freunde auf `uuid` geändert, bekommt jeder verbundene Freund eine `friend`-Nachricht (mit
+   * seinen eigenen Angaben zu ihm: Favorit, Spitzname, Notiz).
+   */
   announce(uuid: string, before: string): void {
     const user = this.store.getUser(uuid);
     if (!user) return;
+    if (this.snapshot(uuid) === before) return;
+    const viewers = this.store.friendViewers(uuid).filter((row) => this.connections.has(row.uuid));
+    if (viewers.length === 0) return;
     const presence = this.presenceOf(user);
-    if (JSON.stringify(presence) === before) return;
-    for (const friend of this.store.listFriendIds(uuid)) {
-      if (this.connections.has(friend.uuid)) {
-        this.send(friend.uuid, { type: 'friend', friend: friendView(user, friend.since, presence) });
-      }
-    }
+    const badge = this.badgesOf([uuid]).get(uuid) ?? null;
+    for (const viewer of viewers) this.send(viewer.uuid, { type: 'friend', friend: friendView(user, viewer, presence, badge) });
+  }
+
+  /** Eigene Angaben zu einem Freund geändert: nur die eigenen Verbindungen bekommen die neue Sicht. */
+  sendFriendTo(viewer: string, row: FriendViewerRow, friend: UserRow): void {
+    if (!this.connections.has(viewer)) return;
+    const badge = this.badgesOf([friend.uuid]).get(friend.uuid) ?? null;
+    this.send(viewer, { type: 'friend', friend: friendView(friend, row, this.presenceOf(friend), badge) });
   }
 
   /** Beim Trennen eines Spielers (Konto gelöscht, gesperrt) auch andere Verbindungen schließen, z. B. den Voice Chat. */
@@ -137,21 +267,38 @@ export class Realtime implements PresenceSource {
    */
   disconnectUser(uuid: string, code: number, reason: string): void {
     for (const listener of this.disconnectListeners) listener(uuid, code, reason);
+    const playing = this.isPlaying(uuid);
     const set = this.connections.get(uuid);
     this.connections.delete(uuid);
+    this.games.delete(uuid);
     this.status.delete(uuid);
+    if (playing) this.emitPlaying(uuid, false);
     if (!set) return;
-    for (const conn of set) {
-      this.clearTimers(conn);
-      conn.ws.close(code, reason);
-      conn.killTimer = setTimeout(() => conn.ws.terminate(), Math.min(2000, this.options.idleTimeoutMs));
-      conn.killTimer.unref();
+    for (const conn of set) this.closeConnection(conn, code, reason);
+  }
+
+  /** Web-Sitzung beendet (Abmelden, Sitzung gelöscht): ihre Begleiter-Verbindungen schließen (4008). */
+  closeSession(sessionId: string): void {
+    for (const set of this.connections.values()) {
+      for (const conn of [...set]) if (conn.sessionId === sessionId) this.closeConnection(conn, CLOSE_SIGNED_OUT, 'Abgemeldet');
     }
   }
 
-  /** Alle Verbindungen sofort trennen (beim Herunterfahren). */
+  private closeConnection(conn: Connection, code: number, reason: string): void {
+    this.clearTimers(conn);
+    conn.ws.close(code, reason);
+    conn.killTimer = setTimeout(() => conn.ws.terminate(), Math.min(2000, this.options.idleTimeoutMs));
+    conn.killTimer.unref();
+  }
+
+  /** Alle Verbindungen sofort trennen (beim Herunterfahren); wer im Spiel war, ist ab jetzt „zuletzt online“. */
   closeAll(): void {
     this.closing = true;
+    try {
+      this.store.setLastOnline([...this.games.keys()], Date.now());
+    } catch (err) {
+      this.options.log(`„Zuletzt online“ nicht gespeichert: ${(err as Error).message}`);
+    }
     for (const set of this.connections.values()) {
       for (const conn of set) {
         this.clearTimers(conn);
@@ -159,6 +306,7 @@ export class Realtime implements PresenceSource {
       }
     }
     this.connections.clear();
+    this.games.clear();
     this.status.clear();
   }
 
@@ -181,7 +329,7 @@ export class Realtime implements PresenceSource {
       return;
     }
     if (typeof message !== 'object' || message === null) return;
-    const { type, state, server } = message as { type?: unknown; state?: unknown; server?: unknown };
+    const { type, state, server, to } = message as { type?: unknown; state?: unknown; server?: unknown; to?: unknown };
 
     if (type === 'ping') {
       // Konto inzwischen gesperrt oder gelöscht (z. B. über heldix-dienst-admin, das diese Verbindung nicht erreicht):
@@ -191,12 +339,24 @@ export class Realtime implements PresenceSource {
         this.disconnectUser(conn.uuid, banned ? 4003 : 4001, banned ? 'Gesperrt' : 'Konto gelöscht');
         return;
       }
+      // Web-Sitzung abgelaufen oder abgemeldet: nur diese Verbindung schließen.
+      if (conn.sessionId !== null && this.options.sessionAlive && !this.options.sessionAlive(conn.sessionId)) {
+        this.closeConnection(conn, CLOSE_SIGNED_OUT, 'Abgemeldet');
+        return;
+      }
       this.sendTo(conn, { type: 'pong' });
     } else if (type === 'status') {
-      if (!isState(state)) return;
+      // Nur das Spiel meldet, wo der Spieler ist; Begleiter (Webseite, Launcher) nicht.
+      if (conn.kind !== 'game' || !isState(state)) return;
       const before = this.snapshot(conn.uuid);
-      this.status.set(conn.uuid, { state, server: state === 'multiplayer' ? normalizeServer(server) : null });
+      const wasPlaying = this.isPlaying(conn.uuid);
+      const check = this.options.normalizeServer ?? normalizeServer;
+      this.status.set(conn.uuid, { state, server: state === 'multiplayer' ? check(server) : null });
       this.announce(conn.uuid, before);
+      if (!wasPlaying) this.emitPlaying(conn.uuid, true);
+      this.emit(this.changeListeners, 'einer Statusänderung', conn.uuid);
+    } else if (type === 'typing') {
+      if (isUuid(to) && to !== conn.uuid) this.emit(this.typingListeners, '„schreibt …“', conn.uuid, to);
     }
     // Unbekannte Nachrichten werden ignoriert.
   }
@@ -208,16 +368,29 @@ export class Realtime implements PresenceSource {
     if (!set || !set.has(conn)) return;
     const before = this.snapshot(conn.uuid);
     set.delete(conn);
-    if (set.size > 0) return;
-    // Letzte Verbindung zu: Der Spieler ist offline.
-    this.connections.delete(conn.uuid);
-    this.status.delete(conn.uuid);
-    try {
-      this.store.touch(conn.uuid, Date.now());
-      this.announce(conn.uuid, before);
-    } catch (err) {
-      this.options.log(`Fehler beim Trennen einer Verbindung: ${(err as Error).message}`);
+    if (set.size === 0) this.connections.delete(conn.uuid);
+    if (conn.kind === 'game') {
+      const left = (this.games.get(conn.uuid) ?? 1) - 1;
+      if (left > 0) {
+        this.games.set(conn.uuid, left);
+      } else {
+        // Letzte Verbindung aus dem Spiel zu: Der Spieler ist offline.
+        const wasPlaying = this.isPlaying(conn.uuid);
+        this.games.delete(conn.uuid);
+        this.status.delete(conn.uuid);
+        try {
+          const now = Date.now();
+          this.store.touch(conn.uuid, now);
+          this.store.setLastOnline([conn.uuid], now);
+          this.announce(conn.uuid, before);
+        } catch (err) {
+          this.options.log(`Fehler beim Trennen einer Verbindung: ${(err as Error).message}`);
+        }
+        if (wasPlaying) this.emitPlaying(conn.uuid, false);
+        this.emit(this.changeListeners, 'einer Statusänderung', conn.uuid);
+      }
     }
+    if (!this.connections.has(conn.uuid)) this.emit(this.connectionListeners, 'einer Verbindung', conn.uuid, false);
   }
 
   private resetIdle(conn: Connection): void {

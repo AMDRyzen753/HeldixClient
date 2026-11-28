@@ -2,9 +2,9 @@
 titel: Addon-API im Detail
 beschreibung: Module, HUD-Elemente, Einstellungen, Tasten, Einblendungen, Ereignisse und gedroppte Items – mit echten Beispielen aus den Addons Spotify, Uhrzeit & Spielzeit und Item Physics.
 reihenfolge: 2
-stichworte: api, heldixapi, addkey, showkey, voice, voicechat, sprachkanal, nearbyplayers, spielermenü, playermenuentry, playermarkers, tasten, keybind, tastenbelegung, hudclick, hudhover, hudstyle, hotspot, iconbutton, anklickbar, hud bedienen, stil-optionen, cosmetics, cosmeticinfo, preview, animate, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate, api 4, api 5, api 6, api 7, showabove, gruppe, voice-gruppe, setstate, playername, droppeditems, droppeditemrenderer, droppeditem, droppeditempose, item physics, gedroppte items
+stichworte: api, heldixapi, addkey, showkey, voice, voicechat, sprachkanal, nearbyplayers, spielermenü, playermenuentry, playermarkers, tasten, keybind, tastenbelegung, hudclick, hudhover, hudstyle, hotspot, iconbutton, anklickbar, hud bedienen, stil-optionen, cosmetics, cosmeticinfo, preview, animate, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate, api 4, api 5, api 6, api 7, showabove, gruppe, voice-gruppe, setstate, playername, api 8, worldmap, minimap, karte, hudimage, createimage, pixel, waypointinfo, wegpunkte, api 9, gast, gäste, browser, browser-link, createbrowserlink, isguest, inbrowser, removeguest, guestsavailable, copytoclipboard, zwischenablage, droppeditems, droppeditemrenderer, droppeditem, droppeditempose, item physics, gedroppte items
 ---
-Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **7** (Stand HeldixClient 0.13.5). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3`, alles unter [Ab API 4](#ab-api-4) den Eintrag `"api": 4`, alles unter [Ab API 5](#ab-api-5) den Eintrag `"api": 5`, alles unter [Ab API 6](#ab-api-6) den Eintrag `"api": 6` und alles unter [Ab API 7](#ab-api-7) den Eintrag `"api": 7`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Addons entwickeln](/entwickler/addons).
+Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **9** (Stand HeldixClient 0.13.8). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3`, alles unter [Ab API 4](#ab-api-4) den Eintrag `"api": 4`, alles unter [Ab API 5](#ab-api-5) den Eintrag `"api": 5`, alles unter [Ab API 6](#ab-api-6) den Eintrag `"api": 6`, alles unter [Ab API 7](#ab-api-7) den Eintrag `"api": 7`, alles unter [Ab API 8](#ab-api-8) den Eintrag `"api": 8` und alles unter [Ab API 9](#ab-api-9) den Eintrag `"api": 9`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Addons entwickeln](/entwickler/addons).
 
 > **Hinweis:** Die Heldix-API reicht für die meisten Addons und läuft über Minecraft-Updates hinweg. Was sie nicht kann, darf ein Addon auch direkt in Minecraft ändern – mit Transformern des Heldix Loaders, siehe [Weg 2: Eingriff in Minecraft](/entwickler/addons#weg-2-eingriff-in-minecraft). Mit der API-Stufe hat das nichts zu tun.
 
@@ -26,6 +26,8 @@ In `onEnable(HeldixApi api)` bekommst du ein Objekt, über das alles läuft:
 - ab API 5: anklickbare HUD-Elemente im HUD-Stil (an `HudRenderer`, `HudCanvas` und `ModuleHandle`), siehe [Ab API 5](#ab-api-5).
 - ab API 6: Tasten im Untermenü eines Moduls (`addKey`, `showKey`), `nearbyPlayers()`, `playerMarkers()`, `addPlayerMenuEntry(...)` und `voice()` – siehe [Ab API 6](#ab-api-6).
 - ab API 7: `playerName(uuid)`, Symbole über dem Kopf (`playerMarkers().showAbove(...)`), Status und Gruppen im Sprachkanal – siehe [Ab API 7](#ab-api-7).
+- ab API 8: `worldMap()` – die Welt von oben für Karten –, `createImage(...)` für selbst gefüllte Bilder im HUD und `waypoints()` – siehe [Ab API 8](#ab-api-8).
+- ab API 9: Gäste und Browser-Teilnehmer im Sprachkanal, `voice().createBrowserLink(...)` und `copyToClipboard(text)` – siehe [Ab API 9](#ab-api-9).
 
 ## Ereignisse
 
@@ -412,7 +414,7 @@ Werte, die keinen Sinn ergeben, fängt HeldixClient ab: `lift` wird auf ±2 Blö
 - `worn(uuid, slot)` – was ein Spieler trägt (`Optional<String>`): für dich deine Auswahl, für andere das, was der Dienst beim Nachschlagen gemeldet hat (nur erkennbare HeldixClient-Spieler in der Nähe oder in der Tab-Liste).
 - `mine()` – deine Auswahl je Slot (`HEAD`, `BACK`, `AURA`, `COMPANION`, `CAPE`), nur belegte.
 - `preview(slot, id, dauer)` – zeigt ein Cosmetic **nur bei dir** (Third-Person, Inventar, Figuren im Heldix-Menü), etwa als Vorschau in einem eigenen Menü. Endet nach der Dauer (höchstens eine Stunde), mit `cancel()` oder wenn das Addon abgeschaltet wird. Beim Dienst ändert sich nichts.
-- `animate(slot, effekt)` – ein kurzer Effekt (etwa 1,6 Sekunden) an deinem Cosmetic, nur bei dir: `"flap"` (Flügel doppelt so schnell, `BACK`), `"spin"` (einmal drehen) und `"bounce"` (hüpfen) für `HEAD`, `BACK` und `COMPANION`, `"burst"` (ein Schwall Partikel, `AURA`).
+- `animate(slot, effekt)` – ein kurzer Effekt (etwa 1,6 Sekunden) an deinem Cosmetic, nur bei dir: `"flap"` (Flügel doppelt so schnell, `BACK`), `"spin"` (einmal drehen) und `"bounce"` (hüpfen) für `HEAD`, `BACK` und `COMPANION`, `"burst"` (ein Schwall Partikel, `AURA`). Bei animierten Cosmetics (Format 2, ab HeldixClient 0.13.8) spielen `"flap"` und `"burst"` die Jubel-Animation des Cosmetics, falls es eine hat; `"spin"` und `"bounce"` wirken wie gewohnt.
 - `onChange(change -> …)` – deine Auswahl hat sich geändert (Heldix-Menü, Launcher oder Webseite): `slot()`, `previous()` und `current()`. Läuft im Haupt-Thread.
 
 Eine unbekannte ID oder ein Effekt, den es für den Slot nicht gibt, wirft eine `IllegalArgumentException`.
@@ -581,6 +583,82 @@ for (UUID speaker : speaking) {
 `api.playerName(uuid)` liefert den Namen eines Spielers aus der Welt, der Tab-Liste des Servers oder deiner Freundesliste – z. B. für Gruppenmitglieder, die gerade woanders sind. Ohne Treffer ein leeres `Optional`. Nur im Haupt-Thread.
 
 Funktionen der Stufe 7 sind in den API-Klassen mit `@since 7` gekennzeichnet.
+
+## Ab API 8
+
+Mit `"api": 8` (ab HeldixClient 0.13.7) lesen Addons die Oberfläche der Welt von oben, zeichnen selbst gefüllte Bilder ins HUD und sehen die Wegpunkte des Spielers – alles, was eine Minimap braucht. Fertige Addons für API 1 bis 7 laufen unverändert weiter.
+
+### Die Welt von oben
+
+`api.worldMap()` liefert ein `WorldMap` (nur im Haupt-Thread, nur geladene Chunks):
+
+- `sampleSurface(minX, minZ, breite, tiefe, farben, colors, heights, waterDepths)` füllt für ein Rechteck je Spalte die Farbe des obersten sichtbaren Blocks (ARGB, 0 = nicht geladen), seine Höhe und die Wassertiefe. Index ist `dz * breite + dx`; `heights` und `waterDepths` dürfen `null` sein. Rückgabe: Anzahl geladener Spalten.
+- Farben: `WorldMap.Colors.TEXTURE` – Durchschnittsfarbe der Textur von oben (aus dem aktiven Ressourcenpaket) mal Biom-Färbung für Gras, Laub und Wasser, also wie die Welt aussieht – oder `WorldMap.Colors.MAP` – die Farben der Minecraft-Karten. Schattierung nach Höhe und Wassertiefe machst du selbst (die Höhen hast du ja).
+- `view()` – Position und Blickrichtung des Spielers **für das gerade gezeichnete Bild**, zwischen zwei Ticks weich. `playerState()` liest nur jeden Tick neu; für eine Karte, die sich mitdreht, würde das ruckeln.
+- `surfaceY(x, z)`, `dimension()`, `hasCeiling()` (z. B. der Nether), `minY()`/`maxY()`.
+- `sampleBelow(…, topY, …)` sucht ab der Höhe `topY` abwärts (bis zu 48 Blöcke) – für Höhlen oder den Nether unter seiner Decke. **Fair Play:** Das geht nur in Einzelspieler-Welten (`undergroundAllowed()`); auf Servern bleiben alle Spalten 0.
+
+Lies nicht jedes Bild die ganze Umgebung neu: Chunk für Chunk im Tick (mit einem Budget je Tick) und ältere Chunks nach und nach auffrischen reicht. Neue Texturfarben liest HeldixClient höchstens 24 je Tick; bis dahin kommt dafür die Kartenfarbe.
+
+### Eigene Bilder im HUD
+
+- `api.createImage(breite, höhe)` (bis 512 × 512) legt ein `HudImage` an; `setPixels(argb)` bzw. `setPixel(x, y, argb)` setzen Pixel (ARGB, Alpha 0 = durchsichtig – so wird eine Karte rund).
+- `canvas.image(bild, x, y, breite, höhe)` zeichnet es; geänderte Pixel lädt HeldixClient vorher hoch. Gezeichnet wird ohne Glätten, an Bildschirm-Pixeln ausgerichtet.
+- `canvas.pixelScale()` sagt, wie viele echte Pixel ein GUI-Pixel gerade hat – lege das Bild so groß an, dann ist es scharf.
+- `close()` gibt ein Bild frei; beim Abschalten des Addons passiert das von selbst. Höchstens 16 Bilder je Addon gleichzeitig.
+
+```java
+HudImage map = api.createImage(192, 192);
+int[] pixels = new int[192 * 192];
+// … pixels füllen …
+map.setPixels(pixels);
+// im HudRenderer:
+canvas.image(map, 0, 0, 96, 96);
+```
+
+### Wegpunkte
+
+`api.waypoints()` – die sichtbaren Wegpunkte des Spielers in der aktuellen Welt (alle Dimensionen) als `WaypointInfo`: `name`, `x`/`y`/`z`, `dimension`, `color` und `death` (der automatische Todespunkt). Nur lesen, nur im Haupt-Thread.
+
+Das offizielle Addon **Minimap** ist ein vollständiges Beispiel für alles auf dieser Stufe. `WorldMap` und `HudImage` stellt HeldixClient bereit, deshalb sind es Schnittstellen; `WaypointInfo` und `WorldMap.View` sind Records. Funktionen der Stufe 8 sind in den API-Klassen mit `@since 8` gekennzeichnet.
+
+## Ab API 9
+
+Mit `"api": 9` (ab HeldixClient 0.13.7) kennt der Sprachkanal Teilnehmer, die über die Webseite mitreden – Gäste ohne HeldixClient und angemeldete Spieler im Browser –, und ein Addon kann für die eigene Voice-Gruppe einen Browser-Link erzeugen. Fertige Addons für API 1 bis 8 laufen unverändert weiter.
+
+### Gäste und Browser im Sprachkanal
+
+Wer einen Browser-Link öffnet, redet auf der Webseite mit (siehe [Im Browser mitreden](/hilfe/einladungen#im-browser-mitreden)) – als **Gast** mit selbst gewähltem Namen oder angemeldet mit seinem Minecraft-Konto. Browser-Teilnehmer haben keine Position: Sie gehören immer zu deiner Gruppe (`groupMembers()`) und sind überall zu hören, wie ein Mitglied in einer anderen Dimension. Ihre Rahmen kommen wie alle anderen über `onFrame` an – im selben Format (Opus, 48 kHz, mono, 20 ms).
+
+- `isGuest(id)` – ein Gast? Gäste haben statt einer Minecraft-UUID eine zufällige ID; ihren Namen liefert `api.playerName(id)`.
+- `inBrowser(id)` – spricht über die Webseite (Gast oder angemeldet im Browser)?
+- `guestsAvailable()` – kann der verbundene Heldix-Dienst Gäste und Browser-Links (ab Dienst 1.11.0)? `false`, solange nicht verbunden.
+- `removeGuest(id)` – einen Gast aus deiner Gruppe entfernen. Der Dienst trennt ihn sofort; mit dem Link kann er neu beitreten, solange der Link gilt. Nur auf Wunsch des Spielers.
+
+### Browser-Link für die Gruppe
+
+`voice().createBrowserLink(onLink, onError)` erzeugt einen Link für deine Gruppe auf dem aktuellen Server: 24 Stunden gültig, höchstens 4 Gäste gleichzeitig; für dieselbe Gruppe kommt derselbe Link zurück. Genau einer der beiden Callbacks läuft, im Haupt-Thread – `onLink` mit dem Link, `onError` mit einer deutschen Meldung für den Spieler (etwa „Du bist in keiner Voice-Gruppe“). Gruppenname und Passwort erfährt dabei niemand: An den Dienst geht wie immer nur der Prüfwert.
+
+`api.copyToClipboard(text)` legt Text in die Zwischenablage – nur auf Wunsch des Spielers und im Haupt-Thread, höchstens 2000 Zeichen.
+
+```java
+// Knopf „Browser-Link kopieren“ im Gruppen-Bereich
+if (api.voice().guestsAvailable()) {
+    api.voice().createBrowserLink(link -> {
+        api.copyToClipboard(link);
+        api.notify("Voice Chat", "Browser-Link kopiert – gilt 24 Stunden");
+    }, error -> api.notify("Voice Chat", error));
+}
+
+// In der Liste: Gäste und Browser kennzeichnen
+for (UUID member : api.voice().groupMembers()) {
+    String name = api.playerName(member).orElse("Spieler");
+    String tag = api.voice().isGuest(member) ? " (Gast)" : api.voice().inBrowser(member) ? " (Browser)" : "";
+    // …
+}
+```
+
+Das offizielle Addon **Voice Chat** (ab Version 1.2.0) zeigt Gäste und Browser-Teilnehmer in seiner Liste, kopiert den Browser-Link und entfernt Gäste. Funktionen der Stufe 9 sind in den API-Klassen mit `@since 9` gekennzeichnet.
 
 ## Threads und Fehler
 

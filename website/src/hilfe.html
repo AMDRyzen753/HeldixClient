@@ -1,40 +1,47 @@
-<!--seite {"titel": "Hilfe-Center", "beschreibung": "Anleitungen zu HeldixClient: Installation auf Windows und Mac, Anmeldung, Instanzen, Module, Freunde, Leistung und Lösungen für typische Probleme."}-->
+<!--seite {"titel":"Hilfe-Center","beschreibung":"Anleitungen zu HeldixClient: Installation, Einrichtung, Launcher, Freunde, Party, Welt teilen, Voice Chat, Grafik und Lösungen für typische Probleme."}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
 <script type="module" src="/hilfe.js"></script>
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="hilfe">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap help-page">
-  <div class="page-hero">
-    <span class="eyebrow">Hilfe-Center</span>
-    <h1>Wobei können wir <span class="gradient">helfen?</span></h1>
-    <p class="lead">{{HILFE_ANZAHL}} Anleitungen – von der Installation bis zur Fehlersuche.</p>
-    <div class="help-search glass" role="search">
-      <label class="search-field big-search">
-        <span class="visually-hidden">Hilfe durchsuchen</span>
-        {{icon:search}}
-        <input type="search" id="hilfe-suche" name="q" placeholder="z. B. Mac öffnen, Freelook, Absturz" autocomplete="off">
-      </label>
+<main id="inhalt" class="help-page">
+  <section class="page-hero page-hero--center" aria-labelledby="seite-titel">
+    <div class="container">
+      <div class="page-hero__inner">
+        <span class="eyebrow">{{icon:help-circle}}Hilfe-Center</span>
+        <h1 class="h1" id="seite-titel">Wobei können wir <span class="text-gradient">helfen?</span></h1>
+        <p class="lead">{{HILFE_ANZAHL}} Anleitungen – von der Installation über Party und Welt teilen bis zur Fehlersuche.</p>
+        <div class="help-search" role="search">
+          <label class="search-field search-field--big">
+            <span class="sr-only">Hilfe durchsuchen</span>
+            {{icon:search}}
+            <input type="search" id="hilfe-suche" name="q" placeholder="z. B. Welt teilen, Mac öffnen, Absturz" autocomplete="off">
+          </label>
+        </div>
+        <div class="topic-chips">{{HILFE_THEMEN_HTML}}</div>
+      </div>
     </div>
-    <div class="topic-chips">{{HILFE_THEMEN_HTML}}</div>
-  </div>
+  </section>
 
-  <div class="search-results" id="hilfe-ergebnisse" aria-live="polite" hidden></div>
-
-  <div class="help-categories" id="hilfe-kategorien">
+  <section class="section section--tight" aria-label="Anleitungen">
+    <div class="container">
+      <div class="search-results" id="hilfe-ergebnisse" aria-live="polite" hidden></div>
+      <div class="help-categories" id="hilfe-kategorien">
 {{HILFE_KATEGORIEN_HTML}}
-  </div>
+      </div>
 
-  <aside class="support-box big-support">
-    {{icon:chat}}
-    <div><h2>Nichts gefunden?</h2><p>Schreib dem Team – die Antwort bekommst du in deinem Konto und im Spiel.</p></div>
-    <a class="button" href="/konto#ziel=support">Support-Anfrage stellen</a>
-  </aside>
+      <aside class="support-box">
+        <span class="icon-tile icon-tile--lg">{{icon:chat}}</span>
+        <div><h2>Nichts gefunden?</h2><p>Schreib dem Team – die Antwort bekommst du in deinem Konto und im Spiel. Ob der Heldix-Dienst gerade läuft, zeigt die <a href="/status">Statusseite</a>.</p></div>
+        <a class="btn btn--primary" href="/konto#reiter=support">{{icon:send}}Support-Anfrage stellen</a>
+      </aside>
+    </div>
+  </section>
 </main>
 
 {{include:icons.html}}

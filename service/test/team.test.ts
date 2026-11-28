@@ -128,16 +128,13 @@ describe('Team-Bereich', () => {
   const asAdmin = (method: string, path: string, body?: unknown) => webApi(service, method, path, { cookie: adminCookie, body });
   const asMod = (method: string, path: string, body?: unknown) => webApi(service, method, path, { cookie: modCookie, body });
 
-  test('Moderatoren: keine Admin-Routen (forbidden)', async () => {
+  test('Moderatoren: nur die Rechte ihrer Rolle (sonst forbidden)', async () => {
     for (const [method, path] of [
-      ['GET', '/v1/team/members'],
       ['POST', '/v1/team/members'],
-      ['GET', '/v1/team/audit'],
       ['GET', '/v1/team/updates'],
       ['PUT', '/v1/team/updates/manifest'],
       ['PUT', '/v1/team/updates/files/HeldixClient-Setup-1.0.0.exe'],
       ['DELETE', '/v1/team/updates/files/HeldixClient-Setup-1.0.0.exe'],
-      ['POST', `/v1/team/players/${anna.uuid}/reset-cape`],
       ['DELETE', `/v1/team/players/${anna.uuid}`],
       ['PUT', `/v1/team/members/${anna.uuid}`],
       ['DELETE', `/v1/team/members/${anna.uuid}`],
@@ -146,7 +143,8 @@ describe('Team-Bereich', () => {
       const res = await asMod(method!, path!, {});
       assert.deepEqual([res.status, res.body.code], [403, 'forbidden'], `${method} ${path}`);
     }
-    for (const path of ['/v1/team/reports', '/v1/team/bans', '/v1/team/players?q=a', '/v1/team/news', `/v1/team/players/${anna.uuid}`]) {
+    // Ab 1.12.0 (Rechte je Route): Team-Übersicht und Protokoll ansehen darf auch ein Moderator.
+    for (const path of ['/v1/team/reports', '/v1/team/bans', '/v1/team/players?q=a', '/v1/team/news', `/v1/team/players/${anna.uuid}`, '/v1/team/members', '/v1/team/audit']) {
       assert.equal((await asMod('GET', path)).status, 200, path);
     }
     // Ohne CSRF-Header: 403 (ohne code).
@@ -224,7 +222,7 @@ describe('Team-Bereich', () => {
 
     let res = await asMod('GET', '/v1/team/players?q=ANNA');
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.players, [{ uuid: anna.uuid, name: 'Anna_X', lastSeen: res.body.players[0].lastSeen, online: true, banned: false, role: null }]);
+    assert.deepEqual(res.body.players, [{ uuid: anna.uuid, name: 'Anna_X', lastSeen: res.body.players[0].lastSeen, online: true, banned: false, role: null, communityBadge: null }]);
     // _ ist kein Platzhalter.
     assert.deepEqual((await asMod('GET', '/v1/team/players?q=Anna_')).body.players.length, 1);
     assert.deepEqual((await asMod('GET', '/v1/team/players?q=Ann_X')).body.players, []);
@@ -239,7 +237,7 @@ describe('Team-Bereich', () => {
     res = await asMod('GET', `/v1/team/players/${anna.uuid}`);
     assert.equal(res.status, 200);
     assert.deepEqual(Object.keys(res.body).sort(), [
-      'ban', 'blocks', 'cape', 'createdAt', 'friends', 'lastSeen', 'messages', 'name', 'online', 'presence', 'reportsAbout', 'reportsBy', 'role', 'showServer', 'uuid', 'visible',
+      'ban', 'blocks', 'cape', 'communityBadge', 'createdAt', 'friends', 'lastSeen', 'messages', 'name', 'online', 'presence', 'reportsAbout', 'reportsBy', 'role', 'showServer', 'uuid', 'visible',
     ]);
     assert.deepEqual([res.body.cape, res.body.friends, res.body.online, res.body.ban, res.body.role], ['glut', 1, true, null, null]);
     assert.equal(res.body.reportsBy.length, 1);

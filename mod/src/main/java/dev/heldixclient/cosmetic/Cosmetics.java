@@ -19,7 +19,8 @@ import java.util.function.Consumer;
 
 /**
  * Cosmetics des eigenen Spielers: Auswahl je Slot (beim Heldix-Dienst gespeichert, {@code GET/PUT /v1/me/cosmetics}),
- * ob man Team-Cosmetics wählen darf, lokale Vorschauen und kurze Effekte der Addon-API und Meldungen über Änderungen.
+ * ob man Team-Cosmetics wählen darf, welche Belohnungen freigeschaltet sind ({@code unlocked}, ab Dienst 1.11.0), lokale
+ * Vorschauen und kurze Effekte der Addon-API und Meldungen über Änderungen.
  *
  * <p>Slots: head (Hüte &amp; Kopf), back (Flügel &amp; Rücken), aura (Partikel), companion (Begleiter). Das Cape bleibt bei
  * {@link Capes} (eingebaute, eigene und Katalog-Capes); Änderungen daran meldet {@link #capeChanged} trotzdem hier.
@@ -105,6 +106,8 @@ public final class Cosmetics {
 
 	private static volatile Map<String, String> mine = Map.of();
 	private static volatile boolean team;
+	/** freigeschaltete Cosmetics mit access "unlock" (vom Dienst bzw. per Echtzeit-Nachricht "unlock") */
+	private static volatile java.util.Set<String> unlocked = java.util.Set.of();
 	private static final List<Preview> PREVIEWS = new CopyOnWriteArrayList<>();
 	private static final Map<String, Effect> EFFECTS_BY_SLOT = new java.util.concurrent.ConcurrentHashMap<>();
 	private static final List<Consumer<Change>> LISTENERS = new CopyOnWriteArrayList<>();
@@ -124,6 +127,8 @@ public final class Cosmetics {
 		}
 		mine = Map.copyOf(map);
 		CosmeticCatalog.init();
+		// Format 2: AFK und Fortschritte des eigenen Spielers für die Animationen
+		RigMotion.init();
 	}
 
 	/** Name eines Slots für die Anzeige */
@@ -131,7 +136,7 @@ public final class Cosmetics {
 		return switch (slot) {
 			case "head" -> "Hüte & Kopf";
 			case "back" -> "Flügel & Rücken";
-			case "aura" -> "Partikel";
+			case "aura" -> "Aura";
 			case "companion" -> "Begleiter";
 			case "cape" -> "Capes";
 			default -> slot;
@@ -155,6 +160,46 @@ public final class Cosmetics {
 	/** Darf dieser Spieler Cosmetics nur fürs Team wählen? (vom Dienst, {@code team} in /v1/me/cosmetics) */
 	public static boolean team() {
 		return team;
+	}
+
+	/** Hat dieser Spieler das Cosmetic freigeschaltet? (Belohnungen für Einladungen, {@code unlocked} in /v1/me/cosmetics) */
+	public static boolean unlocked(String id) {
+		return id != null && unlocked.contains(id);
+	}
+
+	/** Alle Freischaltungen (für Tests und Anzeigen) */
+	public static java.util.Set<String> unlocked() {
+		return unlocked;
+	}
+
+	/**
+	 * Freischaltung aus der Echtzeit-Nachricht "unlock" sofort übernehmen (jeder Thread). false = war schon freigeschaltet.
+	 */
+	public static boolean unlock(String id) {
+		if (id == null || !CosmeticFormat.ID_RE.matcher(id).matches()) return false;
+		synchronized (Cosmetics.class) {
+			if (unlocked.contains(id)) return false;
+			java.util.Set<String> next = new java.util.LinkedHashSet<>(unlocked);
+			next.add(id);
+			unlocked = java.util.Set.copyOf(next);
+		}
+		return true;
+	}
+
+	/** Hinweis an gesperrten Belohnungen (Kacheln, Vorschau) */
+	public static final String UNLOCK_HINT = "Belohnung für Einladungen";
+	/** Meldung, wenn eine gesperrte Belohnung gewählt wird (wie beim Dienst, 403 LOCKED) */
+	public static final String UNLOCK_MESSAGE = "Dieses Cosmetic schaltest du frei, indem du Freunde zu HeldixClient einlädst.";
+
+	/**
+	 * Warum der eigene Spieler dieses Cosmetic nicht tragen darf (kurz, für Tooltips), null = er darf: Team-Cosmetics nur
+	 * fürs Team, Belohnungen ({@code access: "unlock"}) erst nach dem Freischalten.
+	 */
+	public static String lockReason(CosmeticCatalog.Item item) {
+		if (item == null) return null;
+		if (item.teamOnly() && !team) return "Nur für das HeldixClient-Team";
+		if (item.unlockOnly() && !unlocked(item.id())) return UNLOCK_HINT;
+		return null;
 	}
 
 	/** Was der eigene Spieler im Slot gerade zeigt: jüngste aktive Vorschau, sonst die Auswahl */
@@ -202,6 +247,17 @@ public final class Cosmetics {
 			}
 		}
 		if (json.has("team") && json.get("team").isJsonPrimitive()) team = json.get("team").getAsBoolean();
+		// ab Dienst 1.11.0: freigeschaltete Belohnungen (ältere Dienste schicken das Feld nicht – dann gibt es auch keine)
+		if (json.has("unlocked") && json.get("unlocked").isJsonArray()) {
+			java.util.Set<String> ids = new java.util.LinkedHashSet<>();
+			for (JsonElement element : json.getAsJsonArray("unlocked")) {
+				if (!element.isJsonPrimitive()) continue;
+				String id = element.getAsString();
+				if (CosmeticFormat.ID_RE.matcher(id).matches()) ids.add(id);
+				if (ids.size() >= 256) break;
+			}
+			unlocked = java.util.Set.copyOf(ids);
+		}
 		setMine(next);
 	}
 
@@ -226,6 +282,7 @@ public final class Cosmetics {
 	/** Daten beim Dienst gelöscht: auch die gemerkte Auswahl vergessen */
 	public static void forgetMine() {
 		team = false;
+		unlocked = java.util.Set.of();
 		setMine(Map.of());
 	}
 
@@ -273,6 +330,10 @@ public final class Cosmetics {
 		}
 		if (item != null && item.teamOnly() && !team) {
 			result.completeExceptionally(new Social.ServiceException("Dieses Cosmetic gibt es nur für das HeldixClient-Team."));
+			return result;
+		}
+		if (item != null && item.unlockOnly() && !unlocked(item.id())) {
+			result.completeExceptionally(new Social.ServiceException(UNLOCK_MESSAGE));
 			return result;
 		}
 		Social.putCosmetic(slot, id).whenComplete((json, error) -> {

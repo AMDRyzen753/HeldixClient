@@ -1,0 +1,43 @@
+/* =========================================================
+   Welt teilen (Startseite, Welt-Dialog) und Discord-Vorschau in den Einstellungen
+   ========================================================= */
+
+/* ---------- Startseite: offene Welten der Freunde ---------- */
+.world-empty { display: flex; flex-direction: column; gap: 3px; padding: 14px 12px; }
+.world-empty strong { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.world-empty span { color: var(--faint); font-size: 12px; line-height: 1.4; }
+.row-item .row-badge.world-live { background: rgba(20, 184, 166, 0.18); color: #5eead4; padding: 0 7px; font-size: 10.5px; letter-spacing: 0.02em; }
+
+/* ---------- Welt-Dialog ---------- */
+.world-online { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); }
+.world-online.on { color: #a7f3d0; }
+.world-online-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.world-online.on .world-online-dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18); }
+.world-address { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.world-address code { min-width: 0; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; color: var(--accent-text); user-select: text; }
+.world-address .icon-button.small { width: 26px; height: 26px; flex: none; }
+.world-address .icon-button.small svg { width: 13px; height: 13px; }
+
+/* ---------- Einstellungen: zwei Spalten mit Schaltern ---------- */
+.toggle-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 28px; }
+@media (max-width: 1060px) { .toggle-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- Discord-Vorschau (wie das Profil in Discord) ---------- */
+.discord-preview { display: flex; flex-direction: column; gap: 8px; }
+.dp-card { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; border-radius: 12px; background: #1e1f22; border: 1px solid rgba(255, 255, 255, 0.06); color: #dbdee1; }
+.dp-card.off { opacity: 0.72; filter: saturate(0.7); }
+.dp-label { color: #b5bac1; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.dp-body { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.dp-images { position: relative; flex: none; width: 76px; height: 76px; }
+.dp-large { width: 76px; height: 76px; border-radius: 10px; object-fit: cover; background: #111214; }
+.dp-small { position: absolute; right: -5px; bottom: -5px; width: 28px; height: 28px; border-radius: 50%; border: 3px solid #1e1f22; background: #111214; object-fit: cover; }
+.dp-small.avatar { display: grid; place-items: center; font-size: 11px; border-radius: 50%; }
+.dp-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: 12.5px; line-height: 1.4; }
+.dp-text strong { color: #f2f3f5; font-size: 13.5px; font-weight: 700; }
+.dp-line { overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.dp-time { color: #b5bac1; font-size: 12px; font-variant-numeric: tabular-nums; }
+.dp-buttons { display: flex; flex-direction: column; gap: 6px; }
+.dp-button { display: grid; place-items: center; height: 32px; border-radius: 6px; background: #4e5058; color: #fff; font-size: 13px; font-weight: 600; }
+
+/* Umfang: „Ausführlich“ | „Nur ‚Spielt HeldixClient‘“ ohne Umbruch */
+#discord-mode button { flex: 1 1 auto; white-space: nowrap; }

@@ -380,6 +380,47 @@ final class AddonContext implements HeldixApi {
 	public Optional<String> playerName(java.util.UUID player) {
 		Minecraft minecraft = Minecraft.getInstance();
 		if (!minecraft.isSameThread()) throw new IllegalStateException("playerName() nur im Haupt-Thread aufrufen");
+		// ab API 9: Gäste im Sprachkanal haben keinen Minecraft-Namen, aber einen Gastnamen
+		String guest = dev.heldixclient.voice.VoiceLink.guestName(player);
+		if (guest != null) return Optional.of(guest);
 		return Optional.ofNullable(dev.heldixclient.player.NearbyPlayers.nameOf(minecraft, player));
+	}
+
+	// --- API 8: Welt von oben, eigene Bilder, Wegpunkte -------------------------------------------
+
+	@Override
+	public dev.heldixclient.api.WorldMap worldMap() {
+		return dev.heldixclient.world.WorldSampler.INSTANCE;
+	}
+
+	@Override
+	public dev.heldixclient.api.HudImage createImage(int width, int height) {
+		return AddonImages.create(addon, width, height);
+	}
+
+	@Override
+	public List<dev.heldixclient.api.WaypointInfo> waypoints() {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (!minecraft.isSameThread()) throw new IllegalStateException("waypoints() nur im Haupt-Thread aufrufen");
+		List<dev.heldixclient.api.WaypointInfo> list = new java.util.ArrayList<>();
+		for (dev.heldixclient.waypoint.Waypoints.Waypoint waypoint : dev.heldixclient.waypoint.Waypoints.current(minecraft)) {
+			if (!waypoint.visible) continue;
+			list.add(new dev.heldixclient.api.WaypointInfo(waypoint.name, waypoint.x, waypoint.y, waypoint.z, waypoint.dimension, waypoint.color,
+					waypoint.death));
+		}
+		return List.copyOf(list);
+	}
+
+	// --- API 9: Zwischenablage ------------------------------------------------------------------
+
+	@Override
+	public void copyToClipboard(String text) {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (!minecraft.isSameThread()) throw new IllegalStateException("copyToClipboard() nur im Haupt-Thread aufrufen");
+		if (text == null || !addon.isActive()) return;
+		// Zeilenumbrüche und Tabs bleiben, andere Steuerzeichen nicht
+		String clean = text.replaceAll("[\\p{Cc}&&[^\\n\\t]]", "");
+		if (clean.length() > 2000) clean = clean.substring(0, 2000);
+		minecraft.keyboardHandler.setClipboard(clean);
 	}
 }

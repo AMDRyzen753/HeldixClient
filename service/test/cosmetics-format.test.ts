@@ -10,7 +10,9 @@ import {
   BUILTIN_CAPE_IDS,
   checkCosmeticEnvelope,
   checkCosmeticManifest,
+  COSMETIC_ID_RE,
   COSMETIC_LIMITS,
+  COSMETIC_MAX_MANIFEST_BYTES,
   COSMETIC_SLOTS,
   cosmeticEnvelopeText,
   crc32,
@@ -103,13 +105,17 @@ describe('Cosmetic-Manifest (Format 1)', () => {
     bad([], 'Das Manifest ist kein JSON-Objekt');
     bad(null, 'Das Manifest ist kein JSON-Objekt');
     bad(manifestOf('head', { type: 'heldix-addon' }), '„type“ muss „heldix-cosmetic“ sein');
-    bad(manifestOf('head', { format: 2 }), '„format“ muss 1 sein');
-    bad(manifestOf('head', { format: undefined }), '„format“ muss 1 sein');
+    bad(manifestOf('head', { format: 3 }), '„format“ muss 1 oder 2 sein');
+    bad(manifestOf('head', { format: '1' }), '„format“ muss 1 oder 2 sein');
+    bad(manifestOf('head', { format: undefined }), '„format“ muss 1 oder 2 sein');
+    // Format 2 hat andere Felder: ein Format-1-Manifest mit format 2 scheitert am ersten fremden Feld
+    bad(manifestOf('head', { format: 2 }), '„model“ ist kein bekanntes Feld (Format 2)');
     bad(manifestOf('head', { extra: true }), '„extra“ ist kein bekanntes Feld');
     for (const id of ['Krone', '-krone', 'krone-', 'kro_ne', 'kro ne', '', 'a'.repeat(33), 'krone.', 5]) {
       bad(manifestOf('head', { id }), '„id“ ist ungültig');
     }
-    for (const id of BUILTIN_CAPE_IDS) bad(manifestOf('cape', { id }), 'eingebauten Capes');
+    // Eingebaute IDs mit „_“ (z. B. matrix_rot) scheitern schon am Muster, die übrigen an der Liste.
+    for (const id of BUILTIN_CAPE_IDS) bad(manifestOf('cape', { id }), COSMETIC_ID_RE.test(id) ? 'eingebauten Capes' : '„id“ ist ungültig');
     for (const version of [0, -1, 1.5, '1', null, COSMETIC_LIMITS.versionMax + 1]) {
       bad(manifestOf('head', { version }), '„version“ muss eine ganze Zahl von 1 bis 2147483647 sein');
     }
@@ -123,7 +129,7 @@ describe('Cosmetic-Manifest (Format 1)', () => {
     bad(manifestOf('head', { description: 'x'.repeat(301) }), '„description“ ist zu lang (höchstens 300 Zeichen)');
     bad(manifestOf('head', { description: 'mit\tTab' }), '„description“ enthält Zeichen');
     bad(manifestOf('head', { description: undefined }), '„description“ fehlt');
-    bad(manifestOf('head', { access: 'public' }), '„access“ muss eins von all, team sein');
+    bad(manifestOf('head', { access: 'public' }), '„access“ muss eins von all, team, unlock sein');
     for (const date of ['2026-02-30', '26.11.2026', '2026-11-26T25:00:00Z', '', undefined]) {
       bad(manifestOf('head', { date }), '„date“ ist kein gültiges Datum');
     }
@@ -170,8 +176,14 @@ describe('Cosmetic-Manifest (Format 1)', () => {
     ok(head(64, 64));
     ok(head(64, 32 + 8));
     ok(head(256, 256));
-    bad(head(60, 32), '„texture“ muss 8 bis 256 Pixel breit und hoch sein, jeweils ein Vielfaches von 8 (ist 60 × 32)');
-    bad(head(264, 32), 'ist 264 × 32');
+    // bis 512 (z. B. 4-fache Auflösung 512 × 256), texture und glow gleich
+    ok(head(512, 256));
+    ok(head(512, 512));
+    ok(manifestOf('back', { texture: dataUrl(makePng(512, 512)), glow: dataUrl(makePng(512, 512)), model: { ...(VALID.back().model as object), textureSize: [512, 512] } }));
+    bad(head(60, 32), '„texture“ muss 8 bis 512 Pixel breit und hoch sein, jeweils ein Vielfaches von 8 (ist 60 × 32)');
+    bad(head(520, 32), '„texture“ muss 8 bis 512 Pixel breit und hoch sein, jeweils ein Vielfaches von 8 (ist 520 × 32)');
+    bad(head(64, 1024), 'ist 64 × 1024');
+    bad(head(1024, 512), 'ist 1024 × 512');
     bad(head(64, 4), 'ist 64 × 4');
     // Cape: 64, 128 oder 256 breit, jedes Bild halb so hoch wie breit, Bilder untereinander; glow genauso groß
     const capeSize = '„texture“ muss für ein Cape mit 4 Bildern 64 × 128, 128 × 256 oder 256 × 512 Pixel groß sein (Breite 64, 128 oder 256, jedes Bild halb so hoch wie breit;';
@@ -244,14 +256,48 @@ describe('Cosmetic-Manifest (Format 1)', () => {
       });
     bad(manifestOf('head', { model: [] }), '„model“ muss ein JSON-Objekt sein');
     bad(model((m) => (m.extra = 1)), '„model.extra“ ist kein bekanntes Feld');
-    bad(model((m) => (m.textureSize = [32, 32])), '„model.textureSize“ muss genau die Größe der Textur sein ([64, 32])');
+    const sizeError = '„model.textureSize“ muss die Größe der Textur in Texeln sein ([64, 32], [32, 16] oder [16, 8]: Textur in 1-, 2- oder 4-facher Auflösung)';
+    assert.equal(checkCosmeticManifest(model((m) => (m.textureSize = [32, 32]))), sizeError);
+    for (const size of [[64, 16], [128, 64], [21.333, 10.667], ['64', '32'], [64], [64, 32, 1], null]) bad(model((m) => (m.textureSize = size)), sizeError);
     bad(model((m) => delete m.textureSize), '„model.textureSize“ fehlt');
-    bad(model((m) => (m.bones = [])), '„model.bones“ muss eine Liste mit 1 bis 32 Bones sein');
+    // Textur in 2- oder 4-facher Auflösung: textureSize bleibt in Texeln, UV und Box-UV zählen darin
+    const hires = (w: number, h: number, size: [number, number], change: (m: Manifest) => void = () => {}) =>
+      changed('head', (m) => {
+        delete m.animations;
+        m.texture = dataUrl(makePng(w, h));
+        m.model.textureSize = size;
+        change(m.model);
+      });
+    assert.deepEqual(ok(hires(128, 64, [64, 32])).model!.textureSize, [64, 32]);
+    assert.deepEqual(ok(hires(256, 128, [64, 32])).model!.textureSize, [64, 32]);
+    const fourfold = ok(hires(512, 256, [128, 64]));
+    assert.deepEqual([fourfold.model!.textureSize, fourfold.image.width, fourfold.image.height], [[128, 64], 512, 256]);
+    ok(hires(256, 128, [64, 32], (m) => (m.bones[0].cubes[0].uv = [32, 22])));
+    bad(hires(256, 128, [64, 32], (m) => (m.bones[0].cubes[0].uv = [33, 0])), '„model.bones[0].cubes[0].uv“: Die UV-Fläche (32 × 10 ab 33, 0) passt nicht in die Textur (64 × 32)');
+    bad(hires(192, 96, [64, 32]), '„model.textureSize“ muss die Größe der Textur in Texeln sein ([192, 96], [96, 48] oder [48, 24]: Textur in 1-, 2- oder 4-facher Auflösung)');
+    bad(hires(512, 512, [64, 64]), '([512, 512], [256, 256] oder [128, 128]:');
+    bad(hires(256, 64, [64, 32]), '([256, 64], [128, 32] oder [64, 16]:');
+    // glow gleich groß wie texture (also auch in derselben Auflösung)
+    ok(changed('back', (m) => ((m.texture = dataUrl(makePng(256, 256))), (m.glow = dataUrl(makePng(256, 256))))));
+    bad(changed('back', (m) => ((m.texture = dataUrl(makePng(256, 256))), (m.glow = dataUrl(makePng(64, 64))))), '„glow“ muss genauso groß sein wie „texture“ (256 × 256; ist 64 × 64)');
+    bad(model((m) => (m.bones = [])), '„model.bones“ muss eine Liste mit 1 bis 64 Bones sein');
     bad(model((m) => (m.bones = {})), '„model.bones“ muss eine Liste');
     const bone = (name: string, cubes: unknown[] = []) => ({ name, pivot: [0, 0, 0], cubes });
     const cube = { origin: [0, 0, 0], size: [1, 1, 1], uv: [0, 0] };
-    ok(model((m) => (m.bones = [bone('a', [cube]), ...Array.from({ length: 31 }, (_, i) => bone(`b${i}`))])));
-    bad(model((m) => (m.bones = [bone('a', [cube]), ...Array.from({ length: 32 }, (_, i) => bone(`b${i}`))])), '1 bis 32 Bones');
+    assert.equal(ok(model((m) => (m.bones = [bone('a', [cube]), ...Array.from({ length: 63 }, (_, i) => bone(`b${i}`))]))).model!.bones.length, 64);
+    bad(model((m) => (m.bones = [bone('a', [cube]), ...Array.from({ length: 64 }, (_, i) => bone(`b${i}`))])), '„model.bones“ muss eine Liste mit 1 bis 64 Bones sein');
+    // Würfel bleiben bei höchstens 128, auch mit 64 Bones (2 je Bone)
+    ok(model((m) => (m.bones = Array.from({ length: 64 }, (_, i) => bone(`b${i}`, [cube, cube])))));
+    bad(model((m) => (m.bones = [...Array.from({ length: 63 }, (_, i) => bone(`b${i}`, [cube, cube])), bone('b63', [cube, cube, cube])])), '„model“ hat zu viele Würfel (höchstens 128 insgesamt)');
+    // model.scale (freiwillig): Größe des ganzen Modells um den Anker, 0.25–1.5, fehlt: 1
+    assert.equal(ok(VALID.head()).model!.scale, 1);
+    assert.equal(ok(VALID.back()).model!.scale, 1);
+    for (const scale of [0.25, 0.62, 1, 1.5]) assert.equal(ok(model((m) => (m.scale = scale))).model!.scale, scale);
+    assert.equal(ok(changed('companion', (m) => (m.model.scale = 0.5))).model!.scale, 0.5);
+    for (const scale of [0.2, 0.249, 1.51, 2, 0, -1, '1', null, [1], Number.NaN]) {
+      bad(model((m) => (m.scale = scale)), '„model.scale“ muss eine Zahl von 0.25 bis 1.5 sein');
+    }
+    assert.equal(checkCosmeticManifest(model((m) => (m.scale = 1.6))), '„model.scale“ muss eine Zahl von 0.25 bis 1.5 sein');
     for (const name of ['Base', 'a'.repeat(25), '', 'bas-e', 7]) bad(model((m) => (m.bones[0].name = name)), '„model.bones[0].name“ ist ungültig (1–24 Zeichen aus a–z, 0–9 und _)');
     bad(model((m) => (m.bones[1].name = 'base')), '„model.bones[1].name“: Den Bone „base“ gibt es schon');
     // Eltern: nur vorher definierte (kein Vorwärtsverweis, kein Zyklus, nicht sich selbst)
@@ -367,7 +413,7 @@ describe('Cosmetic-Manifest (Format 1)', () => {
     bad(comp({ offset: [0, 1, 0], scale: 1, extra: 0 }), '„companion.extra“ ist kein bekanntes Feld');
   });
 
-  test('Umschlag: Form, 160 KB Manifest, 192 KB Umschlag, kanonische Signatur', () => {
+  test('Umschlag: Form, Größe (Obergrenze aller Formate: 512 KB / 544 KB), kanonische Signatur', () => {
     const sig = Buffer.alloc(64, 7).toString('base64');
     assert.equal(sig.length, 88);
     assert.deepEqual(checkCosmeticEnvelope({ manifest: '{}', signature: sig, extra: 1 }), { manifest: '{}', signature: sig });
@@ -380,14 +426,19 @@ describe('Cosmetic-Manifest (Format 1)', () => {
       assert.equal(checkCosmeticEnvelope({ manifest: '{}', signature: bad }), '„signature“ muss eine Ed25519-Signatur als Base64 sein (88 Zeichen)', bad);
     }
     assert.equal(checkCosmeticEnvelope({ manifest: `{"a":"${String.fromCharCode(0xd800)}"}`, signature: sig }), '„manifest“ enthält ungültige Zeichen');
-    const max = 'a'.repeat(COSMETIC_LIMITS.manifestBytes);
+    // Das Format steht erst im Manifest: Der Umschlag prüft die größte Grenze (Format 2), parseCosmeticManifest die
+    // des Formats (Format 1: 160 KB / 192 KB, siehe cosmetics-format2.test.ts)
+    const max = 'a'.repeat(COSMETIC_MAX_MANIFEST_BYTES);
     assert.equal(typeof checkCosmeticEnvelope({ manifest: max, signature: sig }), 'object');
-    assert.equal(checkCosmeticEnvelope({ manifest: `${max}a`, signature: sig }), '„manifest“ ist zu groß (höchstens 160 KB)');
+    assert.equal(checkCosmeticEnvelope({ manifest: `${max}a`, signature: sig }), '„manifest“ ist zu groß (höchstens 512 KB)');
     // Mehrbyte-Zeichen zählen nach UTF-8
-    assert.equal(checkCosmeticEnvelope({ manifest: 'ä'.repeat(COSMETIC_LIMITS.manifestBytes / 2 + 1), signature: sig }), '„manifest“ ist zu groß (höchstens 160 KB)');
-    // Anführungszeichen verdoppeln sich im ausgelieferten Umschlag: dann zählt die Grenze von 192 KB
-    const quotes = '"'.repeat(100 * 1024);
-    assert.equal(checkCosmeticEnvelope({ manifest: quotes, signature: sig }), 'Der Umschlag ist zu groß (höchstens 192 KB)');
+    assert.equal(checkCosmeticEnvelope({ manifest: 'ä'.repeat(COSMETIC_MAX_MANIFEST_BYTES / 2 + 1), signature: sig }), '„manifest“ ist zu groß (höchstens 512 KB)');
+    // Anführungszeichen verdoppeln sich im ausgelieferten Umschlag: dann zählt die Grenze von 544 KB
+    const quotes = '"'.repeat(300 * 1024);
+    assert.equal(checkCosmeticEnvelope({ manifest: quotes, signature: sig }), 'Der Umschlag ist zu groß (höchstens 544 KB)');
+    // Format 1 bleibt bei 160 KB Manifest
+    const padded = `${JSON.stringify(VALID.head()).slice(0, -1)}${' '.repeat(COSMETIC_LIMITS.manifestBytes)}}`;
+    assert.equal(parseCosmeticManifest(padded), '„manifest“ ist zu groß (höchstens 160 KB bei Format 1)');
     assert.equal(cosmeticEnvelopeText({ manifest: 'm', signature: 's' }), '{"manifest":"m","signature":"s"}');
     assert.deepEqual([utf8Length('a'), utf8Length('ä'), utf8Length('€'), utf8Length('👑'), utf8Length('')], [1, 2, 3, 4, 0]);
     assert.equal(parseCosmeticManifest('{'), '„manifest“ ist kein gültiges JSON');

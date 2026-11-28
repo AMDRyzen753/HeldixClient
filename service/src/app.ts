@@ -2,6 +2,7 @@
 import { createPublicKey, type KeyObject } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
+import { isIP, type Server as NetServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
@@ -11,27 +12,43 @@ import { ADDON_MANIFEST_BODY_LIMIT, Addons, MAX_ADDON_SIZE } from './addons';
 import { Challenges, hashToken, hasJoined, isLoopback, newToken, parseBearer } from './auth';
 import { Blocks } from './blocks';
 import { Cosmetics, ENVELOPE_CACHE_CONTROL, IMMUTABLE_CACHE_CONTROL, LIST_CACHE_CONTROL, type WornChoice } from './cosmetics';
-import { COSMETIC_LIMITS } from './cosmetics-format';
-import { Store, type SettingsPatch, type TeamMemberRow, type TeamRole, type UserRow, type WebSessionRow } from './db';
+import { COSMETIC_MAX_ENVELOPE_BYTES } from './cosmetics-format';
+import { ONLINE_NOTIFY, Store, type OnlineNotify, type SettingsPatch, type TeamMemberRow, type UserRow, type WebSessionRow } from './db';
 import { Friends } from './friends';
+import { HeadCache, isHeadSize, renderHead } from './heads';
 import { HttpError, readJsonObject, rejectUpgrade, sendCachedJson, sendError, sendJson } from './http';
+import { GUEST_EXPIRED, Invites } from './invites';
 import { RateLimiter, Slots } from './limits';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Messages } from './messages';
-import { Realtime } from './realtime';
+import { Parties, type Location } from './party';
+import { Realtime, type ConnectionKind } from './realtime';
 import { Reports } from './reports';
+import { badgesOf, permissionsOf, type Permission, type PlayerBadge } from './roles';
 import { DEFAULT_SKIN_HOSTS, Skins } from './skins';
 import { AddonSubmissions, SUBMISSION_BODY_LIMIT } from './submissions';
 import { Support } from './support';
 import { playerLabel, Team, writeAudit, type Actor } from './team';
-import { DOWNLOAD_TARGETS, MAX_SETUP_SIZE, NOTHING_PUBLISHED, Updates, type DownloadTarget } from './updates';
-import { DEFAULT_CAPES, isName, isUuid } from './validate';
-import { Voice, VOICE_MAX_PAYLOAD, VOICE_RANGE_DEFAULT, VOICE_RANGE_MAX, VOICE_RANGE_MIN } from './voice';
+import { DOWNLOAD_TARGETS, MAX_SETUP_SIZE, NOTHING_PUBLISHED, Updates, downloadInvite, downloadName, type DownloadTarget } from './updates';
+import { checkText, DEFAULT_CAPES, isName, isUuid, normalizeServer } from './validate';
+import { Voice, VOICE_MAX_PAYLOAD, VOICE_RANGE_DEFAULT, VOICE_RANGE_MAX, VOICE_RANGE_MIN, VOICE_SUBPROTOCOL, type VoiceAttachOptions } from './voice';
+import { WorldRelay } from './world-relay';
+import {
+  exportWorlds,
+  MAX_WORLDS,
+  normalizeWorldDomain,
+  WORLD_HOST_PATH,
+  WORLD_STREAM_MAX_PAYLOAD,
+  WORLD_STREAM_PATH_RE,
+  Worlds,
+  WORLDS_OFF,
+} from './worlds';
 import { CALLBACK_PATH, LoginError, MICROSOFT_ENDPOINTS, MicrosoftLogin, type MicrosoftEndpoints } from './microsoft';
 import {
   bindingCookie,
   checkCsrf,
   checkOrigin,
   clearSessionCookie,
+  CSRF_REJECTED,
   loginTarget,
   newSecret,
   NOT_SIGNED_IN,
@@ -46,10 +63,13 @@ export const DEFAULT_SESSION_SERVER = 'https://sessionserver.mojang.com';
 export const BODY_LIMIT = 16 * 1024;
 
 /**
- * Rolle beim Nachschlagen (Heldix-Symbol): Team-Rolle nur bei öffentlichem Teamprofil, `developer` mit sichtbarem
- * Community-Addon, sonst null.
+ * Abzeichen beim Nachschlagen (Heldix-Symbol): Team-Rolle nur bei öffentlichem Teamprofil, dann Community-Abzeichen,
+ * dann `developer` mit sichtbarem Community-Addon, sonst null (siehe roles.ts).
  */
-export type PlayerBadge = TeamRole | 'developer' | null;
+export type { PlayerBadge };
+
+/** Statustext (Freunde 2.0) in Unicode-Zeichen. */
+export const MAX_STATUS_TEXT = 40;
 
 export interface ServiceOptions {
   /** Ordner für die Datenbank. */
@@ -95,6 +115,54 @@ export interface ServiceOptions {
   voiceIdleTimeoutMs?: number;
   /** Uhr des Voice Chats für Positionen und Begrenzungen (nur Tests stellen sie). */
   voiceNow?: () => number;
+  /** Einladungen: so lange muss ein Eingeladener im Spiel gewesen sein, bis sie bestätigt ist (Standard 30 Minuten). */
+  inviteConfirmMs?: number;
+  /** Neue Einladungen pro Spieler und Tag (Standard 20). */
+  inviteDailyLimit?: number;
+  /** Öffentliche Ansicht einer Einladung pro IP und Zeitraum (rateWindowMs, Standard 60). */
+  publicInviteRateLimit?: number;
+  /** Gast-Zugänge für den Voice Chat im Browser pro IP und Zeitraum (guestWindowMs, Standard 5 in 10 Minuten). */
+  guestRateLimit?: number;
+  guestWindowMs?: number;
+  /**
+   * Welt teilen: Domain der Adressen `<code>.<weltDomain>` (z. B. `welt.heldixclient.com`, DNS `*.welt…` auf diesen
+   * Server). Ohne: aus (Routen unter `/v1/worlds` und `/v1/public/worlds` antworten mit 503, kein Relay).
+   */
+  weltDomain?: string | null;
+  /** Port und Adresse des Welt-Relays (eigener TCP-Listener, Standard 25565 auf 0.0.0.0; Tests: 0 = zufällig). */
+  weltPort?: number;
+  weltBind?: string;
+  /** Welt teilen: Welten je Spieler (Standard 10). */
+  worldMax?: number;
+  /** Relay: Handshake (bis Login Start bzw. Ping) innerhalb dieser Zeit (Standard 5 s). */
+  worldHandshakeTimeoutMs?: number;
+  /** So lange hat der Gastgeber Zeit, einen Datenstrom zu öffnen (Standard 10 s). */
+  worldStreamTimeoutMs?: number;
+  /** Steuerverbindung ohne Nachricht bzw. Datenstrom ohne Bytes so lange offen (Standard 60 s). */
+  worldIdleTimeoutMs?: number;
+  /** Relay: neue Verbindungen je IP und Minute (Standard 20), gleichzeitige je IP (16) und insgesamt (2000). */
+  worldConnectionsPerMinute?: number;
+  worldMaxConnectionsPerIp?: number;
+  worldMaxConnections?: number;
+  /** Datenrate je Welt in Byte pro Sekunde, beide Richtungen zusammen (Standard 4 MiB/s; darüber gedrosselt). */
+  worldBytesPerSecond?: number;
+  /** Serverlisten-Abfragen je Welt und Minute, die an den Gastgeber gehen (Standard 30; darüber antwortet der Dienst). */
+  worldStatusPerMinute?: number;
+  /** Öffentliche Ansicht einer Welt pro IP und Zeitraum (rateWindowMs, Standard 60). */
+  publicWorldRateLimit?: number;
+  /**
+   * Live-Zahlen (`GET /v1/public/stats`): erst ab so vielen Spielern online zeigen (Standard 50, 0 = immer); darunter
+   * sind alle Zahlen null, damit kleine Zahlen nicht öffentlich werden.
+   */
+  liveStatsMinOnline?: number;
+  /** Köpfe (`GET /v1/public/heads/<uuid>.png`) pro IP und Zeitraum (rateWindowMs, Standard 120). */
+  publicHeadRateLimit?: number;
+  /** Party: Mitglieder (Standard 8), Gnadenfrist ohne Verbindung (10 Minuten), Gültigkeit einer Einladung (10 Minuten). */
+  partyMaxMembers?: number;
+  partyGraceMs?: number;
+  partyInviteTtlMs?: number;
+  /** „schreibt …“ höchstens einmal je Absender, Empfänger und Zeitraum (Standard 3 s). */
+  typingIntervalMs?: number;
 
   // Zeiten und Grenzen; die Standardwerte entsprechen docs/dienst.md. Tests stellen sie kürzer.
   challengeTtlMs?: number;
@@ -183,6 +251,10 @@ export interface ServiceOptions {
 
 export interface Service {
   server: Server;
+  /** TCP-Listener des Welt-Relays (nur mit weltDomain); lauscht schon, sobald relayReady true liefert. */
+  relay: NetServer | null;
+  /** true, sobald das Relay lauscht; false ohne Welt-Domain oder wenn der Port nicht zu öffnen war. */
+  relayReady: Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -217,8 +289,8 @@ interface Route {
   method: string;
   pattern: RegExp;
   kind: Kind;
-  /** Mindestrolle für Team-Routen (Standard: moderator) */
-  role?: TeamRole;
+  /** Recht für Team-Routen (ohne: jedes Team-Mitglied mit 2FA), siehe roles.ts */
+  permission?: Permission;
   /** Eigene Begrenzung im Endpunkt statt der allgemeinen (z. B. viele Köpfe auf einer Seite) */
   ownRateLimit?: boolean;
   handler: (ctx: Context) => unknown;
@@ -345,12 +417,26 @@ export function createService(options: ServiceOptions): Service {
   const microsoftLimiter = new RateLimiter(options.webMicrosoftRateLimit ?? 20, rateWindowMs);
   const totpLimiter = new RateLimiter(options.totpRateLimit ?? 5, options.totpWindowMs ?? 10 * 60_000);
   const exportLimiter = new RateLimiter(options.exportRateLimit ?? 5, options.exportWindowMs ?? 60 * 60_000);
+  const inviteLimiter = new RateLimiter(options.inviteDailyLimit ?? 20, 24 * 60 * 60_000);
+  const publicInviteLimiter = new RateLimiter(options.publicInviteRateLimit ?? 60, rateWindowMs);
+  const guestLimiter = new RateLimiter(options.guestRateLimit ?? 5, options.guestWindowMs ?? 10 * 60_000);
+  const publicWorldLimiter = new RateLimiter(options.publicWorldRateLimit ?? 60, rateWindowMs);
+  const headLimiter = new RateLimiter(options.publicHeadRateLimit ?? 120, rateWindowMs);
+  const liveStatsMinOnline = options.liveStatsMinOnline ?? 50;
+  if (!Number.isInteger(liveStatsMinOnline) || liveStatsMinOnline < 0) throw new Error('Die Schwelle für die Live-Zahlen muss eine ganze Zahl ab 0 sein.');
   const realtime = new Realtime(store, {
     idleTimeoutMs,
     messageLimit: options.wsMessageLimit ?? 120,
     messageWindowMs: rateWindowMs,
     log,
+    // Abzeichen in Freundesliste und Profilkarte (Addons und Webseite gibt es erst weiter unten; aufgerufen wird später).
+    badges: (uuids) => badgesOf(store, addons, uuids),
+    // Adressen geteilter Welten (`<code>.<Welt-Domain>`) gelten auch, wenn die Welt-Domain keine öffentliche Endung hat.
+    normalizeServer: (value) => normalizeServer(value) ?? worldStatusAddress(value),
+    sessionAlive: (id) => web.sessionAlive(id),
   });
+  // Voice Chat und Einladungen kennen sich gegenseitig (Gruppe einer Einladung, Gäste entfernen): erst beide anlegen.
+  let invites: Invites | undefined;
   const voice =
     options.voice === false
       ? null
@@ -359,18 +445,135 @@ export function createService(options: ServiceOptions): Service {
           idleTimeoutMs: options.voiceIdleTimeoutMs ?? 60_000,
           now: options.voiceNow ?? Date.now,
           log,
+          inviteGroup: (code) => invites?.voiceGroupOf(code) ?? null,
+          onGuestRemoved: (id) => invites?.removeGuest(id),
         });
   // Konto gelöscht oder gesperrt: auch die Voice-Verbindung schließen.
   if (voice) realtime.onDisconnectUser((uuid, code, reason) => voice.disconnectUser(uuid, code, reason));
-  const friends = new Friends(store, realtime, {
-    maxFriends: options.maxFriends ?? 200,
-    maxOutgoing: options.maxOutgoingRequests ?? 50,
+  const maxFriends = options.maxFriends ?? 200;
+  const friends = new Friends(
+    store,
+    realtime,
+    { maxFriends, maxOutgoing: options.maxOutgoingRequests ?? 50 },
+    // Profilkarte: Aussehen wie beim Nachschlagen, nur mit „Für andere erkennbar“
+    (user) => (user.visible ? (cosmetics.forLookup([user]).get(user.uuid) ?? null) : null),
+  );
+  invites = new Invites(store, realtime, voice, {
+    website,
+    confirmMs: options.inviteConfirmMs ?? 30 * 60_000,
+    dailyLimiter: inviteLimiter,
+    maxFriends,
+    log,
   });
+  const inviteService = invites;
+  // Spielzeit für die Bestätigung von Einladungen; Konto gelöscht oder gesperrt: Gäste seiner Einladungen trennen.
+  realtime.onPlaying((uuid, playing) => inviteService.onPlaying(uuid, playing));
+  realtime.onDisconnectUser((uuid) => inviteService.forgetUser(uuid));
   const messages = new Messages(store, realtime, {
     limiter: messageLimiter,
     maxPerConversation: options.maxConversationMessages ?? 500,
+    typingIntervalMs: options.typingIntervalMs,
   });
+  realtime.onTyping((from, to) => messages.typingFrom(from, to));
   const blocks = new Blocks(store, realtime, options.maxBlocks ?? 500);
+  // Party: entsteht erst nach Welt teilen (Ort in geteilten Welten); Welt teilen fragt sie über diese Variable.
+  let parties: Parties | undefined;
+
+  // Welt teilen: nur mit Welt-Domain. Das Relay lauscht auf einem eigenen Port (nicht über Caddy).
+  let weltDomain: string | null = null;
+  if (options.weltDomain) {
+    weltDomain = normalizeWorldDomain(options.weltDomain);
+    if (weltDomain === null) throw new Error(`Ungültige Welt-Domain: "${options.weltDomain}" (erwartet z. B. welt.heldixclient.com)`);
+  }
+  const weltPort = options.weltPort ?? 25565;
+  const weltBind = options.weltBind ?? '0.0.0.0';
+  if (weltDomain !== null) {
+    if (!Number.isInteger(weltPort) || weltPort < 0 || weltPort > 65535) throw new Error(`Ungültiger Port für das Welt-Relay: ${weltPort}`);
+    if (isIP(weltBind) === 0) throw new Error(`Ungültige Adresse für das Welt-Relay: "${weltBind}" (erwartet eine IP-Adresse, z. B. 0.0.0.0 oder ::)`);
+  }
+  const worldIdleTimeoutMs = options.worldIdleTimeoutMs ?? 60_000;
+  const worlds =
+    weltDomain === null
+      ? null
+      : new Worlds(store, realtime, {
+          domain: weltDomain,
+          maxWorlds: options.worldMax ?? MAX_WORLDS,
+          idleTimeoutMs: worldIdleTimeoutMs,
+          streamTimeoutMs: options.worldStreamTimeoutMs ?? 10_000,
+          bytesPerSecond: options.worldBytesPerSecond ?? 4 * 1024 * 1024,
+          statusStreamsPerMinute: options.worldStatusPerMinute ?? 30,
+          log,
+          partyMates: (owner) => parties?.matesOf(owner) ?? new Set(),
+          onHostChange: (owner) => parties?.changed(owner),
+        });
+  const relay =
+    worlds === null
+      ? null
+      : new WorldRelay(worlds, {
+          domain: worlds.domain,
+          handshakeTimeoutMs: options.worldHandshakeTimeoutMs ?? 5_000,
+          connectionsPerMinute: options.worldConnectionsPerMinute ?? 20,
+          maxConnectionsPerIp: options.worldMaxConnectionsPerIp ?? 16,
+          maxConnections: options.worldMaxConnections ?? 2000,
+          log,
+        });
+  // Konto gelöscht oder gesperrt: auch die Steuerverbindung (mit der geöffneten Welt) schließen.
+  if (worlds) realtime.onDisconnectUser((uuid, code, reason) => worlds.disconnectUser(uuid, code, reason));
+
+  /** Adresse einer geteilten Welt aus `status` (`<code>.<Welt-Domain>`, ein Port fällt weg), sonst null. */
+  function worldStatusAddress(value: unknown): string | null {
+    if (weltDomain === null || typeof value !== 'string') return null;
+    const address = value.trim().toLowerCase().replace(/:25565$/, '').replace(/\.$/, '');
+    return /^[a-hjkmnp-z2-9]{6}\./.test(address) && address.endsWith(`.${weltDomain}`) && address.length === 7 + weltDomain.length ? address : null;
+  }
+
+  /** Wo spielt ein Spieler gerade (für die Party): seine geöffnete Welt, eine geteilte Welt oder ein Server. */
+  function locate(uuid: string): Location | null {
+    const hosted = worlds?.available ? worlds.hostedBy(uuid) : null;
+    if (hosted && worlds) return { kind: 'world', target: hosted.code, address: worlds.address(hosted.code), title: hosted.name };
+    const status = realtime.statusOf(uuid);
+    if (!status || status.state !== 'multiplayer' || status.server === null) return null;
+    const world = worlds?.available ? worlds.worldAt(status.server) : null;
+    if (world && worlds) return { kind: 'world', target: world.code, address: worlds.address(world.code), title: world.name };
+    return { kind: 'server', target: status.server, address: status.server, title: status.server };
+  }
+
+  const partyService = new Parties(store, realtime, {
+    maxMembers: options.partyMaxMembers ?? 8,
+    graceMs: options.partyGraceMs ?? 10 * 60_000,
+    inviteTtlMs: options.partyInviteTtlMs ?? 10 * 60_000,
+    chatLimiter: messageLimiter,
+    locate,
+    log,
+  });
+  parties = partyService;
+  realtime.onChange((uuid) => partyService.changed(uuid));
+  realtime.onConnection((uuid, connected) => partyService.connection(uuid, connected));
+  // Konto gelöscht oder gesperrt: raus aus Party und Einladungen.
+  realtime.onDisconnectUser((uuid) => partyService.forgetUser(uuid));
+  const relayReady = new Promise<boolean>((resolve) => {
+    if (relay === null || worlds === null) {
+      resolve(false);
+      return;
+    }
+    relay.server.on('error', (err: NodeJS.ErrnoException) => {
+      if (relay.server.listening) {
+        log(`Welt-Relay: Fehler (${err.code ?? err.message}).`);
+        return;
+      }
+      // Port belegt oder nicht erlaubt: Der Rest des Dienstes läuft weiter, Welt teilen ist aus (503).
+      worlds.available = false;
+      log(`WARNUNG: Welt-Relay kann Port ${weltPort} auf ${weltBind} nicht öffnen (${err.code ?? err.message}). Welt teilen ist aus.`);
+      resolve(false);
+    });
+    relay.server.listen(weltPort, weltBind, () => {
+      const address = relay.server.address();
+      const port = typeof address === 'object' && address ? address.port : weltPort;
+      log(`Welt teilen: Relay auf ${weltBind}:${port} für *.${weltDomain}`);
+      resolve(true);
+    });
+  });
+
   const reports = new Reports(
     store,
     { perReporter: options.reportLimit ?? 10, windowMs: options.reportWindowMs ?? 24 * 60 * 60 * 1000 },
@@ -514,9 +717,13 @@ export function createService(options: ServiceOptions): Service {
   /** `WebMe`: das Profil wie `GET /v1/me` plus Rolle, 2FA-Stand und Ablauf der Sitzung. */
   function webMe(auth: WebAuth) {
     const user = store.getUser(auth.user.uuid) ?? auth.user;
+    const role = store.getTeamMember(user.uuid)?.role ?? null;
     return {
       ...me(user),
-      role: store.getTeamMember(user.uuid)?.role ?? null,
+      role,
+      // Rechte der Rolle (ab 1.12.0), damit die Webseite nur zeigt, was erlaubt ist
+      permissions: permissionsOf(role),
+      communityBadge: store.getCommunityBadge(user.uuid)?.badge ?? null,
       twoFactor: web.twoFactor(user, auth.session),
       expiresAt: web.expiresAt(auth.session),
     };
@@ -542,6 +749,15 @@ export function createService(options: ServiceOptions): Service {
       presence: user.presence,
       showServer: user.showServer,
       messages: user.messages,
+      // Freunde 2.0 (ab 1.12.0)
+      statusText: user.statusText === '' ? null : user.statusText,
+      dnd: user.dnd,
+      showLastOnline: user.showLastOnline,
+      suggestable: user.suggestable,
+      showSuggestions: user.showSuggestions,
+      onlineNotify: user.onlineNotify,
+      // Abzeichen, wie andere es sehen (Team-Rolle nur mit öffentlichem Teamprofil)
+      badge: badgesOf(store, addons, [user.uuid]).get(user.uuid) ?? null,
     };
   }
 
@@ -600,16 +816,38 @@ export function createService(options: ServiceOptions): Service {
     const patch: SettingsPatch = {};
     // Eingebautes Cape oder wählbares Katalog-Cape (Slot cape); "" = keins.
     if (Object.hasOwn(input, 'cape')) patch.cape = cosmetics.checkCape(ctx.user, input.cape);
-    for (const key of ['visible', 'presence', 'showServer', 'messages'] as const) {
+    for (const key of ['visible', 'presence', 'showServer', 'messages', 'dnd', 'showLastOnline', 'suggestable', 'showSuggestions'] as const) {
       if (!Object.hasOwn(input, key)) continue;
       const value = input[key];
       if (typeof value !== 'boolean') throw new HttpError(400, `„${key}“ muss true oder false sein.`);
       patch[key] = value;
     }
+    // Statustext: 0–40 Zeichen, eine Zeile (Regeln wie bei Nachrichten); "" oder null = keiner.
+    if (Object.hasOwn(input, 'statusText')) {
+      const checked = checkText(input.statusText === null ? '' : input.statusText, MAX_STATUS_TEXT, true);
+      if ('problem' in checked) {
+        throw new HttpError(
+          400,
+          checked.problem === 'long'
+            ? `Der Statustext ist zu lang (höchstens ${MAX_STATUS_TEXT} Zeichen).`
+            : checked.problem === 'chars'
+              ? 'Der Statustext enthält Zeichen, die nicht erlaubt sind (z. B. Zeilenumbrüche).'
+              : '„statusText“ muss ein Text oder null sein.',
+        );
+      }
+      patch.statusText = checked.text;
+    }
+    if (Object.hasOwn(input, 'onlineNotify')) {
+      if (!(ONLINE_NOTIFY as readonly unknown[]).includes(input.onlineNotify)) {
+        throw new HttpError(400, '„onlineNotify“ muss "all", "favorites" oder "none" sein.');
+      }
+      patch.onlineNotify = input.onlineNotify as OnlineNotify;
+    }
     const before = realtime.snapshot(ctx.user.uuid);
     store.updateSettings(ctx.user.uuid, patch);
-    // presence oder showServer geändert: Freunde sehen das sofort.
+    // presence oder showServer geändert: Freunde sehen das sofort (auch, ob sie die geöffnete Welt noch sehen).
     realtime.announce(ctx.user.uuid, before);
+    if (Object.hasOwn(patch, 'presence')) worlds?.ownerChanged(ctx.user.uuid);
     return me(store.getUser(ctx.user.uuid)!);
   }
 
@@ -634,6 +872,8 @@ export function createService(options: ServiceOptions): Service {
         ...exportData(store, user, me(user)),
         support: support.exportFor(user),
         cosmetics: cosmetics.exportFor(user),
+        invites: inviteService.exportFor(user),
+        worlds: exportWorlds(store, user, weltDomain),
         addonStore: {
           submissions: submissions.exportFor(user),
           ...addonFeedback.exportFor(user),
@@ -666,12 +906,15 @@ export function createService(options: ServiceOptions): Service {
 
   function logout(ctx: Context) {
     web.deleteSession(ctx.user, ctx.session!.id);
+    // Echtzeit im Browser mit dieser Sitzung endet (4008).
+    realtime.closeSession(ctx.session!.id);
     ctx.res.setHeader('Set-Cookie', clearSessionCookie(ctx.req));
     return { ok: true };
   }
 
   function deleteWebSession(ctx: Context) {
     const id = ctx.params[0] ?? '';
+    if (web.sessions(ctx.user, ctx.session!).sessions.some((s) => s.id === id)) realtime.closeSession(id);
     web.deleteSession(ctx.user, id);
     // Die eigene Sitzung löschen heißt abmelden.
     if (id === ctx.session!.id) ctx.res.setHeader('Set-Cookie', clearSessionCookie(ctx.req));
@@ -862,6 +1105,8 @@ export function createService(options: ServiceOptions): Service {
         launcher: published?.version ?? null,
         addons: addons.visibleCount(),
         cosmetics: cosmetics.visibleCount(),
+        // Welt teilen: geöffnete Welten; null, wenn die Funktion hier aus ist
+        worlds: worlds !== null && worlds.available ? worlds.openCount() : null,
         since: startedAt,
       },
       { 'Cache-Control': 'max-age=30' },
@@ -881,22 +1126,78 @@ export function createService(options: ServiceOptions): Service {
     // Nur wer gerade verbunden ist, kommt überhaupt in Frage.
     const connected = [...new Set(uuids as string[])].filter((uuid) => realtime.isConnected(uuid));
     const visible = store.getUsers(connected).filter((user) => user.visible);
-    const found = visible.map((user) => user.uuid);
-    // Rolle fürs Heldix-Symbol: Team nur mit öffentlichem Teamprofil, sonst Entwickler eines sichtbaren Community-Addons.
-    const roles = found.length > 0 ? team.publicRolesOf(found) : new Map<string, TeamRole>();
-    const developers = found.length > 0 ? addons.developersAmong(found.filter((uuid) => !roles.has(uuid))) : new Set<string>();
+    // Abzeichen fürs Heldix-Symbol: Team-Rolle nur mit öffentlichem Teamprofil, dann Community-Abzeichen, dann Entwickler
+    // eines sichtbaren Community-Addons (gebündelt abgefragt).
+    const badges = badgesOf(store, addons, visible.map((user) => user.uuid));
     // Cape (eingebaut oder aus dem Katalog) und die übrigen Cosmetics, wie andere sie sehen.
     const worn = cosmetics.forLookup(visible);
     const players: Record<string, { cape: string; badge: PlayerBadge; cosmetics: WornChoice }> = {};
     for (const user of visible) {
       const look = worn.get(user.uuid)!;
-      players[user.uuid] = {
-        cape: look.cape,
-        badge: roles.get(user.uuid) ?? (developers.has(user.uuid) ? 'developer' : null),
-        cosmetics: look.cosmetics,
-      };
+      players[user.uuid] = { cape: look.cape, badge: badges.get(user.uuid) ?? null, cosmetics: look.cosmetics };
     }
     return { players };
+  }
+
+  // ---------- Öffentliche Live-Zahlen und Köpfe ----------
+
+  let liveStats: { value: unknown; until: number } | undefined;
+
+  /**
+   * `GET /v1/public/stats`: Spieler online (im Spiel), im Voice Chat und offene Welten, höchstens alle 30 s neu gezählt.
+   * Unter der Schwelle (Standard 50 online) sind alle drei null, damit kleine Zahlen nicht öffentlich werden.
+   */
+  function publicStats(ctx: Context) {
+    const now = Date.now();
+    if (!liveStats || liveStats.until <= now) {
+      const online = realtime.onlineCount();
+      const shown = online >= liveStatsMinOnline;
+      liveStats = {
+        value: {
+          online: shown ? online : null,
+          voice: shown ? (voice?.connectedCount() ?? 0) : null,
+          worlds: shown && worlds !== null && worlds.available ? worlds.openCount() : null,
+          minOnline: liveStatsMinOnline,
+          at: now,
+        },
+        until: now + STATUS_CACHE_MS,
+      };
+    }
+    sendJson(ctx.res, 200, liveStats.value, { 'Cache-Control': 'public, max-age=30' });
+    return RESPONDED;
+  }
+
+  const heads = new HeadCache();
+
+  /**
+   * `GET /v1/public/heads/<uuid>.png?size=32|64|128` (Standard 64): Kopf aus dem Skin für Webseite und Discord. Nur für
+   * Spieler, die der Dienst kennt und die „Für andere erkennbar“ an haben (oder auf der Teamseite stehen); sonst 404.
+   * Ohne Skin (oder nicht lesbar) der Standard-Kopf. Eigene Grenze pro IP.
+   */
+  async function publicHead(ctx: Context) {
+    rateLimit(headLimiter, clientIp(ctx.req), 'Zu viele Köpfe auf einmal. Bitte kurz warten.');
+    const raw = textQuery(ctx, 'size');
+    const size = raw === null ? 64 : /^\d{2,3}$/.test(raw) ? Number(raw) : NaN;
+    if (!isHeadSize(size)) throw new HttpError(400, '„size“ muss 32, 64 oder 128 sein.');
+    const uuid = ctx.params[0] ?? '';
+    const user = isUuid(uuid) ? store.getUser(uuid) : undefined;
+    if (!user || !(user.visible || store.isPublicTeamMember(uuid))) throw new HttpError(404, 'Kein Kopf gefunden.');
+    const key = `${uuid}:${size}`;
+    let png = heads.get(key);
+    if (!png) {
+      const skin = await skins.get(uuid);
+      png = renderHead(skin, size);
+      // Ohne Skin (oder Fehler bei Mojang) nur kurz merken, dann neu versuchen.
+      heads.set(key, png, skin ? 60 * 60_000 : 10 * 60_000);
+    }
+    ctx.res.writeHead(200, {
+      'Content-Type': 'image/png',
+      'Content-Length': String(png.length),
+      'Cache-Control': 'public, max-age=3600',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    ctx.res.end(png);
+    return RESPONDED;
   }
 
   async function sendRequest(ctx: Context) {
@@ -907,8 +1208,7 @@ export function createService(options: ServiceOptions): Service {
 
   async function sendMessage(ctx: Context) {
     const friend = uuidParam(ctx.params[0]);
-    const { text } = await body(ctx);
-    return messages.send(ctx.user, friend, text);
+    return messages.send(ctx.user, friend, await body(ctx));
   }
 
   function history(ctx: Context) {
@@ -919,7 +1219,10 @@ export function createService(options: ServiceOptions): Service {
   }
 
   async function block(ctx: Context) {
-    return blocks.block(ctx.user, await body(ctx));
+    const result = blocks.block(ctx.user, await body(ctx));
+    // Wer blockiert wurde, fliegt aus einer gemeinsamen Party; Einladungen zwischen beiden fallen weg.
+    for (const entry of result.blocked) partyService.blocked(ctx.user.uuid, entry.uuid);
+    return result;
   }
 
   async function report(ctx: Context) {
@@ -934,12 +1237,21 @@ export function createService(options: ServiceOptions): Service {
     return RESPONDED;
   }
 
+  /**
+   * Ziel der Weiterleitung auf eine Datei; ein gültiger `?einladung=<code>` geht beim Windows-Installer mit (der Name im
+   * Download trägt dann den Code, siehe downloadName in updates.ts), sonst fällt er weg.
+   */
+  function downloadLocation(ctx: Context, file: string): string {
+    const invite = downloadInvite(ctx.req.url);
+    return `/v1/launcher/download/${file}${invite !== null && downloadName(file, invite) !== file ? `?einladung=${invite}` : ''}`;
+  }
+
   /** `GET /v1/launcher/download/latest`: Weiterleitung auf den aktuellen Installer (Download-Knopf der Webseite). */
   async function downloadLatest(ctx: Context) {
     const published = await updates.latest();
     if (!published) throw new HttpError(404, NOTHING_PUBLISHED);
     ctx.res.writeHead(302, {
-      Location: `/v1/launcher/download/${published.file}`,
+      Location: downloadLocation(ctx, published.file),
       'Cache-Control': 'no-cache',
       'Content-Length': '0',
     });
@@ -953,7 +1265,7 @@ export function createService(options: ServiceOptions): Service {
     const file = (DOWNLOAD_TARGETS as readonly string[]).includes(target) ? await updates.latestFor(target as DownloadTarget) : null;
     if (file === null) throw new HttpError(404, 'Für dieses System gibt es noch keinen Download.');
     ctx.res.writeHead(302, {
-      Location: `/v1/launcher/download/${file}`,
+      Location: downloadLocation(ctx, file),
       'Cache-Control': 'no-cache',
       'Content-Length': '0',
     });
@@ -1053,6 +1365,38 @@ export function createService(options: ServiceOptions): Service {
     return RESPONDED;
   }
 
+  // ---------- Einladungen (öffentlich) ----------
+
+  /** `GET /v1/public/invites/<code>`: Ansicht einer Einladung für die Webseite (eigene Grenze pro IP). */
+  function publicInvite(ctx: Context) {
+    rateLimit(publicInviteLimiter, clientIp(ctx.req));
+    return inviteService.publicInfo(ctx.params[0] ?? '');
+  }
+
+  // ---------- Welt teilen ----------
+
+  /** Welt teilen eingerichtet (Welt-Domain, Relay lauscht)? Sonst 503. */
+  function worldsOn(): Worlds {
+    if (worlds === null || !worlds.available) throw new HttpError(503, WORLDS_OFF);
+    return worlds;
+  }
+
+  /** `GET /v1/public/worlds/<code>`: Ansicht einer Welt für die Webseite (eigene Grenze pro IP). */
+  function publicWorld(ctx: Context) {
+    const service = worldsOn();
+    rateLimit(publicWorldLimiter, clientIp(ctx.req));
+    return service.publicInfo(ctx.params[0] ?? '');
+  }
+
+  /** `POST /v1/public/invites/<code>/guest`: Gast-Zugang für den Voice Chat im Browser (eigene Grenze pro IP). */
+  async function createGuest(ctx: Context) {
+    // Nur von der eigenen Webseite (oder ohne Browser); fremde Seiten bekommen 403. Ohne Webseite wie beim WebSocket: offen.
+    if (website !== null) checkOrigin(ctx.req, website);
+    rateLimit(guestLimiter, clientIp(ctx.req), 'Zu viele Gast-Zugänge. Bitte in ein paar Minuten noch einmal.');
+    return inviteService.createGuest(ctx.params[0] ?? '', await body(ctx));
+  }
+
+  // Team-Routen: Recht je Route (roles.ts). Ohne `permission` darf jedes Team-Mitglied (mit 2FA).
   const teamRoutes: Route[] = [
     { method: 'GET', pattern: /^\/v1\/team\/me\/profile$/, kind: 'team', handler: (ctx) => team.profile(teamMember(ctx)) },
     {
@@ -1061,12 +1405,32 @@ export function createService(options: ServiceOptions): Service {
       kind: 'team',
       handler: async (ctx) => team.updateProfile(actor(ctx), teamMember(ctx), await body(ctx)),
     },
-    { method: 'GET', pattern: /^\/v1\/team\/support$/, kind: 'team', handler: (ctx) => support.teamList(textQuery(ctx, 'status')) },
-    { method: 'GET', pattern: /^\/v1\/team\/support\/([^/]+)$/, kind: 'team', handler: (ctx) => support.teamGet(idParam(ctx.params[0])) },
+    // Rechte-Übersicht und Kennzahlen (jede Rolle)
+    { method: 'GET', pattern: /^\/v1\/team\/permissions$/, kind: 'team', handler: (ctx) => team.permissions(teamMember(ctx)) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/dashboard$/,
+      kind: 'team',
+      handler: (ctx) =>
+        team.dashboard(teamMember(ctx), {
+          online: realtime.onlineCount(),
+          voice: voice?.connectedCount() ?? 0,
+          worlds: worlds !== null && worlds.available ? worlds.openCount() : null,
+        }),
+    },
+    { method: 'GET', pattern: /^\/v1\/team\/support$/, kind: 'team', permission: 'support', handler: (ctx) => support.teamList(textQuery(ctx, 'status')) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/support\/([^/]+)$/,
+      kind: 'team',
+      permission: 'support',
+      handler: (ctx) => support.teamGet(idParam(ctx.params[0])),
+    },
     {
       method: 'GET',
       pattern: /^\/v1\/team\/support\/([^/]+)\/attachments\/([^/]+)$/,
       kind: 'team',
+      permission: 'support',
       handler: (ctx) => {
         Support.sendAttachment(ctx.res, support.teamAttachment(idParam(ctx.params[0]), idParam(ctx.params[1])));
         return RESPONDED;
@@ -1076,26 +1440,30 @@ export function createService(options: ServiceOptions): Service {
       method: 'POST',
       pattern: /^\/v1\/team\/support\/([^/]+)\/messages$/,
       kind: 'team',
+      permission: 'support',
       handler: async (ctx) => support.teamReply(actor(ctx), idParam(ctx.params[0]), await body(ctx)),
     },
     {
       method: 'POST',
       pattern: /^\/v1\/team\/support\/([^/]+)\/close$/,
       kind: 'team',
+      permission: 'support',
       handler: (ctx) => support.teamClose(actor(ctx), idParam(ctx.params[0])),
     },
-    { method: 'GET', pattern: /^\/v1\/team\/reports$/, kind: 'team', handler: (ctx) => team.reports(textQuery(ctx, 'status')) },
+    { method: 'GET', pattern: /^\/v1\/team\/reports$/, kind: 'team', permission: 'moderation', handler: (ctx) => team.reports(textQuery(ctx, 'status')) },
     {
       method: 'POST',
       pattern: /^\/v1\/team\/reports\/([^/]+)\/done$/,
       kind: 'team',
+      permission: 'moderation',
       handler: (ctx) => team.markDone(actor(ctx), idParam(ctx.params[0])),
     },
-    { method: 'GET', pattern: /^\/v1\/team\/bans$/, kind: 'team', handler: () => team.bans() },
+    { method: 'GET', pattern: /^\/v1\/team\/bans$/, kind: 'team', permission: 'moderation', handler: () => team.bans() },
     {
       method: 'POST',
       pattern: /^\/v1\/team\/bans$/,
       kind: 'team',
+      permission: 'moderation',
       handler: async (ctx) => {
         const result = team.ban(actor(ctx), await body(ctx));
         await sweepSubmissionFiles();
@@ -1106,48 +1474,57 @@ export function createService(options: ServiceOptions): Service {
       method: 'DELETE',
       pattern: /^\/v1\/team\/bans\/([^/]+)$/,
       kind: 'team',
+      permission: 'moderation',
       handler: (ctx) => team.unban(actor(ctx), uuidParam(ctx.params[0])),
     },
-    { method: 'GET', pattern: /^\/v1\/team\/players$/, kind: 'team', handler: (ctx) => team.players(textQuery(ctx, 'q')) },
-    { method: 'GET', pattern: /^\/v1\/team\/players\/([^/]+)$/, kind: 'team', handler: (ctx) => team.player(uuidParam(ctx.params[0])) },
+    { method: 'GET', pattern: /^\/v1\/team\/players$/, kind: 'team', permission: 'players', handler: (ctx) => team.players(textQuery(ctx, 'q')) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/players\/([^/]+)$/,
+      kind: 'team',
+      permission: 'players',
+      handler: (ctx) => team.player(uuidParam(ctx.params[0])),
+    },
     {
       method: 'POST',
       pattern: /^\/v1\/team\/players\/([^/]+)\/reset-cape$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'moderation',
       handler: (ctx) => team.resetCape(actor(ctx), uuidParam(ctx.params[0])),
     },
     {
       method: 'DELETE',
       pattern: /^\/v1\/team\/players\/([^/]+)$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'players.delete',
       handler: async (ctx) => {
         const result = team.deletePlayer(actor(ctx), uuidParam(ctx.params[0]));
         await sweepSubmissionFiles();
         return result;
       },
     },
-    { method: 'GET', pattern: /^\/v1\/team\/news$/, kind: 'team', handler: () => team.news() },
-    { method: 'POST', pattern: /^\/v1\/team\/news$/, kind: 'team', handler: async (ctx) => team.createNews(actor(ctx), await body(ctx)) },
+    { method: 'GET', pattern: /^\/v1\/team\/news$/, kind: 'team', permission: 'news', handler: () => team.news() },
+    { method: 'POST', pattern: /^\/v1\/team\/news$/, kind: 'team', permission: 'news', handler: async (ctx) => team.createNews(actor(ctx), await body(ctx)) },
     {
       method: 'PUT',
       pattern: /^\/v1\/team\/news\/([^/]+)$/,
       kind: 'team',
+      permission: 'news',
       handler: async (ctx) => team.updateNews(actor(ctx), idParam(ctx.params[0]), await body(ctx)),
     },
     {
       method: 'DELETE',
       pattern: /^\/v1\/team\/news\/([^/]+)$/,
       kind: 'team',
+      permission: 'news',
       handler: (ctx) => team.deleteNews(actor(ctx), idParam(ctx.params[0])),
     },
-    { method: 'GET', pattern: /^\/v1\/team\/updates$/, kind: 'team', role: 'admin', handler: () => team.updatesOverview() },
+    { method: 'GET', pattern: /^\/v1\/team\/updates$/, kind: 'team', permission: 'updates', handler: () => team.updatesOverview() },
     {
       method: 'PUT',
       pattern: /^\/v1\/team\/updates\/files\/([^/]+)$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'updates',
       // Roher, gestreamter Körper bis 1 GiB: ohne BODY_LIMIT, ohne JSON.
       handler: (ctx) => team.upload(actor(ctx), ctx.req, ctx.params[0] ?? ''),
     },
@@ -1155,23 +1532,23 @@ export function createService(options: ServiceOptions): Service {
       method: 'DELETE',
       pattern: /^\/v1\/team\/updates\/files\/([^/]+)$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'updates',
       handler: (ctx) => team.deleteFile(actor(ctx), ctx.params[0] ?? ''),
     },
     {
       method: 'PUT',
       pattern: /^\/v1\/team\/updates\/manifest$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'updates',
       handler: async (ctx) => team.publish(actor(ctx), await body(ctx)),
     },
-    // Addon-Store: wie Updates nur für Admins. `PUT …/manifest` und `PATCH …/<id>` treffen dasselbe Muster, die Methode entscheidet.
-    { method: 'GET', pattern: /^\/v1\/team\/addons$/, kind: 'team', role: 'admin', handler: () => team.addonsOverview() },
+    // Addon-Store: `PUT …/manifest` und `PATCH …/<id>` treffen dasselbe Muster, die Methode entscheidet.
+    { method: 'GET', pattern: /^\/v1\/team\/addons$/, kind: 'team', permission: 'addons', handler: () => team.addonsOverview() },
     {
       method: 'PUT',
       pattern: /^\/v1\/team\/addons\/files\/([^/]+)$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'addons',
       // Roher, gestreamter Körper bis 50 MiB: ohne BODY_LIMIT, ohne JSON.
       handler: (ctx) => team.uploadAddon(actor(ctx), ctx.req, ctx.params[0] ?? ''),
     },
@@ -1179,14 +1556,14 @@ export function createService(options: ServiceOptions): Service {
       method: 'DELETE',
       pattern: /^\/v1\/team\/addons\/files\/([^/]+)$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'addons',
       handler: (ctx) => team.deleteAddonFile(actor(ctx), ctx.params[0] ?? ''),
     },
     {
       method: 'PUT',
       pattern: /^\/v1\/team\/addons\/manifest$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'addons',
       // Beschreibung und Hinweise machen das Manifest größer als BODY_LIMIT erlaubt.
       handler: async (ctx) => team.publishAddon(actor(ctx), await readJsonObject(ctx.req, ADDON_MANIFEST_BODY_LIMIT)),
     },
@@ -1194,53 +1571,67 @@ export function createService(options: ServiceOptions): Service {
       method: 'PATCH',
       pattern: /^\/v1\/team\/addons\/([^/]+)$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'addons',
       handler: async (ctx) => team.setAddonHidden(actor(ctx), ctx.params[0] ?? '', await body(ctx)),
     },
     {
       method: 'DELETE',
       pattern: /^\/v1\/team\/addons\/([^/]+)\/versions\/([^/]+)$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'addons',
       handler: (ctx) => team.deleteAddonVersion(actor(ctx), ctx.params[0] ?? '', ctx.params[1] ?? ''),
     },
-    // Cosmetics-Katalog: wie Addons nur für Admins (veröffentlichen = signierter Umschlag aus npm run cosmetic).
-    { method: 'GET', pattern: /^\/v1\/team\/cosmetics$/, kind: 'team', role: 'admin', handler: () => team.cosmeticsOverview() },
+    // Cosmetics-Katalog (veröffentlichen = signierter Umschlag aus npm run cosmetic).
+    { method: 'GET', pattern: /^\/v1\/team\/cosmetics$/, kind: 'team', permission: 'cosmetics', handler: () => team.cosmeticsOverview() },
     {
       method: 'PUT',
       pattern: /^\/v1\/team\/cosmetics$/,
       kind: 'team',
-      role: 'admin',
-      // Texturen als data-URL machen den Umschlag größer als BODY_LIMIT erlaubt.
-      handler: async (ctx) => team.publishCosmetic(actor(ctx), await readJsonObject(ctx.req, COSMETIC_LIMITS.envelopeBytes)),
+      permission: 'cosmetics',
+      // Texturen als data-URL machen den Umschlag größer als BODY_LIMIT erlaubt (Format 2 mit Mesh: bis 544 KB).
+      handler: async (ctx) => team.publishCosmetic(actor(ctx), await readJsonObject(ctx.req, COSMETIC_MAX_ENVELOPE_BYTES)),
     },
-    { method: 'GET', pattern: /^\/v1\/team\/cosmetics\/([^/]+)$/, kind: 'team', role: 'admin', handler: (ctx) => cosmetics.teamDetail(ctx.params[0] ?? '') },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/cosmetics\/([^/]+)$/,
+      kind: 'team',
+      permission: 'cosmetics',
+      handler: (ctx) => cosmetics.teamDetail(ctx.params[0] ?? ''),
+    },
     {
       method: 'PATCH',
       pattern: /^\/v1\/team\/cosmetics\/([^/]+)$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'cosmetics',
       handler: async (ctx) => team.setCosmeticHidden(actor(ctx), ctx.params[0] ?? '', await body(ctx)),
     },
     {
       method: 'DELETE',
       pattern: /^\/v1\/team\/cosmetics\/([^/]+)$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'cosmetics',
       handler: (ctx) => team.deleteCosmetic(actor(ctx), ctx.params[0] ?? ''),
     },
-    // Einreichungen von Spielern: ansehen und ablehnen (jede Rolle), freigeben = signieren (nur Admin).
+    // Einreichungen von Spielern: ansehen, ablehnen und freigeben (signieren) mit dem Recht „Addons“.
     {
       method: 'GET',
       pattern: /^\/v1\/team\/addon-submissions$/,
       kind: 'team',
+      permission: 'addons',
       handler: (ctx) => submissions.teamList(textQuery(ctx, 'status')),
     },
-    { method: 'GET', pattern: /^\/v1\/team\/addon-submissions\/([^/]+)$/, kind: 'team', handler: (ctx) => submissions.teamGet(ctx.params[0]) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/addon-submissions\/([^/]+)$/,
+      kind: 'team',
+      permission: 'addons',
+      handler: (ctx) => submissions.teamGet(ctx.params[0]),
+    },
     {
       method: 'GET',
       pattern: /^\/v1\/team\/addon-submissions\/([^/]+)\/jar$/,
       kind: 'team',
+      permission: 'addons',
       handler: async (ctx) => {
         await submissions.teamJar(ctx.params[0], ctx.req, ctx.res, downloadIdleTimeoutMs);
         return RESPONDED;
@@ -1250,6 +1641,7 @@ export function createService(options: ServiceOptions): Service {
       method: 'GET',
       pattern: /^\/v1\/team\/addon-submissions\/([^/]+)\/screenshots\/([^/]+)$/,
       kind: 'team',
+      permission: 'addons',
       handler: async (ctx) => {
         await submissions.teamScreenshot(ctx.params[0], ctx.params[1], ctx.req, ctx.res, downloadIdleTimeoutMs);
         return RESPONDED;
@@ -1259,7 +1651,7 @@ export function createService(options: ServiceOptions): Service {
       method: 'POST',
       pattern: /^\/v1\/team\/addon-submissions\/([^/]+)\/approve$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'addons',
       // Die Seite darf das signierte Manifest zur Kontrolle mitschicken (bis 64 KB).
       handler: async (ctx) => submissions.approve(actor(ctx), ctx.params[0], await readJsonObject(ctx.req, ADDON_MANIFEST_BODY_LIMIT)),
     },
@@ -1267,49 +1659,73 @@ export function createService(options: ServiceOptions): Service {
       method: 'POST',
       pattern: /^\/v1\/team\/addon-submissions\/([^/]+)\/reject$/,
       kind: 'team',
+      permission: 'addons',
       handler: async (ctx) => submissions.reject(actor(ctx), ctx.params[0], await body(ctx)),
     },
-    { method: 'GET', pattern: /^\/v1\/team\/addon-reports$/, kind: 'team', handler: (ctx) => addonFeedback.teamReports(textQuery(ctx, 'status')) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/addon-reports$/,
+      kind: 'team',
+      permission: 'addon-reports',
+      handler: (ctx) => addonFeedback.teamReports(textQuery(ctx, 'status')),
+    },
     {
       method: 'POST',
       pattern: /^\/v1\/team\/addon-reports\/([^/]+)\/done$/,
       kind: 'team',
+      permission: 'addon-reports',
       handler: (ctx) => addonFeedback.reportDone(actor(ctx), idParam(ctx.params[0])),
     },
-    { method: 'GET', pattern: /^\/v1\/team\/members$/, kind: 'team', role: 'admin', handler: () => team.members() },
+    { method: 'GET', pattern: /^\/v1\/team\/members$/, kind: 'team', permission: 'team.view', handler: () => team.members() },
     {
       method: 'POST',
       pattern: /^\/v1\/team\/members$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'team.manage',
       handler: async (ctx) => team.addMember(actor(ctx), await body(ctx)),
     },
     {
       method: 'PUT',
       pattern: /^\/v1\/team\/members\/([^/]+)$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'team.manage',
       handler: async (ctx) => team.setRole(actor(ctx), uuidParam(ctx.params[0]), await body(ctx)),
     },
     {
       method: 'DELETE',
       pattern: /^\/v1\/team\/members\/([^/]+)$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'team.manage',
       handler: (ctx) => team.removeMember(actor(ctx), uuidParam(ctx.params[0])),
     },
     {
       method: 'POST',
       pattern: /^\/v1\/team\/members\/([^/]+)\/reset-2fa$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'team.manage',
       handler: (ctx) => team.reset2fa(actor(ctx), uuidParam(ctx.params[0])),
+    },
+    // Community-Abzeichen: ansehen mit der Team-Übersicht, vergeben und entziehen mit „Team verwalten“
+    { method: 'GET', pattern: /^\/v1\/team\/badges$/, kind: 'team', permission: 'team.view', handler: () => team.communityBadges() },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/team\/badges\/([^/]+)$/,
+      kind: 'team',
+      permission: 'team.manage',
+      handler: async (ctx) => team.setCommunityBadge(actor(ctx), uuidParam(ctx.params[0]), await body(ctx)),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/team\/badges\/([^/]+)$/,
+      kind: 'team',
+      permission: 'team.manage',
+      handler: (ctx) => team.removeCommunityBadge(actor(ctx), uuidParam(ctx.params[0])),
     },
     {
       method: 'GET',
       pattern: /^\/v1\/team\/audit$/,
       kind: 'team',
-      role: 'admin',
+      permission: 'audit',
       handler: (ctx) => team.auditEntries(intQuery(ctx, 'limit', 1, 500, '„limit“ muss zwischen 1 und 500 liegen.') ?? 100),
     },
   ];
@@ -1337,12 +1753,32 @@ export function createService(options: ServiceOptions): Service {
       kind: 'user',
       handler: (ctx) => friends.removeRequest(ctx.user, uuidParam(ctx.params[0])),
     },
+    // Freunde 2.0: Vorschläge stehen vor dem Muster für UUIDs (die Methode entscheidet ohnehin).
+    { method: 'GET', pattern: /^\/v1\/friends\/suggestions$/, kind: 'user', handler: (ctx) => friends.suggestions(ctx.user) },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/friends\/suggestions\/([^/]+)\/request$/,
+      kind: 'user',
+      handler: (ctx) => friends.requestSuggestion(ctx.user, uuidParam(ctx.params[0])),
+    },
     {
       method: 'DELETE',
       pattern: /^\/v1\/friends\/([^/]+)$/,
       kind: 'user',
-      handler: (ctx) => friends.removeFriend(ctx.user, uuidParam(ctx.params[0])),
+      handler: (ctx) => {
+        const uuid = uuidParam(ctx.params[0]);
+        const result = friends.removeFriend(ctx.user, uuid);
+        partyService.unfriended(ctx.user.uuid, uuid);
+        return result;
+      },
     },
+    {
+      method: 'PATCH',
+      pattern: /^\/v1\/friends\/([^/]+)$/,
+      kind: 'user',
+      handler: async (ctx) => friends.update(ctx.user, uuidParam(ctx.params[0]), await body(ctx)),
+    },
+    { method: 'GET', pattern: /^\/v1\/friends\/([^/]+)\/profile$/, kind: 'user', handler: (ctx) => friends.profile(ctx.user, uuidParam(ctx.params[0])) },
     { method: 'GET', pattern: /^\/v1\/messages$/, kind: 'user', handler: (ctx) => messages.conversations(ctx.user.uuid) },
     { method: 'GET', pattern: /^\/v1\/messages\/([^/]+)$/, kind: 'user', handler: history },
     { method: 'POST', pattern: /^\/v1\/messages\/([^/]+)$/, kind: 'user', handler: sendMessage },
@@ -1351,6 +1787,70 @@ export function createService(options: ServiceOptions): Service {
       pattern: /^\/v1\/messages\/([^/]+)\/read$/,
       kind: 'user',
       handler: (ctx) => messages.markRead(ctx.user, uuidParam(ctx.params[0])),
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/messages\/([^/]+)\/typing$/,
+      kind: 'user',
+      handler: (ctx) => messages.typingRoute(ctx.user, uuidParam(ctx.params[0])),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/messages\/([^/]+)\/(\d{1,15})$/,
+      kind: 'user',
+      handler: (ctx) => messages.remove(ctx.user, uuidParam(ctx.params[0]), idParam(ctx.params[1])),
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/messages\/([^/]+)\/(\d{1,15})\/reaction$/,
+      kind: 'user',
+      handler: async (ctx) => messages.react(ctx.user, uuidParam(ctx.params[0]), idParam(ctx.params[1]), await body(ctx)),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/messages\/([^/]+)\/(\d{1,15})\/reaction$/,
+      kind: 'user',
+      handler: (ctx) => messages.unreact(ctx.user, uuidParam(ctx.params[0]), idParam(ctx.params[1])),
+    },
+    // Party (nur im Arbeitsspeicher; Bearer-Token oder Cookie)
+    { method: 'GET', pattern: /^\/v1\/party$/, kind: 'user', handler: (ctx) => partyService.get(ctx.user) },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/party\/invite$/,
+      kind: 'user',
+      handler: async (ctx) => partyService.invite(ctx.user, (await body(ctx)).uuid),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/party\/invites\/([^/]+)$/,
+      kind: 'user',
+      handler: (ctx) => partyService.cancelInvite(ctx.user, uuidParam(ctx.params[0])),
+    },
+    { method: 'POST', pattern: /^\/v1\/party\/leave$/, kind: 'user', handler: (ctx) => partyService.leave(ctx.user) },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/party\/leader$/,
+      kind: 'user',
+      handler: async (ctx) => partyService.transfer(ctx.user, (await body(ctx)).uuid),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/party\/members\/([^/]+)$/,
+      kind: 'user',
+      handler: (ctx) => partyService.kick(ctx.user, uuidParam(ctx.params[0])),
+    },
+    { method: 'POST', pattern: /^\/v1\/party\/chat$/, kind: 'user', handler: async (ctx) => partyService.chat(ctx.user, (await body(ctx)).text) },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/party\/([0-9a-f]{32})\/accept$/,
+      kind: 'user',
+      handler: (ctx) => partyService.accept(ctx.user, ctx.params[0] ?? ''),
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/party\/([0-9a-f]{32})\/decline$/,
+      kind: 'user',
+      handler: (ctx) => partyService.decline(ctx.user, ctx.params[0] ?? ''),
     },
     { method: 'GET', pattern: /^\/v1\/blocks$/, kind: 'user', handler: (ctx) => blocks.list(ctx.user.uuid) },
     { method: 'POST', pattern: /^\/v1\/blocks$/, kind: 'user', handler: block },
@@ -1363,6 +1863,60 @@ export function createService(options: ServiceOptions): Service {
     { method: 'POST', pattern: /^\/v1\/reports$/, kind: 'user', handler: report },
     { method: 'GET', pattern: /^\/v1\/reports\/mine$/, kind: 'user', handler: (ctx) => myReports(store, ctx.user) },
     { method: 'GET', pattern: /^\/v1\/me\/export$/, kind: 'user', handler: exportMe },
+    // Einladungen (Bearer-Token oder Cookie)
+    { method: 'GET', pattern: /^\/v1\/invites$/, kind: 'user', handler: (ctx) => inviteService.overview(ctx.user) },
+    { method: 'POST', pattern: /^\/v1\/invites$/, kind: 'user', handler: async (ctx) => inviteService.create(ctx.user, await body(ctx)) },
+    { method: 'DELETE', pattern: /^\/v1\/invites\/([^/]+)$/, kind: 'user', handler: (ctx) => inviteService.revoke(ctx.user, ctx.params[0] ?? '') },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/invites\/([^/]+)\/accept$/,
+      kind: 'user',
+      handler: (ctx) => inviteService.accept(ctx.user, ctx.params[0] ?? ''),
+    },
+    // Welt teilen (Bearer-Token oder Cookie); ohne Welt-Domain 503. Die WebSocket-Wege stehen vor dem Muster für IDs.
+    { method: 'GET', pattern: /^\/v1\/worlds$/, kind: 'user', handler: (ctx) => worldsOn().list(ctx.user) },
+    { method: 'POST', pattern: /^\/v1\/worlds$/, kind: 'user', handler: async (ctx) => worldsOn().create(ctx.user, await body(ctx)) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/worlds\/(?:host|streams\/[^/]+)$/,
+      kind: 'public',
+      handler: () => {
+        worldsOn();
+        throw new HttpError(426, 'Dieser Weg ist nur per WebSocket erreichbar.', { Upgrade: 'websocket' });
+      },
+    },
+    { method: 'GET', pattern: /^\/v1\/worlds\/([^/]+)$/, kind: 'user', handler: (ctx) => worldsOn().get(ctx.user, ctx.params[0]) },
+    {
+      method: 'PATCH',
+      pattern: /^\/v1\/worlds\/([^/]+)$/,
+      kind: 'user',
+      handler: async (ctx) => worldsOn().update(ctx.user, ctx.params[0], await body(ctx)),
+    },
+    { method: 'DELETE', pattern: /^\/v1\/worlds\/([^/]+)$/, kind: 'user', handler: (ctx) => worldsOn().remove(ctx.user, ctx.params[0]) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/worlds\/([^/]+)\/members$/,
+      kind: 'user',
+      handler: (ctx) => worldsOn().memberList(ctx.user, ctx.params[0]),
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/worlds\/([^/]+)\/members\/([^/]+)$/,
+      kind: 'user',
+      handler: async (ctx) => worldsOn().putMember(ctx.user, ctx.params[0], ctx.params[1], await body(ctx)),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/worlds\/([^/]+)\/members\/([^/]+)$/,
+      kind: 'user',
+      handler: (ctx) => worldsOn().deleteMember(ctx.user, ctx.params[0], ctx.params[1]),
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/worlds\/([^/]+)\/invite$/,
+      kind: 'user',
+      handler: async (ctx) => worldsOn().invite(ctx.user, ctx.params[0], await body(ctx)),
+    },
     // Cosmetics wählen (Bearer-Token oder Cookie)
     { method: 'GET', pattern: /^\/v1\/me\/cosmetics$/, kind: 'user', handler: (ctx) => cosmetics.mine(ctx.user) },
     { method: 'PUT', pattern: /^\/v1\/me\/cosmetics$/, kind: 'user', handler: async (ctx) => cosmetics.choose(ctx.user, await body(ctx)) },
@@ -1424,6 +1978,14 @@ export function createService(options: ServiceOptions): Service {
       },
     },
     { method: 'GET', pattern: /^\/v1\/public\/skins\/([^/]+)$/, kind: 'public', handler: publicSkin },
+    // Live-Zahlen und Köpfe für Webseite und Discord (ohne Anmeldung, CORS; Köpfe mit eigener Grenze pro IP)
+    { method: 'GET', pattern: /^\/v1\/public\/stats$/, kind: 'public', handler: publicStats },
+    { method: 'GET', pattern: /^\/v1\/public\/heads\/([^/]+)\.png$/, kind: 'public', handler: publicHead },
+    // Einladungen ohne Anmeldung: Ansicht und Gast-Zugang (eigene Grenzen pro IP)
+    { method: 'GET', pattern: /^\/v1\/public\/invites\/([^/]+)$/, kind: 'public', handler: publicInvite },
+    { method: 'POST', pattern: /^\/v1\/public\/invites\/([^/]+)\/guest$/, kind: 'public', handler: createGuest },
+    // Welt teilen ohne Anmeldung: Ansicht einer Adresse (eigene Grenze pro IP)
+    { method: 'GET', pattern: /^\/v1\/public\/worlds\/([^/]+)$/, kind: 'public', handler: publicWorld },
     { method: 'GET', pattern: /^\/v1\/skins\/([^/]+)$/, kind: 'user', ownRateLimit: true, handler: userSkin },
     { method: 'GET', pattern: /^\/v1\/launcher\/versions$/, kind: 'public', handler: launcherVersions },
     { method: 'GET', pattern: /^\/v1\/status$/, kind: 'public', handler: status },
@@ -1577,7 +2139,7 @@ export function createService(options: ServiceOptions): Service {
       if (!route.ownRateLimit) rateLimit(apiLimiter, auth.key);
       user = auth.user;
       session = auth.session;
-      if (route.kind === 'team') member = web.teamGate(auth.user, auth.session!, route.role ?? 'moderator');
+      if (route.kind === 'team') member = web.teamGate(auth.user, auth.session!, route.permission);
     }
     const result = await route.handler({ req, res, params, user: user!, session, member });
     if (result !== RESPONDED) sendJson(res, 200, result);
@@ -1604,26 +2166,138 @@ export function createService(options: ServiceOptions): Service {
   server.requestTimeout = REQUEST_TIMEOUT_MS;
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: BODY_LIMIT, clientTracking: false });
-  const voiceWss = voice ? new WebSocketServer({ noServer: true, maxPayload: VOICE_MAX_PAYLOAD, clientTracking: false }) : null;
+  // Aus dem Browser kommt das Unterprotokoll heldix-voice (Gäste dazu gast.<token>): Der Dienst wählt heldix-voice.
+  const voiceWss = voice
+    ? new WebSocketServer({
+        noServer: true,
+        maxPayload: VOICE_MAX_PAYLOAD,
+        clientTracking: false,
+        handleProtocols: (protocols) => (protocols.has(VOICE_SUBPROTOCOL) ? VOICE_SUBPROTOCOL : false),
+      })
+    : null;
+  // Welt teilen: Steuerverbindung (JSON wie /v1/ws) und Datenströme (binär, größere Nachrichten)
+  const worldHostWss = worlds ? new WebSocketServer({ noServer: true, maxPayload: BODY_LIMIT, clientTracking: false }) : null;
+  const worldStreamWss = worlds ? new WebSocketServer({ noServer: true, maxPayload: WORLD_STREAM_MAX_PAYLOAD, clientTracking: false }) : null;
+
+  /** Unterprotokolle aus `Sec-WebSocket-Protocol` (durch Kommas getrennt). */
+  function protocolsOf(req: IncomingMessage): string[] {
+    const header = req.headers['sec-websocket-protocol'];
+    if (typeof header !== 'string') return [];
+    return header
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part !== '');
+  }
+
+  /**
+   * Anmeldung am Voice Chat: Spiel mit Bearer-Token (wie bisher); Gast im Browser mit dem Unterprotokoll
+   * `gast.<token>` (Origin muss die Webseite sein, wenn eine eingerichtet ist); angemeldeter Spieler im Browser mit dem
+   * Cookie der Webseite (Origin muss genau die Webseite sein, statt des CSRF-Headers). `key` zählt für die Grenze.
+   */
+  function authenticateVoice(req: IncomingMessage): { uuid: string; key: string; attach: VoiceAttachOptions } {
+    if (req.headers.authorization !== undefined) {
+      const { user, tokenHash } = authenticate(req);
+      return { uuid: user.uuid, key: tokenHash, attach: {} };
+    }
+    const guestProtocol = protocolsOf(req).find((protocol) => protocol.startsWith('gast.'));
+    if (guestProtocol !== undefined) {
+      if (website !== null && req.headers.origin !== website) throw new HttpError(403, CSRF_REJECTED);
+      const session = inviteService.guestSession(guestProtocol.slice('gast.'.length));
+      if (session === null) throw new HttpError(401, GUEST_EXPIRED);
+      return {
+        uuid: session.id,
+        key: `gast:${session.id}`,
+        attach: { browser: true, guest: { name: session.name, invite: session.invite, expiresAt: session.expiresAt } },
+      };
+    }
+    const value = readSessionCookie(req);
+    if (value !== null) {
+      if (website === null || req.headers.origin !== website) throw new HttpError(403, CSRF_REJECTED);
+      const found = web.find(value);
+      if (!found) throw new HttpError(401, NOT_SIGNED_IN);
+      return { uuid: found.user.uuid, key: `web:${found.session.id}`, attach: { browser: true } };
+    }
+    throw new HttpError(401, NOT_SIGNED_IN);
+  }
+
+  /**
+   * Anmeldung an `/v1/ws`: Spiel mit Bearer-Token (wie bisher); Launcher mit Bearer-Token und `?client=launcher` als
+   * Begleiter; Webseite mit dem Cookie (Origin muss genau die Webseite sein, statt des CSRF-Headers) als Begleiter.
+   * Begleiter bekommen alle Nachrichten, zählen aber nicht als „online im Spiel“.
+   */
+  function authenticateRealtime(req: IncomingMessage): { uuid: string; key: string; kind: ConnectionKind; sessionId: string | null } {
+    if (req.headers.authorization !== undefined) {
+      const { user, tokenHash } = authenticate(req);
+      const client = new URL(req.url ?? '/', 'http://heldix.invalid').searchParams.get('client');
+      return { uuid: user.uuid, key: tokenHash, kind: client === 'launcher' ? 'companion' : 'game', sessionId: null };
+    }
+    const value = readSessionCookie(req);
+    if (value !== null) {
+      if (website === null || req.headers.origin !== website) throw new HttpError(403, CSRF_REJECTED);
+      const found = web.find(value);
+      if (!found) throw new HttpError(401, NOT_SIGNED_IN);
+      return { uuid: found.user.uuid, key: `web:${found.session.id}`, kind: 'companion', sessionId: found.session.id };
+    }
+    throw new HttpError(401, NOT_SIGNED_IN);
+  }
 
   server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on('error', () => socket.destroy());
     try {
       const path = pathOf(req);
       const isVoice = path === '/v1/voice' && voice !== null;
-      if (path !== '/v1/ws' && !isVoice) throw new HttpError(404, 'Nicht gefunden.');
+      const isWorldHost = path === WORLD_HOST_PATH;
+      const worldStream = WORLD_STREAM_PATH_RE.exec(path);
+      if (path !== '/v1/ws' && !isVoice && !isWorldHost && worldStream === null) throw new HttpError(404, 'Nicht gefunden.');
       if (req.method !== 'GET') throw new HttpError(405, 'Diese Methode ist hier nicht erlaubt.', { Allow: 'GET' });
-      const { user, tokenHash } = authenticate(req);
-      rateLimit(apiLimiter, tokenHash);
+      if (isWorldHost || worldStream !== null) {
+        const service = worldsOn();
+        const { user, tokenHash } = authenticate(req);
+        if (isWorldHost) {
+          rateLimit(apiLimiter, tokenHash);
+          // Höchstens eine Steuerverbindung pro Spieler: Die neue ersetzt die alte (4002).
+          worldHostWss!.handleUpgrade(req, socket, head, (ws) => {
+            if (closed) {
+              ws.terminate();
+              return;
+            }
+            try {
+              service.attachHost(ws, user.uuid);
+            } catch (err) {
+              log(`Fehler beim Verbinden der Steuerverbindung: ${(err as Error)?.stack ?? String(err)}`);
+              ws.terminate();
+            }
+          });
+          return;
+        }
+        // Datenstrom: nur der Gastgeber der Welt, nur einmal, nur solange er wartet (sonst 404). Zählt nicht zur
+        // allgemeinen Grenze (jede Serverlisten-Abfrage öffnet einen; ihre Zahl begrenzt das Relay).
+        const stream = service.claimStream(worldStream![1]!, user.uuid);
+        worldStreamWss!.handleUpgrade(req, socket, head, (ws) => {
+          if (closed) {
+            ws.terminate();
+            return;
+          }
+          try {
+            service.attachStream(ws, stream);
+          } catch (err) {
+            log(`Fehler beim Verbinden eines Datenstroms: ${(err as Error)?.stack ?? String(err)}`);
+            ws.terminate();
+          }
+        });
+        return;
+      }
       if (isVoice) {
-        // Höchstens eine Voice-Verbindung pro Spieler: Die neue ersetzt die alte (4002).
+        const who = authenticateVoice(req);
+        rateLimit(apiLimiter, who.key);
+        // Höchstens eine Voice-Verbindung pro Spieler bzw. Gast: Die neue ersetzt die alte (4002).
         voiceWss!.handleUpgrade(req, socket, head, (ws) => {
           if (closed) {
             ws.terminate();
             return;
           }
           try {
-            voice!.attach(ws, user.uuid);
+            voice!.attach(ws, who.uuid, who.attach);
           } catch (err) {
             log(`Fehler beim Verbinden mit dem Voice Chat: ${(err as Error)?.stack ?? String(err)}`);
             ws.terminate();
@@ -1631,7 +2305,9 @@ export function createService(options: ServiceOptions): Service {
         });
         return;
       }
-      if (realtime.connectionCount(user.uuid) >= maxConnectionsPerUser) {
+      const who = authenticateRealtime(req);
+      rateLimit(apiLimiter, who.key);
+      if (realtime.connectionCount(who.uuid) >= maxConnectionsPerUser) {
         throw new HttpError(429, 'Zu viele gleichzeitige Verbindungen.', { 'Retry-After': '30' });
       }
       wss.handleUpgrade(req, socket, head, (ws) => {
@@ -1640,7 +2316,7 @@ export function createService(options: ServiceOptions): Service {
           return;
         }
         try {
-          realtime.attach(ws, user.uuid);
+          realtime.attach(ws, who.uuid, { kind: who.kind, sessionId: who.sessionId });
         } catch (err) {
           log(`Fehler beim Verbinden: ${(err as Error)?.stack ?? String(err)}`);
           ws.terminate();
@@ -1674,6 +2350,14 @@ export function createService(options: ServiceOptions): Service {
     web.sweepBound(now);
     totpLimiter.sweep(now);
     exportLimiter.sweep(now);
+    inviteLimiter.sweep(now);
+    publicInviteLimiter.sweep(now);
+    guestLimiter.sweep(now);
+    publicWorldLimiter.sweep(now);
+    headLimiter.sweep(now);
+    messages.sweepTyping(now);
+    relay?.sweep(now);
+    worlds?.sweep(now);
     try {
       store.deleteExpiredTokens(now);
       store.deleteMessagesBefore(now - messageTtlMs);
@@ -1683,6 +2367,8 @@ export function createService(options: ServiceOptions): Service {
       store.deleteOldTickets(now - supportClosedTtlMs, now - supportIdleTtlMs);
       store.deleteOldSubmissions(now - addonSubmissionTtlMs);
       store.deleteAddonReportsBefore(now - reportTtlMs);
+      store.deleteExpiredInvites(now);
+      inviteService.sweep(now);
     } catch (err) {
       log(`Aufräumen fehlgeschlagen: ${(err as Error).message}`);
     }
@@ -1696,19 +2382,30 @@ export function createService(options: ServiceOptions): Service {
     if (closing) return closing;
     closed = true;
     clearInterval(sweepTimer);
+    // Gezählte Spielzeit noch speichern, solange die Datenbank offen ist.
+    inviteService.close();
+    // Parties leben nur im Arbeitsspeicher: Zeitgeber anhalten.
+    partyService.closeAll();
+    // Geöffnete Welten: Zeitpunkt speichern, Steuerverbindungen, Datenströme und Spieler-Verbindungen trennen.
+    worlds?.closeAll();
+    const relayClosed = relay?.close() ?? Promise.resolve();
     realtime.closeAll();
     voice?.closeAll();
     closing = new Promise<void>((resolve) => {
       wss.close();
       voiceWss?.close();
+      worldHostWss?.close();
+      worldStreamWss?.close();
       server.close(() => {
-        store.close();
-        resolve();
+        void relayClosed.then(() => {
+          store.close();
+          resolve();
+        });
       });
       server.closeAllConnections();
     });
     return closing;
   }
 
-  return { server, close };
+  return { server, relay: relay?.server ?? null, relayReady, close };
 }

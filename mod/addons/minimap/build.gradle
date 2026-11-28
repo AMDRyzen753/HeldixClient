@@ -1,0 +1,27 @@
+// Minimap: Karte der Umgebung im HUD, nur über die Heldix-API (Stufe 8) – läuft in Heldix- und Fabric-Instanzen.
+plugins {
+	id 'java'
+}
+
+version = '1.0.0'
+
+base {
+	archivesName = 'heldix-addon-minimap'
+}
+
+dependencies {
+	compileOnly project(':heldix-api')
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+	it.options.encoding = 'UTF-8'
+}
+
+processResources {
+	def props = [version: project.version]
+	inputs.properties props
+	filesMatching('heldix.addon.json') {
+		expand props
+	}
+}

@@ -3,29 +3,29 @@ titel: Updates des Launchers
 beschreibung: Wie sich HeldixClient unter Windows selbst aktualisiert und wie du auf dem Mac eine neue Version installierst.
 kategorie: launcher
 reihenfolge: 6
-stichworte: update, updates, aktualisieren, neue version, automatisch, versionsverlauf, was ist neu, mac update, neu starten, signatur
+stichworte: update, updates, aktualisieren, neue version, automatisch, beim start, startfenster, suche nach updates, versionsverlauf, was ist neu, neu in, mac update, neu starten, jetzt neu starten, jetzt installieren, signatur
 ---
 Neue Versionen von HeldixClient kommen über heldixclient.com. Mit dem Launcher bekommen deine Instanzen beim nächsten Start auch die neue HeldixClient-Mod.
 
 ## Windows: automatisch
-Unter Windows hält sich der Launcher selbst aktuell:
-1. Kurz nach dem Start und danach alle 6 Stunden schaut er nach einer neuen Version.
-2. Gibt es eine, lädt er sie im Hintergrund. Den Fortschritt siehst du unten in der Seitenleiste.
-3. Installiert wird beim Beenden des Launchers – oder sofort mit **Neu starten**.
-4. Nach dem Update zeigt der Launcher, was neu ist.
+Unter Windows hält sich der Launcher selbst aktuell – direkt beim Start:
+1. Beim Öffnen zeigt ein kleines Startfenster **„Suche nach Updates …“**. Das dauert höchstens ein paar Sekunden; ohne Internet startet der Launcher einfach normal.
+2. Gibt es eine neue Version, lädt er sie gleich (**„Update auf … wird geladen … 42 %“**), installiert sie (**„Wird installiert …“**) und startet danach von selbst neu. Dauert das Laden zu lange, startet **Später – Launcher jetzt öffnen** den Launcher sofort; das Update lädt dann im Hintergrund weiter.
+3. Läuft der Launcher schon länger, schaut er alle 30 Minuten nach. Eine neue Version lädt er im Hintergrund; ist sie fertig, steht in der Seitenleiste **Update bereit** mit **Jetzt neu starten**. Spielst du gerade, kommt der Hinweis erst nach dem Spiel. Spätestens beim Beenden des Launchers wird installiert.
+4. Beim ersten Start der neuen Version zeigt der Launcher einmal **„Neu in HeldixClient …“** mit den Änderungen.
 
 Jede Version ist vom HeldixClient-Team signiert. Der Launcher installiert nur Updates mit gültiger Signatur und unveränderter Datei – und nie eine ältere Version als die installierte.
 
-> **Hinweis:** Solange Minecraft läuft, wird nicht installiert. Beende zuerst das Spiel.
+> **Hinweis:** Solange Minecraft läuft, wird nicht installiert – auch nicht beim Start, wenn das Spiel aus der letzten Sitzung noch offen ist. Klappt eine Installation nicht, startet der Launcher normal und versucht es später noch einmal.
 
 ## Einstellungen
 Unter **Einstellungen → Updates** findest du:
-- **Automatisch aktualisieren:** im Hintergrund laden und beim Beenden installieren. Ist der Schalter aus, sucht der Launcher nicht mehr von selbst.
-- **Nach Updates suchen:** prüft sofort und lädt eine neue Version gleich herunter. Danach installierst du sie mit **Neu starten und installieren**.
+- **Automatisch aktualisieren:** beim Start prüfen und gleich installieren, im laufenden Launcher im Hintergrund laden. Ist der Schalter aus, zeigt der Launcher beim Start nur **Update verfügbar** mit **Jetzt installieren** und installiert nichts von selbst.
+- **Nach Updates suchen:** prüft sofort und lädt eine neue Version gleich herunter. Danach installierst du sie mit **Jetzt neu starten**.
 - **Versionsverlauf:** öffnet die Liste aller Versionen mit ihren Änderungen.
 
 ## Mac: neue Version laden
-Auf dem Mac aktualisiert sich der Launcher nicht selbst. Er meldet eine neue Version aber in der Seitenleiste und unter **Einstellungen → Updates**:
+Auf dem Mac aktualisiert sich der Launcher nicht selbst. Er meldet eine neue Version aber beim Start (**Update verfügbar**), in der Seitenleiste und unter **Einstellungen → Updates**:
 1. Klicke auf **Herunterladen**. Die [Download-Seite](/download) öffnet sich.
 2. Lade die passende `.dmg`-Datei (Apple Silicon oder Intel).
 3. Beende HeldixClient, öffne die DMG und ziehe HeldixClient wieder in **Programme**. Ersetze dabei die alte Version.
@@ -35,4 +35,5 @@ Deine Instanzen, Welten und Konten bleiben erhalten – sie liegen nicht in der 
 ## Fehlermeldungen
 - **„Update-Server nicht erreichbar. Später erneut versuchen.“** – Der Launcher erreicht heldixclient.com gerade nicht. Prüfe deine Internetverbindung oder schau auf die [Statusseite](/status).
 - **„Die Signatur des Updates stimmt nicht. Das Update wird nicht installiert.“** – Das Update wurde zu deiner Sicherheit abgelehnt. Lade die aktuelle Version über die [Download-Seite](/download).
-- **„Erst das Spiel beenden, dann aktualisieren.“** – Beende Minecraft und klicke noch einmal auf **Neu starten**.
+- **„Erst das Spiel beenden, dann aktualisieren.“** – Beende Minecraft und klicke noch einmal auf **Jetzt neu starten**.
+- **„Der Installer ließ sich nicht starten. Später erneut versuchen.“** – Meist hält ein Virenscanner die Datei kurz fest. Der Launcher versucht es später von selbst noch einmal; sonst hilft die [Download-Seite](/download).

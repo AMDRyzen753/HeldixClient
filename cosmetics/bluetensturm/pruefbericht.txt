@@ -1,0 +1,33 @@
+Prüfbericht: Blütensturm (bluetensturm), Slot aura, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  auras/BlossomStorm/BlossomStorm.cosmetic.json  1337,4 KB  sha256 dc35fad9157d63909a7f9a4f9f70623414d6578f2cd2b73bc8fb9618c1855693
+  auras/BlossomStorm/textures/BlossomStorm_albedo.png  3,5 KB  sha256 15970d8fc15b9fc15f7b82d9035324fc2c8ec47fae11227da13f31bc0820bed4
+  auras/BlossomStorm/textures/BlossomStorm_emissive_anim.png  32,2 KB  sha256 229752f26031d9c9e8dbe5b048eda24d52db9fa9b2ae02bfdb2d1ce0be776dcd
+
+Größe:
+  vorher: 1373,1 KB (JSON 1337,4 KB + Texturen)
+  nachher: Manifest 368,1 KB von höchstens 512,0 KB, Umschlag etwa 376,4 KB von 544,0 KB
+
+Mesh:
+  4264 Vertices, 2132 Dreiecke, 47 Knochen, größte Rundung der Positionen 0,0156 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+
+Animationen (7), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 96 Frames bei 24 fps, Schleife, 46 Spuren, 3278 Keys
+  Active: 48 Frames bei 24 fps, Schleife, 47 Spuren, 2180 Keys
+  Sneak: 144 Frames bei 24 fps, Schleife, 47 Spuren, 3128 Keys
+  Emote: 120 Frames bei 24 fps, Schleife, 46 Spuren, 5192 Keys
+  Spawn: 31 Frames bei 24 fps, einmalig, 47 Spuren, 1123 Keys
+  Despawn: 25 Frames bei 24 fps, einmalig, 47 Spuren, 938 Keys
+  Celebrate: 41 Frames bei 24 fps, einmalig, 47 Spuren, 2261 Keys
+  zusammen 18100 Keys statt 51719 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1497°, move 0,0200 px, scale 0,0020
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,0633 px (Despawn, Frame 5, Vertex 3281)
+
+Zustände: 15 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,35 s
+Partikel: 4 Vorschläge → 4 Einträge (.L-Knochen auch für .R)
+  gekürzt: minecraft:cherry_leaves an bs_ground: 25/s → 20/s (Grenze)
+Leuchten: 8 Bilder, 3 Ticks je Bild, Puls 3 s zwischen 0,7 und 1
+Texturen: texture.png 256 × 256 (3,5 KB) = BlossomStorm_albedo.png; glow.png 256 × 2048 (32,2 KB) = BlossomStorm_emissive_anim.png

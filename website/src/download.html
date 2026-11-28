@@ -1,147 +1,225 @@
-<!--seite {"titel": "Download", "beschreibung": "HeldixClient kostenlos herunterladen – für Windows 10 und 11 sowie macOS 11 oder neuer (Apple Silicon und Intel). Mit Prüfsummen und Installationsanleitung.", "bild": "/images/launcher-start.png"}-->
+<!--seite {"titel":"Download","beschreibung":"HeldixClient kostenlos herunterladen – für Windows 10 und 11 sowie macOS 11 oder neuer (Apple Silicon und Intel). Mit Prüfsummen, Anforderungen und Installation Schritt für Schritt.","software":true}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
 <script type="module" src="/download.js"></script>
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="download">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap download-page" data-api-base="https://__API_DOMAIN__">
-  <div class="page-hero">
-    <span class="eyebrow">Download</span>
-    <h1>HeldixClient <span class="gradient">herunterladen</span></h1>
-    <p class="lead">Kostenlos für Windows und Mac. Installieren, mit deinem Microsoft-Konto anmelden, Instanz wählen, spielen.</p>
-  </div>
-
-  <p class="notice" id="download-fehler" role="status" hidden>Die Liste der Dateien ist gerade nicht erreichbar. Die Download-Knöpfe funktionieren trotzdem, sobald der Server wieder läuft – sonst hilft der <a href="/konto#ziel=support">Support</a>.</p>
-
-  <!-- Empfehlung für das erkannte System -->
-  <div class="recommend glass" id="empfohlen" aria-live="polite">
-    <div class="recommend-main">
-      <span class="recommend-icon" aria-hidden="true">{{icon:download}}</span>
-      <div class="recommend-text">
-        <p class="eyebrow" id="empfohlen-label">Empfohlen</p>
-        <h2 id="empfohlen-titel">Für Windows und Mac</h2>
-        <p class="muted" id="empfohlen-meta">Version {{VERSION}}</p>
-        <p class="recommend-hint" id="empfohlen-hinweis" hidden></p>
+<main id="inhalt" class="download-page" data-api-base="https://__API_DOMAIN__">
+  <section class="page-hero" aria-labelledby="seite-titel">
+    <div class="container">
+      <div class="page-hero__inner">
+        <span class="eyebrow">{{icon:download}}Download</span>
+        <h1 class="h1" id="seite-titel">HeldixClient <span class="text-gradient">herunterladen</span></h1>
+        <p class="lead">Kostenlos für Windows und Mac. Installieren, beim ersten Start einrichten, spielen – in ein paar Minuten.</p>
       </div>
     </div>
-    <div class="recommend-actions" id="empfohlen-aktionen">
-      <a class="button big" id="download-primary" href="https://__API_DOMAIN__/v1/launcher/download/latest/windows">{{icon:download}}<span>Für Windows herunterladen</span></a>
-      <a class="button big ghost" id="download-secondary" href="https://__API_DOMAIN__/v1/launcher/download/latest/mac-arm64">{{icon:download}}<span>Für Mac herunterladen</span></a>
-    </div>
-  </div>
-
-  <!-- Alle Systeme -->
-  <section id="alle-systeme" aria-labelledby="systeme-titel">
-    <div class="section-head">
-      <span class="eyebrow">Alle Systeme</span>
-      <h2 id="systeme-titel">Wähle dein System</h2>
-      <p>Jede Datei kommt direkt von unserem Server. Mit der SHA-256-Prüfsumme kannst du kontrollieren, dass sie unverändert ist.</p>
-    </div>
-    <div class="system-grid">
-      <article class="system-card" id="system-windows" data-ziel="windows">
-        <div class="system-head"><span class="badge">{{icon:monitor}}</span><div><h3>Windows</h3><p>Windows 10 und 11 · 64 Bit</p></div></div>
-        <div class="system-files" data-dateien></div>
-        <p class="system-missing" data-fehlt hidden>Für dieses System gibt es noch keinen Download. Frag gern beim <a href="/konto#ziel=support">Support</a> nach.</p>
-        <a class="button" data-knopf href="https://__API_DOMAIN__/v1/launcher/download/latest/windows">{{icon:download}}Installer laden</a>
-      </article>
-      <article class="system-card" id="system-mac-arm64" data-ziel="mac-arm64">
-        <div class="system-head"><span class="badge">{{icon:chip}}</span><div><h3>Mac mit Apple Silicon</h3><p>macOS 11 oder neuer · M1 und neuer</p></div></div>
-        <div class="system-files" data-dateien></div>
-        <p class="system-missing" data-fehlt hidden>Für dieses System gibt es noch keinen Download. Frag gern beim <a href="/konto#ziel=support">Support</a> nach.</p>
-        <a class="button" data-knopf href="https://__API_DOMAIN__/v1/launcher/download/latest/mac-arm64">{{icon:download}}Disk-Image laden</a>
-      </article>
-      <article class="system-card" id="system-mac-x64" data-ziel="mac-x64">
-        <div class="system-head"><span class="badge">{{icon:chip}}</span><div><h3>Mac mit Intel</h3><p>macOS 11 oder neuer · Intel-Prozessor</p></div></div>
-        <div class="system-files" data-dateien></div>
-        <p class="system-missing" data-fehlt hidden>Für dieses System gibt es noch keinen Download. Frag gern beim <a href="/konto#ziel=support">Support</a> nach.</p>
-        <a class="button" data-knopf href="https://__API_DOMAIN__/v1/launcher/download/latest/mac-x64">{{icon:download}}Disk-Image laden</a>
-      </article>
-    </div>
-    <p class="hint center">Welcher Mac? Unter Apple-Menü → „Über diesen Mac“ steht bei Apple Silicon „Chip“ (M1, M2 …), bei Intel „Prozessor“. Die meisten Macs ab Ende 2020 haben Apple Silicon.</p>
   </section>
 
-  <!-- Version -->
-  <section id="version" aria-labelledby="version-titel">
-    <div class="version-card glass">
+  <div class="container">
+    <!-- Einladung aus dem Link (#einladung=<code>) -->
+    <div class="invite-banner" id="download-einladung" role="status" hidden>
+      <span class="icon-tile icon-tile--lg icon-tile--voice">{{icon:gift}}</span>
       <div>
-        <span class="eyebrow">Aktuelle Version</span>
-        <h2 id="version-titel"><span id="version-nummer">{{VERSION}}</span></h2>
-        <p class="muted" id="version-datum"></p>
+        <strong id="download-einladung-titel">Du wurdest eingeladen</strong>
+        <span id="download-einladung-text">Lade HeldixClient – nach der Installation öffnet sich die Einladung im Launcher, und ihr seid gleich befreundet.</span>
       </div>
-      <div class="version-notes" id="version-hinweise"><p class="muted">Was neu ist, steht im <a href="/neuigkeiten#versionen">Versionsverlauf</a>.</p></div>
+      <a class="btn btn--social btn--sm" id="download-einladung-link" href="/einladung">{{icon:ticket}}Einladung ansehen</a>
+    </div>
+
+    <p class="notice" id="download-fehler" role="status" hidden>Die Liste der Dateien ist gerade nicht erreichbar. Die Download-Knöpfe funktionieren trotzdem, sobald der Server wieder läuft – sonst hilft der <a href="/konto#reiter=support">Support</a>.</p>
+
+    <!-- Empfehlung für das erkannte System -->
+    <div class="card card--accent recommend" id="empfohlen" aria-live="polite">
+      <div class="recommend-main">
+        <span class="icon-tile icon-tile--lg" id="empfohlen-icon">{{icon:download}}</span>
+        <div class="recommend-text">
+          <p class="eyebrow" id="empfohlen-label">Empfohlen</p>
+          <h2 id="empfohlen-titel">Für Windows und Mac</h2>
+          <p class="text-2" id="empfohlen-meta">Version {{VERSION}}</p>
+          <p class="recommend-hint" id="empfohlen-hinweis" hidden></p>
+        </div>
+      </div>
+      <div class="recommend-actions" id="empfohlen-aktionen">
+        <a class="btn btn--primary btn--lg" id="download-primary" href="https://__API_DOMAIN__/v1/launcher/download/latest/windows">{{icon:download}}<span>Für Windows herunterladen</span></a>
+        <a class="btn btn--secondary btn--lg" id="download-secondary" href="https://__API_DOMAIN__/v1/launcher/download/latest/mac-arm64">{{icon:download}}<span>Für Mac herunterladen</span></a>
+        <span class="tiny center">Kostenlos · Version <span id="empfohlen-version">{{VERSION}}</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Installation Schritt für Schritt -->
+  <section class="section" id="anleitung" aria-labelledby="anleitung-titel">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">{{icon:play}}Installation</span>
+        <h2 class="h2" id="anleitung-titel">Schritt für Schritt</h2>
+        <p class="lead">So kommst du vom Download bis ins Spiel. Die Einrichtung beim ersten Start ist auf Windows und Mac gleich.</p>
+      </div>
+      <div class="tabs install" id="anleitung-reiter">
+        <div class="tabs__list" role="tablist" aria-label="System" id="anleitung-tabs">
+          <button class="tabs__tab" type="button" role="tab" id="tab-windows" data-tab="windows" aria-controls="panel-windows" aria-selected="true">{{icon:windows}}Windows</button>
+          <button class="tabs__tab" type="button" role="tab" id="tab-mac" data-tab="mac" aria-controls="panel-mac" aria-selected="false" tabindex="-1">{{icon:apple}}Mac</button>
+        </div>
+        <div class="tabs__panel" id="panel-windows" role="tabpanel" aria-labelledby="tab-windows">
+          <h3 class="tabs__panel-title">Windows</h3>
+          <ol class="install-steps">
+            <li class="install-step">
+              <div class="install-step__text">
+                <h3>Installer laden und starten</h3>
+                <p>Die Datei heißt <code>HeldixClient-Setup-{{VERSION}}.exe</code>. Der Installer im HeldixClient-Design fragt nach dem Ordner und startet HeldixClient am Ende.</p>
+                <p class="small">Erscheint „Der Computer wurde durch Windows geschützt“, klick auf <strong>„Weitere Informationen“</strong> und dann auf <strong>„Trotzdem ausführen“</strong> – der Installer hat noch keine kostenpflichtige Signatur.</p>
+              </div>
+              <figure class="install-step__media frame"><img src="/bilder/download-installer.webp" width="497" height="360" alt="Der Windows-Installer von HeldixClient: Willkommen bei HeldixClient, mit den Knöpfen Weiter und Abbrechen." loading="lazy"></figure>
+            </li>
+            <li class="install-step">
+              <div class="install-step__text">
+                <h3>Mit Microsoft anmelden</h3>
+                <p>Die Einrichtung beim ersten Start fragt nach deinem Microsoft-Konto – dem, mit dem du Minecraft: Java Edition gekauft hast. Dein Passwort gibst du nur im Fenster von Microsoft ein.</p>
+              </div>
+              <figure class="install-step__media frame"><img src="/bilder/einrichtung-konto.webp" width="680" height="380" alt="Einrichtung, Schritt Konto: Mit Microsoft anmelden." loading="lazy"></figure>
+            </li>
+            <li class="install-step">
+              <div class="install-step__text">
+                <h3>Addons aussuchen</h3>
+                <p>Offizielle Addons wie Voice Chat, Minimap und Uhrzeit &amp; Spielzeit sind vorausgewählt – geprüft und signiert vom Team. Ändern kannst du alles später im Addon-Store.</p>
+              </div>
+              <figure class="install-step__media frame"><img src="/bilder/einrichtung-addons.webp" width="960" height="600" alt="Einrichtung, Schritt Addons: sechs offizielle Addons, drei davon empfohlen und ausgewählt." loading="lazy"></figure>
+            </li>
+            <li class="install-step">
+              <div class="install-step__text">
+                <h3>Spielen</h3>
+                <p>„Spielen“ drücken – Minecraft und Java lädt der Launcher selbst. Hat dich jemand eingeladen, nimmst du die Einladung am Ende der Einrichtung an. Updates installiert der Launcher beim Start von allein.</p>
+              </div>
+              <div class="install-step__note">{{icon:friends}}<strong>Tipp:</strong> Deinen eigenen Einladungs-Link findest du im Launcher unter Freunde → Einladen.</div>
+            </li>
+          </ol>
+        </div>
+        <div class="tabs__panel" id="panel-mac" role="tabpanel" aria-labelledby="tab-mac" hidden>
+          <h3 class="tabs__panel-title">Mac</h3>
+          <ol class="install-steps">
+            <li class="install-step">
+              <div class="install-step__text">
+                <h3>Disk-Image laden und öffnen</h3>
+                <p>Für Apple Silicon (M1 und neuer) oder Intel – welche Datei passt, steht unten. HeldixClient in „Programme“ ziehen und von dort starten.</p>
+              </div>
+              <div class="install-step__note">{{icon:info}}<strong>Welcher Mac?</strong> Unter Apple-Menü → „Über diesen Mac“ steht bei Apple Silicon „Chip“ (M1, M2 …), bei Intel „Prozessor“.</div>
+            </li>
+            <li class="install-step">
+              <div class="install-step__text">
+                <h3>Ersten Start erlauben</h3>
+                <p>macOS blockiert den ersten Start, weil die App nicht von Apple beglaubigt ist: Öffne <strong>Systemeinstellungen → Datenschutz &amp; Sicherheit</strong> und klick unten auf <strong>„Dennoch öffnen“</strong>.</p>
+              </div>
+              <div class="install-step__note">{{icon:help-circle}}<strong>Hilfe:</strong> <a href="/hilfe/mac-app-blockiert">Mac blockiert die App</a> – mit allen Schritten.</div>
+            </li>
+            <li class="install-step">
+              <div class="install-step__text">
+                <h3>Einrichten und anmelden</h3>
+                <p>Die Einrichtung führt dich durch Microsoft-Anmeldung, empfohlene Addons und – falls vorhanden – deine Einladung.</p>
+              </div>
+              <figure class="install-step__media frame"><img src="/bilder/einrichtung-willkommen.webp" width="960" height="600" alt="Einrichtung beim ersten Start: Willkommen bei HeldixClient, mit Einladung und den Schritten Konto, Addons und Fertig." loading="lazy"></figure>
+            </li>
+            <li class="install-step">
+              <div class="install-step__text">
+                <h3>Spielen und auf dem Laufenden bleiben</h3>
+                <p>„Spielen“ drücken – Minecraft und Java lädt der Launcher selbst. Neue Versionen meldet der Launcher; du lädst sie dann hier.</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </div>
     </div>
   </section>
 
-  <!-- Anleitung -->
-  <section id="anleitung" aria-labelledby="anleitung-titel">
-    <div class="section-head">
-      <span class="eyebrow">Installation</span>
-      <h2 id="anleitung-titel">Schritt für Schritt</h2>
-    </div>
-    <div class="install glass">
-      <div class="tabs install-tabs" role="tablist" aria-label="System" id="anleitung-tabs">
-        <button class="tab" type="button" role="tab" id="tab-windows" data-tab="windows" aria-controls="panel-windows" aria-selected="true">{{icon:monitor}}Windows</button>
-        <button class="tab" type="button" role="tab" id="tab-mac" data-tab="mac" aria-controls="panel-mac" aria-selected="false" tabindex="-1">{{icon:chip}}Mac</button>
+  <!-- Alle Systeme und Prüfsummen -->
+  <section class="section section--raised" id="alle-systeme" aria-labelledby="systeme-titel">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">{{icon:file}}Alle Systeme</span>
+        <h2 class="h2" id="systeme-titel">Dateien und Prüfsummen</h2>
+        <p class="lead">Jede Datei kommt direkt von unserem Server. Mit der SHA-256-Prüfsumme kontrollierst du, dass sie unverändert ist.</p>
       </div>
-      <div class="install-panel" id="panel-windows" role="tabpanel" aria-labelledby="tab-windows" tabindex="0">
-        <ol class="steps big-steps">
-          <li><span><strong>Installer laden und starten.</strong> Die Datei heißt <code>HeldixClient-Setup-…exe</code>.</span></li>
-          <li><span><strong>Windows SmartScreen:</strong> Erscheint „Der Computer wurde durch Windows geschützt“, klick auf <strong>„Weitere Informationen“</strong> und dann auf <strong>„Trotzdem ausführen“</strong>. Der Installer hat noch keine kostenpflichtige Signatur.</span></li>
-          <li><span><strong>Anmelden</strong> mit dem Microsoft-Konto, mit dem du Minecraft gekauft hast.</span></li>
-          <li><span><strong>Spielen drücken.</strong> Minecraft und Java lädt der Launcher selbst. Später aktualisiert er sich von allein.</span></li>
-        </ol>
-      </div>
-      <div class="install-panel" id="panel-mac" role="tabpanel" aria-labelledby="tab-mac" tabindex="0" hidden>
-        <ol class="steps big-steps">
-          <li><span><strong>Disk-Image laden und öffnen</strong> (Apple Silicon oder Intel, siehe oben).</span></li>
-          <li><span><strong>HeldixClient in „Programme“ ziehen</strong> und von dort starten.</span></li>
-          <li><span><strong>macOS blockiert den ersten Start:</strong> Öffne <strong>Systemeinstellungen → Datenschutz &amp; Sicherheit</strong> und klick unten auf <strong>„Dennoch öffnen“</strong>. Die App ist nicht von Apple beglaubigt.</span></li>
-          <li><span><strong>Anmelden und spielen</strong> wie unter Windows. Neue Versionen meldet der Launcher; du lädst sie dann hier.</span></li>
-        </ol>
+      <div class="system-grid">
+        <article class="card system-card" id="system-windows" data-ziel="windows">
+          <div class="system-head"><span class="icon-tile">{{icon:windows}}</span><div><h3>Windows</h3><p>Windows 10 und 11 · 64 Bit</p></div></div>
+          <div class="system-files" data-dateien></div>
+          <p class="text-2 small" data-fehlt hidden>Für dieses System gibt es noch keinen Download. Frag gern beim <a href="/konto#reiter=support">Support</a> nach.</p>
+          <a class="btn btn--secondary" data-knopf href="https://__API_DOMAIN__/v1/launcher/download/latest/windows">{{icon:download}}Installer laden</a>
+        </article>
+        <article class="card system-card" id="system-mac-arm64" data-ziel="mac-arm64">
+          <div class="system-head"><span class="icon-tile">{{icon:apple}}</span><div><h3>Mac mit Apple Silicon</h3><p>macOS 11 oder neuer · M1 und neuer</p></div></div>
+          <div class="system-files" data-dateien></div>
+          <p class="text-2 small" data-fehlt hidden>Für dieses System gibt es noch keinen Download. Frag gern beim <a href="/konto#reiter=support">Support</a> nach.</p>
+          <a class="btn btn--secondary" data-knopf href="https://__API_DOMAIN__/v1/launcher/download/latest/mac-arm64">{{icon:download}}Disk-Image laden</a>
+        </article>
+        <article class="card system-card" id="system-mac-x64" data-ziel="mac-x64">
+          <div class="system-head"><span class="icon-tile">{{icon:chip}}</span><div><h3>Mac mit Intel</h3><p>macOS 11 oder neuer · Intel-Prozessor</p></div></div>
+          <div class="system-files" data-dateien></div>
+          <p class="text-2 small" data-fehlt hidden>Für dieses System gibt es noch keinen Download. Frag gern beim <a href="/konto#reiter=support">Support</a> nach.</p>
+          <a class="btn btn--secondary" data-knopf href="https://__API_DOMAIN__/v1/launcher/download/latest/mac-x64">{{icon:download}}Disk-Image laden</a>
+        </article>
       </div>
     </div>
   </section>
 
-  <!-- Voraussetzungen und Fragen -->
-  <section id="voraussetzungen" aria-labelledby="voraussetzungen-titel">
-    <div class="two-col">
-      <div class="glass panel-pad">
-        <h2 id="voraussetzungen-titel">Voraussetzungen</h2>
+  <!-- Anforderungen, Version, Fragen -->
+  <section class="section" id="voraussetzungen" aria-labelledby="voraussetzungen-titel">
+    <div class="container why-band">
+      <div>
+        <span class="eyebrow">{{icon:monitor}}Anforderungen</span>
+        <h2 class="h2" id="voraussetzungen-titel">Das brauchst du</h2>
         <dl class="requirements">
-          <dt>Spiel</dt><dd>Minecraft: Java Edition (gekauft, Microsoft-Konto)</dd>
-          <dt>Windows</dt><dd>Windows 10 oder 11, 64 Bit</dd>
-          <dt>Mac</dt><dd>macOS 11 oder neuer, Apple Silicon oder Intel</dd>
-          <dt>Speicher</dt><dd>4 GB RAM oder mehr</dd>
-          <dt>Java</dt><dd>lädt der Launcher selbst</dd>
-          <dt>Grafik</dt><dd>Vulkan oder OpenGL (Mac: OpenGL)</dd>
+          <div><dt>Spiel</dt><dd>Minecraft: Java Edition (gekauft, Microsoft-Konto)</dd></div>
+          <div><dt>Windows</dt><dd>Windows 10 oder 11, 64 Bit</dd></div>
+          <div><dt>Mac</dt><dd>macOS 11 oder neuer, Apple Silicon oder Intel</dd></div>
+          <div><dt>Speicher</dt><dd>4 GB RAM oder mehr</dd></div>
+          <div><dt>Java</dt><dd>lädt der Launcher selbst</dd></div>
+          <div><dt>Grafik</dt><dd>Vulkan oder OpenGL (Mac: OpenGL)</dd></div>
+          <div><dt>Internet</dt><dd>für Anmeldung, Downloads, Freunde und Store</dd></div>
         </dl>
       </div>
-      <div class="faq compact-faq">
+      <div class="accordion">
         <details>
           <summary>Ist der Download sicher?{{icon:chevron-down}}</summary>
-          <p>Alle Dateien kommen von unserem eigenen Server. Die SHA-256-Prüfsumme oben zeigt, ob deine Datei unverändert ist. Unter Windows prüft der Launcher jedes Update zusätzlich mit einer digitalen Signatur.</p>
+          <div class="accordion__body"><p>Alle Dateien kommen von unserem eigenen Server. Die SHA-256-Prüfsumme oben zeigt, ob deine Datei unverändert ist. Jedes Update prüft der Launcher zusätzlich mit einer digitalen Signatur des Teams.</p></div>
         </details>
         <details>
           <summary>Warum warnt mein System?{{icon:chevron-down}}</summary>
-          <p>Die Dateien haben noch keine kostenpflichtige Signatur von Microsoft oder Apple. Deshalb fragt dein System beim ersten Start einmal nach – siehe Anleitung oben.</p>
+          <div class="accordion__body"><p>Die Dateien haben noch keine kostenpflichtige Signatur von Microsoft oder Apple. Deshalb fragt dein System beim ersten Start einmal nach – siehe Anleitung oben.</p></div>
         </details>
         <details>
           <summary>Wie bekomme ich Updates?{{icon:chevron-down}}</summary>
-          <p>Unter Windows aktualisiert sich der Launcher selbst. Auf dem Mac meldet er neue Versionen; du lädst sie dann auf dieser Seite.</p>
+          <div class="accordion__body"><p>Unter Windows installiert der Launcher Updates beim Start von selbst. Auf dem Mac meldet er neue Versionen; du lädst sie dann auf dieser Seite. Was neu ist, steht im <a href="/neuigkeiten#versionen">Versionsverlauf</a>.</p></div>
         </details>
         <details>
           <summary>Gibt es HeldixClient für Linux oder das Handy?{{icon:chevron-down}}</summary>
-          <p>Zurzeit nicht – nur für Windows und Mac.</p>
+          <div class="accordion__body"><p>Zurzeit nicht – nur für Windows und Mac.</p></div>
         </details>
         <details>
           <summary>Es klappt nicht – was nun?{{icon:chevron-down}}</summary>
-          <p>Im <a href="/hilfe">Hilfe-Center</a> stehen Lösungen für typische Probleme. Sonst schreib dem Team über eine <a href="/konto#ziel=support">Support-Anfrage</a>.</p>
+          <div class="accordion__body"><p>Im <a href="/hilfe">Hilfe-Center</a> stehen Lösungen für typische Probleme. Sonst schreib dem Team über eine <a href="/konto#reiter=support">Support-Anfrage</a>.</p></div>
         </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Aktuelle Version -->
+  <section class="section section--tight" id="version" aria-labelledby="version-titel">
+    <div class="container">
+      <div class="card version-box">
+        <div>
+          <span class="eyebrow">{{icon:sparkles}}Aktuelle Version</span>
+          <h2 id="version-titel"><span id="version-nummer">{{VERSION}}</span></h2>
+          <p class="text-3 small" id="version-datum"></p>
+        </div>
+        <div class="version-notes" id="version-hinweise">
+          {{VERSION_NEU_HTML}}
+          <p class="small"><a href="/neuigkeiten#versionen">Alle Versionen ansehen</a></p>
+        </div>
       </div>
     </div>
   </section>

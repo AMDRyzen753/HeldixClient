@@ -57,6 +57,15 @@ final class CosmeticTests {
 	private static final double HEAD_TOP = 2.001 * 0.9375;
 	private static final double SHOULDER = 1.501 * 0.9375;
 	private static final List<String> SLOTS = List.of("head", "back", "aura", "companion");
+	/** Einträge im Format 1 im Katalog des Test-Dienstes: Startsatz (17) und die zwei Belohnungen für Einladungen (access "unlock") */
+	private static final int CATALOG_SIZE = 19;
+	/** Einträge im Format 2 (aus Blender übernommen, cosmetics/<id>/; im Einzelnen prüft sie Format2Tests) */
+	private static final int CATALOG_SIZE_2 = 26;
+
+	/** Cosmetics im Format 1 (die Prüfungen hier zählen nur sie; Format 2 prüft Format2Tests) */
+	private static List<CosmeticCatalog.Item> classic(List<CosmeticCatalog.Item> items) {
+		return items.stream().filter(i -> i.format() == CosmeticFormat.FORMAT).toList();
+	}
 
 	private CosmeticTests() {
 	}
@@ -126,19 +135,28 @@ final class CosmeticTests {
 	// ======================================================================================
 
 	private static void catalog(TestContext t) throws Exception {
-		t.waitSoft(mc -> CosmeticCatalog.status() == CosmeticCatalog.Status.READY && CosmeticCatalog.items().size() >= 15, 40);
-		List<CosmeticCatalog.Item> items = t.compute(mc -> CosmeticCatalog.items());
-		t.log("Cosmetics im Katalog: " + items.stream().map(i -> i.id() + "(" + i.slot() + ")").toList() + ", verworfen " + CosmeticCatalog.rejected());
-		check(t, "Cosmetics: Katalog geladen und geprüft (" + items.size() + ")", items.size() == 15 && CosmeticCatalog.rejected().isEmpty());
+		t.waitSoft(mc -> CosmeticCatalog.status() == CosmeticCatalog.Status.READY && CosmeticCatalog.items().size() >= CATALOG_SIZE + CATALOG_SIZE_2, 40);
+		List<CosmeticCatalog.Item> all = t.compute(mc -> CosmeticCatalog.items());
+		List<CosmeticCatalog.Item> items = classic(all);
+		long meshes = all.stream().filter(i -> i.format() == CosmeticFormat.FORMAT_2).count();
+		t.log("Cosmetics im Katalog: " + items.stream().map(i -> i.id() + "(" + i.slot() + ")").toList() + ", dazu " + meshes + " im Format 2, verworfen "
+				+ CosmeticCatalog.rejected());
+		check(t, "Cosmetics: Katalog geladen und geprüft (" + items.size() + " im Format 1, " + meshes + " im Format 2)", items.size() == CATALOG_SIZE
+				&& meshes == CATALOG_SIZE_2 && all.size() == CATALOG_SIZE + CATALOG_SIZE_2 && CosmeticCatalog.rejected().isEmpty());
 		for (String slot : List.of("head", "back", "aura", "companion", "cape")) {
 			int expected = switch (slot) {
 				case "head" -> 5;
-				case "back", "aura" -> 3;
+				case "back" -> 5;
+				// je eine Belohnung für Einladungen dazu: Freundesfunken (Partikel), Freundesband (Cape)
+				case "aura" -> 4;
+				case "cape" -> 3;
 				default -> 2;
 			};
-			check(t, "Cosmetics: " + expected + " im Slot " + slot, t.compute(mc -> CosmeticCatalog.items(slot).size()) == expected);
+			check(t, "Cosmetics: " + expected + " im Slot " + slot, t.compute(mc -> classic(CosmeticCatalog.items(slot)).size()) == expected);
 		}
-		check(t, "Cosmetics: Team-Krone nur fürs Team", t.compute(mc -> CosmeticCatalog.item("team-krone").teamOnly() && !CosmeticCatalog.item("krone").teamOnly()));
+		check(t, "Cosmetics: Team-Krone nur fürs Team", t.compute(mc -> CosmeticCatalog.item("team-krone") != null && CosmeticCatalog.item("team-krone").teamOnly()
+				&& CosmeticCatalog.item("krone") != null && !CosmeticCatalog.item("krone").teamOnly()));
+		unlockRewards(t);
 		check(t, "Cosmetics: Modelle mit Bones und Flächen (Engelsflügel: 4 Bones, Ebenen mit zwei Seiten)", t.compute(mc -> {
 			CosmeticCatalog.Item wings = CosmeticCatalog.item("engelsfluegel");
 			return wings.mesh().boneCount() == 4 && wings.mesh().vertexCount() == 4 * 2 * 4 && wings.mesh().flaps();
@@ -150,7 +168,7 @@ final class CosmeticTests {
 		try (Stream<Path> list = Files.list(dir)) {
 			files = list.filter(p -> p.getFileName().toString().endsWith(".json")).count();
 		}
-		check(t, "Cosmetics: Umschläge im Zwischenspeicher (" + files + " in " + dir.getFileName() + ")", files == 15);
+		check(t, "Cosmetics: Umschläge im Zwischenspeicher (" + files + " in " + dir.getFileName() + ")", files == all.size());
 
 		// Signatur: echter Umschlag gilt, verändertes Manifest oder verändertes Signatur-Byte nicht
 		CosmeticCatalog.Item krone = t.compute(mc -> CosmeticCatalog.item("krone"));
@@ -187,6 +205,12 @@ final class CosmeticTests {
 		badPng.addProperty("texture", CosmeticFormat.PNG_DATA_URL_PREFIX + "iVBORw0KGgo=");
 		check(t, "Cosmetics: kaputtes PNG abgelehnt (" + ruleError(badPng) + ")", ruleError(badPng).startsWith("„texture“ ist beschädigt"));
 		check(t, "Cosmetics: echtes Manifest erfüllt alle Regeln", ruleError(parsed).isEmpty());
+		JsonObject unlockAccess = parsed.deepCopy();
+		unlockAccess.addProperty("access", "unlock");
+		check(t, "Cosmetics: Zugriff „unlock“ (Belohnung für Einladungen) ist erlaubt", ruleError(unlockAccess).isEmpty());
+		JsonObject badAccess = parsed.deepCopy();
+		badAccess.addProperty("access", "freunde");
+		check(t, "Cosmetics: unbekannter Zugriff abgelehnt (" + ruleError(badAccess) + ")", ruleError(badAccess).equals("„access“ muss eins von all, team, unlock sein"));
 
 		// Palette-PNG (Farbtyp 3 mit tRNS): dekodiert und mit sichtbaren Pixeln
 		check(t, "Cosmetics: Krone ist ein Palette-PNG", (krone.manifest().texture()[25] & 0xFF) == 3);
@@ -203,9 +227,9 @@ final class CosmeticTests {
 		Files.writeString(kroneFile, changed.toString(), StandardCharsets.UTF_8);
 		t.run(mc -> CosmeticCatalog.forgetForTest());
 		t.run(mc -> CosmeticCatalog.refresh(true));
-		t.waitSoft(mc -> CosmeticCatalog.status() == CosmeticCatalog.Status.READY && CosmeticCatalog.items().size() == 15, 30);
+		t.waitSoft(mc -> CosmeticCatalog.status() == CosmeticCatalog.Status.READY && CosmeticCatalog.items().size() == all.size(), 30);
 		String restored = Files.readString(kroneFile, StandardCharsets.UTF_8);
-		check(t, "Cosmetics: veränderter Zwischenspeicher verworfen und neu geladen", t.compute(mc -> CosmeticCatalog.items().size()) == 15
+		check(t, "Cosmetics: veränderter Zwischenspeicher verworfen und neu geladen", t.compute(mc -> CosmeticCatalog.items().size()) == all.size()
 				&& restored.equals(envelope) && CosmeticCatalog.rejected().isEmpty());
 	}
 
@@ -225,6 +249,56 @@ final class CosmeticTests {
 		} catch (CosmeticFormat.InvalidCosmeticException e) {
 			return e.getMessage();
 		}
+	}
+
+	/**
+	 * Belohnungen für Einladungen (access "unlock", im Test-Dienst veröffentlicht): Freundesfunken (Partikel) und Freundesband
+	 * (Cape) stehen im Katalog, sind für das Testkonto gesperrt (es hat niemanden eingeladen), und Auswählen wird im Spiel und
+	 * beim Dienst abgelehnt. Fehlen sie im Katalog, schlagen die Prüfungen fehl, ohne den Test abzubrechen.
+	 */
+	private static void unlockRewards(TestContext t) {
+		CosmeticCatalog.Item funken = t.compute(mc -> CosmeticCatalog.item("freundesfunken"));
+		CosmeticCatalog.Item band = t.compute(mc -> CosmeticCatalog.item("freundesband"));
+		check(t, "Cosmetics: Belohnung „Freundesfunken“ (Partikel, access unlock) im Katalog", funken != null && "aura".equals(funken.slot())
+				&& funken.unlockOnly() && !funken.teamOnly());
+		check(t, "Cosmetics: Belohnung „Freundesband“ (Cape, access unlock) im Katalog", band != null && "cape".equals(band.slot()) && band.unlockOnly());
+		try {
+			Social.refreshCosmetics().get(15, java.util.concurrent.TimeUnit.SECONDS);
+		} catch (Exception e) {
+			t.log("Cosmetics: Freischaltungen nicht neu geladen (" + e + ")");
+		}
+		t.log("Cosmetics: freigeschaltet " + t.compute(mc -> Cosmetics.unlocked()));
+		check(t, "Cosmetics: Belohnungen für das Testkonto gesperrt", t.compute(mc -> !Cosmetics.unlocked("freundesfunken") && !Cosmetics.unlocked("freundesband")));
+		check(t, "Cosmetics: Sperrgrund „Belohnung für Einladungen“", funken != null && band != null
+				&& Cosmetics.UNLOCK_HINT.equals(t.compute(mc -> Cosmetics.lockReason(funken))) && Cosmetics.UNLOCK_HINT.equals(t.compute(mc -> {
+					Capes.Cape cape = Capes.byId("freundesband");
+					return cape == null ? null : cape.lockReason();
+				})));
+		String error;
+		try {
+			t.compute(mc -> Cosmetics.choose("aura", "freundesfunken")).get(10, java.util.concurrent.TimeUnit.SECONDS);
+			error = "angenommen";
+		} catch (java.util.concurrent.ExecutionException e) {
+			error = e.getCause() == null ? String.valueOf(e) : e.getCause().getMessage();
+		} catch (Exception e) {
+			error = String.valueOf(e);
+		}
+		check(t, "Cosmetics: Freundesfunken im Spiel abgelehnt (" + error + ")", error != null && error.contains("Freunde zu HeldixClient einlädst"));
+		JsonObject put = new JsonObject();
+		put.addProperty("slot", "aura");
+		put.addProperty("id", "freundesfunken");
+		String serviceAnswer;
+		try {
+			request("PUT", "/v1/me/cosmetics", put, token(t));
+			serviceAnswer = "angenommen";
+		} catch (IllegalStateException e) {
+			serviceAnswer = e.getMessage();
+		}
+		check(t, "Cosmetics: Dienst lehnt gesperrte Belohnung ab (" + serviceAnswer + ")", serviceAnswer != null && serviceAnswer.contains(" 403 "));
+		check(t, "Cosmetics: gesperrtes Freundesband wird nicht getragen", t.compute(mc -> {
+			Capes.Cape selected = Capes.selected();
+			return selected == null || !"freundesband".equals(selected.id());
+		}));
 	}
 
 	// ======================================================================================
@@ -285,6 +359,22 @@ final class CosmeticTests {
 		}
 		check(t, "Cosmetics: Dienst lehnt Team-Krone ab (" + serviceAnswer + ")", serviceAnswer.contains(" 403 "));
 
+		// Belohnung für Einladungen: gesperrt markiert, Klick legt sie nicht an, Hinweis zeigt den Weg zu den Einladungen
+		if (t.compute(mc -> CosmeticCatalog.item("freundesfunken", "aura")) != null) {
+			openTab(t, "aura");
+			int rewardIndex = index(t, "aura", "freundesfunken");
+			int[] reward = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).cosmeticCenter(rewardIndex));
+			t.moveMouse(reward[0], reward[1]);
+			t.waitTicks(4);
+			t.screenshot("heldix-40e2-cosmetics-belohnung");
+			t.click(reward[0], reward[1]);
+			t.waitTicks(10);
+			check(t, "Cosmetics: Freundesfunken im Menü gesperrt (Belohnung für Einladungen)", "herzen".equals(t.compute(mc -> Cosmetics.mine("aura")))
+					&& t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).describeRows()).stream().anyMatch(r -> r.contains("Belohnung für Einladungen")));
+		} else {
+			check(t, "Cosmetics: Freundesfunken im Menü (fehlt im Katalog)", false);
+		}
+
 		// Optionen
 		openTab(t, "options");
 		t.moveMouse(5, 5);
@@ -328,6 +418,12 @@ final class CosmeticTests {
 		int[] center = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).cosmeticCenter(index));
 		t.moveMouse(center[0], center[1]);
 		t.waitTicks(6);
+		if (!id.equals(t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).cosmeticHovered()))) {
+			// Unter Last scrollt die Liste noch: Position neu holen und etwas länger warten
+			int[] again = t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).cosmeticCenter(index));
+			t.moveMouse(again[0], again[1]);
+			t.waitSoft(mc -> id.equals(((HeldixMenuScreen) mc.gui.screen()).cosmeticHovered()), 2);
+		}
 		check(t, "Cosmetics: Kachel " + id + " unter der Maus zeigt die Vorschau", id.equals(t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).cosmeticHovered())));
 		t.screenshot(screenshot);
 		t.click(center[0], center[1]);
@@ -369,10 +465,14 @@ final class CosmeticTests {
 			mc.options.setCameraType(CameraType.THIRD_PERSON_FRONT);
 		});
 		t.waitTicks(30);
+		// Blickrichtung kurz vor dem Messen noch einmal setzen: eine Mausbewegung am PC während der Wartezeit kippt sonst den Kopf
+		t.run(mc -> face(mc, 0f));
+		t.waitTicks(3);
 		CosmeticRenderer.Probe probe = probe(t, own);
 		double[] feet = t.compute(mc -> new double[] {mc.player.getX(), mc.player.getY(), mc.player.getZ()});
 		t.log("Anker eigener Spieler: Füße " + fmt(feet) + ", Kopf " + fmt(probe.head()) + ", Rücken " + fmt(probe.back()) + ", Begleiter " + fmt(probe.companion())
-				+ ", Partikel " + probe.particles());
+				+ ", Partikel " + probe.particles() + ", Blick " + t.compute(mc -> String.format(java.util.Locale.ROOT, "y %.1f / x %.1f / Kopf %.1f / Körper %.1f",
+						mc.player.getYRot(), mc.player.getXRot(), mc.player.getYHeadRot(), mc.player.yBodyRot)));
 		check(t, "Cosmetics: Krone sitzt auf der Kopf-Oberseite (" + fmt(probe.head()) + ")", near(probe.head(), feet[0], feet[1] + HEAD_TOP, feet[2], 0.12));
 		check(t, "Cosmetics: Flügel am Rücken auf Schulterhöhe (" + fmt(probe.back()) + ")", near(probe.back(), feet[0], feet[1] + SHOULDER, feet[2], 0.12));
 		// Blick nach Süden (+z): rechte Seite = -x, offset (0,8 | 1,45 | -0,3)
@@ -438,6 +538,31 @@ final class CosmeticTests {
 		check(t, "Cosmetics: Zuschauer ohne Cosmetics", !rendering(t, own, "back") && !rendering(t, own, "aura"));
 		t.serverCommand("gamemode creative @p");
 		check(t, "Cosmetics: wieder sichtbar", rendering(t, own, "back"));
+
+		// Cyber-Flügel und Krallen (aus Minecraft-Java-Modellen übernommen: verkleinert, bis 60 Bones, 512er-Textur)
+		String backBefore = t.compute(mc -> Cosmetics.mine("back"));
+		for (String id : List.of("cyberfluegel", "krallen")) {
+			boolean worn;
+			try {
+				t.compute(mc -> Cosmetics.choose("back", id)).get(10, java.util.concurrent.TimeUnit.SECONDS);
+				worn = id.equals(t.compute(mc -> Cosmetics.own("back")));
+			} catch (Exception e) {
+				worn = false;
+			}
+			t.waitTicks(10);
+			check(t, "Cosmetics: " + id + " angelegt und am Rücken gezeichnet", worn && rendering(t, own, "back"));
+			t.screenshot("cosmetics-" + id + "-vorn");
+			t.run(mc -> mc.options.setCameraType(CameraType.THIRD_PERSON_BACK));
+			t.waitTicks(10);
+			t.screenshot("cosmetics-" + id + "-hinten");
+			t.run(mc -> mc.options.setCameraType(CameraType.THIRD_PERSON_FRONT));
+		}
+		try {
+			t.compute(mc -> Cosmetics.choose("back", backBefore)).get(10, java.util.concurrent.TimeUnit.SECONDS);
+		} catch (Exception e) {
+			check(t, "Cosmetics: Rücken-Cosmetic zurückgesetzt", false);
+		}
+		t.waitTicks(5);
 
 		// Katalog-Cape am eigenen Spieler (über die bestehende Cape-Technik, mit Animation)
 		t.run(mc -> Capes.select(Capes.byId("ozean")));
@@ -574,7 +699,7 @@ final class CosmeticTests {
 		});
 		t.waitTicks(10);
 		t.run(mc -> HeldixConfig.get().cosmeticParticlesOthers = false);
-		check(t, "Cosmetics: „Partikel anderer zeigen“ aus", !rendering(t, uuid, "aura") && rendering(t, uuid, "head"));
+		check(t, "Cosmetics: „Auren anderer zeigen“ aus", !rendering(t, uuid, "aura") && rendering(t, uuid, "head"));
 		t.run(mc -> HeldixConfig.get().cosmeticsOthers = false);
 		check(t, "Cosmetics: „Cosmetics anderer zeigen“ aus", !rendering(t, uuid, "head") && !rendering(t, uuid, "companion"));
 		t.run(mc -> {
@@ -615,7 +740,8 @@ final class CosmeticTests {
 		});
 
 		List<CosmeticInfo> catalog = cosmetics.catalog();
-		check(t, "API: catalog() mit 15 Cosmetics", catalog.size() == 15);
+		int catalogSize = t.compute(mc -> CosmeticCatalog.items().size());
+		check(t, "API: catalog() mit " + catalogSize + " Cosmetics (" + catalog.size() + ")", catalog.size() == catalogSize && catalogSize == CATALOG_SIZE + CATALOG_SIZE_2);
 		check(t, "API: Engelsflügel im Slot BACK", catalog.stream().anyMatch(c -> c.id().equals("engelsfluegel") && c.slot() == dev.heldixclient.api.Cosmetics.Slot.BACK
 				&& c.name().equals("Engelsflügel") && !c.teamOnly()));
 		check(t, "API: Team-Krone teamOnly", catalog.stream().anyMatch(c -> c.id().equals("team-krone") && c.teamOnly()));

@@ -7,7 +7,8 @@ import java.util.UUID;
  * Sprachkanal über den Heldix-Dienst für Voice-Chat-Addons: HeldixClient hält die Verbindung, meldet Server, Welt und
  * Position und verteilt die Rahmen deines Addons an HeldixClient-Spieler in der Nähe (gleicher Server, gleiche Welt,
  * innerhalb von {@link #range()} Blöcken; Blockierungen und „Nur Freunde“ gelten) – ab API 7 außerdem an die Mitglieder deiner
- * Gruppe ({@link #setGroup}) auf demselben Server, egal wo sie sind. Aufnehmen, Kodieren (z. B. Opus),
+ * Gruppe ({@link #setGroup}) auf demselben Server, egal wo sie sind; ab API 9 sind auch Gäste und Spieler im Browser in der
+ * Gruppe ({@link #isGuest}, {@link #inBrowser}, {@link #createBrowserLink}). Aufnehmen, Kodieren (z. B. Opus),
  * Mischen und Abspielen macht das Addon selbst. Der Dienst speichert nichts.
  * Wird von HeldixClient bereitgestellt, nicht selbst implementieren.
  *
@@ -123,6 +124,54 @@ public interface VoiceChannel {
 	 * @since 7
 	 */
 	String groupProblem();
+
+	// --- ab API 9: Gäste und Browser-Teilnehmer -------------------------------------------------
+
+	/**
+	 * Ist dieser Teilnehmer ein Gast – jemand ohne HeldixClient, der über einen Browser-Link deiner Gruppe auf der Webseite
+	 * mitredet? Gäste haben statt einer Minecraft-UUID eine zufällige ID, keine Position und gehören immer zu deiner Gruppe
+	 * ({@link #groupMembers()}, wie Mitglieder in einer anderen Dimension). Ihren Namen liefert {@link HeldixApi#playerName}.
+	 *
+	 * @since 9
+	 */
+	boolean isGuest(UUID participant);
+
+	/**
+	 * Spricht dieser Teilnehmer über die Webseite – als Gast oder als angemeldeter Spieler im Browser? Auch angemeldete
+	 * Spieler im Browser haben keine Position und sind nur über die Gruppe zu hören.
+	 *
+	 * @since 9
+	 */
+	boolean inBrowser(UUID participant);
+
+	/**
+	 * Kann der verbundene Heldix-Dienst Gäste und Browser-Links (ab Dienst 1.11.0)? false, solange nicht verbunden.
+	 *
+	 * @since 9
+	 */
+	boolean guestsAvailable();
+
+	/**
+	 * Einen Gast aus deiner Gruppe entfernen: Der Heldix-Dienst trennt ihn sofort, sein Zugang gilt danach nicht mehr (mit
+	 * dem Link kann er neu beitreten, solange der Link gilt). Nur für Gäste deiner Gruppe; sonst passiert nichts. Nur auf
+	 * Wunsch des Spielers aufrufen.
+	 *
+	 * @since 9
+	 */
+	void removeGuest(UUID guest);
+
+	/**
+	 * Web-Link für deine Gruppe auf dem aktuellen Server erzeugen: Wer ihn öffnet, redet im Browser mit (als Gast mit Namen
+	 * oder angemeldet mit Minecraft-Konto), 24 Stunden lang, höchstens 4 Gäste gleichzeitig. Für dieselbe Gruppe kommt
+	 * derselbe Link zurück, solange er gilt. Nur auf Wunsch des Spielers aufrufen (z. B. Knopf „Browser-Link kopieren“).
+	 *
+	 * <p>Genau einer der beiden Callbacks läuft, im Haupt-Thread: {@code onLink} mit dem Link (z. B. für
+	 * {@link HeldixApi#copyToClipboard}), {@code onError} mit einer deutschen Meldung für den Spieler, z. B. „Du bist in
+	 * keiner Voice-Gruppe“ oder „Der Heldix-Dienst kann noch keine Gäste im Browser“.
+	 *
+	 * @since 9
+	 */
+	void createBrowserLink(java.util.function.Consumer<String> onLink, java.util.function.Consumer<String> onError);
 
 	@FunctionalInterface
 	interface FrameListener {

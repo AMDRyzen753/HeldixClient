@@ -50,6 +50,12 @@ public class HeldixClient implements HeldixModInitializer {
 	public static KeyMapping hudKey;
 	/** Spielermenü: auf einen Spieler zielen und drücken (ab Werk Mausrad-Klick) */
 	public static KeyMapping playerMenuKey;
+	/**
+	 * Einblendungen mit Tasten: Welt teilen – jemand klopft an (erlauben/ablehnen) – und Party – Einladung annehmen/ablehnen,
+	 * dem Leiter folgen (ab Werk H und N; J belegt das Emote-Rad). Das Anklopfen hat Vorrang.
+	 */
+	public static KeyMapping knockAllowKey;
+	public static KeyMapping knockDenyKey;
 
 	@Override
 	public void onInitialize() {
@@ -67,6 +73,8 @@ public class HeldixClient implements HeldixModInitializer {
 		hudKey = KeyMappings.register(new KeyMapping("key.heldixclient.hudInteract", InputConstants.Type.KEYBOARD, InputConstants.UNKNOWN.getValue(), category));
 		// teilt sich ab Werk die Taste mit „Block auswählen“ – auf Spielern macht das in Minecraft nichts
 		playerMenuKey = KeyMappings.register(new KeyMapping("key.heldixclient.playerMenu", InputConstants.Type.MOUSE, InputConstants.MOUSE_BUTTON_MIDDLE, category));
+		knockAllowKey = KeyMappings.register(new KeyMapping("key.heldixclient.knockAllow", InputConstants.Type.KEYBOARD, InputConstants.KEY_H, category));
+		knockDenyKey = KeyMappings.register(new KeyMapping("key.heldixclient.knockDeny", InputConstants.Type.KEYBOARD, InputConstants.KEY_N, category));
 		// je Modul eine Taste zum Ein- und Ausschalten (auch für Module aus Addons, die bis hier geladen sind)
 		ModuleManager.createToggleKeys();
 
@@ -88,6 +96,12 @@ public class HeldixClient implements HeldixModInitializer {
 		WorldEvents.JOIN.register(HeldixClient::rememberServer);
 		// Spielzeit der Sitzung für das Pausemenü
 		dev.heldixclient.screen.PauseMenuScreen.trackSession();
+		// Welt teilen: Anklopfen im HUD, beim Verlassen der Welt bzw. Beenden alles schließen
+		HudEvents.RENDER.register((graphics, delta) -> dev.heldixclient.share.KnockPrompt.render(graphics));
+		// Party (ab Heldix-Dienst 1.12.0): Einladung annehmen bzw. dem Leiter folgen – mit denselben Tasten
+		HudEvents.RENDER.register((graphics, delta) -> dev.heldixclient.social.PartyPrompt.render(graphics));
+		WorldEvents.LEAVE.register(dev.heldixclient.share.WorldShare::leftWorld);
+		ClientEvents.STOPPING.register(dev.heldixclient.share.WorldShare::leftWorld);
 
 		// Pausemenü: direkter Zugang zum Heldix-Menü
 		ScreenEvents.AFTER_INIT.register((minecraft, screen, width, height) -> {
@@ -143,6 +157,7 @@ public class HeldixClient implements HeldixModInitializer {
 		}
 		ModuleManager.handleToggleKeys();
 		dev.heldixclient.player.PlayerMenu.tick(mc);
+		dev.heldixclient.share.WorldShare.tick(mc);
 		dev.heldixclient.voice.VoiceLink.tick(mc);
 		ModuleManager.tick(mc);
 		DebugOverlay.seed(mc);

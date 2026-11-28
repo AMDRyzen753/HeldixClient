@@ -1,0 +1,100 @@
+<!--seite {"titel":"Einladung","beschreibung":"Ein Freund lädt dich zu HeldixClient ein: Einladung annehmen, Willkommens-Belohnung holen, im Launcher öffnen – oder bei einer Voice-Einladung direkt im Browser mitreden."}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
+<link rel="stylesheet" href="/einladung.css">
+<script type="module" src="/einladung.js"></script>
+</head>
+<body data-seite="einladung">
+{{include:nav.html}}
+
+<main id="inhalt" class="container section section--tight public-page invite-page" data-zustand="laden" data-api-base="https://__API_DOMAIN__">
+  <noscript><p class="notice">Für Einladungen braucht dein Browser JavaScript. Du kannst die Einladung auch im Launcher öffnen.</p></noscript>
+
+  <!-- Wird geladen -->
+  <div class="app-loading" id="einladung-laden" role="status">
+    <span class="spinner" aria-hidden="true"></span><span>Einladung wird geladen …</span>
+  </div>
+
+  <!-- Kein Link, unbekannt oder abgelaufen -->
+  <section class="invite-gone" id="einladung-weg" aria-labelledby="einladung-weg-titel" hidden>
+    <div class="badge-lg warn">{{icon:clock}}</div>
+    <h1 id="einladung-weg-titel">Diese Einladung gilt nicht mehr</h1>
+    <p class="lead" id="einladung-weg-text">Einladungen gelten 30 Tage, mit Voice-Gruppe 24 Stunden – oder der Link wurde zurückgezogen. Frag einfach nach einem neuen.</p>
+    <div class="invite-actions center-actions">
+      <a class="btn btn--primary btn--lg" href="/download">{{icon:download}}HeldixClient herunterladen</a>
+      <a class="btn btn--secondary btn--lg" href="/hilfe/einladungen">{{icon:info}}So funktionieren Einladungen</a>
+    </div>
+  </section>
+
+  <!-- Dienst nicht erreichbar -->
+  <section class="invite-gone" id="einladung-fehler" aria-labelledby="einladung-fehler-titel" hidden>
+    <div class="badge-lg warn">{{icon:warning}}</div>
+    <h1 id="einladung-fehler-titel">Die Einladung lässt sich gerade nicht laden</h1>
+    <p class="lead" id="einladung-fehler-text">Der Heldix-Dienst antwortet gerade nicht. Versuch es in ein paar Minuten noch einmal.</p>
+    <div class="invite-actions center-actions">
+      <button class="btn btn--primary btn--lg" type="button" id="einladung-erneut">{{icon:refresh}}Erneut versuchen</button>
+      <a class="btn btn--secondary btn--lg" id="einladung-fehler-app" href="heldixclient://einladung/">{{icon:loader-heldix}}Im Launcher öffnen</a>
+    </div>
+  </section>
+
+  <!-- Die Einladung -->
+  <div class="invite" id="einladung" hidden>
+    <section class="invite-hero card card--voice" aria-labelledby="einladung-titel">
+      <div class="invite-who">
+        <span class="invite-head" id="einladung-kopf"></span>
+        <div class="invite-who-text">
+          <p class="eyebrow">Einladung zu HeldixClient</p>
+          <h1 id="einladung-titel">Du bist eingeladen</h1>
+          <p class="invite-server" id="einladung-server" hidden>{{icon:server}}<span>Komm auf meinen Server: <strong id="einladung-server-name"></strong></span></p>
+          <p class="invite-expiry" id="einladung-ablauf"></p>
+        </div>
+      </div>
+
+      <p class="notice" id="einladung-hinweis" role="alert" hidden></p>
+      <div class="invite-result" id="einladung-ergebnis" role="status" aria-live="polite" hidden></div>
+
+      <div class="invite-actions" id="einladung-aktionen">
+        <button class="btn btn--primary btn--lg" type="button" id="einladung-annehmen" hidden>{{icon:user-plus}}<span>Einladung annehmen</span></button>
+        <a class="btn btn--primary btn--lg mc-accept" id="einladung-anmelden" href="/api/v1/web/auth/microsoft" hidden>{{icon:loader-vanilla}}<span>Mit Minecraft-Konto annehmen</span></a>
+        <button class="btn btn--secondary btn--lg" type="button" id="einladung-voice-knopf" hidden>{{icon:headphones}}<span>Im Browser mitreden</span></button>
+        <a class="btn btn--secondary btn--lg" href="/download" id="einladung-download">{{icon:download}}<span>HeldixClient herunterladen</span></a>
+      </div>
+      <p class="hint invite-download-hint" id="einladung-download-hinweis" hidden>{{icon:info}}<span>Nach der Installation öffnet sich die Einladung von selbst im Launcher.</span></p>
+      <p class="invite-app">{{icon:loader-heldix}}<span>Schon installiert? <a id="einladung-app" href="heldixclient://einladung/">Im Launcher öffnen</a><span id="einladung-app-server" hidden> – dort kannst du auch gleich dem Server beitreten</span>.</span></p>
+      <p class="hint invite-login-hint" id="einladung-anmelden-hinweis" hidden>Zum Annehmen meldest du dich bei Microsoft an – dort liegt dein Minecraft-Konto. Wir übernehmen nur deinen Minecraft-Namen und deine UUID; danach kommst du hierher zurück.</p>
+      <p class="hint invite-login-hint" id="einladung-ohne-anmeldung" hidden>Annehmen kannst du die Einladung im Launcher: HeldixClient installieren und mit deinem Microsoft-Konto anmelden. Unter Windows öffnet sich die Einladung nach der Installation von selbst, sonst öffnest du den Link einfach noch einmal.</p>
+    </section>
+
+    <div class="invite-grid">
+      <section class="app-card invite-reward" id="einladung-belohnung" aria-labelledby="belohnung-titel">
+        <div class="invite-reward-art" id="belohnung-bild" aria-hidden="true">{{icon:sparkles}}</div>
+        <div>
+          <p class="eyebrow">Willkommens-Belohnung</p>
+          <h2 id="belohnung-titel">Freundesfunken</h2>
+          <p id="belohnung-text">Neu bei HeldixClient? Nimm die Einladung an, und die Aura „Freundesfunken“ gehört dir – andere HeldixClient-Spieler sehen sie an dir, ganz ohne etwas zu installieren.</p>
+          <p class="hint">Gilt für neue Spieler (Konto höchstens 14 Tage alt), die noch nie eingeladen wurden. <a href="/hilfe/einladungen#belohnungen">Mehr zu Belohnungen</a></p>
+        </div>
+      </section>
+
+      <section class="app-card invite-steps" aria-labelledby="schritte-titel">
+        <h2 id="schritte-titel">So geht’s</h2>
+        <ol class="mini-steps">
+          <li><span><strong>HeldixClient herunterladen</strong> und installieren – kostenlos für Windows und Mac.</span></li>
+          <li><span><strong>Mit deinem Microsoft-Konto anmelden</strong>, mit dem du Minecraft: Java Edition spielst.</span></li>
+          <li><span><strong>Einladung annehmen</strong> – hier oder mit „Im Launcher öffnen“. Ihr seid dann Freunde und seht, wo der andere spielt.</span></li>
+        </ol>
+      </section>
+    </div>
+
+    <!-- Voice Chat im Browser (voice-panel.js) -->
+    <section class="app-card voice-room" id="voice" aria-labelledby="voice-raum-titel" hidden></section>
+  </div>
+</main>
+
+{{ICONS_ALLE_HTML}}
+{{include:footer.html}}
+</body>
+</html>

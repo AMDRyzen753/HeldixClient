@@ -6,9 +6,10 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { TLSSocket } from 'node:tls';
 import { hashToken, isLoopback } from './auth';
-import type { Store, TeamMemberRow, TeamRole, UserRow, WebSessionRow } from './db';
+import type { Store, TeamMemberRow, UserRow, WebSessionRow } from './db';
 import { HttpError } from './http';
 import type { RateLimiter } from './limits';
+import { hasPermission, PERMISSION_LABELS, type Permission } from './roles';
 import { newTotpSecret, totpUri, verifyTotp } from './totp';
 
 /** Name des Cookies (`__Host-`: nur über HTTPS, nur für genau diese Adresse, Pfad `/`). */
@@ -38,7 +39,7 @@ export const LINK_EXPIRED =
 export const NOT_SIGNED_IN = 'Nicht angemeldet oder Anmeldung abgelaufen. Bitte neu anmelden.';
 export const MICROSOFT_EXPIRED =
   'Die Anmeldung ist abgelaufen oder wurde in einem anderen Browser begonnen. Bitte klicke noch einmal auf „Mit Minecraft-Konto anmelden“.';
-const CSRF_REJECTED = 'Diese Anfrage wurde aus Sicherheitsgründen abgelehnt. Bitte die Seite neu laden.';
+export const CSRF_REJECTED = 'Diese Anfrage wurde aus Sicherheitsgründen abgelehnt. Bitte die Seite neu laden.';
 const WRONG_CODE = 'Der Code stimmt nicht.';
 
 export interface WebOptions {
@@ -386,17 +387,17 @@ export class Web {
     this.confirm(session);
   }
 
-  /**
-   * Zugang zu `/v1/team/*`: Team-Rolle, eingerichtete 2FA und in dieser Sitzung bestätigter Code; für Admin-Routen die
-   * Rolle `admin`. Sonst 403 mit `code`.
-   */
   /** Wie teamGate (jede Rolle), aber ohne Fehler: true, wenn der Team-Bereich offen wäre. */
   passesTeamGate(user: UserRow, session: WebSessionRow): boolean {
     const member = this.store.getTeamMember(user.uuid);
     return member !== undefined && member.totpSecret !== null && this.isVerified(session);
   }
 
-  teamGate(user: UserRow, session: WebSessionRow, role: TeamRole): TeamMemberRow {
+  /**
+   * Zugang zu `/v1/team/*`: Team-Rolle (jede der sechs), eingerichtete 2FA und in dieser Sitzung bestätigter Code; dazu
+   * das Recht der Route (ab 1.12.0 statt einer Mindestrolle, siehe roles.ts). Sonst 403 mit `code`.
+   */
+  teamGate(user: UserRow, session: WebSessionRow, permission?: Permission): TeamMemberRow {
     const member = this.store.getTeamMember(user.uuid);
     if (!member) throw new HttpError(403, 'Dieser Bereich ist nur für das HeldixClient-Team.', {}, 'forbidden');
     if (member.totpSecret === null) {
@@ -405,7 +406,15 @@ export class Web {
     if (!this.isVerified(session)) {
       throw new HttpError(403, 'Bitte den Code aus der Authenticator-App eingeben.', {}, '2fa_required');
     }
-    if (role === 'admin' && member.role !== 'admin') throw new HttpError(403, 'Dafür braucht es die Rolle Admin.', {}, 'forbidden');
+    if (permission !== undefined && !hasPermission(member.role, permission)) {
+      throw new HttpError(403, `Dafür fehlt deiner Rolle das Recht „${PERMISSION_LABELS[permission]}“.`, {}, 'forbidden');
+    }
     return member;
+  }
+
+  /** Gilt die Web-Sitzung mit dieser ID noch (nicht abgelaufen, nicht zu lange unbenutzt)? */
+  sessionAlive(id: string): boolean {
+    const now = Date.now();
+    return this.store.webSessionAlive(id, now, now - this.options.sessionIdleMs);
   }
 }

@@ -21,12 +21,25 @@ export function myReports(store: Store, user: UserRow) {
  */
 export function exportData(store: Store, user: UserRow, profile: Record<string, unknown>) {
   const member = store.getTeamMember(user.uuid);
+  const badge = store.getCommunityBadge(user.uuid);
   return {
     exportedAt: Date.now(),
-    profile: { ...profile, createdAt: user.createdAt, lastSeen: user.lastSeen },
-    friends: store.listFriends(user.uuid).map(({ user: friend, since }) => ({ uuid: friend.uuid, name: friend.name, since })),
+    profile: { ...profile, createdAt: user.createdAt, lastSeen: user.lastSeen, lastOnline: user.lastOnline },
+    // Favorit, Spitzname und Notiz sind deine eigenen Angaben (der Freund sieht sie nie).
+    friends: store.listFriends(user.uuid).map(({ user: friend, since, favorite, nickname, note }) => ({
+      uuid: friend.uuid,
+      name: friend.name,
+      since,
+      favorite,
+      nickname: nickname === '' ? null : nickname,
+      note: note === '' ? null : note,
+    })),
     requests: { incoming: store.listIncoming(user.uuid), outgoing: store.listOutgoing(user.uuid) },
+    // mit Antwort-Bezug (replyTo) und Beitreten-Karte (card)
     messages: store.messagesOf(user.uuid),
+    // eigene Reaktionen auf Nachrichten (die Nachricht steht unter messages, solange es sie gibt)
+    reactions: store.reactionsBy(user.uuid),
+    communityBadge: badge ? { badge: badge.badge, addedAt: badge.addedAt } : null,
     blocked: store.listBlocks(user.uuid),
     reports: store.reportsBy(user.uuid).map((r) => ({
       id: r.id,

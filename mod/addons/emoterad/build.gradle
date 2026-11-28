@@ -1,0 +1,31 @@
+// Emote-Rad: offizielles Addon von einem anderen Entwickler (Heldix-API 2), greift direkt in Minecraft 26.3 ein
+// (eigene Ebene bzw. eigene Spieler-Renderer über Reflexion) – darum clientEntrypoint und "minecraft": ["26.3"].
+plugins {
+	id 'java'
+}
+
+apply from: rootProject.file('gradle/minecraft.gradle')
+
+version = '1.0.0'
+
+base {
+	archivesName = 'heldix-addon-emoterad'
+}
+
+dependencies {
+	compileOnly project(':heldix-loader')
+	compileOnly project(':heldix-api')
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+	it.options.encoding = 'UTF-8'
+}
+
+processResources {
+	def props = [version: project.version]
+	inputs.properties props
+	filesMatching('heldix.addon.json') {
+		expand props
+	}
+}

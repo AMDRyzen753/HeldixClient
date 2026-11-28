@@ -1,10 +1,15 @@
 // HeldixClient – Webseite: Cosmetics-Katalog (/cosmetics) mit 3D-Vorschau auf skinview3d (three.js, WebGL).
 //
-// Reiter je Slot (Kopf, Rücken, Aura, Begleiter, Capes). Die neun eingebauten Capes stehen schon im HTML; den Katalog
+// Reiter je Slot (Kopf, Rücken, Aura, Begleiter, Capes). Die 13 eingebauten Capes stehen schon im HTML (die nur fürs
+// Team mit data-team, Kennzeichnung wie bei Katalog-Cosmetics mit access: team); den Katalog
 // lädt die Seite von GET /api/v1/cosmetics und zeigt jedes Cosmetic erst, wenn sein Umschlag im Browser geprüft ist
-// (Ed25519-Signatur des HeldixClient-Teams und alle Regeln von Format 1, siehe cosmetics-common.js).
+// (Ed25519-Signatur des HeldixClient-Teams und alle Regeln von Format 1 bzw. 2, siehe cosmetics-common.js).
+// Format 2 (animierte Meshes): unter der Figur die Animationen des Cosmetics im offenen Reiter (Namen aus dem Manifest,
+// Standard: Zustand idle); fährt man über die Kachel des angezogenen Cosmetics, spielt es sein Emote.
 // Je Slot ist ein Cosmetic „angezogen“ – so lässt sich ein ganzes Outfit anprobieren. Adresse: /cosmetics#kopf/krone.
 // Ohne WebGL zeichnet die Seite eine 2D-Ansicht. Mit Anmeldung: „Mit meinem Skin anprobieren“.
+// Belohnungen für Einladungen (access: unlock) kann jeder anprobieren; sie tragen ein Schloss und den Weg zum
+// Freischalten. Angemeldet fragt die Seite GET /api/v1/me/cosmetics (unlocked), was schon freigeschaltet ist.
 import { api, h, icon, toast } from './app-common.js';
 import {
   COSMETIC_SLOTS,
@@ -12,7 +17,9 @@ import {
   SLOT_HASHES,
   SLOT_NAMES,
   SLOT_TITLES,
+  animationButtons,
   cosmeticAnimated,
+  cosmeticAnimations,
   cosmeticsKeyAvailable,
   createCosmeticLayer,
   drawCosmeticPreview,
@@ -27,6 +34,12 @@ const DATE = new Intl.DateTimeFormat('de-DE', { day: 'numeric', month: 'long', y
 const MOTION_TEXT = { rise: 'steigen auf', fall: 'rieseln herab', orbit: 'kreisen um dich', spark: 'funkeln auf', float: 'schweben um dich' };
 /** Von wo die Figur zu sehen ist, wenn man einen Reiter öffnet (Drehung um y; Rücken/Cape: von hinten). */
 const VIEW_YAW = { head: 0.45, back: Math.PI * 0.82, aura: 0.35, companion: 0.55, cape: Math.PI * 0.82 };
+/** Blickrichtung je Reiter; Format-2-Begleiter von ihrer Seite (links gebaut, rechts gespiegelt). */
+function viewYaw(slot) {
+  const manifest = worn(slot)?.manifest;
+  if (slot === 'companion' && manifest?.format === 2) return manifest.attach?.side === 'right' ? 0.75 : -0.75;
+  return VIEW_YAW[slot];
+}
 const SLOT_FROM_HASH = Object.fromEntries(Object.entries(SLOT_HASHES).map(([slot, hash]) => [hash, slot]));
 
 const $ = (id) => document.getElementById(id);
@@ -50,6 +63,7 @@ const els = {
   anim: $('cosmetic-animation'),
   skin: $('cosmetic-mein-skin'),
   hint: $('viewer-hinweis'),
+  anims: $('cosmetic-animationen'),
 };
 
 /** Alle Einträge je Slot: { key, slot, id, name, description, builtin, manifest?, entry?, cape?, art? } */
@@ -69,6 +83,10 @@ const state = {
   wantedHash: null,
   tokens: Object.fromEntries(COSMETIC_SLOTS.map((slot) => [slot, 0])),
   ownSkin: false,
+  /** freigeschaltete Belohnungen (angemeldet, Dienst ab 1.11.0); null = unbekannt */
+  unlocked: null,
+  /** Format 2: gewählte Animation je Eintrag (key → Name) */
+  anims: new Map(),
 };
 let viewer = null;
 let layer = null;
@@ -83,7 +101,7 @@ const worn = (slot) => find(state.outfit[slot]);
 /** Eingebaute Capes aus den Knöpfen im HTML (Daten aus capes.json der Mod). */
 function readBuiltinCapes() {
   for (const button of picker.querySelectorAll('.cape-pick[data-cape]')) {
-    const { cape, name, beschreibung, frames, fps, glow } = button.dataset;
+    const { cape, name, beschreibung, frames, fps, glow, team } = button.dataset;
     items.cape.push({
       key: `cape:${cape}`,
       slot: 'cape',
@@ -91,10 +109,17 @@ function readBuiltinCapes() {
       name,
       description: beschreibung,
       builtin: true,
-      cape: { id: cape, name, description: beschreibung, frames: Number(frames) || 1, fps: Number(fps) || 10, glow: glow === '1' },
+      cape: { id: cape, name, description: beschreibung, frames: Number(frames) || 1, fps: Number(fps) || 10, glow: glow === '1', team: team === '1' },
     });
   }
 }
+
+/** Nur für das HeldixClient-Team: Katalog-Cosmetics mit access: team und eingebaute Team-Capes. */
+const teamOnly = (item) => (item.builtin ? item.cape.team === true : item.manifest?.access === 'team');
+/** Belohnung für Einladungen (access: unlock) – und ob der angemeldete Spieler sie schon hat. */
+const rewardOnly = (item) => !item.builtin && item.manifest?.access === 'unlock';
+const rewardUnlocked = (item) => rewardOnly(item) && state.unlocked?.has(item.id) === true;
+const INVITE_HREF = '/konto#reiter=freunde&teil=einladen';
 
 const preparedCache = new Map();
 function prepare(item) {
@@ -164,7 +189,8 @@ function pickButton(item) {
     },
     artFor(item),
     h('span', { class: 'cape-pick-name', text: item.name }),
-    item.manifest?.access === 'team' ? h('span', { class: 'cosmetic-pick-badge', title: 'Nur für das HeldixClient-Team' }, icon('shield')) : null,
+    teamOnly(item) ? h('span', { class: 'cosmetic-pick-badge', title: 'Nur für das HeldixClient-Team' }, icon('shield')) : null,
+    rewardOnly(item) ? h('span', { class: 'cosmetic-pick-badge reward', title: rewardUnlocked(item) ? 'Belohnung für Einladungen – freigeschaltet' : 'Belohnung für Einladungen' }, icon(rewardUnlocked(item) ? 'check' : 'lock')) : null,
   );
 }
 
@@ -191,7 +217,7 @@ function renderPicker() {
   if (!list.length) {
     picker.setAttribute('role', 'group');
     if (state.catalog === 'laden') picker.replaceChildren(pickerMessage('Cosmetics werden geladen und geprüft …', 'hourglass'));
-    else if (state.catalog === 'fehler') picker.replaceChildren(pickerMessage('Der Katalog ist gerade nicht erreichbar.', 'warning', h('button', { class: 'button tiny ghost', type: 'button', onClick: loadCatalog }, icon('refresh'), 'Erneut versuchen')));
+    else if (state.catalog === 'fehler') picker.replaceChildren(pickerMessage('Der Katalog ist gerade nicht erreichbar.', 'warning', h('button', { class: 'btn btn--secondary btn--sm', type: 'button', onClick: loadCatalog }, icon('refresh'), 'Erneut versuchen')));
     else if (state.catalog === 'ohne-pruefung') picker.replaceChildren(pickerMessage('Dein Browser kann die Signaturen der Cosmetics nicht prüfen – deshalb zeigt die Seite hier nichts an.', 'lock'));
     else picker.replaceChildren(pickerMessage(`Unter „${SLOT_TITLES[state.active]}“ gibt es noch keine Cosmetics. Schau bald wieder vorbei.`, 'sparkles'));
     return;
@@ -212,6 +238,7 @@ function renderInfo() {
   const item = worn(slot);
   els.slotName.textContent = SLOT_TITLES[slot];
   els.remove.hidden = !item;
+  renderRewardHint(item);
   els.remove.querySelector('span').textContent = slot === 'cape' ? 'Cape ablegen' : 'Ablegen';
   if (!item) {
     els.name.textContent = items[slot].length ? 'Nichts angezogen' : SLOT_TITLES[slot];
@@ -226,15 +253,24 @@ function renderInfo() {
   const meta = [];
   if (item.builtin) {
     chips.push(chip('Eingebaut', 'accent', 'cape', 'Kommt mit HeldixClient'));
+    if (item.cape.team) chips.push(chip('Nur fürs Team', 'warning', 'shield', 'Tragen können es nur Mitglieder des HeldixClient-Teams'));
     if (item.cape.glow) chips.push(chip('leuchtet', 'accent'));
     meta.push(`${item.cape.frames} Bilder, ${item.cape.fps} pro Sekunde${item.cape.glow ? ' · leuchtet im Dunkeln' : ''}`);
   } else {
     const { manifest } = item;
     chips.push(chip('Signatur geprüft', 'success', 'check', 'Vom HeldixClient-Team signiert – in deinem Browser geprüft'));
     if (manifest.access === 'team') chips.push(chip('Nur fürs Team', 'warning', 'shield', 'Tragen können es nur Mitglieder des HeldixClient-Teams'));
+    if (manifest.access === 'unlock') {
+      chips.push(chip('Belohnung für Einladungen', 'accent', rewardUnlocked(item) ? 'sparkles' : 'lock', 'Tragen kann es, wer es über Einladungen freigeschaltet hat'));
+      if (rewardUnlocked(item)) chips.push(chip('Freigeschaltet', 'success', 'check', 'Du hast es freigeschaltet'));
+    }
     if (manifest.glow) chips.push(chip('leuchtet', 'accent'));
-    if (manifest.slot !== 'aura' && manifest.slot !== 'cape' && cosmeticAnimated(manifest)) chips.push(chip('bewegt sich', 'accent'));
-    if (manifest.slot === 'aura') meta.push(`Partikel, die ${MOTION_TEXT[manifest.particles.motion]}`);
+    const mesh = manifest.format === 2;
+    if ((mesh || (manifest.slot !== 'aura' && manifest.slot !== 'cape')) && cosmeticAnimated(manifest)) chips.push(chip('bewegt sich', 'accent'));
+    if (mesh) {
+      const count = Object.keys(manifest.animations).length;
+      meta.push(count === 1 ? '1 Animation' : `${count} Animationen`);
+    } else if (manifest.slot === 'aura') meta.push(`Partikel, die ${MOTION_TEXT[manifest.particles.motion]}`);
     if (manifest.slot === 'cape') meta.push(`${manifest.cape.frames === 1 ? '1 Bild' : `${manifest.cape.frames} Bilder, ${manifest.cape.fps} pro Sekunde`}`);
     if (manifest.slot === 'companion') meta.push('Begleitet dich im Spiel');
     meta.push(`Version ${manifest.version}`);
@@ -243,6 +279,54 @@ function renderInfo() {
   }
   els.chips.replaceChildren(...chips);
   els.meta.textContent = meta.join(' · ');
+  renderAnimations();
+}
+
+/**
+ * Format 2: Animationen des Cosmetics im offenen Reiter unter der Figur (nur mit 3D-Ansicht). Gewählt wird je Eintrag;
+ * ohne Wahl läuft der Zustand idle.
+ */
+function renderAnimations() {
+  const box = els.anims;
+  if (!box) return;
+  const item = worn(state.active);
+  const info = layer?.supported && item?.manifest ? cosmeticAnimations(item.manifest) : null;
+  if (!info || info.clips.length < 2) {
+    box.hidden = true;
+    box.replaceChildren();
+    delete box.dataset.cosmetic;
+    return;
+  }
+  const active = state.anims.get(item.key) ?? info.idle;
+  box.hidden = false;
+  box.dataset.cosmetic = item.id;
+  box.dataset.animation = active ?? '';
+  box.setAttribute('aria-label', `Animation von ${item.name}`);
+  box.replaceChildren(
+    ...animationButtons(info, active, (name) => {
+      state.anims.set(item.key, name);
+      layer?.setAnimation(item.slot, name);
+      renderAnimations();
+    }),
+  );
+}
+
+/** Unter der Beschreibung: wie man eine Belohnung freischaltet (oder: schon freigeschaltet → im Konto tragen). */
+function renderRewardHint(item) {
+  const box = $('cosmetic-belohnung');
+  if (!box) return;
+  if (!item || !rewardOnly(item)) {
+    box.hidden = true;
+    box.replaceChildren();
+    return;
+  }
+  if (rewardUnlocked(item)) {
+    box.replaceChildren(icon('sparkles'), h('span', null, 'Du hast es freigeschaltet. ', h('a', { href: `/konto#reiter=profil&platz=${SLOT_HASHES[item.slot]}`, text: 'Im Konto tragen' })));
+  } else {
+    box.replaceChildren(icon('lock'), h('span', null, 'Belohnung für Einladungen: Lade Freunde zu HeldixClient ein – kommen sie neu dazu und spielen 30 Minuten, schaltest du es frei. ', h('a', { href: INVITE_HREF, text: 'Freunde einladen' })));
+  }
+  box.hidden = false;
+  box.dataset.freigeschaltet = rewardUnlocked(item) ? 'ja' : 'nein';
 }
 
 function renderOutfit() {
@@ -277,7 +361,8 @@ function renderOverview() {
             null,
             h('a', { href: `#${SLOT_HASHES[slot]}/${item.id}`, text: item.name }),
             item.description ? ` – ${item.description}` : '',
-            item.manifest?.access === 'team' ? h('span', { class: 'chip warning', text: 'nur Team' }) : null,
+            teamOnly(item) ? h('span', { class: 'chip warning', text: 'nur Team' }) : null,
+            rewardOnly(item) ? h('span', { class: 'chip accent', text: 'Belohnung für Einladungen' }) : null,
           ),
         ),
       ),
@@ -321,7 +406,7 @@ function createViewer() {
     const created = new lib.SkinViewer({ canvas, width: host.clientWidth || 480, height: host.clientHeight || 520, skin: '/assets/standard-skin.png', fov: 40, zoom: 0.66 });
     created.autoRotate = !reduceMotion;
     created.autoRotateSpeed = 0.55;
-    created.playerWrapper.rotation.y = VIEW_YAW[state.active];
+    created.playerWrapper.rotation.y = viewYaw(state.active);
     const controls = created.controls;
     controls.enableZoom = false;
     controls.enablePan = false;
@@ -382,7 +467,10 @@ async function show(slot) {
     const prepared = await prepare(item);
     if (token !== state.tokens[slot]) return;
     layer.wear(slot, prepared);
+    // Format 2: zuvor gewählte Animation wieder abspielen
+    if (state.anims.has(item.key)) layer.setAnimation(slot, state.anims.get(item.key));
     host.dataset.geladen = item.id;
+    if (slot === state.active) renderAnimations();
   } catch {
     if (token === state.tokens[slot]) toast(`„${item.name}“ ließ sich gerade nicht laden.`, 'error');
   } finally {
@@ -441,7 +529,7 @@ function selectSlot(slot, { focus = false, item = null } = {}) {
   renderInfo();
   renderOutfit();
   els.elytra.hidden = !viewer || slot !== 'cape';
-  if (viewer && changed) viewer.playerWrapper.rotation.y = VIEW_YAW[slot];
+  if (viewer && changed) viewer.playerWrapper.rotation.y = viewYaw(slot);
   updateHash();
   show(slot);
 }
@@ -472,6 +560,21 @@ function setupPicker() {
     const item = button && find(button.dataset.key);
     if (item) wear(item);
   });
+  // Format 2: über der Kachel des angezogenen Cosmetics spielt es sein Emote
+  let emoting = null;
+  const hover = (event) => {
+    const button = event.target.closest?.('.cosmetic-pick');
+    const item = button && find(button.dataset.key);
+    const slot = item && item.manifest?.format === 2 && state.outfit[item.slot] === item.key ? item.slot : null;
+    if (slot === emoting) return;
+    if (emoting) layer?.emote(emoting, false);
+    emoting = slot;
+    if (slot) layer?.emote(slot, true);
+  };
+  picker.addEventListener('pointerover', hover);
+  picker.addEventListener('pointerleave', () => hover({ target: picker }));
+  picker.addEventListener('focusin', hover);
+  picker.addEventListener('focusout', () => hover({ target: picker }));
   picker.addEventListener('keydown', (event) => {
     const buttons = [...picker.querySelectorAll('.cosmetic-pick')];
     const index = buttons.indexOf(document.activeElement);
@@ -525,7 +628,9 @@ async function offerOwnSkin() {
   } catch {
     return; // nicht angemeldet: Knopf bleibt versteckt
   }
-  if (!me?.uuid || !viewer) return;
+  if (!me?.uuid) return;
+  loadUnlocked();
+  if (!viewer) return;
   els.skin.hidden = false;
   els.skin.addEventListener('click', async () => {
     els.skin.disabled = true;
@@ -545,6 +650,19 @@ async function offerOwnSkin() {
       els.skin.disabled = false;
     }
   });
+}
+
+/** Angemeldet: freigeschaltete Belohnungen holen (älterer Dienst ohne `unlocked`: bleibt unbekannt). */
+async function loadUnlocked() {
+  try {
+    const data = await api('GET', '/v1/me/cosmetics');
+    if (!Array.isArray(data?.unlocked)) return;
+    state.unlocked = new Set(data.unlocked.filter((id) => typeof id === 'string'));
+  } catch {
+    return;
+  }
+  renderPicker();
+  renderInfo();
 }
 
 // ---------------------------------------------------------------------------------------------------------

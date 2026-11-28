@@ -7,6 +7,14 @@
 // (Heldix-Capes – eingebaute und aus dem Katalog –, Minecraft-Capes des Kontos) und „Cosmetics“ (Kopf, Rücken, Aura,
 // Begleiter aus dem Katalog des Heldix-Dienstes; Modelle zeichnet cosmetic-scene.ts).
 //
+// Gesperrt sind Team-Einträge (Konto sicher nicht im Team) und Belohnungen (access „unlock“, z. B. Freundesfunken und
+// Freundesband für Einladungen), solange ihre ID nicht in cosmetics.unlocked steht. Belohnungen tragen das Kennzeichen
+// „Belohnung“; ein Klick auf eine gesperrte Belohnung und der Knopf .profile-invite-jump führen zu Freunde → Einladen.
+//
+// Cosmetics im Format 2 (animierte Meshes) haben mehrere Animationen: Unter der Figur stehen sie als Leiste (Namen aus
+// dem Manifest, Standard: Zustand idle) für das überfahrene bzw. zuletzt gewählte Format-2-Cosmetic; beim Überfahren
+// einer Kachel spielt es sein Emote. Angehalten (Knopf oder „Bewegung reduzieren“) zeigt die Figur ein Standbild.
+//
 // Heldix-Capes: capes/<id>.png enthält alle Bilder der Animation untereinander (je 512 × 256 = 8 × Cape-Vorlage 64 × 32),
 // capes/<id>_glow.png die Leuchtebene (je 256 × 128). Wie auf der Webseite (website/src/capes.js) wird das aktuelle Bild
 // auf ein Canvas geschnitten, die Leuchtebene darübergelegt und das Ergebnis an die Figur gegeben. Capes aus dem Katalog
@@ -72,6 +80,9 @@ const SAFE_ID = /^[a-z0-9_-]{1,40}$/;
 /** Drehung der Figur: leicht seitlich von vorn (Skins) bzw. von hinten (Capes) */
 const FRONT_ANGLE = 0.5;
 const BACK_ANGLE = Math.PI - 0.55;
+/** Format-2-Begleiter sitzen links (bzw. rechts) am Körper: schräg von vorn auf diese Seite */
+const LEFT_ANGLE = -0.75;
+const RIGHT_ANGLE = 0.75;
 
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -86,7 +97,7 @@ const MODEL_SLOTS: readonly CosmeticModelSlot[] = ['head', 'back', 'aura', 'comp
 const SLOT_INFO: Record<CosmeticModelSlot, { title: string; text: string; none: string; removed: string }> = {
   head: { title: 'Kopf', text: 'Hüte, Kronen und mehr – sitzt auf deinem Kopf und bewegt sich mit.', none: 'Nichts', removed: 'Kopfschmuck abgelegt.' },
   back: { title: 'Rücken', text: 'Flügel und mehr – passt auch zu Cape und Elytra.', none: 'Nichts', removed: 'Rückenteil abgelegt.' },
-  aura: { title: 'Aura', text: 'Partikel, die um dich herum schweben.', none: 'Keine Aura', removed: 'Aura abgelegt.' },
+  aura: { title: 'Aura', text: 'Effekte rund um dich – schwebende Partikel oder animierte Kreise am Boden.', none: 'Keine Aura', removed: 'Aura abgelegt.' },
   companion: { title: 'Begleiter', text: 'Ein kleiner Begleiter, der neben dir schwebt.', none: 'Kein Begleiter', removed: 'Begleiter abgelegt.' },
 };
 
@@ -117,6 +128,10 @@ const page = {
   motion: !reduceMotion.matches,
   active: false,
   renaming: false,
+  /** Format 2: Slot, dessen Animationen die Leiste zeigt (zuletzt gewählt oder angeklickt) */
+  animSlot: null as CosmeticModelSlot | null,
+  /** Format 2: gewählte Animation je Cosmetic (id:sha256) */
+  anims: new Map<string, string>(),
 };
 
 interface Ui {
@@ -140,6 +155,8 @@ interface Ui {
   stageName: HTMLElement;
   stageSub: HTMLElement;
   elytra: HTMLButtonElement;
+  /** Format 2: Auswahl der Animation unter der Figur */
+  anims: HTMLElement;
 }
 let ui: Ui | null = null;
 
@@ -185,6 +202,23 @@ function catalogCapeItem(id: string | null | undefined): CosmeticItem | undefine
 function teamLocked(item: CosmeticItem): boolean {
   return item.teamOnly && page.cosmetics?.team === false;
 }
+
+const REWARD_LOCK = 'Belohnung für Einladungen – lade Freunde ein, um es freizuschalten';
+
+/** Belohnung (access „unlock“), die das Konto noch nicht freigeschaltet hat */
+function rewardLocked(item: CosmeticItem): boolean {
+  return item.unlockOnly && !(page.cosmetics?.unlocked ?? []).includes(item.id);
+}
+
+/** warum eine Katalog-Kachel gesperrt ist (Team, Belohnung), sonst null */
+function itemLock(item: CosmeticItem): string | null {
+  if (teamLocked(item)) return 'nur für das HeldixClient-Team';
+  if (rewardLocked(item)) return REWARD_LOCK;
+  return null;
+}
+
+/** Sprung zu Freunde → Einladen (setzt app.ts über initProfile) */
+let openInvites: () => void = () => undefined;
 
 function sortedLibrary(p: ProfileState): SavedSkin[] {
   return [...p.library].sort((a, b) => b.addedAt - a.addedAt);
@@ -810,17 +844,23 @@ function setHover(skin: string | null, cape: CapeChoice | null, cosmetic: Cosmet
     page.hoverSkin = skin;
     page.hoverCape = cape;
     page.hoverCosmetic = cosmetic;
-    // Rückenteile von hinten zeigen, alles andere von vorn
-    if (cosmetic) face(cosmetic.slot === 'back' ? 'back' : 'front');
+    // Rückenteile von hinten zeigen, Format-2-Begleiter von ihrer Seite, alles andere von vorn
+    if (cosmetic) face(cosmetic.slot === 'back' ? 'back' : companionSide(cosmetic) ?? 'front');
     renderStage();
     void syncViewer();
   }, skin || cape || cosmetic ? 40 : 110);
 }
 
+/** Seite eines überfahrenen Format-2-Begleiters (links gebaut, rechts gespiegelt), sonst null */
+function companionSide(hover: CosmeticHover): 'left' | 'right' | null {
+  const mesh = hover.slot === 'companion' ? cosmeticItem(hover.id, hover.slot)?.mesh : null;
+  return mesh ? mesh.attach.side : null;
+}
+
 /** Figur mit dieser Seite zur Kamera drehen – nur, wenn sie gerade (auch durch das Drehen von selbst) woanders hinzeigt */
-function face(side: 'front' | 'back'): void {
+function face(side: 'front' | 'back' | 'left' | 'right'): void {
   if (!viewer) return;
-  const goal = side === 'back' ? BACK_ANGLE : FRONT_ANGLE;
+  const goal = side === 'back' ? BACK_ANGLE : side === 'left' ? LEFT_ANGLE : side === 'right' ? RIGHT_ANGLE : FRONT_ANGLE;
   const current = viewer.playerWrapper.rotation.y - viewer.controls.getAzimuthalAngle();
   if (Math.abs(Math.atan2(Math.sin(goal - current), Math.cos(goal - current))) > 0.9) turnTo(goal);
 }
@@ -885,7 +925,7 @@ async function loadCosmetics(refresh = false): Promise<void> {
     setCosmetics(cosmetics);
   } catch (error) {
     if (seq !== page.cosmeticsSeq) return;
-    if (!page.cosmetics) page.cosmetics = { items: [], selection: null, canChoose: false, team: null, error: errorMessage(error) };
+    if (!page.cosmetics) page.cosmetics = { items: [], selection: null, canChoose: false, team: null, unlocked: null, error: errorMessage(error) };
   } finally {
     if (seq === page.cosmeticsSeq) {
       page.cosmeticsLoading = false;
@@ -1024,6 +1064,8 @@ async function selectHeldixCape(cape: HeldixCape | null): Promise<void> {
 /** Cosmetic anlegen (item) oder den Slot leeren (null); slot cape = Cape aus dem Katalog */
 async function selectCosmetic(slot: CosmeticSlotName, item: CosmeticItem | null): Promise<void> {
   if (page.busy || !page.cosmetics?.canChoose) return;
+  // Format 2: die Leiste unter der Figur zeigt danach die Animationen dieses Slots
+  if (item?.mesh && slot !== 'cape') page.animSlot = slot;
   page.busy = `cosmetic:${slot}:${item?.id ?? 'none'}`;
   render();
   try {
@@ -1295,6 +1337,71 @@ function renderStage(): void {
   ui.motion.title = page.motion ? 'Drehen und Animation anhalten' : 'Drehen und Animation abspielen';
   ui.motion.setAttribute('aria-pressed', String(page.motion));
   ui.motion.hidden = !viewer;
+  updateEmote();
+  renderAnims();
+}
+
+// ---------- Format 2: Animationen ----------
+
+const animKey = (item: CosmeticItem) => `${item.id}:${item.sha256}`;
+
+/** Das überfahrene Format-2-Cosmetic spielt sein Emote, alle anderen ihre gewählte Animation */
+function updateEmote(): void {
+  if (!rig) return;
+  const hover = page.hoverCosmetic;
+  const item = hover ? cosmeticItem(hover.id, hover.slot) : undefined;
+  for (const slot of MODEL_SLOTS) rig.emote(slot, hover?.slot === slot && item?.mesh ? item : null);
+}
+
+/** Format-2-Cosmetic an der Figur, dessen Animationen die Leiste zeigt: überfahren, zuletzt gewählt, sonst nach Slot */
+function animatedFocus(): CosmeticItem | null {
+  if (!previewSkin()) return null;
+  const shown = previewCosmetics();
+  const order: CosmeticModelSlot[] = [];
+  if (page.hoverCosmetic) order.push(page.hoverCosmetic.slot);
+  if (page.animSlot) order.push(page.animSlot);
+  order.push('back', 'companion', 'aura', 'head');
+  for (const slot of order) {
+    const item = shown[slot];
+    if (item?.mesh) return item;
+  }
+  return null;
+}
+
+/** Leiste mit den Animationen (Namen aus dem Manifest); einmalige tragen „1×“ und laufen danach zurück */
+function renderAnims(): void {
+  if (!ui) return;
+  const box = ui.anims;
+  const item = viewer && rig ? animatedFocus() : null;
+  const mesh = item?.mesh;
+  if (!item || !mesh || mesh.animations.length < 2) {
+    box.hidden = true;
+    box.replaceChildren();
+    delete box.dataset.cosmetic;
+    return;
+  }
+  const names = mesh.animations.map((a) => a.name);
+  const idle = names.includes(mesh.states.idle) ? mesh.states.idle : names[0];
+  const emote = mesh.states.emote && names.includes(mesh.states.emote) ? mesh.states.emote : null;
+  const hovered = page.hoverCosmetic?.slot === item.slot && page.hoverCosmetic.id === item.id;
+  const chosen = page.anims.get(animKey(item)) ?? idle;
+  const active = hovered && emote ? emote : chosen;
+  box.hidden = false;
+  box.dataset.cosmetic = item.id;
+  box.dataset.animation = active;
+  box.setAttribute('aria-label', `Animation von ${item.name}`);
+  box.replaceChildren(...mesh.animations.map((a) => h('button', {
+    class: 'profile-anim',
+    type: 'button',
+    'aria-pressed': String(a.name === active),
+    title: a.loop ? `${a.name} abspielen` : `${a.name} einmal abspielen, danach zurück`,
+    onclick: () => {
+      page.anims.set(animKey(item), a.name);
+      page.animSlot = item.slot as CosmeticModelSlot;
+      rig?.setAnimation(item, a.name);
+      renderAnims();
+    },
+  }, a.name, a.loop ? null : h('span', { class: 'profile-anim-once', text: '1×' }))));
 }
 
 function loadingView(): HTMLElement {
@@ -1445,6 +1552,10 @@ interface TileOptions {
   locked: boolean;
   /** nur für das HeldixClient-Team */
   team?: boolean;
+  /** Belohnung (access „unlock“) */
+  reward?: boolean;
+  /** Klick auf die gesperrte Kachel (z. B. zu „Freunde einladen“) */
+  onLocked?: () => void;
   busyKey: string;
   title: string;
   select: () => void;
@@ -1463,7 +1574,8 @@ function capeTile(o: TileOptions): HTMLElement {
     'aria-disabled': blocked ? 'true' : null,
     title: o.title,
     onclick: () => {
-      if (!blocked && !busy && !o.checked) o.select();
+      if (o.locked && o.onLocked && !page.busy) o.onLocked();
+      else if (!blocked && !busy && !o.checked) o.select();
     },
     onmouseenter: enter,
     onmouseleave: leave,
@@ -1471,8 +1583,10 @@ function capeTile(o: TileOptions): HTMLElement {
     onblur: leave,
   },
   h('span', { class: 'profile-cape-art' }, o.art),
-  h('span', { class: 'profile-cape-name', text: o.label }),
+  // Lange Einzelwörter (z. B. „Freundesfunken“) kleiner setzen statt mitten im Wort umzubrechen
+  h('span', { class: `profile-cape-name${o.label.split(/\s+/).some((word) => word.length > 11) ? ' long' : ''}`, text: o.label }),
   o.team ? h('span', { class: 'profile-cape-team', title: 'Nur für das HeldixClient-Team' }, uiIcon('shield'), 'Team') : null,
+  o.reward && !o.team ? h('span', { class: 'profile-cape-team profile-cape-reward', title: 'Belohnung für Einladungen' }, uiIcon('user-plus'), 'Belohnung') : null,
   o.checked ? h('span', { class: 'profile-cape-check' }, uiIcon('check')) : null,
   busy ? h('span', { class: 'profile-cape-busy' }, spinner()) : null);
 }
@@ -1481,11 +1595,21 @@ function capeTile(o: TileOptions): HTMLElement {
 function cosmeticTitle(item: CosmeticItem, lockedBy: string | null): string {
   const text = item.description ? `${item.name}: ${item.description}` : item.name;
   if (lockedBy) return `${item.name} – ${lockedBy}`;
+  if (item.unlockOnly) return `${text} (Belohnung für Einladungen)`;
   return item.teamOnly ? `${text} (nur für das HeldixClient-Team)` : text;
 }
 
 function noneArt(): HTMLElement {
   return h('span', { class: 'profile-cape-none' }, uiIcon('ban'));
+}
+
+/** Hinweis unter gesperrten Belohnungen mit Sprung zu „Freunde einladen“ */
+function rewardHint(items: CosmeticItem[]): HTMLElement {
+  const names = items.map((i) => i.name);
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} und ${names.at(-1)}` : names[0];
+  return h('p', { class: 'profile-locked profile-reward-hint' }, uiIcon('user-plus'),
+    h('span', { text: `Belohnung für Einladungen: ${list} schaltest du frei, indem du Freunde zu HeldixClient einlädst.` }),
+    h('button', { class: 'ghost small profile-invite-jump', type: 'button', onclick: () => openInvites() }, 'Freunde einladen'));
 }
 
 function sectionHead(heading: string, text: string): HTMLElement {
@@ -1555,14 +1679,21 @@ function capesView(p: ProfileState): HTMLElement {
         const thumb = { canvas, cape: builtinDef(cape), frame: -1 };
         thumbs.push(thumb);
         if (strips.has(thumb.cape.key)) drawThumb(thumb, 0);
+        // Team-Capes (capes.json „team“): wie Katalog-Cosmetics gesperrt, wenn das Konto sicher nicht im Team ist
+        const teamLock = cape.team && page.cosmetics?.team === false;
         return capeTile({
           choice: { kind: 'heldix', id: cape.id },
           label: cape.name,
           art: canvas,
           checked: cape.id === selected,
-          locked: heldixLocked,
+          locked: heldixLocked || teamLock,
           busyKey: `heldix:${cape.id}`,
-          title: heldixLocked ? `${cape.name} – ${lockTitle}` : `${cape.name}: ${cape.description}`,
+          title: heldixLocked
+            ? `${cape.name} – ${lockTitle}`
+            : teamLock
+              ? `${cape.name} – nur für das HeldixClient-Team`
+              : `${cape.name}: ${cape.description}${cape.team ? ' (nur für das HeldixClient-Team)' : ''}`,
+          team: cape.team,
           select: () => void selectHeldixCape(cape),
         });
       }),
@@ -1572,7 +1703,7 @@ function capesView(p: ProfileState): HTMLElement {
         thumbs.push(thumb);
         if (strips.has(thumb.cape.key)) drawThumb(thumb, 0);
         const chooseLocked = heldixLocked || !page.cosmetics?.canChoose;
-        const lockedBy = chooseLocked ? lockTitle : teamLocked(item) ? 'nur für das HeldixClient-Team' : null;
+        const lockedBy = chooseLocked ? lockTitle : itemLock(item);
         return capeTile({
           choice: { kind: 'catalog', id: item.id },
           label: item.name,
@@ -1580,6 +1711,8 @@ function capesView(p: ProfileState): HTMLElement {
           checked: item.id === selected,
           locked: !!lockedBy,
           team: item.teamOnly,
+          reward: item.unlockOnly,
+          onLocked: !chooseLocked && rewardLocked(item) ? openInvites : undefined,
           busyKey: `cosmetic:cape:${item.id}`,
           title: cosmeticTitle(item, lockedBy),
           select: () => void selectCosmetic('cape', item),
@@ -1587,6 +1720,7 @@ function capesView(p: ProfileState): HTMLElement {
       }),
     ];
     heldix.append(h('div', { class: `profile-cape-grid${heldixLocked ? ' locked' : ''}`, role: 'radiogroup', 'aria-label': 'Heldix-Cape' }, ...tiles));
+    if (extra.some(rewardLocked)) heldix.append(rewardHint(extra.filter(rewardLocked)));
   }
 
   panel.append(heldix, mojang);
@@ -1653,7 +1787,7 @@ function cosmeticsView(): HTMLElement {
         select: () => void selectCosmetic(slot, null),
       }),
       ...items.map((item) => {
-        const lockedBy = lockTitle ?? (teamLocked(item) ? 'nur für das HeldixClient-Team' : null);
+        const lockedBy = lockTitle ?? itemLock(item);
         return capeTile({
           cosmetic: { slot, id: item.id },
           label: item.name,
@@ -1662,6 +1796,8 @@ function cosmeticsView(): HTMLElement {
           checked: worn?.id === item.id,
           locked: !!lockedBy,
           team: item.teamOnly,
+          reward: item.unlockOnly,
+          onLocked: !lockTitle && rewardLocked(item) ? openInvites : undefined,
           busyKey: `cosmetic:${slot}:${item.id}`,
           title: cosmeticTitle(item, lockedBy),
           select: () => void selectCosmetic(slot, item),
@@ -1670,7 +1806,8 @@ function cosmeticsView(): HTMLElement {
     ];
     panel.append(h('section', { class: 'profile-section', 'data-slot': slot },
       sectionHead(info.title, info.text),
-      h('div', { class: `profile-cape-grid${locked ? ' locked' : ''}`, role: 'radiogroup', 'aria-label': info.title }, ...tiles)));
+      h('div', { class: `profile-cape-grid${locked ? ' locked' : ''}`, role: 'radiogroup', 'aria-label': info.title }, ...tiles),
+      items.some(rewardLocked) ? rewardHint(items.filter(rewardLocked)) : null));
   }
   return panel;
 }
@@ -1709,7 +1846,8 @@ function build(root: HTMLElement): Ui {
     // Standbild statt Animation: erstes Bild zeigen
     for (const thumb of thumbs) if (strips.has(thumb.cape.key)) drawThumb(thumb, page.motion ? thumb.frame : 0);
   });
-  const stageView = h('div', { class: 'profile-stage-view' }, canvas, fallback, hint, tag, motion);
+  const anims = h('div', { class: 'profile-anims', role: 'group', hidden: true });
+  const stageView = h('div', { class: 'profile-stage-view' }, canvas, fallback, hint, tag, motion, anims);
   const stageName = h('div', { class: 'profile-stage-name' });
   const stageSub = h('div', { class: 'profile-stage-sub' });
   const elytra = h('button', { class: 'ghost small profile-toggle', type: 'button', 'aria-pressed': 'false' }, 'Elytra');
@@ -1737,11 +1875,12 @@ function build(root: HTMLElement): Ui {
     h('div', { class: 'drop-overlay' }, h('div', { text: 'PNG-Skins hier ablegen' })));
 
   root.replaceChildren(head, h('div', { class: 'profile-layout' }, stage, main));
-  return { root, sub, main, scroll, tabSkins, tabCapes, tabCosmetics, skinCount, actions, addButton, resetButton, stageView, canvas, fallback, hint, tag, motion, stageName, stageSub, elytra };
+  return { root, sub, main, scroll, tabSkins, tabCapes, tabCosmetics, skinCount, actions, addButton, resetButton, stageView, canvas, fallback, hint, tag, motion, stageName, stageSub, elytra, anims };
 }
 
-/** einmal beim Start */
-export function initProfile(): void {
+/** einmal beim Start; invites = Sprung zu Freunde → Einladen */
+export function initProfile(invites?: () => void): void {
+  if (invites) openInvites = invites;
   const root = document.getElementById('profile-root');
   if (!root || ui) return;
   root.classList.add('profile-page');
@@ -1772,4 +1911,21 @@ export function activateProfile(): void {
   if (page.accountKey === null || accountChanged) void load({ reset: accountChanged });
   else if (!page.loading && (page.stale || !page.profile || Date.now() - page.loadedAt > 60_000)) void load({ silent: !!page.profile });
   else render();
+}
+
+/** Freischaltungen haben sich geändert (neue Belohnung): Cosmetics neu laden bzw. beim nächsten Öffnen */
+export function reloadCosmetics(): void {
+  page.stale = true;
+  if (page.active) void loadCosmetics();
+}
+
+/** Seite mit dem Reiter zu diesem Cosmetic öffnen (Capes für Capes, sonst Cosmetics); vorher activateProfile() */
+export async function showProfileCosmetic(id: string): Promise<void> {
+  if (!ui) return;
+  let item = cosmeticItem(id);
+  if (!item) {
+    await loadCosmetics();
+    item = cosmeticItem(id);
+  }
+  setTab(item?.slot === 'cape' ? 'capes' : 'cosmetics');
 }

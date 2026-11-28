@@ -1,7 +1,8 @@
 // Prüft das Cosmetic-Format (core/cosmetics-format.ts = Kopie von service/src/cosmetics-format.ts, core/cosmetics.ts)
 // und den Startsatz unter cosmetics/: Kopie gleich dem Dienst, gültige Beispiele je Slot, jede Grenze einzeln verletzt,
-// Umschlag und Signatur (falsches Präfix, fremder Schlüssel, verändertes Manifest), Bedeutung von Box-UV/Animationen
-// und dass jedes Start-Cosmetic gebaut und signiert werden kann. Signiert wird mit einem Test-Schlüssel – der echte
+// Umschlag und Signatur (falsches Präfix, fremder Schlüssel, verändertes Manifest), Bedeutung von Box-UV/Animationen,
+// Format 2 (Mesh mit Keyframes: Beispiele, Regeln, Dekodier-Hilfen, Größe je Format) und dass jedes Start-Cosmetic
+// (Format 1 und die aus Blender übernommenen in Format 2) gebaut und signiert werden kann. Signiert wird mit einem Test-Schlüssel – der echte
 // Update-Schlüssel wird nicht gebraucht.
 //
 // Aufruf: npm run test:cosmetics
@@ -24,10 +25,19 @@ import {
   checkCosmeticEnvelope,
   checkCosmeticManifest,
   COSMETIC_LIMITS,
+  COSMETIC_LIMITS_2,
+  COSMETIC_MAX_MANIFEST_BYTES,
   COSMETIC_SIGNATURE_PREFIX,
   cosmeticEnvelopeText,
+  decodeCosmeticMesh,
+  decodeCosmeticTrack,
+  encodeInt16LE,
+  encodeInt8,
+  encodeUint16LE,
+  encodeUint8,
   readPng,
   type CosmeticManifest,
+  type CosmeticManifest2,
   type CosmeticModel,
 } from '../main/core/cosmetics-format';
 import { buildCosmetic, listCosmeticSources } from './cosmetic-sources';
@@ -52,7 +62,8 @@ function png(width: number, height: number, noise = false): string {
 const DATE = '2026-11-26T12:00:00.000Z';
 const BASE = { type: 'heldix-cosmetic', format: 1, version: 1, description: 'Zum Testen', access: 'all', date: DATE };
 
-function simpleModel(textureSize: [number, number] = [64, 32]): CosmeticModel {
+/** Rohes Modell ohne scale (Standardwert 1) */
+function simpleModel(textureSize: [number, number] = [64, 32]): Omit<CosmeticModel, 'scale'> {
   return {
     textureSize,
     bones: [
@@ -91,11 +102,58 @@ const VALID: Record<string, Json> = {
   cape: { ...BASE, id: 'test-cape', slot: 'cape', name: 'Testcape', texture: png(64, 64), cape: { frames: 2, fps: 12 } },
 };
 
-/** Prüft ein Manifest-Objekt; liefert das Manifest oder wirft mit der (ersten) Fehlermeldung. */
+/** Prüft ein Manifest-Objekt (Format 1); liefert das Manifest oder wirft mit der (ersten) Fehlermeldung. */
 function parse(manifest: unknown): CosmeticManifest {
   const result = checkCosmeticManifest(manifest);
   if (typeof result === 'string') throw new Error(result);
+  if (result.format !== 1) throw new Error(`Format ${result.format} statt 1`);
   return result;
+}
+
+// ---------- Format 2: Rechteck an zwei Knochen (1/32 Pixel), zwei Animationen, Leucht-Streifen mit 4 Bildern ----------
+
+const quatY = (degrees: number) => [0, Math.round(Math.sin((degrees * Math.PI) / 360) * 32767), 0, Math.round(Math.cos((degrees * Math.PI) / 360) * 32767)];
+
+function mesh2(slot: 'head' | 'back' | 'aura' | 'companion'): Json {
+  return {
+    type: 'heldix-cosmetic', format: 2, id: `test-mesh-${slot}`, version: 1, slot, name: `Testmesh ${slot}`, description: 'Zum Testen', access: 'all', date: DATE,
+    texture: png(16, 16), glow: png(16, 64),
+    emissive: { frames: 4, frametimeTicks: 2, pulse: { period: 2, min: 0.5, max: 1 } },
+    bones: [
+      { name: 'root', parent: -1, pivot: [0, 0, 2], tail: [0, 4, 2] },
+      { name: 'wing.L', parent: 0, pivot: [4, 0, 2], tail: [4, 8, 2] },
+    ],
+    mesh: {
+      vertexCount: 4, triangleCount: 2,
+      positions: encodeInt16LE([0, 0, 2, 4, 0, 2, 4, 8, 2, 0, 8, 2].map((v) => v * 32)),
+      normals: encodeInt8([0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127]),
+      uvs: encodeUint16LE([0, 0, 65535, 0, 65535, 65535, 0, 65535]),
+      bones: encodeUint8([0, 0, 1, 1]),
+      triangles: encodeUint16LE([0, 1, 2, 0, 2, 3]),
+    },
+    animations: {
+      Idle: { fps: 24, frames: 48, loop: true, tracks: [{ bone: 1, rot: { keys: encodeUint16LE([0, 24, 47]), values: encodeInt16LE([...quatY(0), ...quatY(30), ...quatY(1)]) } }] },
+      Hurt: { fps: 24, frames: 12, loop: false, tracks: [{ bone: 0, move: { keys: encodeUint16LE([0, 6]), values: encodeInt16LE([0, 0, 0, 0, -32, 0]) }, scale: { keys: encodeUint16LE([0]), values: encodeUint16LE([1000]) } }] },
+    },
+    states: { idle: 'Idle', hurt: 'Hurt', blendSeconds: 0.25 },
+    particles: [{ bone: 1, at: 'tail', particle: 'minecraft:dust', color: '#ffcc00', perSecond: 2, states: ['Idle'] }],
+    ...(slot === 'companion' ? { attach: { origin: [14, -6, 1], side: 'left' } } : {}),
+  };
+}
+
+/** Prüft ein Manifest-Objekt (Format 2) oder wirft mit der Fehlermeldung. */
+function parse2(manifest: unknown): CosmeticManifest2 {
+  const result = checkCosmeticManifest(manifest);
+  if (typeof result === 'string') throw new Error(result);
+  if (result.format !== 2) throw new Error(`Format ${result.format} statt 2`);
+  return result;
+}
+
+function rejects2(label: string, change: (m: Json) => void, pattern: RegExp, slot: 'head' | 'back' | 'aura' | 'companion' = 'back'): void {
+  const manifest = mesh2(slot);
+  change(manifest);
+  const result = checkCosmeticManifest(manifest);
+  check(`Format 2 abgelehnt: ${label}`, typeof result === 'string' && pattern.test(result), typeof result === 'string' ? result : 'keine Fehlermeldung');
 }
 
 /** Erwartet, dass die Änderung mit passender Meldung abgelehnt wird (der Rest des Beispiels ist gültig). */
@@ -151,9 +209,13 @@ async function main(): Promise<void> {
     }
   }
   const head = parse(VALID.head);
-  check('Standardwerte ergänzt (parent, rotation, inflate, mirror, phase, amplitude bei spin)',
+  check('Standardwerte ergänzt (parent, rotation, inflate, mirror, phase, amplitude bei spin, model.scale)',
     head.model!.bones[1].parent === 'base' && head.model!.bones[1].rotation.join() === '0,0,0' && head.model!.bones[1].cubes[0].inflate === 0
-      && head.model!.bones[1].cubes[0].mirror === false && head.animations[0].phase === 0 && head.animations[0].amplitude === 0 && head.glow === null);
+      && head.model!.bones[1].cubes[0].mirror === false && head.animations[0].phase === 0 && head.animations[0].amplitude === 0 && head.glow === null
+      && head.model!.scale === 1);
+  const scaled = clone(VALID.back);
+  scaled.model.scale = 0.62;
+  check('model.scale übernommen', parse(scaled).model!.scale === 0.62);
   check('Texturmaße aus dem PNG-Kopf', head.image.width === 64 && head.image.height === 32);
 
   // ---------- Grenzen genau erreicht ----------
@@ -162,12 +224,21 @@ async function main(): Promise<void> {
   accepts('Beschreibung mit 300 Zeichen', 'head', (m) => (m.description = 'x'.repeat(300)));
   accepts('ID mit 32 Zeichen', 'head', (m) => (m.id = 'a'.repeat(32)));
   accepts('access team', 'head', (m) => (m.access = 'team'));
+  accepts('access unlock (Belohnung, z. B. für Einladungen)', 'aura', (m) => (m.access = 'unlock'));
   accepts('version 2^31 − 1', 'head', (m) => (m.version = 2147483647));
-  accepts('32 Bones, 128 Würfel, 16 Animationen', 'head', (m) => {
+  accepts('64 Bones, 128 Würfel, 16 Animationen', 'head', (m) => {
     m.texture = png(256, 256);
-    m.model = { textureSize: [256, 256], bones: Array.from({ length: 32 }, (_, i) => ({ name: `b${i}`, pivot: [0, 0, 0], cubes: Array.from({ length: 4 }, () => ({ origin: [-48, -48, -48], size: [1, 1, 1], uv: [252, 254] })) })) };
+    m.model = { textureSize: [256, 256], bones: Array.from({ length: 64 }, (_, i) => ({ name: `b${i}`, pivot: [0, 0, 0], cubes: Array.from({ length: 2 }, () => ({ origin: [-48, -48, -48], size: [1, 1, 1], uv: [252, 254] })) })) };
     m.animations = Array.from({ length: 16 }, (_, i) => ({ bone: `b${i}`, type: 'flap', axis: 'x', amplitude: 90, speed: 4, phase: 1 }));
   });
+  accepts('model.scale 0,25', 'head', (m) => (m.model.scale = 0.25));
+  accepts('model.scale 1,5', 'back', (m) => (m.model.scale = 1.5));
+  accepts('model.scale beim Begleiter (zusätzlich zu companion.scale)', 'companion', (m) => (m.model.scale = 0.5));
+  accepts('texture 512 × 256', 'head', (m) => ((m.texture = png(512, 256)), (m.model.textureSize = [512, 256])));
+  accepts('texture 512 × 256 für 128 × 64 Texel (4-fache Auflösung)', 'head', (m) => ((m.texture = png(512, 256)), (m.model.textureSize = [128, 64])));
+  accepts('texture 128 × 64 für 64 × 32 Texel (2-fache Auflösung)', 'head', (m) => ((m.texture = png(128, 64)), (m.model.textureSize = [64, 32])));
+  accepts('texture und glow 4-fach (256 × 128 für 64 × 32 Texel)', 'back', (m) => ((m.texture = png(256, 128)), (m.glow = png(256, 128))));
+  accepts('texture und glow 512 × 512', 'back', (m) => ((m.texture = png(512, 512)), (m.glow = png(512, 512)), (m.model.textureSize = [512, 512])));
   accepts('leere Bones neben einem Würfel', 'head', (m) => m.model.bones.push({ name: 'leer', parent: 'base', pivot: [0, 0, 0], cubes: [] }));
   accepts('Würfelkante 32 und Koordinate 48', 'head', (m) => ((m.texture = png(256, 64)), delete m.animations, (m.model = { textureSize: [256, 64], bones: [{ name: 'a', pivot: [48, -48, 0], rotation: [180, -180, 0], cubes: [{ origin: [16, 0, 0], size: [32, 0, 0], uv: [0, 0], inflate: 0 }] }] })));
   accepts('Ebene (eine Kante 0) und inflate 2', 'head', (m) => (m.model.bones[0].cubes[0] = { origin: [-4, 2, 0], size: [8, 8, 0], uv: [0, 0], inflate: 2 }));
@@ -180,7 +251,8 @@ async function main(): Promise<void> {
 
   // ---------- jede Regel einzeln verletzt ----------
   rejects('type falsch', 'head', (m) => (m.type = 'heldix-addon'), /„type“/);
-  rejects('format 2', 'head', (m) => (m.format = 2), /„format“/);
+  rejects('format 3', 'head', (m) => (m.format = 3), /„format“ muss 1 oder 2 sein/);
+  rejects('Format-1-Inhalt mit format 2', 'head', (m) => (m.format = 2), /„model“ ist kein bekanntes Feld \(Format 2\)/);
   rejects('ID mit Großbuchstaben', 'head', (m) => (m.id = 'Krone'), /„id“ ist ungültig/);
   rejects('ID beginnt mit -', 'head', (m) => (m.id = '-krone'), /„id“ ist ungültig/);
   rejects('ID endet mit -', 'head', (m) => (m.id = 'krone-'), /„id“ ist ungültig/);
@@ -222,9 +294,10 @@ async function main(): Promise<void> {
     m.texture = pngDataUrl(bytes.subarray(0, bytes.length - 12));
   }, /IEND fehlt/);
   rejects('texture größer als 64 KB', 'head', (m) => ((m.texture = png(256, 256, true)), (m.model.textureSize = [256, 256])), /„texture“ ist zu groß/);
-  rejects('texture 12 px breit', 'head', (m) => ((m.texture = png(12, 16)), (m.model.textureSize = [12, 16])), /„texture“ muss 8 bis 256/);
-  rejects('texture 264 px breit', 'head', (m) => ((m.texture = png(264, 16)), (m.model.textureSize = [264, 16])), /„texture“ muss 8 bis 256/);
-  rejects('texture kleiner als 8 px', 'aura', (m) => (m.texture = png(16, 4)), /„texture“ muss 8 bis 256/);
+  rejects('texture 12 px breit', 'head', (m) => ((m.texture = png(12, 16)), (m.model.textureSize = [12, 16])), /„texture“ muss 8 bis 512/);
+  rejects('texture 520 px breit', 'head', (m) => ((m.texture = png(520, 16)), (m.model.textureSize = [520, 16])), /„texture“ muss 8 bis 512/);
+  rejects('texture 1024 px hoch', 'head', (m) => ((m.texture = png(16, 1024)), (m.model.textureSize = [16, 1024])), /„texture“ muss 8 bis 512 Pixel breit und hoch sein, jeweils ein Vielfaches von 8 \(ist 16 × 1024\)/);
+  rejects('texture kleiner als 8 px', 'aura', (m) => (m.texture = png(16, 4)), /„texture“ muss 8 bis 512/);
   rejects('glow anders groß', 'back', (m) => (m.glow = png(32, 32)), /„glow“ muss genauso groß/);
   rejects('glow kein PNG', 'back', (m) => (m.glow = 'data:image/png;base64,AAAA'), /„glow“ ist kein PNG/);
 
@@ -241,9 +314,17 @@ async function main(): Promise<void> {
   rejects('cape mit model', 'cape', (m) => (m.model = simpleModel([64, 64])), /„model“ gibt es beim Slot cape nicht/);
 
   // Modell
-  rejects('textureSize passt nicht zur Textur', 'head', (m) => (m.model.textureSize = [64, 64]), /„model\.textureSize“/);
-  rejects('keine Bones', 'head', (m) => (m.model.bones = []), /„model\.bones“ muss eine Liste mit 1 bis 32/);
-  rejects('33 Bones', 'head', (m) => (m.model.bones = Array.from({ length: 33 }, (_, i) => ({ name: `b${i}`, pivot: [0, 0, 0], cubes: i ? [] : [{ origin: [0, 0, 0], size: [1, 1, 1], uv: [0, 0] }] }))), /„model\.bones“ muss eine Liste mit 1 bis 32/);
+  rejects('textureSize passt nicht zur Textur', 'head', (m) => (m.model.textureSize = [64, 64]), /^„model\.textureSize“ muss die Größe der Textur in Texeln sein \(\[64, 32\], \[32, 16\] oder \[16, 8\]: Textur in 1-, 2- oder 4-facher Auflösung\)$/);
+  rejects('textureSize mit 3-facher Auflösung', 'head', (m) => ((m.texture = png(192, 96)), (m.model.textureSize = [64, 32])), /„model\.textureSize“ muss die Größe der Textur in Texeln sein \(\[192, 96\]/);
+  rejects('textureSize ungleich aufgelöst', 'head', (m) => ((m.texture = png(256, 64)), (m.model.textureSize = [64, 32])), /„model\.textureSize“/);
+  rejects('UV zählt in Texeln von textureSize (4-fach)', 'head', (m) => ((m.texture = png(256, 128)), (m.model.bones[0].cubes[0].uv = [40, 0])), /Die UV-Fläche \(32 × 10 ab 40, 0\) passt nicht in die Textur \(64 × 32\)/);
+  rejects('keine Bones', 'head', (m) => (m.model.bones = []), /„model\.bones“ muss eine Liste mit 1 bis 64 Bones sein/);
+  rejects('65 Bones', 'head', (m) => (m.model.bones = Array.from({ length: 65 }, (_, i) => ({ name: `b${i}`, pivot: [0, 0, 0], cubes: i ? [] : [{ origin: [0, 0, 0], size: [1, 1, 1], uv: [0, 0] }] }))), /„model\.bones“ muss eine Liste mit 1 bis 64 Bones sein/);
+  rejects('model.scale 0,2', 'head', (m) => (m.model.scale = 0.2), /^„model\.scale“ muss eine Zahl von 0\.25 bis 1\.5 sein$/);
+  rejects('model.scale 1,6', 'back', (m) => (m.model.scale = 1.6), /^„model\.scale“ muss eine Zahl von 0\.25 bis 1\.5 sein$/);
+  rejects('model.scale 0', 'head', (m) => (m.model.scale = 0), /„model\.scale“/);
+  rejects('model.scale als Text', 'head', (m) => (m.model.scale = '1'), /„model\.scale“/);
+  rejects('model.scale null', 'head', (m) => (m.model.scale = null), /„model\.scale“/);
   rejects('129 Würfel', 'head', (m) => {
     m.texture = png(256, 256);
     m.model = { textureSize: [256, 256], bones: Array.from({ length: 3 }, (_, i) => ({ name: `b${i}`, pivot: [0, 0, 0], cubes: Array.from({ length: 43 }, () => ({ origin: [0, 0, 0], size: [1, 1, 1], uv: [0, 0] })) })) };
@@ -321,9 +402,14 @@ async function main(): Promise<void> {
   throwsWith('Manifest größer als 160 KB', () => parseCosmeticManifestText(JSON.stringify(VALID.head) + ' '.repeat(COSMETIC_LIMITS.manifestBytes)), /„manifest“ ist zu groß/);
   throwsWith('Manifest kein JSON', () => parseCosmeticManifestText('{kaputt'), /kein gültiges JSON/);
   const validEnvelope = envelopeOf(VALID.head, privateKey);
-  const big = { manifest: 'x'.repeat(COSMETIC_LIMITS.manifestBytes), signature: JSON.parse(validEnvelope).signature };
-  check('Manifest-Text über 160 KB im Umschlag abgelehnt', typeof checkCosmeticEnvelope({ ...big, manifest: big.manifest + 'x' }) === 'string');
-  check('Umschlag über 192 KB abgelehnt', /Umschlag ist zu groß/.test(String(checkCosmeticEnvelope({ manifest: '"'.repeat(COSMETIC_LIMITS.manifestBytes), signature: big.signature }))));
+  // Der Umschlag kennt das Format noch nicht: größte Grenze (512 KB / 544 KB); Format 1 bleibt beim Lesen bei 160 KB
+  const big = { manifest: 'x'.repeat(COSMETIC_MAX_MANIFEST_BYTES), signature: JSON.parse(validEnvelope).signature };
+  check('Manifest-Text über 512 KB im Umschlag abgelehnt', typeof checkCosmeticEnvelope({ ...big, manifest: big.manifest + 'x' }) === 'string');
+  check('Umschlag über 544 KB abgelehnt', /Umschlag ist zu groß \(höchstens 544 KB\)/.test(String(checkCosmeticEnvelope({ manifest: '"'.repeat(300 * 1024), signature: big.signature }))));
+  throwsWith('Format 1 über 160 KB abgelehnt (auch wenn der Umschlag passt)', () => parseCosmeticManifestText(JSON.stringify(VALID.head).slice(0, -1) + ' '.repeat(COSMETIC_LIMITS.manifestBytes) + '}'), /höchstens 160 KB bei Format 1/);
+  const two = JSON.stringify(mesh2('back'));
+  check('Format 2 bis 512 KB erlaubt', parseCosmeticManifestText(two.slice(0, -1) + ' '.repeat(400 * 1024) + '}').format === 2);
+  throwsWith('Format 2 über 512 KB abgelehnt', () => parseCosmeticManifestText(two.slice(0, -1) + ' '.repeat(COSMETIC_LIMITS_2.manifestBytes) + '}'), /„manifest“ ist zu groß/);
   check('Zusatzfelder im Umschlag werden ignoriert', typeof checkCosmeticEnvelope({ ...JSON.parse(validEnvelope), extra: 1 }) !== 'string');
   check('Umschlag ohne Signatur abgelehnt', /„signature“/.test(String(checkCosmeticEnvelope({ manifest: '{}' }))));
   check('Signatur zu kurz abgelehnt', /„signature“/.test(String(checkCosmeticEnvelope({ manifest: '{}', signature: Buffer.alloc(32).toString('base64') }))));
@@ -364,40 +450,112 @@ async function main(): Promise<void> {
   check('spin: 0,5 Umdrehungen/s nach 0,5 s = 90°', Math.abs(spin.rotation[1] - 90) < 1e-9);
   const comp = parse(VALID.companion);
   check('bob verschiebt den Pivot', Math.abs(cosmeticPose(comp.model!, comp.animations, 0.5).get('koerper')!.offset[1] - 1) < 1e-9);
-  const rot = cosmeticBoneMatrices({ textureSize: [64, 32], bones: [{ name: 'a', parent: null, pivot: [0, 0, 0], rotation: [0, 90, 0], cubes: [] }] }).get('a')!;
+  const rot = cosmeticBoneMatrices({ textureSize: [64, 32], scale: 1, bones: [{ name: 'a', parent: null, pivot: [0, 0, 0], rotation: [0, 90, 0], cubes: [] }] }).get('a')!;
   const turned = mat4Apply(rot, [1, 0, 0]);
   check('Drehung um +Y (rechte Hand): +X → -Z', Math.abs(turned[0]) < 1e-9 && Math.abs(turned[2] + 1) < 1e-9);
-  const chain = cosmeticBoneMatrices({
+  const chainModel = (scale: number): CosmeticModel => ({
     textureSize: [64, 32],
+    scale,
     bones: [
       { name: 'a', parent: null, pivot: [0, 0, 0], rotation: [0, 0, 90], cubes: [] },
       { name: 'b', parent: 'a', pivot: [4, 0, 0], rotation: [0, 0, 90], cubes: [] },
     ],
-  }).get('b')!;
-  const tip = mat4Apply(chain, [8, 0, 0]);
+  });
+  const tip = mat4Apply(cosmeticBoneMatrices(chainModel(1)).get('b')!, [8, 0, 0]);
   check('Bones erben die Lage der Eltern (Pivots absolut)', Math.abs(tip[0] + 4) < 1e-9 && Math.abs(tip[1] - 4) < 1e-9);
+  // model.scale: S · Matrix des Bones um den Anker – Spitze halb so weit weg, Anker bleibt, auch bei Kindern
+  const half = cosmeticBoneMatrices(chainModel(0.5));
+  const halfTip = mat4Apply(half.get('b')!, [8, 0, 0]);
+  const halfAnchor = mat4Apply(half.get('a')!, [0, 0, 0]);
+  check('model.scale skaliert um den Anker über den Bone-Matrizen', Math.abs(halfTip[0] + 2) < 1e-9 && Math.abs(halfTip[1] - 2) < 1e-9
+    && halfAnchor.every((v) => Math.abs(v) < 1e-9), [halfTip, halfAnchor]);
+
+  // ---------- Format 2: Mesh mit Keyframes ----------
+  for (const slot of ['head', 'back', 'aura', 'companion'] as const) {
+    try {
+      const verified = verifyCosmeticEnvelope(envelopeOf(mesh2(slot), privateKey), publicKey);
+      check(`Format 2 gültig, signiert und geprüft: ${slot}`, verified.format === 2 && verified.slot === slot);
+    } catch (error) {
+      check(`Format 2 gültig, signiert und geprüft: ${slot}`, false, error);
+    }
+  }
+  const m2 = parse2(mesh2('companion'));
+  check('Format 2: Standardwerte und Partikel ohne „minecraft:“', m2.particles[0].particle === 'dust' && m2.particles[0].color === '#ffcc00'
+    && m2.attach?.side === 'left' && m2.attach.origin.join() === '14,-6,1' && m2.states.idle === 'Idle' && m2.states.blendSeconds === 0.25 && m2.mesh.joints === null);
+  const withoutAttach = mesh2('companion');
+  delete withoutAttach.attach;
+  check('Format 2: attach fehlt → Ursprung 0, links', parse2(withoutAttach).attach?.origin.join() === '0,0,0');
+  const decoded = decodeCosmeticMesh(m2.mesh);
+  check('Format 2: Mesh dekodiert (Int16LE, Int8, Uint16LE, Uint8)', decoded.positions[3] === 128 && decoded.positions[7] === 256 && decoded.normals[2] === 127
+    && decoded.uvs[2] === 65535 && decoded.bones.join() === '0,0,1,1' && decoded.triangles.join() === '0,1,2,0,2,3');
+  const idleTrack = decodeCosmeticTrack(m2.animations.Idle.tracks[0]);
+  check('Format 2: Spur dekodiert (Keys, Quaternionen)', idleTrack.rot!.keys.join() === '0,24,47' && [...idleTrack.rot!.values.slice(4, 8)].join() === quatY(30).join() && idleTrack.move === null);
+  const skin = mesh2('back');
+  skin.mesh.joints = encodeUint8([0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0]);
+  skin.mesh.weights = encodeUint8([200, 55, 0, 0, 128, 127, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0]);
+  check('Format 2: weiche Haut (joints/weights) erlaubt', decodeCosmeticMesh(parse2(skin).mesh).weights![1] === 55);
+  rejects2('Format 2 beim Cape', (m) => (m.slot = 'cape'), /„slot“ muss eins von head, back, aura, companion sein/);
+  rejects2('Textur keine Zweierpotenz', (m) => ((m.texture = png(24, 16)), delete m.glow, delete m.emissive), /„texture“ muss je eine Zweierpotenz von 16 bis 512/);
+  rejects2('glow nicht texture.h × frames hoch', (m) => (m.glow = png(16, 16)), /„glow“ muss 16 × 64 Pixel groß sein/);
+  rejects2('glow ohne emissive', (m) => delete m.emissive, /„emissive“ fehlt/);
+  rejects2('Base64-Länge passt nicht zu vertexCount', (m) => (m.mesh.vertexCount = 5), /„mesh\.positions“ muss genau 15 Int16-Werte/);
+  rejects2('Dreieck nennt Vertex ≥ N', (m) => (m.mesh.triangles = encodeUint16LE([0, 1, 2, 0, 2, 4])), /„mesh\.triangles“: Dreieck 1 nennt den Vertex 4/);
+  rejects2('Vertex nennt unbekannten Knochen', (m) => (m.mesh.bones = encodeUint8([0, 0, 1, 2])), /„mesh\.bones“: Vertex 3 nennt den Knochen 2/);
+  rejects2('weiche Haut: Gewichte nicht 255', (m) => Object.assign(m.mesh, { joints: encodeUint8(Array(16).fill(0)), weights: encodeUint8(Array(16).fill(1)) }), /ergeben 4 statt 255/);
+  rejects2('Eltern-Knochen nach dem Kind', (m) => (m.bones[1].parent = 1), /„bones\[1\]\.parent“/);
+  rejects2('Keys nicht ab 0', (m) => (m.animations.Idle.tracks[0].rot.keys = encodeUint16LE([1, 24, 47])), /muss mit Frame 0 beginnen/);
+  rejects2('Keys nicht aufsteigend', (m) => (m.animations.Idle.tracks[0].rot.keys = encodeUint16LE([0, 30, 24])), /muss streng aufsteigen/);
+  rejects2('Key hinter dem letzten Frame', (m) => (m.animations.Idle.tracks[0].rot.keys = encodeUint16LE([0, 24, 48])), /Frame 48 liegt nicht in der Animation/);
+  rejects2('Quaternion nicht normiert', (m) => (m.animations.Idle.tracks[0].rot.values = encodeInt16LE([...quatY(0), ...quatY(30), 0, 0, 0, 30000])), /hat die Länge 0\.916/);
+  rejects2('Zustand ohne Animation', (m) => (m.states.emote = 'Emote'), /„states\.emote“ muss der Name einer Animation sein/);
+  rejects2('ohne idle', (m) => delete m.states.idle, /„states\.idle“ fehlt/);
+  rejects2('unbekannter Partikel', (m) => (m.particles[0].particle = 'minecraft:explosion'), /ist kein erlaubter Partikel/);
+  rejects2('17 Partikel', (m) => (m.particles = Array.from({ length: 17 }, () => ({ bone: 0, at: 'pivot', particle: 'flame', perSecond: 1 }))), /höchstens 16 Einträgen/);
+  rejects2('attach außerhalb von companion', (m) => (m.attach = {}), /„attach“ gibt es nur beim Slot companion/);
+  rejects2('unbekanntes Feld (Format 2)', (m) => (m.model = {}), /„model“ ist kein bekanntes Feld \(Format 2\)/);
 
   // ---------- Startsatz ----------
+  // Zugriff: Team-Krone nur fürs Team, Freundesfunken und Freundesband als Belohnung für Einladungen, sonst alle
+  const ACCESS: Record<string, string> = { 'team-krone': 'team', freundesfunken: 'unlock', freundesband: 'unlock' };
+  // Aus Blender übernommen (npm run blender-import): 8 Flügel, 9 Begleiter (+3 Mochi-Fellfarben), 6 Auren
+  const BLENDER = [
+    'seraphfluegel', 'daemonenfluegel', 'morphofluegel', 'mechfluegel', 'lohenfluegel', 'amethystfaecher', 'abgrund-tentakel', 'farnwedel',
+    'ember', 'wisp', 'bolt', 'mochi', 'mochi-tuxedo', 'mochi-silber', 'mochi-schnee', 'jelly', 'orbit', 'pip', 'lumi', 'sprout',
+    'runenkreis', 'flammenkreis', 'eiskranz', 'leere-spirale', 'bluetensturm', 'gewitterwolke',
+  ];
   const ids = await listCosmeticSources();
   const slots: Record<string, number> = {};
+  const formats: Record<number, number> = {};
   for (const id of ids) {
     try {
       const built = await buildCosmetic(id, new Date().toISOString());
       const m = built.manifest;
       slots[m.slot] = (slots[m.slot] ?? 0) + 1;
+      formats[m.format] = (formats[m.format] ?? 0) + 1;
       const envelope = cosmeticEnvelopeText({ manifest: built.text, signature: sign(null, cosmeticSignedBytes(built.text), privateKey).toString('base64') });
       const verified = verifyCosmeticEnvelope(envelope, publicKey);
       const size = Buffer.byteLength(envelope);
       const header = readPng(built.texture);
       if (typeof header === 'string') throw new Error(`texture.png ${header}`);
-      check(`Start-Cosmetic ${id}: gültig, signiert, ${(size / 1024).toFixed(1)} KB, Textur ${header.width}×${header.height}`,
-        verified.id === id && size <= COSMETIC_LIMITS.envelopeBytes && verified.access === (id === 'team-krone' ? 'team' : 'all'));
+      const limit = verified.format === 2 ? COSMETIC_LIMITS_2.envelopeBytes : COSMETIC_LIMITS.envelopeBytes;
+      let extra = true;
+      if (verified.format === 2) {
+        // Mesh und alle Spuren lassen sich dekodieren, Zustände zeigen auf Animationen, Begleiter haben attach
+        const mesh = decodeCosmeticMesh(verified.mesh);
+        for (const clip of Object.values(verified.animations)) for (const track of clip.tracks) decodeCosmeticTrack(track);
+        extra = mesh.triangles.length === verified.mesh.triangleCount * 3 && Object.hasOwn(verified.animations, verified.states.idle)
+          && (verified.slot === 'companion') === (verified.attach !== null) && verified.emissive !== null && BLENDER.includes(id);
+      }
+      check(`Start-Cosmetic ${id}: Format ${verified.format}, gültig, signiert, ${(size / 1024).toFixed(1)} KB, Textur ${header.width}×${header.height}`,
+        verified.id === id && size <= limit && verified.access === (ACCESS[id] ?? 'all') && extra, { access: verified.access, size });
     } catch (error) {
       check(`Start-Cosmetic ${id}`, false, error);
     }
   }
-  check('Startsatz vollständig (5 Kopf, 3 Rücken, 3 Partikel, 2 Begleiter, 2 Capes)',
-    slots.head === 5 && slots.back === 3 && slots.aura === 3 && slots.companion === 2 && slots.cape === 2, slots);
+  check('aus Blender: alle 26 vorhanden', BLENDER.every((id) => ids.includes(id)), BLENDER.filter((id) => !ids.includes(id)));
+  check('Startsatz vollständig (45: 5 Kopf, 13 Rücken, 10 Partikel/Auren, 14 Begleiter, 3 Capes; 19 in Format 1, 26 in Format 2)',
+    ids.length === 45 && slots.head === 5 && slots.back === 13 && slots.aura === 10 && slots.companion === 14 && slots.cape === 3 && formats[1] === 19 && formats[2] === 26,
+    { slots, formats });
 
   finish('test:cosmetics');
 }

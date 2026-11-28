@@ -199,7 +199,8 @@ public class QuickSearchScreen extends Screen {
 			case STORE -> "addon store herunterladen installieren";
 			case CAPE -> "umhang";
 			case COSMETICS -> "hut hüte flügel aura partikel begleiter";
-			case FRIENDS -> "freundesliste online";
+			case FRIENDS -> "freundesliste online favoriten vorschläge profil";
+			case PARTY -> "party gruppe leiter folgen beitreten voice";
 			case MESSAGES -> "chat schreiben";
 			case REQUESTS -> "freundschaftsanfrage";
 			case PRIVACY -> "datenschutz sichtbar blockiert";
@@ -210,6 +211,7 @@ public class QuickSearchScreen extends Screen {
 			case OPTIONS -> "minecraft optionen steuerung tasten video sound sprache";
 			case WORLDS -> "welt einzelspieler singleplayer";
 			case SERVERS -> "server mehrspieler multiplayer";
+			case HELDIX_WORLDS -> "welt teilen freunde beitreten adresse sicherung";
 			case PAUSE -> "pause";
 			case RESUME -> "weiterspielen";
 			case QUIT -> "spiel beenden schließen";

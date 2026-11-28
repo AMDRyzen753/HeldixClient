@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { runAdmin } from '../src/admin';
 import { LINK_EXPIRED, SESSION_COOKIE } from '../src/web';
-import { api, befriend, connect, devPlayer, sleep, startService, upgradeStatus } from './helpers';
+import { api, befriend, connect, devPlayer, sleep, startService, upgradeStatus, ME_DEFAULTS } from './helpers';
 import { Clock, cookieFrom, teamLogin, webApi, webLogin, WEBSITE } from './web-helpers';
 
 const FIREFOX = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0';
@@ -79,7 +79,10 @@ describe('Web-Sitzung', () => {
         presence: true,
         showServer: true,
         messages: true,
+        ...ME_DEFAULTS,
         role: null,
+        permissions: [],
+        communityBadge: null,
         twoFactor: { enabled: false, verified: false },
       });
       // 30 Tage ab Anmeldung, aber höchstens 7 Tage ohne Nutzung: also jetzt + 7 Tage.
@@ -231,7 +234,7 @@ describe('CSRF und Cookie auf den Spieler-Routen', () => {
     }
   });
 
-  test('Freunde, Nachrichten, Meldungen, Nachschlagen mit Cookie; die Web-Sitzung macht nicht online; WebSocket nur mit Bearer', async () => {
+  test('Freunde, Nachrichten, Meldungen, Nachschlagen mit Cookie; die Web-Sitzung macht nicht online; WebSocket mit Cookie nur mit Origin', async () => {
     const service = await startService({ dev: true, website: WEBSITE });
     try {
       const anna = await devPlayer(service.url, 'Anna');
@@ -259,8 +262,9 @@ describe('CSRF und Cookie auf den Spieler-Routen', () => {
         const lookup = await webApi(service, 'POST', '/v1/players/lookup', { cookie, body: { uuids: [anna.uuid] } });
         assert.deepEqual(lookup.body, { players: {} });
         assert.equal((await api(service.url, 'GET', '/v1/friends', { token: ben.token })).body.friends[0].online, false);
-        // WebSocket nimmt das Cookie nicht.
-        assert.equal((await upgradeStatus(service.wsUrl, { Cookie: `${SESSION_COOKIE}=${cookie}` })).status, 401);
+        // WebSocket mit Cookie nur mit dem Origin der Webseite (ab 1.12.0 als Begleiter, siehe web-realtime.test.ts).
+        assert.equal((await upgradeStatus(service.wsUrl, { Cookie: `${SESSION_COOKIE}=${cookie}` })).status, 403);
+        assert.equal((await upgradeStatus(service.wsUrl, { Cookie: `${SESSION_COOKIE}=${cookie}`, Origin: 'https://boese.example' })).status, 403);
       } finally {
         await benWs.client.close();
       }

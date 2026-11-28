@@ -1,32 +1,38 @@
-<a class="skip" href="#inhalt">Zum Inhalt springen</a>
-<header class="nav">
-  <div class="wrap nav-inner">
-    <a class="brand" href="/" aria-label="HeldixClient – Startseite"><img src="/assets/logo.svg" alt="" width="30" height="30">Heldix<span>Client</span></a>
-    <nav class="nav-links" aria-label="Hauptnavigation">
-      <a href="/#funktionen">Funktionen</a>
-      <a href="/module">Module</a>
-      <a href="/addons">Addons</a>
-      <a href="/cosmetics">Cosmetics</a>
-      <a href="/hilfe">Hilfe</a>
-      <a href="/das-team">Team</a>
+<a class="skip-link" href="#inhalt">{{t:nav.inhalt}}</a>
+<header class="site-header" data-header>
+  <div class="container container--wide site-header__inner">
+    <a class="brand" href="/" aria-label="{{t:nav.start}}"><img src="/assets/logo.svg" alt="" width="30" height="30">Heldix<span>Client</span></a>
+    <nav class="site-nav" aria-label="{{t:nav.haupt}}">
+      <a href="/module" data-nav="funktionen">{{t:nav.funktionen}}</a>
+      <a href="/zusammen" data-nav="zusammen">{{t:nav.zusammen}}</a>
+      <a href="/cosmetics" data-nav="cosmetics">{{t:nav.cosmetics}}</a>
+      <a href="/addons" data-nav="addons">{{t:nav.addons}}</a>
+      <a href="/hilfe" data-nav="hilfe">{{t:nav.hilfe}}</a>
+      <a href="/neuigkeiten" data-nav="neuigkeiten">{{t:nav.neuigkeiten}}</a>
     </nav>
-    <a class="nav-account" href="/konto">{{icon:user}}<span class="nav-account-label">Konto</span></a>
-    <a class="button small nav-cta" href="/download">{{icon:download}}Download</a>
-    <details class="nav-menu">
-      <summary aria-label="Menü">
-        <span class="icon-open"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></span>
-        <span class="icon-close">{{icon:close}}</span>
-      </summary>
-      <nav class="nav-menu-panel" aria-label="Menü">
-        <a href="/#funktionen">{{icon:sparkles}}Funktionen</a>
-        <a href="/module">{{icon:modules}}Module</a>
-        <a href="/addons">{{icon:addons}}Addons</a>
-        <a href="/cosmetics">{{icon:cape}}Cosmetics</a>
-        <a href="/download">{{icon:download}}Download</a>
-        <a href="/hilfe">{{icon:info}}Hilfe</a>
-        <a href="/das-team">{{icon:friends}}Team</a>
-        <a href="/konto">{{icon:user}}Konto</a>
-      </nav>
-    </details>
+    <div class="site-header__actions">
+      <a class="btn btn--secondary btn--sm site-header__konto" href="/konto" data-nav="konto">{{icon:user}}<span>{{t:nav.konto}}</span></a>
+      <a class="btn btn--primary btn--sm site-header__download" href="/download" data-nav="download">{{icon:download}}<span>{{t:nav.download}}</span></a>
+      <details class="menu" data-menu>
+        <summary class="btn btn--secondary btn--sm btn--icon" aria-label="{{t:nav.menue}}">
+          <span class="menu__open">{{icon:menu}}</span><span class="menu__close">{{icon:close}}</span>
+        </summary>
+        <div class="menu__panel">
+          <nav class="menu__links" aria-label="{{t:nav.menueText}}">
+            <a href="/module" data-nav="funktionen">{{icon:sparkles}}{{t:nav.funktionen}}</a>
+            <a href="/zusammen" data-nav="zusammen">{{icon:friends}}{{t:nav.zusammen}}</a>
+            <a href="/cosmetics" data-nav="cosmetics">{{icon:cape}}{{t:nav.cosmetics}}</a>
+            <a href="/addons" data-nav="addons">{{icon:addons}}{{t:nav.addons}}</a>
+            <a href="/hilfe" data-nav="hilfe">{{icon:help-circle}}{{t:nav.hilfe}}</a>
+            <a href="/neuigkeiten" data-nav="neuigkeiten">{{icon:news}}{{t:nav.neuigkeiten}}<span class="chip chip--accent">{{VERSION}}</span></a>
+            <a href="/download" data-nav="download">{{icon:download}}{{t:nav.download}}</a>
+          </nav>
+          <div class="menu__actions">
+            <a class="btn btn--secondary" href="/konto">{{icon:user}}{{t:nav.konto}}</a>
+            <a class="btn btn--social" href="/konto#reiter=einladen">{{icon:user-plus}}{{t:nav.einladen}}</a>
+          </div>
+        </div>
+      </details>
+    </div>
   </div>
 </header>

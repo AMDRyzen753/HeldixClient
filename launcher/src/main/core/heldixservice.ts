@@ -47,8 +47,10 @@ export function serviceBase(serviceUrl: string): string {
   return serviceUrl.trim().replace(/\/+$/, '');
 }
 
+export type ServiceMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
 export interface ServiceRequest {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: ServiceMethod;
   body?: unknown;
   /** roher Text statt JSON (z. B. Anhang einer Support-Anfrage) */
   rawBody?: string;

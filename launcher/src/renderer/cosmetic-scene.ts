@@ -10,6 +10,9 @@
 // - Pivots und Würfel sind absolut. Bone-Matrix = Eltern · T(pivot + bob) · Rz · Ry · Rx · T(−pivot): je Bone eine
 //   Gruppe „outer“ (Position pivot + bob, Drehung in der Reihenfolge ZYX) mit einer Gruppe „inner“ (Position −pivot)
 //   darin; Würfelflächen und Kinder-Bones hängen an „inner“.
+// - model.scale (CosmeticItem.modelScale): Gruppe „model“ mit dieser Größe zwischen root und den Bones, also
+//   S · Bone-Matrix um den Anker. root bleibt frei für Platz und companion.scale (beide multiplizieren sich).
+// - UV in Texeln, geteilt durch item.textureSize (= model.textureSize; das Bild darf 2- oder 4-fach aufgelöst sein).
 // - Flächen (Box-UV, mirror, Ebenen mit einer Kante 0) rechnet der Hauptprozess mit cosmeticCubeFaces() aus; alle
 //   Flächen werden beidseitig gezeichnet (wie die Vorschau), Pixel mit Deckkraft unter 10 % fallen weg.
 // - Leuchtebene: zweites Mesh mit derselben Geometrie, ohne Licht (nur „emissive“), liegt über der Textur.
@@ -18,7 +21,19 @@
 // - Anker: head = Mitte der Kopf-Oberseite (folgt dem Kopf), back = Rumpfmitte auf Schulterhöhe (folgt dem Rumpf),
 //   companion = eigenes Objekt neben der Figur (offset in Blöcken, x rechts → Modell-x = −x·16), aura = Partikel um
 //   die Füße als einfache Sprites (Bilder laufen einmal über die Lebensdauer, Farbe tönt multiplikativ).
+//
+// Format 2 (animierte Meshes, item.mesh; Rechnung in cosmetic-mesh.ts):
+// - Ein Mesh je Cosmetic, die Ecken werden je Bild auf der CPU mit den Knochen-Matrizen bewegt (starr ein Knochen je
+//   Ecke, mit weicher Haut gewichtet – auch Dreiecke über zwei Knochen, z. B. Membranen, verformen sich wie im Spiel).
+// - Body-Modellraum → Szene: Gruppe mit 180° um X ((x, y, z) → (x, −y, −z)); attach.side „right“ spiegelt an X.
+// - Anker: head, back, companion am Rumpf auf Halshöhe (wie body.translateAndRotate im Spiel; Begleiter dazu
+//   attach.origin), aura am Spielerobjekt auf Halshöhe ohne Rumpf (Füße bei y = 24 im Body-Raum, kippt nicht mit).
+// - Albedo beidseitig mit Alpha-Schnitt; Leuchten als zweiter Durchgang, additiv und ohne Licht: Streifen-Bild über die
+//   Textur-Verschiebung (frame = ⌊Ticks / frametimeTicks⌋ mod frames), Puls über emissiveIntensity.
+// - Animationen: gewählte Schleife (Standard: Zustand idle), beim Wechsel Überblenden; emote(slot, item) spielt kurz den
+//   Zustand emote (z. B. beim Überfahren einer Kachel). Partikel aus dem Manifest zeigt die Vorschau nicht.
 import type { CosmeticBoneData, CosmeticFace, CosmeticItem, CosmeticModelSlot, CosmeticVec3 } from '../shared/api';
+import { boneMatrices, decodeMeshRig, glowFrame, glowIntensity, MeshAnimator, meshBounds, skinMesh, stateClip, type MeshRig } from './cosmetic-mesh.js';
 
 // ---------- three.js (nur die Teile, die hier gebraucht werden) ----------
 interface V3 {
@@ -42,14 +57,21 @@ interface Obj3D {
   updateMatrixWorld(force?: boolean): void;
   lookAt(x: number, y: number, z: number): void;
 }
+interface Attribute {
+  constructor: new (array: Float32Array, itemSize: number) => unknown;
+  array: Float32Array;
+  needsUpdate: boolean;
+}
 interface Geometry {
   setAttribute(name: string, attribute: unknown): Geometry;
-  getAttribute(name: string): { constructor: new (array: Float32Array, itemSize: number) => unknown; array: ArrayLike<number> } | undefined;
+  getAttribute(name: string): Attribute | undefined;
+  setIndex(index: number[]): Geometry;
   dispose(): void;
 }
 interface MaterialLike {
   opacity: number;
   needsUpdate: boolean;
+  emissiveIntensity?: number;
   dispose(): void;
 }
 interface Tex {
@@ -114,6 +136,7 @@ interface RigLib {
 
 const NEAREST = 1003; // THREE.NearestFilter
 const DOUBLE_SIDE = 2; // THREE.DoubleSide
+const ADDITIVE = 2; // THREE.AdditiveBlending
 /** Pixel mit weniger Deckkraft fallen weg (wie die Vorschau: 26 / 255) */
 const ALPHA_CUT = 0.1;
 
@@ -281,6 +304,10 @@ class ModelMount {
       });
       this.disposables.push(light);
     }
+    // model.scale um den Anker, über allen Bones (root selbst bekommt beim Begleiter Platz und companion.scale)
+    const model = new three.Group();
+    model.scale.set(item.modelScale, item.modelScale, item.modelScale);
+    this.root.add(model);
     const inners = new Map<string, Obj3D>();
     for (const bone of item.bones) {
       const outer = new three.Group();
@@ -288,7 +315,7 @@ class ModelMount {
       const inner = new three.Group();
       inner.position.set(-bone.pivot[0], -bone.pivot[1], -bone.pivot[2]);
       outer.add(inner);
-      (bone.parent ? inners.get(bone.parent) ?? this.root : this.root).add(outer);
+      (bone.parent ? inners.get(bone.parent) ?? model : model).add(outer);
       inners.set(bone.name, inner);
       if (bone.faces.length) {
         const geometry = boneGeometry(three, bone.faces, item.textureSize);
@@ -313,6 +340,142 @@ class ModelMount {
       outer.position.set(bone.pivot[0] + lage.offset[0], bone.pivot[1] + lage.offset[1], bone.pivot[2] + lage.offset[2]);
       outer.rotation.set(lage.rotation[0] * RAD, lage.rotation[1] * RAD, lage.rotation[2] * RAD);
     }
+  }
+
+  dispose(): void {
+    this.root.parent?.remove(this.root);
+    for (const d of this.disposables) d.dispose();
+  }
+}
+
+// ---------- Format 2: animiertes Mesh ----------
+
+/** Verschiebung eines Format-2-Modells im Body-Raum (Pixel): Begleiter an attach.origin, sonst keine */
+export function meshOffset(item: CosmeticItem): CosmeticVec3 {
+  const origin = item.slot === 'companion' ? item.mesh?.attach.origin : null;
+  return origin ? [origin[0], origin[1], origin[2]] : [0, 0, 0];
+}
+
+/**
+ * Ein Format-2-Cosmetic: ein Mesh (Albedo) und, mit glow, ein zweites (Leuchten) mit derselben Geometrie. root liegt im
+ * Anker (Halshöhe, +Y oben, +Z vorn) und dreht in den Body-Raum; update(t) bewegt die Ecken für die Rig-Uhr t.
+ */
+export class MeshMount {
+  readonly root: Obj3D;
+  readonly rig: MeshRig;
+  readonly animator: MeshAnimator;
+  private readonly matrices: Float32Array;
+  private readonly position: Attribute;
+  private readonly normal: Attribute;
+  private readonly glowMaterial: MaterialLike | null = null;
+  private readonly glow: Tex | null;
+  private readonly disposables: { dispose(): void }[] = [];
+  private shownAt = Number.NaN;
+  private shownFrame = -1;
+
+  constructor(three: Three, readonly item: CosmeticItem, texture: Tex, glow: Tex | null) {
+    const data = item.mesh;
+    if (!data) throw new Error('kein Mesh');
+    this.rig = decodeMeshRig(data);
+    this.animator = new MeshAnimator(this.rig);
+    this.matrices = new Float32Array(this.rig.parents.length * 16);
+    this.glow = glow;
+    this.root = new three.Group();
+    // Body-Raum (+Y unten, +Z hinten) → Szene (+Y oben, +Z vorn); Modelle sind links gebaut, rechts = gespiegelt
+    this.root.rotation.set(Math.PI, 0, 0);
+    if (data.attach.side === 'right') this.root.scale.set(-1, 1, 1);
+    const inner = new three.Group();
+    const [ox, oy, oz] = meshOffset(item);
+    inner.position.set(ox, oy, oz);
+    this.root.add(inner);
+
+    const rig = this.rig;
+    const uvs = new Float32Array(rig.vertexCount * 2);
+    for (let i = 0; i < rig.vertexCount; i++) {
+      uvs[i * 2] = rig.uvs[i * 2];
+      uvs[i * 2 + 1] = 1 - rig.uvs[i * 2 + 1];
+    }
+    const geometry = new three.BufferGeometry();
+    geometry.setAttribute('position', new three.Float32BufferAttribute(rig.positions, 3));
+    geometry.setAttribute('normal', new three.Float32BufferAttribute(rig.normals, 3));
+    geometry.setAttribute('uv', new three.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(Array.from(rig.triangles));
+    this.position = geometry.getAttribute('position')!;
+    this.normal = geometry.getAttribute('normal')!;
+    this.disposables.push(geometry, texture);
+    const base = new three.MeshStandardMaterial({ map: texture, side: DOUBLE_SIDE, alphaTest: ALPHA_CUT });
+    this.disposables.push(base);
+    const mesh = new three.Mesh(geometry, base);
+    mesh.frustumCulled = false;
+    inner.add(mesh);
+    if (glow) {
+      // nur das Leuchten: schwarz und metallisch (kein Licht, kein Glanz), Farbe aus emissiveMap, aufaddiert
+      const frames = Math.max(1, data.emissive?.frames ?? 1);
+      glow.repeat.set(1, 1 / frames);
+      glow.offset.set(0, (frames - 1) / frames);
+      glow.needsUpdate = true;
+      const light = new three.MeshStandardMaterial({
+        color: 0x000000,
+        metalness: 1,
+        roughness: 1,
+        emissive: 0xffffff,
+        emissiveMap: glow,
+        side: DOUBLE_SIDE,
+        transparent: true,
+        depthWrite: false,
+        blending: ADDITIVE,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -4,
+      });
+      this.glowMaterial = light;
+      this.disposables.push(light, glow);
+      const shine = new three.Mesh(geometry, light);
+      shine.renderOrder = 1;
+      shine.frustumCulled = false;
+      inner.add(shine);
+    }
+    this.update(0);
+  }
+
+  /** Animation wählen (restart: von vorn; immediate: ohne Überblenden, z. B. im Standbild) */
+  play(name: string, t: number, options: { restart?: boolean; immediate?: boolean } = {}): void {
+    this.animator.play(name, t, options);
+    this.shownAt = Number.NaN;
+  }
+
+  update(t: number): void {
+    if (t === this.shownAt) return;
+    this.shownAt = t;
+    const pose = this.animator.update(t);
+    boneMatrices(this.rig, pose, this.matrices);
+    skinMesh(this.rig, this.matrices, this.position.array, this.normal.array);
+    this.position.needsUpdate = true;
+    this.normal.needsUpdate = true;
+    if (this.glow && this.glowMaterial) {
+      const emissive = this.rig.emissive;
+      const frames = Math.max(1, emissive?.frames ?? 1);
+      const frame = glowFrame(emissive, t);
+      if (frame !== this.shownFrame) {
+        this.shownFrame = frame;
+        // Bild 0 oben im Streifen; die Textur ist gespiegelt geladen (v = 0 unten)
+        this.glow.offset.set(0, (frames - 1 - frame) / frames);
+      }
+      this.glowMaterial.emissiveIntensity = glowIntensity(emissive, t);
+    }
+  }
+
+  /** Hülle der Idle-Pose in Spielerkoordinaten relativ zum Hals (Pixel; +Y oben, +Z vorn) */
+  extent(): { min: CosmeticVec3; max: CosmeticVec3 } | null {
+    const idle = stateClip(this.rig, 'idle');
+    const probe = new MeshAnimator(this.rig, idle?.name ?? null);
+    const matrices = boneMatrices(this.rig, probe.update(0));
+    const positions = new Float32Array(this.rig.vertexCount * 3);
+    skinMesh(this.rig, matrices, positions, new Float32Array(this.rig.vertexCount * 3));
+    const box = meshBounds(positions, this.rig.vertexCount);
+    if (!box) return null;
+    const [ox, oy, oz] = meshOffset(this.item);
+    return { min: [box.min[0] + ox, -(box.max[1] + oy), -(box.max[2] + oz)], max: [box.max[0] + ox, -(box.min[1] + oy), -(box.min[2] + oz)] };
   }
 
   dispose(): void {
@@ -446,7 +609,17 @@ class AuraMount {
 }
 
 // ---------- an der Figur ----------
-type Mount = ModelMount | AuraMount;
+type Mount = ModelMount | AuraMount | MeshMount;
+
+/** Animationen eines Format-2-Cosmetics an der Figur */
+export interface RigAnimations {
+  /** Namen wie im Manifest (Reihenfolge des Manifests) */
+  names: string[];
+  /** gewählte Schleife bzw. Animation (Standard: Zustand idle) */
+  chosen: string;
+  /** Animation des Zustands emote (falls vorhanden) */
+  emote: string | null;
+}
 
 /** wie weit ein Cosmetic in Spielerkoordinaten reicht (Pixel; Füße bei −16, Kopf oben bei 16) */
 interface Extent {
@@ -465,7 +638,11 @@ export class CosmeticRig {
   private readonly extents = new Map<CosmeticModelSlot, Extent>();
   private baseZoom: number | null = null;
   private readonly wanted = new Map<CosmeticModelSlot, string>();
-  private readonly anchors: Record<'head' | 'back' | 'body', Obj3D>;
+  private readonly anchors: Record<'head' | 'back' | 'body' | 'stand', Obj3D>;
+  /** Format 2: gewählte Animation je Cosmetic (Schlüssel id:sha256) */
+  private readonly chosen = new Map<string, string>();
+  /** Format 2: Slot, der gerade sein Emote zeigt (Schlüssel des Cosmetics) */
+  private readonly emoting = new Map<CosmeticModelSlot, string>();
   private motion = true;
   private time = 0;
   private last = performance.now();
@@ -475,14 +652,19 @@ export class CosmeticRig {
     const head = new three.Group();
     head.position.set(0, 8, 0); // Oberseite des Kopfes (Kopf 8 × 8 × 8 über dem Hals)
     skin.head.add(head);
+    // Schulterhöhe (Rumpf 12 hoch, Mitte bei 0) = Hals-Pivot des Rumpfs: auch der Ursprung des Body-Raums (Format 2)
     const back = new three.Group();
-    back.position.set(0, 6, 0); // Schulterhöhe (Rumpf 12 hoch, Mitte bei 0)
+    back.position.set(0, 6, 0);
     skin.body.add(back);
     // Füße der Figur: Spielerobjekt y = −16 (Beine enden 24 unter dem Hals, der liegt bei 8)
     const body = new three.Group();
     body.position.set(0, -16, 0);
     viewer.playerObject.add(body);
-    this.anchors = { head, back, body };
+    // Format-2-Auren: Hals-Höhe am Spielerobjekt (dieselben Pixel wie der Body-Raum, aber ohne Rumpf-Neigung)
+    const stand = new three.Group();
+    stand.position.set(0, 8, 0);
+    viewer.playerObject.add(stand);
+    this.anchors = { head, back, body, stand };
     const render = viewer.render.bind(viewer);
     viewer.render = () => {
       this.tick();
@@ -533,13 +715,58 @@ export class CosmeticRig {
       if (Math.abs(target - zoom) > 0.001) this.viewer.zoom = this.motion ? zoom + (target - zoom) * Math.min(1, real * 7) : target;
     }
     for (const mount of this.mounts.values()) {
-      if (mount instanceof ModelMount) mount.update(this.time);
-      else mount.update(dt);
+      if (mount instanceof AuraMount) mount.update(dt);
+      else mount.update(this.time);
     }
   }
 
   private key(item: CosmeticItem | null): string {
     return item ? `${item.id}:${item.sha256}` : '';
+  }
+
+  // ---------- Format 2: Animationen ----------
+
+  /** Animationen des Format-2-Cosmetics, das gerade in diesem Slot an der Figur hängt (sonst null) */
+  animations(slot: CosmeticModelSlot): RigAnimations | null {
+    const mount = this.mounts.get(slot);
+    if (!(mount instanceof MeshMount)) return null;
+    const rig = mount.rig;
+    const emote = rig.byName.has(rig.states.emote ?? '') ? rig.states.emote : null;
+    return { names: rig.clips.map((c) => c.name), chosen: this.chosenFor(mount.item, rig), emote };
+  }
+
+  private chosenFor(item: CosmeticItem, rig: MeshRig): string {
+    const name = this.chosen.get(this.key(item));
+    return name && rig.byName.has(name) ? name : stateClip(rig, 'idle')?.name ?? rig.clips[0]?.name ?? '';
+  }
+
+  /** Animation eines Cosmetics wählen (null = Zustand idle); gilt, solange es an der Figur hängt */
+  setAnimation(item: CosmeticItem, name: string | null): void {
+    const key = this.key(item);
+    if (name) this.chosen.set(key, name);
+    else this.chosen.delete(key);
+    for (const [slot, mount] of this.mounts) if (mount instanceof MeshMount && this.key(mount.item) === key) this.applyAnimation(slot, true);
+  }
+
+  /** Emote eines Slots zeigen (item = dieses Cosmetic, z. B. beim Überfahren seiner Kachel) oder beenden (null) */
+  emote(slot: CosmeticModelSlot, item: CosmeticItem | null): void {
+    const key = item?.mesh ? this.key(item) : '';
+    if ((this.emoting.get(slot) ?? '') === key) return;
+    if (key) this.emoting.set(slot, key);
+    else this.emoting.delete(slot);
+    this.applyAnimation(slot, false);
+  }
+
+  private applyAnimation(slot: CosmeticModelSlot, restart: boolean): void {
+    const mount = this.mounts.get(slot);
+    if (!(mount instanceof MeshMount)) return;
+    const rig = mount.rig;
+    const emote = this.emoting.get(slot) === this.key(mount.item) ? rig.states.emote : undefined;
+    const name = emote && rig.byName.has(emote) ? emote : this.chosenFor(mount.item, rig);
+    // einmalige Animationen beim erneuten Wählen von vorn; im Standbild ohne Überblenden
+    const clip = rig.byName.get(name);
+    if (clip) mount.play(name, this.time, { restart: restart && !clip.loop, immediate: !this.motion });
+    mount.update(this.time);
   }
 
   /** Cosmetic eines Slots zeigen (null = keins). Gleiche Version bleibt, wie sie ist. */
@@ -553,13 +780,14 @@ export class CosmeticRig {
       this.extents.delete(slot);
       return;
     }
-    if (slot === 'aura' ? !item.particles : !item.bones.length) return;
+    if (!item.mesh && (slot === 'aura' ? !item.particles : !item.bones.length)) return;
     let mount: Mount;
     try {
-      const [image, glow] = await Promise.all([decode(item.texture), item.glow && slot !== 'aura' ? decode(item.glow) : Promise.resolve(null)]);
+      const [image, glow] = await Promise.all([decode(item.texture), item.glow && (slot !== 'aura' || item.mesh) ? decode(item.glow) : Promise.resolve(null)]);
       if (this.wanted.get(slot) !== key) return;
       const texture = pixelTexture(this.three, image);
-      if (slot === 'aura') mount = new AuraMount(this.three, item, texture);
+      if (item.mesh) mount = new MeshMount(this.three, item, texture, glow ? pixelTexture(this.three, glow) : null);
+      else if (slot === 'aura') mount = new AuraMount(this.three, item, texture);
       else {
         const model = new ModelMount(this.three, item, texture, glow ? pixelTexture(this.three, glow) : null);
         model.update(this.time);
@@ -575,11 +803,21 @@ export class CosmeticRig {
     this.mounts.get(slot)?.dispose();
     this.mounts.set(slot, mount);
     this.extents.set(slot, this.extentOf(slot, item, mount));
-    this.place(slot, item, mount.root);
+    this.place(slot, item, mount);
+    // Format 2: gewählte Animation (bzw. Emote, wenn die Kachel gerade überfahren wird)
+    if (mount instanceof MeshMount) this.applyAnimation(slot, false);
   }
 
   /** Ausdehnung in der Ruhelage (vor dem Einhängen: root ohne Eltern und unverschoben) */
   private extentOf(slot: CosmeticModelSlot, item: CosmeticItem, mount: Mount): Extent {
+    if (mount instanceof MeshMount) {
+      // Hals bei y = 8 im Spielerobjekt (Rumpf-Anker und Aura-Anker); etwas Luft für größere Bewegungen
+      const box = mount.extent();
+      if (!box) return { side: 0, top: 0, bottom: 0 };
+      const x = Math.max(Math.abs(box.min[0]), Math.abs(box.max[0]));
+      const z = Math.max(Math.abs(box.min[2]), Math.abs(box.max[2]));
+      return { side: Math.hypot(x, z) + 1, top: 8 + box.max[1] + 1, bottom: 8 + box.min[1] - 1 };
+    }
     if (mount instanceof AuraMount) {
       const p = item.particles!;
       return { side: p.radius * 16 + p.size * 8, top: 22 + p.size * 8, bottom: -16 };
@@ -601,7 +839,13 @@ export class CosmeticRig {
     return { side: Math.hypot(x, z), top: y + max[1], bottom: y + min[1] };
   }
 
-  private place(slot: CosmeticModelSlot, item: CosmeticItem, root: Obj3D): void {
+  private place(slot: CosmeticModelSlot, item: CosmeticItem, mount: Mount): void {
+    const root = mount.root;
+    if (mount instanceof MeshMount) {
+      // Format 2: Body-Raum am Rumpf (Hals); Auren ohne Rumpf am Spielerobjekt
+      (slot === 'aura' ? this.anchors.stand : this.anchors.back).add(root);
+      return;
+    }
     if (slot === 'head') this.anchors.head.add(root);
     else if (slot === 'back') this.anchors.back.add(root);
     else if (slot === 'aura') this.anchors.body.add(root);
@@ -625,6 +869,7 @@ export class CosmeticRig {
     this.mounts.clear();
     this.extents.clear();
     this.wanted.clear();
+    this.emoting.clear();
   }
 }
 
@@ -652,8 +897,8 @@ export class CosmeticThumbnails {
   }
 
   private async render(item: CosmeticItem, size: number): Promise<string | null> {
-    if (item.slot === 'aura') return auraThumbnail(item, size);
-    if (!item.bones.length) return null;
+    if (item.slot === 'aura' && !item.mesh) return auraThumbnail(item, size);
+    if (!item.bones.length && !item.mesh) return null;
     const three = threeFrom(this.viewer);
     if (!three) return null;
     if (!this.renderer) {
@@ -665,7 +910,10 @@ export class CosmeticThumbnails {
     }
     this.renderer.setSize(size, size, false);
     const [image, glow] = await Promise.all([decode(item.texture), item.glow ? decode(item.glow) : Promise.resolve(null)]);
-    const mount = new ModelMount(three, item, pixelTexture(three, image), glow ? pixelTexture(three, glow) : null);
+    // Format 2: Standbild der Idle-Pose (Anfang der Animation), Leuchten mit mittlerem Puls
+    const mount = item.mesh
+      ? new MeshMount(three, item, pixelTexture(three, image), glow ? pixelTexture(three, glow) : null)
+      : new ModelMount(three, item, pixelTexture(three, image), glow ? pixelTexture(three, glow) : null);
     // Hülle aller Ecken in der Ruhelage
     const box = bounds(mount.root);
     if (!box) {
@@ -678,9 +926,9 @@ export class CosmeticThumbnails {
     scene.add(mount.root);
     const center: CosmeticVec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
     const radius = Math.max(1, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2);
-    // leicht von oben, schräg von vorn (Rückenteile: schräg von hinten)
-    const yaw = (item.slot === 'back' ? 180 - 30 : 30) * RAD;
-    const pitch = 16 * RAD;
+    const [yawDeg, pitchDeg] = thumbnailView(item);
+    const yaw = yawDeg * RAD;
+    const pitch = pitchDeg * RAD;
     const fov = 24;
     const distance = (radius / Math.sin((fov / 2) * RAD)) * 1.02;
     const camera = new three.PerspectiveCamera(fov, 1, 1, distance + radius * 4);
@@ -693,6 +941,16 @@ export class CosmeticThumbnails {
     mount.dispose();
     return url;
   }
+}
+
+/**
+ * Blickrichtung eines Vorschaubilds in Grad [Drehung um y, Neigung von oben]: leicht von oben schräg von vorn,
+ * Rückenteile schräg von hinten, Auren (Format 2) steiler von oben, damit der Boden-Kreis zu sehen ist.
+ */
+export function thumbnailView(item: Pick<CosmeticItem, 'slot' | 'mesh'>): [number, number] {
+  if (item.slot === 'back') return [180 - 30, 16];
+  if (item.slot === 'aura' && item.mesh) return [20, 30];
+  return [30, 16];
 }
 
 /** Vorschau einer Aura: einige Partikelbilder, getönt, verstreut */

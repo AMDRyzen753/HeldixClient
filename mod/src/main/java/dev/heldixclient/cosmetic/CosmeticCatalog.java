@@ -70,6 +70,8 @@ public final class CosmeticCatalog {
 		private final Entry entry;
 		private final CosmeticFormat.Manifest manifest;
 		private final CosmeticMesh mesh;
+		/** Format 2: Mesh mit Knochen und Keyframe-Animationen */
+		private final CosmeticRig rig;
 		/** dekodierte Bilder bis zum Hochladen (Besitz geht an die Textur über) */
 		private NativeImage textureImage;
 		private NativeImage glowImage;
@@ -83,11 +85,13 @@ public final class CosmeticCatalog {
 			this.entry = entry;
 			this.manifest = manifest;
 			this.mesh = manifest.model() != null ? new CosmeticMesh(manifest.model(), manifest.animations()) : null;
+			this.rig = manifest.rig() != null ? new CosmeticRig(manifest, glowImage) : null;
 			this.textureImage = textureImage;
 			this.glowImage = glowImage;
 			// Vorschaubild für die Kacheln im Heldix-Menü (einmal, im Hintergrund)
 			if (textureImage != null) {
 				if (mesh != null) iconImage = CosmeticIcons.model(mesh, textureImage, glowImage, manifest.slot().equals("back"));
+				else if (rig != null) iconImage = CosmeticIcons.rig(rig, textureImage, glowImage, manifest.slot());
 				else if (manifest.particles() != null) iconImage = CosmeticIcons.particles(textureImage, manifest.particles());
 			}
 		}
@@ -118,6 +122,11 @@ public final class CosmeticCatalog {
 			return manifest.teamOnly();
 		}
 
+		/** nur für Spieler, die es freigeschaltet haben (access "unlock", Belohnung für Einladungen) */
+		public boolean unlockOnly() {
+			return manifest.unlockOnly();
+		}
+
 		public int version() {
 			return manifest.version();
 		}
@@ -133,6 +142,21 @@ public final class CosmeticCatalog {
 		/** Modell (head, back, companion), sonst null */
 		public CosmeticMesh mesh() {
 			return mesh;
+		}
+
+		/** Format 2: Mesh mit Knochen und Animationen (head, back, aura, companion), sonst null */
+		public CosmeticRig rig() {
+			return rig;
+		}
+
+		/** Format des Manifests (1 = Quader und einfache Animationen, 2 = Mesh mit Knochen und Keyframes) */
+		public int format() {
+			return manifest.format();
+		}
+
+		/** Bewegt es sich? (Format 1: Animationen oder Partikel, Format 2: immer) */
+		public boolean animated() {
+			return rig != null || !manifest.animations().isEmpty() || manifest.particles() != null;
 		}
 
 		/** Textur (nur im Render-Thread); beim ersten Aufruf hochgeladen. null bei Capes (die laufen über {@link Capes}). */
@@ -369,7 +393,8 @@ public final class CosmeticCatalog {
 			String sha256 = o.get("sha256").getAsString();
 			long size = o.get("size").getAsLong();
 			if (!CosmeticFormat.ID_RE.matcher(id).matches() || !CosmeticFormat.SLOTS.contains(slot) || !SHA256.matcher(sha256).matches()
-					|| size <= 0 || size > CosmeticFormat.ENVELOPE_BYTES) {
+					|| size <= 0 || size > CosmeticFormat.MAX_ENVELOPE_BYTES) {
+				// (Format 2 darf größer sein – welches Format es ist, zeigt erst der Umschlag)
 				return null;
 			}
 			return new Entry(id, slot, o.get("version").getAsInt(), string(o, "name"), string(o, "description"),

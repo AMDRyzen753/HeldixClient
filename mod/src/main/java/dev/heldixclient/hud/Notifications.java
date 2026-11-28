@@ -77,6 +77,13 @@ public final class Notifications {
 		}
 	}
 
+	/** Für den Autotest: Titel und Text der wartenden bzw. sichtbaren Einblendungen („Titel: Text“) */
+	public static List<String> current() {
+		synchronized (ENTRIES) {
+			return ENTRIES.stream().map(entry -> entry.title + ": " + entry.message).toList();
+		}
+	}
+
 	static void render(GuiGraphicsExtractor g) {
 		long now = System.currentTimeMillis();
 		List<Entry> visible;

@@ -2,13 +2,17 @@
 import { STATUS_CODES, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Duplex } from 'node:stream';
 
-/** Fehler mit HTTP-Status und deutschem Text für den Spieler; `code` zusätzlich für Programme (Team-Bereich). */
+/**
+ * Fehler mit HTTP-Status und deutschem Text für den Spieler; `code` zusätzlich für Programme (Team-Bereich, Cosmetics),
+ * `extra` weitere Felder in der Antwort (z. B. `friend: 'self'` beim Annehmen der eigenen Einladung).
+ */
 export class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
     readonly headers: Record<string, string> = {},
     readonly code?: string,
+    readonly extra?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -53,7 +57,8 @@ export function sendCachedJson(req: IncomingMessage, res: ServerResponse, cached
 }
 
 export function sendError(res: ServerResponse, err: HttpError): void {
-  sendJson(res, err.status, err.code === undefined ? { error: err.message } : { error: err.message, code: err.code }, err.headers);
+  const body = err.code === undefined ? { error: err.message } : { error: err.message, code: err.code };
+  sendJson(res, err.status, err.extra === undefined ? body : { ...err.extra, ...body }, err.headers);
 }
 
 /** Antwort auf eine abgelehnte WebSocket-Anfrage direkt auf den Socket schreiben. */

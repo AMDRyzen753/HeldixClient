@@ -40,7 +40,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Verbindung zum Heldix-Dienst (siehe docs/dienst.md): Capes anderer HeldixClient-Spieler, Heldix-Symbol (mit Rolle) in
- * der Tab-Liste und über Köpfen und Freunde mit Online-Status.
+ * der Tab-Liste und über Köpfen, Freunde mit Online-Status und (ab Dienst 1.11.0) Einladungen mit Belohnungen.
  *
  * <p>Anmeldung wie beim Betreten eines Minecraft-Servers: Der Dienst gibt eine serverId aus, der Client meldet bei
  * Mojang den Beitritt (Session-Service von Minecraft), der Dienst prüft das bei Mojang. Das Zugangs-Token verlässt
@@ -59,15 +59,38 @@ public final class Social {
 		ERROR
 	}
 
-	public record Friend(UUID uuid, String name, boolean online, String state, String server, long since) {
+	/**
+	 * Freund laut Dienst. Ab Dienst 1.12.0 (Freunde 2.0) zusätzlich: {@code favorite}, {@code nickname}, {@code note} (nur
+	 * die eigenen Angaben, der Freund sieht sie nie), {@code statusText} und {@code dnd} („Nicht stören“, nur online),
+	 * {@code lastOnline} (ms, gerundet vom Dienst, 0 = unbekannt oder ausgeblendet) und {@code badge} (Abzeichen, null =
+	 * normaler HeldixClient-Spieler). Ältere Dienste schicken diese Felder nicht – dann gelten die Standardwerte.
+	 */
+	public record Friend(UUID uuid, String name, boolean online, String state, String server, long since,
+			boolean favorite, String nickname, String note, String statusText, boolean dnd, long lastOnline, Badge.Role badge) {
+		/** Name für Listen: der eigene Spitzname, sonst der Minecraft-Name */
+		public String shownName() {
+			return nickname != null && !nickname.isBlank() ? nickname : name;
+		}
+
+		/** „zuletzt online vor 5 Min.“ (nur offline und wenn der Freund es zeigt), sonst null */
+		public String lastOnlineText() {
+			if (online || lastOnline <= 0) return null;
+			return "zuletzt online " + ago(lastOnline);
+		}
+
 		/** Was der Freund gerade macht, für die Anzeige */
 		public String activity() {
-			if (!online) return "Offline";
+			if (!online) {
+				String last = lastOnlineText();
+				return last != null ? "Offline · " + last : "Offline";
+			}
+			if (dnd) return "Nicht stören";
 			if (state == null) return "Online";
 			return switch (state) {
 				case "menu" -> "Im Hauptmenü";
 				case "singleplayer" -> "Spielt Einzelspieler";
-				case "multiplayer" -> server != null ? "Spielt auf " + server : "Spielt auf einem Server";
+				case "multiplayer" -> server != null && dev.heldixclient.share.WorldShare.isWorldAddress(server) ? "In einer Heldix-Welt"
+						: server != null ? "Spielt auf " + server : "Spielt auf einem Server";
 				case "realms" -> "Spielt auf Realms";
 				case "lan" -> "Spielt im LAN";
 				default -> "Online";
@@ -75,8 +98,42 @@ public final class Social {
 		}
 	}
 
+	/** „vor 5 Min.“, „vor 3 Std.“, „vor 2 Tagen“ (für „zuletzt online“) */
+	public static String ago(long at) {
+		long minutes = Math.max(1, (System.currentTimeMillis() - at) / 60_000);
+		if (minutes < 60) return "vor " + minutes + " Min.";
+		long hours = minutes / 60;
+		if (hours < 24) return "vor " + hours + " Std.";
+		long days = hours / 24;
+		return "vor " + days + (days == 1 ? " Tag" : " Tagen");
+	}
+
 	public record Request(UUID uuid, String name, long at) {
 	}
+
+	/**
+	 * Eigene Angaben beim Dienst ab 1.12.0 ({@code GET/PUT /v1/me}): Statustext (höchstens 40 Zeichen), „Nicht stören“,
+	 * „Zuletzt online zeigen“, „In Vorschlägen erscheinen“, „Vorschläge zeigen“ und Online-Benachrichtigungen ("all",
+	 * "favorites", "none" – wertet nur der Client aus). Gilt beim Dienst: auch Launcher und Webseite ändern sie.
+	 */
+	public record Me(String statusText, boolean dnd, boolean showLastOnline, boolean suggestable, boolean showSuggestions, String onlineNotify) {
+		public static final Me DEFAULT = new Me(null, false, true, false, true, "all");
+	}
+
+	/** Gemeinsamer Freund (Profilkarte) */
+	public record Mutual(UUID uuid, String name) {
+	}
+
+	/** Profilkarte eines Freundes ({@code GET /v1/friends/<uuid>/profile}); cosmetics: Slot → ID (leer, wenn nicht erkennbar) */
+	public record Profile(Friend friend, List<Mutual> mutual, String cape, Map<String, String> cosmetics) {
+	}
+
+	/** höchstens so viele Zeichen im eigenen Statustext, Spitznamen und in Notizen (wie beim Dienst) */
+	public static final int STATUS_MAX = 40;
+	public static final int NICKNAME_MAX = 24;
+	public static final int NOTE_MAX = 200;
+	/** Meldung, wenn der Dienst Freunde 2.0 noch nicht kennt (vor 1.12.0) */
+	public static final String FRIENDS2_MISSING = "Das gibt es erst ab Heldix-Dienst 1.12.0 – der verbundene Dienst ist älter.";
 
 	/**
 	 * Ergebnis des Nachschlagens; role ist bei heldix immer gesetzt (PLAYER ohne besondere Rolle). cosmetics: Slot → ID
@@ -117,6 +174,12 @@ public final class Social {
 	private static volatile String statusMode = "menu";
 	private static volatile String statusServer;
 
+	/** eigene Angaben beim Dienst (ab 1.12.0); friends2 = der Dienst kennt sie (Antwort von PUT /v1/me hat "dnd") */
+	private static volatile Me me = Me.DEFAULT;
+	private static volatile boolean friends2;
+	/** Statustext, der nach kurzer Pause an den Dienst geht (beim Tippen nicht jede Taste einzeln) */
+	private static ScheduledFuture<?> statusTextSave;
+
 	private Social() {
 	}
 
@@ -128,6 +191,10 @@ public final class Social {
 		// erst im ersten Client-Tick verbinden: dann gibt es Minecraft und das angemeldete Konto sicher
 		ClientEvents.TICK_END.register(Social::tick);
 		ClientEvents.TICK_END.register(BadgeDisplay::tick);
+		// Freunde 2.0: Spieler in der Nähe merken (lokale Vorschläge), Party (Folgen, Voice)
+		ClientEvents.TICK_END.register(Suggestions::tick);
+		ClientEvents.TICK_END.register(Party::tick);
+		ClientEvents.STOPPING.register(mc -> Suggestions.save());
 		NET.scheduleAtFixedRate(Social::ping, 30, 30, TimeUnit.SECONDS);
 	}
 
@@ -182,6 +249,31 @@ public final class Social {
 		return outgoing;
 	}
 
+	/** Freund per UUID (null = nicht in der Freundesliste) */
+	public static Friend friend(UUID uuid) {
+		if (uuid == null) return null;
+		for (Friend friend : friends) if (friend.uuid().equals(uuid)) return friend;
+		return null;
+	}
+
+	/** eigene Angaben beim Dienst (Standardwerte, solange nichts geladen ist) */
+	public static Me me() {
+		return me;
+	}
+
+	/** Kennt der verbundene Dienst Freunde 2.0 (Party, Favoriten, Status, Vorschläge; ab 1.12.0)? */
+	public static boolean friends2() {
+		return online() && friends2;
+	}
+
+	/**
+	 * Keine Einblendungen und Töne: Einblendungen ausgeschaltet oder „Nicht stören“ an (Nachrichten kommen trotzdem an,
+	 * Party-Einladungen landen still in der Liste).
+	 */
+	public static boolean quiet() {
+		return !HeldixConfig.get().socialNotifications || me.dnd();
+	}
+
 	/** Verbindung (neu) aufbauen, z. B. nach dem Start oder einem Fehler */
 	public static synchronized void connect() {
 		int gen = ++generation;
@@ -212,6 +304,8 @@ public final class Social {
 				fetchCosmetics();
 				syncProfile();
 				openSocket(gen);
+				// ab Dienst 1.12.0: eigene Party (Einladungen kommen beim Verbinden per Echtzeit)
+				if (gen == generation && friends2) Party.load();
 			} catch (Exception e) {
 				if (gen != generation) return;
 				fail(e);
@@ -231,6 +325,10 @@ public final class Social {
 		outgoing = List.of();
 		LOOKUP.clear();
 		Messages.reset();
+		Party.reset();
+		Suggestions.resetServer();
+		me = Me.DEFAULT;
+		friends2 = false;
 		state = newState;
 	}
 
@@ -333,7 +431,10 @@ public final class Social {
 		token = result.get("token").getAsString();
 	}
 
-	/** Eigene Auswahl an Cosmetics und ob man Team-Cosmetics wählen darf (GET /v1/me/cosmetics, ab Dienst 1.6.0) */
+	/**
+	 * Eigene Auswahl an Cosmetics, ob man Team-Cosmetics wählen darf und (ab Dienst 1.11.0) die freigeschalteten
+	 * Belohnungen (GET /v1/me/cosmetics, ab Dienst 1.6.0)
+	 */
 	private static void fetchCosmetics() {
 		try {
 			dev.heldixclient.cosmetic.Cosmetics.applyMine(call("GET", "/v1/me/cosmetics", null, true));
@@ -368,19 +469,114 @@ public final class Social {
 		HeldixConfig.Data config = HeldixConfig.get();
 		JsonObject body = new JsonObject();
 		// eigene Bilder bleiben auf dem PC: nur Heldix-Capes gehen an den Dienst. Ein Katalog-Cape nur, wenn es im
-		// geprüften Katalog steht (und man es wählen darf) – sonst bleibt die Auswahl beim Dienst, wie sie ist.
+		// geprüften Katalog steht (und man es wählen darf: Team bzw. freigeschaltet) – sonst bleibt die Auswahl beim Dienst,
+		// wie sie ist.
 		String capeId = config.cape == null ? "" : config.cape;
-		if (capeId.isEmpty() || Capes.isBuiltin(capeId)) body.addProperty("cape", capeId);
-		else if (capeId.startsWith("datei:")) body.addProperty("cape", "");
+		if (capeId.isEmpty() || Capes.isBuiltin(capeId)) {
+			// eingebautes Team-Cape nur, wenn das Team-Recht schon bekannt ist (sonst lehnt der Dienst mit 403 ab und die
+			// Anmeldung scheitert); die Auswahl beim Dienst bleibt dann, wie sie ist
+			Capes.Cape cape = Capes.byId(capeId);
+			if (cape == null || cape.lockReason() == null) body.addProperty("cape", capeId);
+		} else if (capeId.startsWith("datei:")) body.addProperty("cape", "");
 		else {
 			dev.heldixclient.cosmetic.CosmeticCatalog.Item item = dev.heldixclient.cosmetic.CosmeticCatalog.item(capeId, "cape");
-			if (item != null && (!item.teamOnly() || dev.heldixclient.cosmetic.Cosmetics.team())) body.addProperty("cape", capeId);
+			if (item != null && dev.heldixclient.cosmetic.Cosmetics.lockReason(item) == null) body.addProperty("cape", capeId);
 		}
 		body.addProperty("visible", config.socialVisible);
 		body.addProperty("presence", config.socialPresence);
 		body.addProperty("showServer", config.socialShowServer);
 		body.addProperty("messages", config.socialMessages);
-		call("PUT", "/v1/me", body, true);
+		// die Angaben ab 1.12.0 (Status, „Nicht stören“, Vorschläge …) gelten beim Dienst: nur lesen, nicht überschreiben
+		applyMe(call("PUT", "/v1/me", body, true));
+	}
+
+	/** Antwort von GET/PUT /v1/me: die Angaben ab Dienst 1.12.0 übernehmen (ältere Dienste kennen sie nicht) */
+	private static void applyMe(JsonObject json) {
+		if (json == null || !json.has("dnd")) {
+			friends2 = false;
+			me = Me.DEFAULT;
+			return;
+		}
+		String notify = string(json, "onlineNotify");
+		if (!"all".equals(notify) && !"favorites".equals(notify) && !"none".equals(notify)) notify = "all";
+		me = new Me(blankToNull(string(json, "statusText")), bool(json, "dnd", false), bool(json, "showLastOnline", true),
+				bool(json, "suggestable", false), bool(json, "showSuggestions", true), notify);
+		friends2 = true;
+	}
+
+	/**
+	 * Eigene Angabe beim Dienst ändern ({@code PUT /v1/me} mit nur diesem Feld): dnd, showLastOnline, suggestable,
+	 * showSuggestions (true/false) oder onlineNotify ("all", "favorites", "none"). Sofort sichtbar, beim Fehler zurück.
+	 */
+	public static CompletableFuture<Void> updateMe(String field, com.google.gson.JsonElement value) {
+		CompletableFuture<Void> result = new CompletableFuture<>();
+		if (!online()) {
+			result.completeExceptionally(new ServiceException("Nicht mit dem Heldix-Dienst verbunden"));
+			return result;
+		}
+		Me before = me;
+		me = withField(before, field, value);
+		NET.execute(() -> {
+			try {
+				JsonObject body = new JsonObject();
+				body.add(field, value);
+				applyMe(call("PUT", "/v1/me", body, true));
+				result.complete(null);
+			} catch (Exception e) {
+				me = before;
+				result.completeExceptionally(e instanceof ServiceException ? e : new ServiceException("Dienst nicht erreichbar"));
+			}
+		});
+		return result;
+	}
+
+	private static Me withField(Me m, String field, com.google.gson.JsonElement value) {
+		boolean flag = value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean() && value.getAsBoolean();
+		String text = value != null && value.isJsonPrimitive() ? value.getAsString() : null;
+		return switch (field) {
+			case "statusText" -> new Me(blankToNull(text), m.dnd(), m.showLastOnline(), m.suggestable(), m.showSuggestions(), m.onlineNotify());
+			case "dnd" -> new Me(m.statusText(), flag, m.showLastOnline(), m.suggestable(), m.showSuggestions(), m.onlineNotify());
+			case "showLastOnline" -> new Me(m.statusText(), m.dnd(), flag, m.suggestable(), m.showSuggestions(), m.onlineNotify());
+			case "suggestable" -> new Me(m.statusText(), m.dnd(), m.showLastOnline(), flag, m.showSuggestions(), m.onlineNotify());
+			case "showSuggestions" -> new Me(m.statusText(), m.dnd(), m.showLastOnline(), m.suggestable(), flag, m.onlineNotify());
+			case "onlineNotify" -> new Me(m.statusText(), m.dnd(), m.showLastOnline(), m.suggestable(), m.showSuggestions(), text);
+			default -> m;
+		};
+	}
+
+	/**
+	 * Eigenen Statustext setzen (leer = löschen): sofort sichtbar, an den Dienst geht er erst nach einer Sekunde ohne
+	 * weitere Änderung (beim Tippen nicht jede Taste). Fehler (zu lang, Zeichen) meldet {@code onError} im Haupt-Thread.
+	 */
+	public static synchronized void setStatusText(String text, java.util.function.Consumer<String> onError) {
+		String clean = text == null ? "" : text.strip();
+		if (clean.equals(me.statusText() == null ? "" : me.statusText())) return;
+		me = withField(me, "statusText", new com.google.gson.JsonPrimitive(clean));
+		if (statusTextSave != null) statusTextSave.cancel(false);
+		statusTextSave = NET.schedule(() -> {
+			if (!online()) return;
+			try {
+				JsonObject body = new JsonObject();
+				if (clean.isEmpty()) body.add("statusText", com.google.gson.JsonNull.INSTANCE);
+				else body.addProperty("statusText", clean);
+				applyMe(call("PUT", "/v1/me", body, true));
+			} catch (Exception e) {
+				String message = e instanceof ServiceException ? e.getMessage() : "Dienst nicht erreichbar";
+				if (onError != null) Minecraft.getInstance().execute(() -> onError.accept(message));
+			}
+		}, 1, TimeUnit.SECONDS);
+	}
+
+	/** Eigene Angaben neu vom Dienst holen (z. B. auf der Seite Privatsphäre; Launcher oder Webseite können sie ändern) */
+	public static void refreshMe() {
+		if (!online()) return;
+		NET.execute(() -> {
+			try {
+				applyMe(call("GET", "/v1/me", null, true));
+			} catch (Exception e) {
+				HeldixClient.LOGGER.debug("Heldix-Dienst: Profil nicht geladen ({})", e.toString());
+			}
+		});
 	}
 
 	/** Cape oder Sichtbarkeit geändert: im Hintergrund an den Dienst melden */
@@ -437,6 +633,13 @@ public final class Social {
 		} catch (Exception e) {
 			HeldixClient.LOGGER.info("Heldix-Dienst: Senden fehlgeschlagen ({})", e.toString());
 		}
+	}
+
+	/** Nachricht über die Echtzeit-Verbindung schicken (z. B. „schreibt …“); false = nicht verbunden */
+	static boolean sendRealtime(JsonObject message) {
+		if (socket == null || !online()) return false;
+		NET.execute(() -> send(message));
+		return true;
 	}
 
 	private static void ping() {
@@ -521,12 +724,21 @@ public final class Social {
 	private static void handle(JsonObject message) {
 		String type = string(message, "type");
 		if (type == null) return;
-		HeldixConfig.Data config = HeldixConfig.get();
+		boolean notify = !quiet();
 		switch (type) {
 			case "friends" -> applyFriends(message);
 			case "message" -> Messages.onMessage(message);
+			// ab Dienst 1.12.0: Nachricht gelöscht, Reaktionen geändert, „schreibt …“
+			case "message-deleted" -> Messages.onDeleted(message);
+			case "reaction" -> Messages.onReaction(message);
+			case "typing" -> Messages.onTyping(message);
+			// ab Dienst 1.12.0: Party (Stand, Einladungen, Chat, Folgen)
+			case "party" -> Party.onParty(message);
+			case "party-invite" -> Party.onInvite(message);
+			case "party-chat" -> Party.onChat(message);
+			case "party-follow" -> Party.onFollow(message);
 			case "support" -> {
-				if (config.socialNotifications) {
+				if (notify) {
 					String subject = string(message, "subject");
 					Notifications.show("support-" + string(message, "id"), "Antwort vom HeldixClient-Team",
 							subject != null ? subject + " · Heldix-Menü → Einstellungen → Info" : "Heldix-Menü → Einstellungen → Info", null);
@@ -546,26 +758,79 @@ public final class Social {
 				}
 				if (before == null) list.add(friend);
 				friends = sorted(list);
-				if (config.socialNotifications && friend.online() && (before == null || !before.online())) {
-					Notifications.show("freund-" + friend.uuid(), friend.name() + " ist online", friend.activity(), null);
+				// „ist online“ nach Einstellung: alle, nur Favoriten oder keine (wertet nur der Client aus)
+				String onlineNotify = me.onlineNotify();
+				boolean wanted = "all".equals(onlineNotify) || ("favorites".equals(onlineNotify) && friend.favorite());
+				if (notify && wanted && friend.online() && (before == null || !before.online())) {
+					Notifications.show("freund-" + friend.uuid(), friend.shownName() + " ist online", friend.activity(), null);
 				}
 			}
 			case "request" -> {
 				JsonObject from = message.getAsJsonObject("from");
-				if (from != null && config.socialNotifications) {
+				if (from != null && notify) {
 					Notifications.show("anfrage", "Freundschaftsanfrage", string(from, "name") + " möchte mit dir befreundet sein", null);
 				}
 			}
 			case "accepted" -> {
 				Friend friend = friend(message.getAsJsonObject("friend"));
-				if (friend != null && config.socialNotifications) {
+				if (friend != null && notify) {
 					Notifications.show("anfrage", "Neuer Freund", friend.name() + " hat deine Anfrage angenommen", null);
+				}
+			}
+			// ab Dienst 1.11.0: Belohnung für Einladungen freigeschaltet (sofort wählbar) und Neues zu eigenen Einladungen
+			case "unlock" -> {
+				String cosmetic = string(message, "cosmetic");
+				if (cosmetic == null || !dev.heldixclient.cosmetic.CosmeticFormat.ID_RE.matcher(cosmetic).matches()) return;
+				if (!dev.heldixclient.cosmetic.Cosmetics.unlock(cosmetic)) return;
+				dev.heldixclient.cosmetic.CosmeticCatalog.Item item = dev.heldixclient.cosmetic.CosmeticCatalog.item(cosmetic);
+				String where = item != null && "cape".equals(item.slot()) ? "Heldix-Menü → Cape" : "Heldix-Menü → Cosmetics";
+				// Name in die zweite Zeile: der Titel bleibt so kurz genug für die Einblendung („Nicht stören“: still)
+				if (!me.dnd()) {
+					Invites.notify("freischaltung-" + cosmetic, "Neues Cosmetic freigeschaltet",
+							"„" + (item != null ? item.name() : cosmetic) + "“ – Belohnung fürs Einladen · " + where);
+				}
+			}
+			// ab Dienst 1.12.0: ein Freund lädt in seine geteilte Welt ein (Heldix-Welten)
+			case "world-invite" -> dev.heldixclient.share.WorldInvites.onInvite(message, notify);
+			// ab Dienst 1.12.0: Welt eines Freundes geöffnet bzw. geschlossen (für Heldix-Welten und die Freunde-Leiste)
+			case "world-open" -> dev.heldixclient.share.WorldInvites.onOpen(message, notify);
+			case "world-closed" -> dev.heldixclient.share.WorldInvites.onClosed(message);
+			case "invite" -> {
+				String name = string(message, "name");
+				if (!notify || name == null || name.isBlank()) return;
+				String event = string(message, "event");
+				if ("accepted".equals(event)) {
+					Invites.notify("einladung", "Einladung angenommen", name + " ist jetzt mit dir befreundet");
+				} else if ("confirmed".equals(event)) {
+					Invites.notify("einladung", "Einladung bestätigt", name + " spielt jetzt HeldixClient – das zählt für deine Belohnungen");
 				}
 			}
 			default -> {
 				// pong und Unbekanntes
 			}
 		}
+	}
+
+	/**
+	 * Nur für automatische Tests: eine Echtzeit-Nachricht so verarbeiten, als käme sie vom Dienst (z. B. "unlock"). Läuft
+	 * durch dieselbe Auswertung wie echte Nachrichten.
+	 */
+	public static void testRealtime(JsonObject message) {
+		handle(message);
+	}
+
+	/** Eigene Cosmetics (Auswahl, Team, Freischaltungen) neu vom Dienst holen, im Hintergrund */
+	public static CompletableFuture<Void> refreshCosmetics() {
+		CompletableFuture<Void> result = new CompletableFuture<>();
+		if (!online()) {
+			result.completeExceptionally(new ServiceException("Nicht mit dem Heldix-Dienst verbunden"));
+			return result;
+		}
+		NET.execute(() -> {
+			fetchCosmetics();
+			result.complete(null);
+		});
+		return result;
 	}
 
 	private static void applyFriends(JsonObject json) {
@@ -585,9 +850,24 @@ public final class Social {
 		applyFriends(call("GET", "/v1/friends", null, true));
 	}
 
+	/** Favoriten zuerst, dann online, dann nach (Spitz-)Namen */
 	private static List<Friend> sorted(List<Friend> list) {
-		list.sort((a, b) -> a.online() != b.online() ? (a.online() ? -1 : 1) : a.name().compareToIgnoreCase(b.name()));
+		list.sort((a, b) -> a.favorite() != b.favorite() ? (a.favorite() ? -1 : 1)
+				: a.online() != b.online() ? (a.online() ? -1 : 1) : a.shownName().compareToIgnoreCase(b.shownName()));
 		return List.copyOf(list);
+	}
+
+	/** Freund in der Liste ersetzen (nach PATCH oder Echtzeit {@code friend}) */
+	private static void replaceFriend(Friend friend) {
+		List<Friend> list = new ArrayList<>(friends);
+		boolean found = false;
+		for (int i = 0; i < list.size(); i++) {
+			if (list.get(i).uuid().equals(friend.uuid())) {
+				list.set(i, friend);
+				found = true;
+			}
+		}
+		if (found) friends = sorted(list);
 	}
 
 	private static List<Request> requests(JsonArray array) {
@@ -604,8 +884,35 @@ public final class Social {
 		if (object == null) return null;
 		UUID uuid = uuid(string(object, "uuid"));
 		if (uuid == null) return null;
-		return new Friend(uuid, string(object, "name"), object.has("online") && object.get("online").getAsBoolean(),
-				string(object, "state"), string(object, "server"), object.has("since") ? object.get("since").getAsLong() : 0);
+		boolean online = bool(object, "online", false);
+		JsonElement badge = object.get("badge");
+		return new Friend(uuid, string(object, "name"), online, string(object, "state"), string(object, "server"), number(object, "since"),
+				bool(object, "favorite", false), oneLine(string(object, "nickname"), NICKNAME_MAX), clip(string(object, "note"), NOTE_MAX),
+				oneLine(string(object, "statusText"), STATUS_MAX), online && bool(object, "dnd", false), number(object, "lastOnline"),
+				badge != null && badge.isJsonPrimitive() ? Badge.Role.of(badge.getAsString()) : null);
+	}
+
+	private static boolean bool(JsonObject object, String key, boolean fallback) {
+		JsonElement value = object == null ? null : object.get(key);
+		return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean() ? value.getAsBoolean() : fallback;
+	}
+
+	private static long number(JsonObject object, String key) {
+		JsonElement value = object == null ? null : object.get(key);
+		return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber() ? value.getAsLong() : 0;
+	}
+
+	/** Text vom Dienst für eine Zeile: Formatierungs- und Steuerzeichen raus, höchstens {@code max} Zeichen; leer = null */
+	static String oneLine(String text, int max) {
+		if (text == null) return null;
+		String clean = text.replaceAll("[\\p{Cc}\\p{Cf}§]", "").strip();
+		if (clean.codePointCount(0, clean.length()) > max) clean = clean.substring(0, clean.offsetByCodePoints(0, max));
+		return clean.isEmpty() ? null : clean;
+	}
+
+	/** wie {@link #oneLine}, für längere Notizen */
+	private static String clip(String text, int max) {
+		return oneLine(text, max);
 	}
 
 	// ======================================================================================
@@ -662,6 +969,81 @@ public final class Social {
 		return result;
 	}
 
+	// ======================================================================================
+	// Einladungen (ab Dienst 1.11.0)
+	// ======================================================================================
+
+	/**
+	 * Einladung des Dienstes ({@code POST /v1/invites}): url = Web-Link {@code <webseite>/einladung#<code>}, appUrl =
+	 * {@code heldixclient://einladung/<code>}, expires in ms seit 1970 (0 = unbekannt), voice = mit Voice-Gruppe.
+	 */
+	public record Invite(String code, String url, String appUrl, long expires, String server, boolean voice) {
+	}
+
+	/** Code einer Einladung: 10 Zeichen ohne i, l, o, 0 und 1 */
+	public static final java.util.regex.Pattern INVITE_CODE = java.util.regex.Pattern.compile("^[a-hjkmnp-z2-9]{10}$");
+	/** Meldung, wenn der Dienst noch keine Einladungen kennt (vor 1.11.0: 404) */
+	public static final String INVITES_MISSING = "Einladungen gibt es erst ab Heldix-Dienst 1.11.0 – der verbundene Dienst ist älter.";
+
+	/**
+	 * Einladung erzeugen bzw. die offene wiederverwenden: {@code server} = Server, auf den eingeladen wird (null = ohne),
+	 * {@code voiceGroup} = Prüfwert der Voice-Gruppe (64 Hex-Zeichen, nur mit Server; der Link gilt dann 24 Stunden).
+	 * Lehnt der Dienst die Server-Adresse einer allgemeinen Einladung ab (z. B. LAN), gibt es eine Einladung ohne Server.
+	 */
+	public static CompletableFuture<Invite> createInvite(String server, String voiceGroup) {
+		CompletableFuture<Invite> result = new CompletableFuture<>();
+		if (!online()) {
+			result.completeExceptionally(new ServiceException("Nicht mit dem Heldix-Dienst verbunden"));
+			return result;
+		}
+		NET.execute(() -> {
+			try {
+				try {
+					result.complete(postInvite(server, voiceGroup));
+				} catch (ServiceException e) {
+					if (e.status() != 400 || server == null || voiceGroup != null) throw e;
+					result.complete(postInvite(null, null));
+				}
+			} catch (ServiceException e) {
+				result.completeExceptionally(e.status() == 404 ? new ServiceException(INVITES_MISSING, 404) : e);
+			} catch (Exception e) {
+				result.completeExceptionally(new ServiceException("Dienst nicht erreichbar"));
+			}
+		});
+		return result;
+	}
+
+	private static Invite postInvite(String server, String voiceGroup) throws Exception {
+		JsonObject body = new JsonObject();
+		if (server == null) body.add("server", com.google.gson.JsonNull.INSTANCE);
+		else body.addProperty("server", server);
+		if (voiceGroup == null) body.add("voice", com.google.gson.JsonNull.INSTANCE);
+		else {
+			JsonObject voice = new JsonObject();
+			voice.addProperty("group", voiceGroup);
+			body.add("voice", voice);
+		}
+		JsonObject json = call("POST", "/v1/invites", body, true);
+		String code = string(json, "code");
+		if (code == null || !INVITE_CODE.matcher(code).matches()) throw new ServiceException("Der Heldix-Dienst hat eine ungültige Einladung geliefert");
+		String url = string(json, "url");
+		if (url == null || url.isBlank()) throw new ServiceException("Beim Heldix-Dienst ist keine Webseite eingetragen – ohne sie gibt es keine Einladungslinks.");
+		URI uri;
+		try {
+			uri = URI.create(url);
+		} catch (IllegalArgumentException e) {
+			throw new ServiceException("Der Heldix-Dienst hat einen ungültigen Link geliefert");
+		}
+		boolean local = "http".equals(uri.getScheme()) && ("127.0.0.1".equals(uri.getHost()) || "localhost".equals(uri.getHost()));
+		if (uri.getHost() == null || !("https".equals(uri.getScheme()) || local) || !url.contains(code)) {
+			throw new ServiceException("Der Heldix-Dienst hat einen ungültigen Link geliefert");
+		}
+		long expires = json.has("expires") && json.get("expires").isJsonPrimitive() && json.get("expires").getAsJsonPrimitive().isNumber()
+				? json.get("expires").getAsLong() : 0;
+		boolean voice = json.has("voice") && json.get("voice").isJsonPrimitive() && json.get("voice").getAsBoolean();
+		return new Invite(code, url, string(json, "appUrl"), expires, string(json, "server"), voice);
+	}
+
 	/** Neuigkeit des HeldixClient-Teams (GET /v1/news) */
 	public record News(String title, String text, long at, String author) {
 	}
@@ -710,7 +1092,95 @@ public final class Social {
 		return friendsCall("DELETE", "/v1/friends/" + compact(uuid), null);
 	}
 
-	private static CompletableFuture<Void> friendsCall(String method, String path, JsonObject body) {
+	// ======================================================================================
+	// Freunde 2.0 (ab Dienst 1.12.0): Favorit, Spitzname, Notiz, Profilkarte
+	// ======================================================================================
+
+	/** Favorit setzen bzw. entfernen (nur für dich; der Freund erfährt davon nichts) */
+	public static CompletableFuture<Void> setFavorite(UUID uuid, boolean favorite) {
+		JsonObject body = new JsonObject();
+		body.addProperty("favorite", favorite);
+		return patchFriend(uuid, body);
+	}
+
+	/** Spitzname (höchstens 24 Zeichen) bzw. Notiz (höchstens 200) – leer löscht; nur für dich */
+	public static CompletableFuture<Void> setNickname(UUID uuid, String nickname) {
+		return patchFriend(uuid, textBody("nickname", nickname));
+	}
+
+	public static CompletableFuture<Void> setNote(UUID uuid, String note) {
+		return patchFriend(uuid, textBody("note", note));
+	}
+
+	private static JsonObject textBody(String key, String value) {
+		JsonObject body = new JsonObject();
+		String clean = value == null ? "" : value.strip();
+		if (clean.isEmpty()) body.add(key, com.google.gson.JsonNull.INSTANCE);
+		else body.addProperty(key, clean);
+		return body;
+	}
+
+	/** {@code PATCH /v1/friends/<uuid>}: Antwort { friend } ersetzt den Eintrag in der Liste */
+	private static CompletableFuture<Void> patchFriend(UUID uuid, JsonObject body) {
+		CompletableFuture<Void> result = new CompletableFuture<>();
+		if (!online()) {
+			result.completeExceptionally(new ServiceException("Nicht mit dem Heldix-Dienst verbunden"));
+			return result;
+		}
+		NET.execute(() -> {
+			try {
+				Friend friend = friend(call("PATCH", "/v1/friends/" + compact(uuid), body, true).getAsJsonObject("friend"));
+				if (friend != null) replaceFriend(friend);
+				result.complete(null);
+			} catch (ServiceException e) {
+				result.completeExceptionally(e.status() == 404 && !friends2 ? new ServiceException(FRIENDS2_MISSING, 404) : e);
+			} catch (Exception e) {
+				result.completeExceptionally(new ServiceException("Dienst nicht erreichbar"));
+			}
+		});
+		return result;
+	}
+
+	/** Profilkarte eines Freundes: Freund (aktuell), gemeinsame Freunde, Cape und Cosmetics (leer, wenn nicht erkennbar) */
+	public static CompletableFuture<Profile> profile(UUID uuid) {
+		CompletableFuture<Profile> result = new CompletableFuture<>();
+		if (!online()) {
+			result.completeExceptionally(new ServiceException("Nicht mit dem Heldix-Dienst verbunden"));
+			return result;
+		}
+		NET.execute(() -> {
+			try {
+				JsonObject json = call("GET", "/v1/friends/" + compact(uuid) + "/profile", null, true);
+				Friend friend = friend(json.getAsJsonObject("friend"));
+				if (friend == null) throw new ServiceException("Der Heldix-Dienst hat kein Profil geliefert");
+				replaceFriend(friend);
+				List<Mutual> mutual = new ArrayList<>();
+				for (JsonElement element : array(json, "mutual")) {
+					if (!element.isJsonObject()) continue;
+					UUID id = uuid(string(element.getAsJsonObject(), "uuid"));
+					String name = string(element.getAsJsonObject(), "name");
+					if (id != null && name != null) mutual.add(new Mutual(id, name));
+				}
+				Map<String, String> cosmetics = new java.util.HashMap<>();
+				JsonElement worn = json.get("cosmetics");
+				if (worn != null && worn.isJsonObject()) {
+					for (String slot : dev.heldixclient.cosmetic.Cosmetics.WORN_SLOTS) {
+						JsonElement value = worn.getAsJsonObject().get(slot);
+						String id = value != null && value.isJsonPrimitive() ? value.getAsString() : null;
+						if (id != null && dev.heldixclient.cosmetic.CosmeticFormat.ID_RE.matcher(id).matches()) cosmetics.put(slot, id);
+					}
+				}
+				result.complete(new Profile(friend, List.copyOf(mutual), blankToNull(string(json, "cape")), Map.copyOf(cosmetics)));
+			} catch (ServiceException e) {
+				result.completeExceptionally(e.status() == 404 && !friends2 ? new ServiceException(FRIENDS2_MISSING, 404) : e);
+			} catch (Exception e) {
+				result.completeExceptionally(new ServiceException("Dienst nicht erreichbar"));
+			}
+		});
+		return result;
+	}
+
+	static CompletableFuture<Void> friendsCall(String method, String path, JsonObject body) {
 		CompletableFuture<Void> result = new CompletableFuture<>();
 		if (!online()) {
 			result.completeExceptionally(new ServiceException("Nicht mit dem Heldix-Dienst verbunden"));
@@ -853,14 +1323,55 @@ public final class Social {
 	// HTTP
 	// ======================================================================================
 
-	/** Fehler mit Text für den Spieler (vom Dienst) */
+	/** Fehler mit Text für den Spieler (vom Dienst); status = HTTP-Status der Antwort, 0 = keine Antwort des Dienstes */
 	public static final class ServiceException extends Exception {
+		private final int status;
+
 		public ServiceException(String message) {
+			this(message, 0);
+		}
+
+		public ServiceException(String message, int status) {
 			super(message);
+			this.status = status;
+		}
+
+		public int status() {
+			return status;
 		}
 	}
 
 	static JsonObject call(String method, String path, JsonObject body, boolean auth) throws IOException, InterruptedException, ServiceException {
+		JsonElement element = callElement(method, path, body, auth);
+		return element.isJsonObject() ? element.getAsJsonObject() : new JsonObject();
+	}
+
+	/**
+	 * Anfrage an den Dienst im Netzwerk-Thread, Antwort als JSON (Objekt oder Liste) – für „Welt teilen“
+	 * (dev.heldixclient.share). {@code auth}: mit Anmeldung (dann nur, solange verbunden). Fehler kommen als
+	 * {@link ServiceException} mit Text für den Spieler und HTTP-Status (0 = keine Antwort).
+	 */
+	public static CompletableFuture<JsonElement> request(String method, String path, JsonObject body, boolean auth) {
+		CompletableFuture<JsonElement> result = new CompletableFuture<>();
+		if (auth && !online()) {
+			result.completeExceptionally(new ServiceException("Nicht mit dem Heldix-Dienst verbunden"));
+			return result;
+		}
+		if (baseUrl().isEmpty()) {
+			result.completeExceptionally(new ServiceException("Kein Heldix-Dienst eingetragen"));
+			return result;
+		}
+		NET.execute(() -> {
+			try {
+				result.complete(callElement(method, path, body, auth));
+			} catch (Exception e) {
+				result.completeExceptionally(e instanceof ServiceException ? e : new ServiceException("Dienst nicht erreichbar"));
+			}
+		});
+		return result;
+	}
+
+	private static JsonElement callElement(String method, String path, JsonObject body, boolean auth) throws IOException, InterruptedException, ServiceException {
 		HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(baseUrl() + path))
 				.timeout(Duration.ofSeconds(15))
 				.header("Accept", "application/json")
@@ -877,22 +1388,22 @@ public final class Social {
 			request.method(method, HttpRequest.BodyPublishers.noBody());
 		}
 		HttpResponse<String> response = HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-		JsonObject json = parse(response.body());
+		JsonElement json = parse(response.body());
 		if (response.statusCode() == 401 && auth) {
 			// Anmeldung beim Dienst abgelaufen: neu anmelden
 			NET.execute(Social::connect);
 		}
 		if (response.statusCode() >= 400) {
-			String message = string(json, "error");
-			throw new ServiceException(message != null ? message : "Fehler beim Dienst (" + response.statusCode() + ")");
+			String message = json.isJsonObject() ? string(json.getAsJsonObject(), "error") : null;
+			throw new ServiceException(message != null ? message : "Fehler beim Dienst (" + response.statusCode() + ")", response.statusCode());
 		}
 		return json;
 	}
 
-	private static JsonObject parse(String text) {
+	private static JsonElement parse(String text) {
 		try {
 			JsonElement element = JsonParser.parseString(text == null || text.isBlank() ? "{}" : text);
-			return element.isJsonObject() ? element.getAsJsonObject() : new JsonObject();
+			return element.isJsonObject() || element.isJsonArray() ? element : new JsonObject();
 		} catch (RuntimeException e) {
 			return new JsonObject();
 		}
@@ -903,7 +1414,7 @@ public final class Social {
 		return object.get(key).getAsString();
 	}
 
-	private static JsonArray array(JsonObject object, String key) {
+	static JsonArray array(JsonObject object, String key) {
 		return object != null && object.has(key) && object.get(key).isJsonArray() ? object.getAsJsonArray(key) : new JsonArray();
 	}
 

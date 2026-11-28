@@ -3,41 +3,54 @@
 //
 // Ein Cosmetic ist ein signierter Umschlag { manifest: "<JSON-Text>", signature: "<base64>" }. Die Signatur ist
 // Ed25519 mit dem Update-Schlüssel über die UTF-8-Bytes von "heldix-cosmetic\n" + manifest. Die Seite zeigt ein
-// Cosmetic erst, wenn die Signatur im Browser (WebCrypto) bestätigt ist und das Manifest alle Regeln von Format 1
-// erfüllt. Die Prüfregeln sind eine genaue Übertragung von service/src/cosmetics-format.ts (dieselben Grenzen und
-// Meldungen wie Dienst, Spiel und Launcher). Den öffentlichen Schlüssel bringt die Seite selbst mit: build.mjs schreibt
-// ihn aus launcher/src/main/update-public-key.ts nach /update-key.js – er kommt also nicht vom Dienst, der die Daten
-// liefert. Der Team-Bereich kann stattdessen `publicKey` aus GET /v1/team/cosmetics übergeben.
+// Cosmetic erst, wenn die Signatur im Browser (WebCrypto) bestätigt ist und das Manifest alle Regeln von Format 1 bzw.
+// Format 2 (animierte Meshes, ab Launcher 0.13.8) erfüllt. Die Prüfregeln sind eine genaue Übertragung von
+// service/src/cosmetics-format.ts (dieselben Grenzen und Meldungen wie Dienst, Spiel und Launcher). Den öffentlichen
+// Schlüssel bringt die Seite selbst mit: build.mjs schreibt ihn aus launcher/src/main/update-public-key.ts nach
+// /update-key.js – er kommt also nicht vom Dienst, der die Daten liefert. Der Team-Bereich kann stattdessen `publicKey`
+// aus GET /v1/team/cosmetics übergeben.
 //
 // Exporte (stabil, andere Seiten bauen darauf):
-//   Konstanten   COSMETIC_SIGNATURE_PREFIX, COSMETIC_TYPE, COSMETIC_FORMAT, COSMETIC_SLOTS, MODEL_SLOTS,
-//                COSMETIC_ACCESS, ANIMATION_TYPES, ANIMATION_AXES, PARTICLE_MOTIONS, COSMETIC_ID_RE, BONE_NAME_RE,
-//                COLOR_RE, SIGNATURE_RE, PNG_DATA_URL_PREFIX, BUILTIN_CAPE_IDS, COSMETIC_LIMITS,
+//   Konstanten   COSMETIC_SIGNATURE_PREFIX, COSMETIC_TYPE, COSMETIC_FORMAT, COSMETIC_FORMAT_2, COSMETIC_FORMATS,
+//                COSMETIC_SLOTS, MODEL_SLOTS, MESH_SLOTS, COSMETIC_ACCESS, ANIMATION_TYPES, ANIMATION_AXES,
+//                PARTICLE_MOTIONS, COSMETIC_ID_RE, BONE_NAME_RE, COLOR_RE, SIGNATURE_RE, PNG_DATA_URL_PREFIX,
+//                BUILTIN_CAPE_IDS, COSMETIC_LIMITS, COSMETIC_LIMITS_2, COSMETIC_MAX_MANIFEST_BYTES,
+//                COSMETIC_MAX_ENVELOPE_BYTES, COSMETIC_STATES, COSMETIC_PARTICLE_IDS, PARTICLE_ANCHORS, ATTACH_SIDES,
+//                MESH_BONE_NAME_RE, ANIMATION_NAME_RE,
 //                SLOT_NAMES (Kopf, Rücken, …), SLOT_TITLES (Hüte & Kopf, …), SLOT_HASHES (kopf, ruecken, …)
-//   Format       cosmeticSignedText, cosmeticEnvelopeText, utf8Length, codePointLength, crc32, readPng,
-//                decodeBase64, isIsoDate, checkCosmeticManifest, parseCosmeticManifest, checkCosmeticEnvelope
+//   Format       cosmeticSignedText, cosmeticEnvelopeText, cosmeticEnvelopeLength, utf8Length, codePointLength, crc32,
+//                readPng, decodeBase64, encodeBase64, encode/decode Uint8, Int8, Uint16LE, Int16LE, isIsoDate,
+//                checkCosmeticManifest, parseCosmeticManifest, checkCosmeticEnvelope
 //   Prüfen       CosmeticError, cosmeticsKeyAvailable(), importCosmeticKey(pem?), verifyCosmeticEnvelope(envelope, { publicKey, expect })
 //   Katalog      normalizeCatalogEntry, loadCosmeticCatalog(), loadCosmetic(entry), loadVerifiedCosmetics(entries, { onItem }),
-//                loadBuiltinCapes(), cosmeticAnimated(manifest)
+//                loadBuiltinCapes(), cosmeticAnimated(manifest), cosmeticAnimations(manifest)
 //   Bilder       prepareCosmetic(manifest), prepareBuiltinCape(cape), drawCapeFrame(context, prepared, frame, width, height)
 //   Geometrie    cosmeticCubeFaces, cosmeticPose, cosmeticBoneMatrices, mat4Multiply, mat4Apply, cosmeticLoopSeconds
+//   Format 2     meshRig, meshClipFrame, sampleMeshChannel, sampleMeshPose, blendMeshPose, meshBoneMatrices,
+//                skinMeshRig, meshGlowFrame, meshGlowIntensity, meshStateClip, MeshAnimator
 //   Zeichnen     drawCosmeticPreview(canvas, prepared, options)   – 2D (Vorschaubilder, Ersatz ohne WebGL)
 //                createCosmeticLayer(viewer, options)              – 3D-Meshes auf einem skinview3d.SkinViewer
 import { UPDATE_PUBLIC_KEY } from './update-key.js';
 
 // ---------------------------------------------------------------------------------------------------------
-// Format 1 (genau wie service/src/cosmetics-format.ts)
+// Format 1 und 2 (genau wie service/src/cosmetics-format.ts)
 // ---------------------------------------------------------------------------------------------------------
 
 /** Steht vor dem Manifest-Text, wenn signiert wird. */
 export const COSMETIC_SIGNATURE_PREFIX = 'heldix-cosmetic\n';
 export const COSMETIC_TYPE = 'heldix-cosmetic';
 export const COSMETIC_FORMAT = 1;
+/** Meshes mit Keyframe-Animationen */
+export const COSMETIC_FORMAT_2 = 2;
+export const COSMETIC_FORMATS = Object.freeze([COSMETIC_FORMAT, COSMETIC_FORMAT_2]);
 
 export const COSMETIC_SLOTS = Object.freeze(['head', 'back', 'aura', 'companion', 'cape']);
 /** Slots mit Modell (und damit mit Animationen). */
 export const MODEL_SLOTS = Object.freeze(['head', 'back', 'companion']);
-export const COSMETIC_ACCESS = Object.freeze(['all', 'team']);
+/** Slots, die Format 2 kennt (kein Cape). */
+export const MESH_SLOTS = Object.freeze(['head', 'back', 'aura', 'companion']);
+/** Wer ein Cosmetic tragen darf: alle, nur das Team oder nur, wer es freigeschaltet hat (Belohnung für Einladungen). */
+export const COSMETIC_ACCESS = Object.freeze(['all', 'team', 'unlock']);
 export const ANIMATION_TYPES = Object.freeze(['flap', 'sway', 'spin', 'bob']);
 export const ANIMATION_AXES = Object.freeze(['x', 'y', 'z']);
 export const PARTICLE_MOTIONS = Object.freeze(['rise', 'fall', 'orbit', 'spark', 'float']);
@@ -45,7 +58,7 @@ export const PARTICLE_MOTIONS = Object.freeze(['rise', 'fall', 'orbit', 'spark',
 /** Kurze Namen der Slots (Reiter auf der Webseite). */
 export const SLOT_NAMES = Object.freeze({ head: 'Kopf', back: 'Rücken', aura: 'Aura', companion: 'Begleiter', cape: 'Capes' });
 /** Lange Namen der Slots (wie im Launcher und im Heldix-Menü). */
-export const SLOT_TITLES = Object.freeze({ head: 'Hüte & Kopf', back: 'Flügel & Rücken', aura: 'Partikel', companion: 'Begleiter', cape: 'Capes' });
+export const SLOT_TITLES = Object.freeze({ head: 'Hüte & Kopf', back: 'Flügel & Rücken', aura: 'Aura', companion: 'Begleiter', cape: 'Capes' });
 /** Slot in Adressen (/cosmetics#kopf, /cosmetics#capes/galaxie). */
 export const SLOT_HASHES = Object.freeze({ head: 'kopf', back: 'ruecken', aura: 'aura', companion: 'begleiter', cape: 'capes' });
 
@@ -58,7 +71,7 @@ export const SIGNATURE_RE = /^[A-Za-z0-9+/]{85}[AQgw]==$/;
 export const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
 
 /** IDs der eingebauten Capes (wie DEFAULT_CAPES im Dienst): Ein Cosmetic darf keine davon tragen. */
-export const BUILTIN_CAPE_IDS = Object.freeze(['heldix', 'mitternacht', 'aurora', 'glut', 'kristall', 'neon', 'sakura', 'gewitter', 'galaxie']);
+export const BUILTIN_CAPE_IDS = Object.freeze(['heldix', 'mitternacht', 'aurora', 'glut', 'kristall', 'neon', 'sakura', 'gewitter', 'galaxie', 'matrix', 'matrix_rot', 'matrix_tuerkis', 'sakura_orange']);
 
 /** Alle Grenzen von Format 1 (Byte-Angaben: 1 KB = 1024 Byte). */
 export const COSMETIC_LIMITS = Object.freeze({
@@ -69,14 +82,19 @@ export const COSMETIC_LIMITS = Object.freeze({
   nameMax: 40,
   descriptionMax: 300,
   textureMin: 8,
-  textureMax: 256,
+  textureMax: 512,
   textureStep: 8,
   /** cape: 64, 128 oder 256 breit, je Bild halb so hoch wie breit, Bilder untereinander */
   capeWidths: Object.freeze([64, 128, 256]),
   capeFramesMax: 32,
   capeFpsMax: 20,
-  bonesMax: 32,
+  bonesMax: 64,
   cubesMax: 128,
+  /** Das PNG eines Modells ist model.textureSize mal 1, 2 oder 4 (UV und Box-UV zählen in Texeln von textureSize) */
+  textureScales: Object.freeze([1, 2, 4]),
+  /** model.scale (freiwillig, fehlt: 1): Größe des ganzen Modells um den Anker */
+  modelScaleMin: 0.25,
+  modelScaleMax: 1.5,
   cubeEdgeMax: 32,
   coordMax: 48,
   rotationMax: 180,
@@ -101,7 +119,101 @@ export const COSMETIC_LIMITS = Object.freeze({
   scaleMax: 1.5,
 });
 
+/**
+ * Alle Grenzen von Format 2 (Byte-Angaben: 1 KB = 1024 Byte). Ganzzahlen in den Base64-Listen: Positionen und move
+ * in 1/32 Pixel (Int16), Normalen × 127 (Int8), UV ÷ 65535 (Uint16), Quaternionen × 32767 (Int16), scale ÷ 1000
+ * (Uint16), Gewichte ÷ 255 (Uint8).
+ */
+export const COSMETIC_LIMITS_2 = Object.freeze({
+  manifestBytes: 512 * 1024,
+  envelopeBytes: 544 * 1024,
+  pngBytes: 64 * 1024,
+  /** texture: Breite und Höhe je eine Zweierpotenz von 16 bis 512 */
+  textureMin: 16,
+  textureMax: 512,
+  verticesMax: 16384,
+  trianglesMax: 16384,
+  bonesMax: 96,
+  boneNameMax: 32,
+  /** pivot und tail der Knochen: je Achse von -1024 bis 1024 Pixel */
+  coordMax: 1024,
+  /** attach.origin (Begleiter): je Achse von -64 bis 64 Pixel */
+  originMax: 64,
+  animationsMax: 16,
+  fpsMax: 60,
+  framesMax: 1200,
+  emissiveFramesMax: 16,
+  frametimeTicksMax: 20,
+  pulsePeriodMin: 0.1,
+  pulsePeriodMax: 20,
+  blendSecondsMax: 1,
+  particlesMax: 16,
+  perSecondMin: 0.1,
+  perSecondMax: 20,
+  /** Länge eines Quaternions (÷ 32767) darf so weit von 1 abweichen */
+  quaternionTolerance: 0.01,
+  positionUnit: 32,
+  normalUnit: 127,
+  uvUnit: 65535,
+  rotationUnit: 32767,
+  scaleUnit: 1000,
+  weightUnit: 255,
+  /** Einflüsse je Vertex bei weicher Haut (mesh.joints, mesh.weights) */
+  influences: 4,
+});
+
+/** Größte Grenzen über alle Formate: für Downloads, bevor das Format bekannt ist. */
+export const COSMETIC_MAX_MANIFEST_BYTES = Math.max(COSMETIC_LIMITS.manifestBytes, COSMETIC_LIMITS_2.manifestBytes);
+export const COSMETIC_MAX_ENVELOPE_BYTES = Math.max(COSMETIC_LIMITS.envelopeBytes, COSMETIC_LIMITS_2.envelopeBytes);
+
+/** Spielerzustände in `states` (Format 2); `idle` ist Pflicht. */
+export const COSMETIC_STATES = Object.freeze(['idle', 'walk', 'sneak', 'sit_or_ride', 'swim', 'sprint', 'elytra', 'jump', 'fall', 'creative_fly', 'start_flying', 'land', 'hurt', 'emote', 'celebrate', 'afk', 'sleep', 'enable', 'disable', 'summon']);
+/** Minecraft-Partikel (ohne „minecraft:“; im Manifest mit oder ohne) für Format 2. Alle ohne Parameter außer dust. */
+export const COSMETIC_PARTICLE_IDS = Object.freeze([
+  'flame',
+  'small_flame',
+  'soul_fire_flame',
+  'smoke',
+  'end_rod',
+  'electric_spark',
+  'dust',
+  'heart',
+  'note',
+  'happy_villager',
+  'cloud',
+  'poof',
+  'snowflake',
+  'spore_blossom_air',
+  'crit',
+  'enchant',
+  'portal',
+  'witch',
+  'glow',
+  'falling_water',
+  'dripping_water',
+  'firework',
+  'cherry_leaves',
+  'ash',
+  'white_ash',
+  'soul',
+  'sculk_soul',
+  'lava',
+  'falling_spore_blossom',
+  'wax_on',
+  'wax_off',
+  'bubble_pop',
+  'composter',
+  'totem_of_undying',
+  'reverse_portal',
+]);
+export const PARTICLE_ANCHORS = Object.freeze(['pivot', 'tail']);
+export const ATTACH_SIDES = Object.freeze(['left', 'right']);
+/** Knochen in Format 2: 1–32 Zeichen aus A–Z, a–z, 0–9, _, . und - (Blender-Namen wie „wing.L“). */
+export const MESH_BONE_NAME_RE = /^[A-Za-z0-9_.-]{1,32}$/;
+export const ANIMATION_NAME_RE = /^[A-Za-z0-9_]{1,24}$/;
+
 const MANIFEST_KEYS = ['type', 'format', 'id', 'version', 'slot', 'name', 'description', 'access', 'date', 'texture', 'glow', 'model', 'animations', 'particles', 'cape', 'companion'];
+const MANIFEST_KEYS_2 = ['type', 'format', 'id', 'version', 'slot', 'name', 'description', 'access', 'date', 'texture', 'glow', 'emissive', 'mesh', 'bones', 'animations', 'states', 'particles', 'attach'];
 /** Steuerzeichen (auch Zeilenumbrüche), Zeilen-/Absatztrenner, Schreibrichtung, einzelne Ersatzzeichen. */
 const FORBIDDEN_TEXT_RE = /[\p{Cc}\p{Cs}\u2028\u2029\u202A-\u202E\u2066-\u2069]/u;
 const LONE_SURROGATE_RE = /\p{Cs}/u;
@@ -236,6 +348,102 @@ export function decodeBase64(text) {
   return bytes;
 }
 
+// ---------- Zahlenlisten (Format 2): Base64 ↔ typisierte Listen, little-endian ----------
+
+/** Bytes als Standard-Base64 (mit „=“ am Ende). */
+export function encodeBase64(bytes) {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+function int16Bytes(values) {
+  const bytes = new Uint8Array(values.length * 2);
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i] & 0xffff;
+    bytes[i * 2] = v & 0xff;
+    bytes[i * 2 + 1] = v >> 8;
+  }
+  return bytes;
+}
+
+/** Uint8-Werte (0–255) als Base64. */
+export const encodeUint8 = (values) => encodeBase64(Uint8Array.from(values));
+/** Int8-Werte (−128–127) als Base64. */
+export const encodeInt8 = (values) => encodeBase64(new Uint8Array(Int8Array.from(values).buffer));
+/** Int16-Werte als Base64 (little-endian). */
+export const encodeInt16LE = (values) => encodeBase64(int16Bytes(values));
+/** Uint16-Werte als Base64 (little-endian). */
+export const encodeUint16LE = (values) => encodeBase64(int16Bytes(values));
+/** Base64 → Uint8; null bei ungültigem Base64. */
+export const decodeUint8 = (text) => decodeBase64(text);
+
+/** Base64 → Int8; null bei ungültigem Base64. */
+export function decodeInt8(text) {
+  const bytes = decodeBase64(text);
+  return bytes === null ? null : new Int8Array(bytes.buffer, bytes.byteOffset, bytes.length);
+}
+
+/** Base64 → Uint16 (little-endian); null bei ungültigem Base64 oder ungerader Byte-Zahl. */
+export function decodeUint16LE(text) {
+  const bytes = decodeBase64(text);
+  if (bytes === null || bytes.length % 2 !== 0) return null;
+  const out = new Uint16Array(bytes.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = bytes[i * 2] | (bytes[i * 2 + 1] << 8);
+  return out;
+}
+
+/** Base64 → Int16 (little-endian); null bei ungültigem Base64 oder ungerader Byte-Zahl. */
+export function decodeInt16LE(text) {
+  const words = decodeUint16LE(text);
+  return words === null ? null : new Int16Array(words.buffer);
+}
+
+/**
+ * Das Mesh eines geprüften Manifests (Format 2) als Ganzzahl-Listen in den Einheiten von COSMETIC_LIMITS_2:
+ * { vertexCount, triangleCount, positions (Int16, ×3), normals (Int8, ×3), uvs (Uint16, ×2), bones (Uint8),
+ * triangles (Uint16, ×3), joints / weights (Uint8, ×4 oder null) }. Wirft, wenn es nicht geprüft war.
+ */
+export function decodeCosmeticMesh(mesh) {
+  const need = (value) => {
+    if (value === null) throw new Error('Das Mesh ist nicht geprüft (ungültiges Base64)');
+    return value;
+  };
+  return {
+    vertexCount: mesh.vertexCount,
+    triangleCount: mesh.triangleCount,
+    positions: need(decodeInt16LE(mesh.positions)),
+    normals: need(decodeInt8(mesh.normals)),
+    uvs: need(decodeUint16LE(mesh.uvs)),
+    bones: need(decodeUint8(mesh.bones)),
+    triangles: need(decodeUint16LE(mesh.triangles)),
+    joints: mesh.joints === null ? null : need(decodeUint8(mesh.joints)),
+    weights: mesh.weights === null ? null : need(decodeUint8(mesh.weights)),
+  };
+}
+
+/** Eine (geprüfte) Spur als Ganzzahl-Listen: { bone, rot, move, scale } je { keys, values } oder null; wirft sonst. */
+export function decodeCosmeticTrack(track) {
+  const keys = (k) => {
+    const value = decodeUint16LE(k.keys);
+    if (value === null) throw new Error('Die Spur ist nicht geprüft (ungültiges Base64)');
+    return value;
+  };
+  const signed = (k) => {
+    if (k === null) return null;
+    const values = decodeInt16LE(k.values);
+    if (values === null) throw new Error('Die Spur ist nicht geprüft (ungültiges Base64)');
+    return { keys: keys(k), values };
+  };
+  let scale = null;
+  if (track.scale !== null) {
+    const values = decodeUint16LE(track.scale.values);
+    if (values === null) throw new Error('Die Spur ist nicht geprüft (ungültiges Base64)');
+    scale = { keys: keys(track.scale), values };
+  }
+  return { bone: track.bone, rot: signed(track.rot), move: signed(track.move), scale };
+}
+
 class Problem extends Error {}
 function fail(message) {
   throw new Problem(message);
@@ -247,9 +455,10 @@ function object(value, path) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) fail(`${q(path)} muss ein JSON-Objekt sein`);
   return value;
 }
-function onlyKeys(o, path, allowed) {
+/** Nur bekannte Felder (kein Format kennt Zusatzfelder). */
+function onlyKeys(o, path, allowed, format = COSMETIC_FORMAT) {
   for (const key of Object.keys(o)) {
-    if (!allowed.includes(key)) fail(`${q(sub(path, key))} ist kein bekanntes Feld (Format ${COSMETIC_FORMAT})`);
+    if (!allowed.includes(key)) fail(`${q(sub(path, key))} ist kein bekanntes Feld (Format ${format})`);
   }
 }
 const has = (o, key) => Object.hasOwn(o, key);
@@ -312,14 +521,14 @@ export function isIsoDate(value) {
   return Number(h) <= 23 && Number(mi) <= 59 && Number(s) <= 59 && Number(oh) <= 23 && Number(om) <= 59;
 }
 
-function png(value, path) {
+function png(value, path, maxBytes = COSMETIC_LIMITS.pngBytes) {
   if (typeof value !== 'string' || !value.startsWith(PNG_DATA_URL_PREFIX)) fail(`${q(path)} muss eine data-URL „${PNG_DATA_URL_PREFIX}…“ sein`);
   const base64 = value.slice(PNG_DATA_URL_PREFIX.length);
-  const tooLarge = `${q(path)} ist zu groß (höchstens ${COSMETIC_LIMITS.pngBytes / 1024} KB als PNG)`;
-  if (base64.length > Math.ceil(COSMETIC_LIMITS.pngBytes / 3) * 4) fail(tooLarge);
+  const tooLarge = `${q(path)} ist zu groß (höchstens ${maxBytes / 1024} KB als PNG)`;
+  if (base64.length > Math.ceil(maxBytes / 3) * 4) fail(tooLarge);
   const bytes = decodeBase64(base64);
   if (bytes === null) fail(`${q(path)} enthält kein gültiges Base64`);
-  if (bytes.length > COSMETIC_LIMITS.pngBytes) fail(tooLarge);
+  if (bytes.length > maxBytes) fail(tooLarge);
   const info = readPng(bytes);
   if (typeof info === 'string') fail(`${q(path)} ${info}`);
   return { width: info.width, height: info.height, bytes: bytes.length };
@@ -399,12 +608,18 @@ function checkCube(value, path, texture) {
 function checkModel(value, image) {
   const L = COSMETIC_LIMITS;
   const o = object(value, 'model');
-  onlyKeys(o, 'model', ['textureSize', 'bones']);
-  const textureSize = required(o, 'textureSize', 'model');
-  if (!Array.isArray(textureSize) || textureSize.length !== 2 || textureSize[0] !== image.width || textureSize[1] !== image.height) {
-    fail(`„model.textureSize“ muss genau die Größe der Textur sein ([${image.width}, ${image.height}])`);
+  onlyKeys(o, 'model', ['textureSize', 'scale', 'bones']);
+  // textureSize = Größe in Texeln (UV-Raum); das PNG hat die 1-, 2- oder 4-fache Auflösung davon
+  const rawSize = required(o, 'textureSize', 'model');
+  const size = Array.isArray(rawSize) && rawSize.length === 2 ? rawSize : null;
+  const k = size === null ? undefined : L.textureScales.find((f) => size[0] === image.width / f && size[1] === image.height / f);
+  if (k === undefined) {
+    const sizes = L.textureScales.map((f) => `[${image.width / f}, ${image.height / f}]`);
+    const scales = L.textureScales.map(String);
+    fail(`„model.textureSize“ muss die Größe der Textur in Texeln sein (${sizes.slice(0, -1).join(', ')} oder ${sizes[sizes.length - 1]}: Textur in ${scales.slice(0, -1).join('-, ')}- oder ${scales[scales.length - 1]}-facher Auflösung)`);
   }
-  const texture = [image.width, image.height];
+  const texture = [image.width / k, image.height / k];
+  const scale = has(o, 'scale') ? number(o.scale, 'model.scale', L.modelScaleMin, L.modelScaleMax) : 1;
   const rawBones = required(o, 'bones', 'model');
   if (!Array.isArray(rawBones) || rawBones.length < 1 || rawBones.length > L.bonesMax) fail(`„model.bones“ muss eine Liste mit 1 bis ${L.bonesMax} Bones sein`);
   const names = new Set();
@@ -433,7 +648,7 @@ function checkModel(value, image) {
     bones.push({ name, parent, pivot, rotation, cubes });
   });
   if (cubeCount === 0) fail('„model“ braucht mindestens einen Würfel');
-  return { textureSize: texture, bones };
+  return { textureSize: texture, scale, bones };
 }
 
 function checkAnimations(value, model) {
@@ -477,35 +692,43 @@ function checkTextureSize(slot, image, cape, particles) {
 }
 
 /**
- * Prüft den Inhalt eines Cosmetic-Manifests (das geparste JSON) nach Format 1. Liefert das Manifest mit Standardwerten
- * für fehlende freiwillige Felder (dazu `image`: Größe der Textur) oder einen deutschen Hinweis (der erste Fehler).
+ * Prüft den Inhalt eines Cosmetic-Manifests (das geparste JSON) nach Format 1 oder 2 (je nach `format`). Liefert das
+ * Manifest mit Standardwerten für fehlende freiwillige Felder (dazu `image`: Größe der Textur) oder einen deutschen
+ * Hinweis (der erste Fehler). Die Größe des Manifest-Texts prüft parseCosmeticManifest.
  */
 export function checkCosmeticManifest(value) {
   try {
-    return check(value);
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) fail('Das Manifest ist kein JSON-Objekt');
+    const m = value;
+    if (m.type !== COSMETIC_TYPE) fail(`„type“ muss „${COSMETIC_TYPE}“ sein`);
+    if (m.format === COSMETIC_FORMAT_2) return checkFormat2(m);
+    if (m.format !== COSMETIC_FORMAT) fail(`„format“ muss ${COSMETIC_FORMATS.join(' oder ')} sein`);
+    return check(m);
   } catch (error) {
     if (error instanceof Problem) return error.message;
     throw error;
   }
 }
 
-function check(value) {
+/** Kopf beider Formate: id, version, slot, name, description, access, date. */
+function checkHead(m, slots) {
   const L = COSMETIC_LIMITS;
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) fail('Das Manifest ist kein JSON-Objekt');
-  const m = value;
-  if (m.type !== COSMETIC_TYPE) fail(`„type“ muss „${COSMETIC_TYPE}“ sein`);
-  if (m.format !== COSMETIC_FORMAT) fail(`„format“ muss ${COSMETIC_FORMAT} sein`);
-  onlyKeys(m, '', MANIFEST_KEYS);
   const id = m.id;
   if (typeof id !== 'string' || !COSMETIC_ID_RE.test(id)) fail('„id“ ist ungültig (1–32 Zeichen aus a–z, 0–9 und -, ohne - am Anfang oder Ende)');
   if (BUILTIN_CAPE_IDS.includes(id)) fail(`„id“ darf nicht die ID eines eingebauten Capes sein (${BUILTIN_CAPE_IDS.join(', ')})`);
   const version = integer(m.version, 'version', 1, L.versionMax);
-  const slot = oneOf(m.slot, 'slot', COSMETIC_SLOTS);
+  const slot = oneOf(m.slot, 'slot', slots);
   const name = text(m.name, 'name', 1, L.nameMax);
   const description = text(m.description, 'description', 0, L.descriptionMax);
   const access = oneOf(m.access, 'access', COSMETIC_ACCESS);
   if (!isIsoDate(m.date)) fail('„date“ ist kein gültiges Datum nach ISO 8601 (z. B. 2026-11-26T12:00:00.000Z)');
-  const date = m.date;
+  return { id, version, slot, name, description, access, date: m.date };
+}
+
+/** Format 1 (type und format sind schon geprüft). */
+function check(m) {
+  onlyKeys(m, '', MANIFEST_KEYS);
+  const { id, version, slot, name, description, access, date } = checkHead(m, COSMETIC_SLOTS);
 
   if (!has(m, 'texture')) fail('„texture“ fehlt');
   const image = png(m.texture, 'texture');
@@ -535,7 +758,298 @@ function check(value) {
   return { type: COSMETIC_TYPE, format: COSMETIC_FORMAT, id, version, slot, name, description, access, date, texture: m.texture, image, glow, model, animations, particles, cape, companion };
 }
 
-/** Manifest-Text lesen und prüfen (der Text muss vorher mit seiner Signatur geprüft sein). */
+// ---------- Format 2: Mesh mit Keyframe-Animationen ----------
+
+const isPowerOfTwo = (v) => v > 0 && (v & (v - 1)) === 0;
+const u16 = (bytes, i) => bytes[i * 2] | (bytes[i * 2 + 1] << 8);
+const s16 = (bytes, i) => (u16(bytes, i) << 16) >> 16;
+
+/** Base64 mit genau `count` Werten zu je `size` Byte (Länge passend, strenges Base64); liefert die Bytes. */
+function packed(value, path, count, size, what) {
+  const bytes = count * size;
+  const chars = Math.ceil(bytes / 3) * 4;
+  if (typeof value !== 'string') fail(`${q(path)} fehlt oder ist kein Text (Base64)`);
+  if (value.length !== chars) fail(`${q(path)} muss genau ${count} ${what} als Base64 enthalten (${chars} Zeichen, nicht ${value.length})`);
+  const decoded = decodeBase64(value);
+  if (decoded === null || decoded.length !== bytes) fail(`${q(path)} enthält kein gültiges Base64 (erwartet ${bytes} Byte)`);
+  return decoded;
+}
+
+function checkEmissive(value) {
+  const L = COSMETIC_LIMITS_2;
+  const o = object(value, 'emissive');
+  onlyKeys(o, 'emissive', ['frames', 'frametimeTicks', 'pulse'], COSMETIC_FORMAT_2);
+  const frames = integer(required(o, 'frames', 'emissive'), 'emissive.frames', 1, L.emissiveFramesMax);
+  const frametimeTicks = integer(required(o, 'frametimeTicks', 'emissive'), 'emissive.frametimeTicks', 1, L.frametimeTicksMax);
+  const p = object(required(o, 'pulse', 'emissive'), 'emissive.pulse');
+  onlyKeys(p, 'emissive.pulse', ['period', 'min', 'max'], COSMETIC_FORMAT_2);
+  const period = number(required(p, 'period', 'emissive.pulse'), 'emissive.pulse.period', L.pulsePeriodMin, L.pulsePeriodMax);
+  const min = number(required(p, 'min', 'emissive.pulse'), 'emissive.pulse.min', 0, 1);
+  const max = number(required(p, 'max', 'emissive.pulse'), 'emissive.pulse.max', 0, 1);
+  if (min > max) fail('„emissive.pulse.min“ darf nicht größer sein als „emissive.pulse.max“');
+  return { frames, frametimeTicks, pulse: { period, min, max } };
+}
+
+/** Knochen: Eltern zuerst (parent -1 oder ein kleinerer Index), Namen eindeutig. */
+function checkMeshBones(value) {
+  const L = COSMETIC_LIMITS_2;
+  if (!Array.isArray(value) || value.length < 1 || value.length > L.bonesMax) fail(`„bones“ muss eine Liste mit 1 bis ${L.bonesMax} Knochen sein`);
+  const names = new Set();
+  return value.map((raw, i) => {
+    const path = `bones[${i}]`;
+    const b = object(raw, path);
+    onlyKeys(b, path, ['name', 'parent', 'pivot', 'tail'], COSMETIC_FORMAT_2);
+    const name = required(b, 'name', path);
+    if (typeof name !== 'string' || !MESH_BONE_NAME_RE.test(name)) fail(`${q(sub(path, 'name'))} ist ungültig (1–${L.boneNameMax} Zeichen aus A–Z, a–z, 0–9, _, . und -)`);
+    if (names.has(name)) fail(`${q(sub(path, 'name'))}: Den Knochen „${name}“ gibt es schon`);
+    names.add(name);
+    const parent = required(b, 'parent', path);
+    if (typeof parent !== 'number' || !Number.isInteger(parent) || parent < -1 || parent >= i) {
+      fail(
+        i === 0
+          ? `${q(sub(path, 'parent'))} muss -1 sein (der erste Knochen hat keinen Eltern-Knochen)`
+          : `${q(sub(path, 'parent'))} muss -1 (kein Eltern-Knochen) oder der Index eines Knochens davor sein (0 bis ${i - 1})`,
+      );
+    }
+    const pivot = vec3(required(b, 'pivot', path), sub(path, 'pivot'), around(L.coordMax));
+    const tail = vec3(required(b, 'tail', path), sub(path, 'tail'), around(L.coordMax));
+    return { name, parent, pivot, tail };
+  });
+}
+
+const MESH_KEYS = ['vertexCount', 'triangleCount', 'positions', 'normals', 'uvs', 'bones', 'triangles', 'joints', 'weights'];
+
+/** Mesh: Längen passend zu N und T, Indizes < N, Knochen gültig; weiche Haut (joints/weights) freiwillig. */
+function checkMesh(value, boneCount) {
+  const L = COSMETIC_LIMITS_2;
+  const o = object(value, 'mesh');
+  onlyKeys(o, 'mesh', MESH_KEYS, COSMETIC_FORMAT_2);
+  const n = integer(required(o, 'vertexCount', 'mesh'), 'mesh.vertexCount', 1, L.verticesMax);
+  const t = integer(required(o, 'triangleCount', 'mesh'), 'mesh.triangleCount', 1, L.trianglesMax);
+  packed(required(o, 'positions', 'mesh'), 'mesh.positions', 3 * n, 2, `Int16-Werte (3 je Vertex, ${n} Vertices)`);
+  packed(required(o, 'normals', 'mesh'), 'mesh.normals', 3 * n, 1, `Int8-Werte (3 je Vertex, ${n} Vertices)`);
+  packed(required(o, 'uvs', 'mesh'), 'mesh.uvs', 2 * n, 2, `Uint16-Werte (2 je Vertex, ${n} Vertices)`);
+  const bones = packed(required(o, 'bones', 'mesh'), 'mesh.bones', n, 1, 'Knochen-Indizes (Uint8, 1 je Vertex)');
+  for (let v = 0; v < n; v++) {
+    if (bones[v] >= boneCount) fail(`„mesh.bones“: Vertex ${v} nennt den Knochen ${bones[v]}, es gibt nur ${boneCount} (0 bis ${boneCount - 1})`);
+  }
+  const triangles = packed(required(o, 'triangles', 'mesh'), 'mesh.triangles', 3 * t, 2, `Vertex-Indizes (Uint16, 3 je Dreieck, ${t} Dreiecke)`);
+  for (let i = 0; i < 3 * t; i++) {
+    const index = u16(triangles, i);
+    if (index >= n) fail(`„mesh.triangles“: Dreieck ${Math.floor(i / 3)} nennt den Vertex ${index}, es gibt nur ${n} (0 bis ${n - 1})`);
+  }
+  let joints = null;
+  let weights = null;
+  if (has(o, 'joints') !== has(o, 'weights')) fail(has(o, 'joints') ? '„mesh.weights“ fehlt (Pflicht mit „mesh.joints“)' : '„mesh.joints“ fehlt (Pflicht mit „mesh.weights“)');
+  if (has(o, 'joints')) {
+    const k = L.influences;
+    const j = packed(o.joints, 'mesh.joints', k * n, 1, `Knochen-Indizes (Uint8, ${k} je Vertex)`);
+    const w = packed(o.weights, 'mesh.weights', k * n, 1, `Gewichte (Uint8, ${k} je Vertex)`);
+    for (let v = 0; v < n; v++) {
+      let sum = 0;
+      let max = 0;
+      for (let i = v * k; i < v * k + k; i++) {
+        if (j[i] >= boneCount) fail(`„mesh.joints“: Vertex ${v} nennt den Knochen ${j[i]}, es gibt nur ${boneCount} (0 bis ${boneCount - 1})`);
+        sum += w[i];
+        max = Math.max(max, w[i]);
+      }
+      if (sum !== L.weightUnit) fail(`„mesh.weights“: Die Gewichte von Vertex ${v} ergeben ${sum} statt ${L.weightUnit}`);
+      let main = false;
+      for (let i = v * k; i < v * k + k; i++) if (j[i] === bones[v] && w[i] === max) main = true;
+      if (!main) fail(`„mesh.bones“: Vertex ${v} muss den Knochen mit dem größten Gewicht aus „mesh.joints“ nennen`);
+    }
+    joints = o.joints;
+    weights = o.weights;
+  }
+  return { vertexCount: n, triangleCount: t, positions: o.positions, normals: o.normals, uvs: o.uvs, bones: o.bones, triangles: o.triangles, joints, weights };
+}
+
+const KEY_VALUES = { rot: 4, move: 3, scale: 1 };
+const KEY_WHAT = { rot: 'Int16-Werte (x, y, z, w je Key)', move: 'Int16-Werte (x, y, z je Key)', scale: 'Uint16-Werte (einer je Key)' };
+
+/** Keys einer Spur: Frame-Nummern (erste 0, streng aufsteigend, < frames) und passend viele Werte. */
+function checkKeys(value, path, frames, kind) {
+  const L = COSMETIC_LIMITS_2;
+  const o = object(value, path);
+  onlyKeys(o, path, ['keys', 'values'], COSMETIC_FORMAT_2);
+  const keysPath = sub(path, 'keys');
+  const rawKeys = required(o, 'keys', path);
+  const keyBytes = typeof rawKeys === 'string' ? decodeBase64(rawKeys) : null;
+  if (keyBytes === null || keyBytes.length % 2 !== 0) fail(`${q(keysPath)} muss Frame-Nummern (Uint16) als Base64 enthalten, mindestens eine`);
+  const count = keyBytes.length / 2;
+  let previous = -1;
+  for (let i = 0; i < count; i++) {
+    const frame = u16(keyBytes, i);
+    if (i === 0 && frame !== 0) fail(`${q(keysPath)} muss mit Frame 0 beginnen (ist ${frame})`);
+    if (frame <= previous) fail(`${q(keysPath)} muss streng aufsteigen (Key ${i}: Frame ${frame} nach ${previous})`);
+    if (frame >= frames) fail(`${q(keysPath)}: Frame ${frame} liegt nicht in der Animation (0 bis ${frames - 1})`);
+    previous = frame;
+  }
+  const per = KEY_VALUES[kind];
+  const values = packed(required(o, 'values', path), sub(path, 'values'), per * count, 2, KEY_WHAT[kind]);
+  if (kind === 'rot') {
+    for (let i = 0; i < count; i++) {
+      let square = 0;
+      for (let c = 0; c < 4; c++) square += (s16(values, i * 4 + c) / L.rotationUnit) ** 2;
+      const length = Math.sqrt(square);
+      if (Math.abs(length - 1) > L.quaternionTolerance) {
+        fail(`${q(sub(path, 'values'))}: Das Quaternion von Key ${i} hat die Länge ${length.toFixed(3)} (erlaubt ${1 - L.quaternionTolerance} bis ${1 + L.quaternionTolerance})`);
+      }
+    }
+  }
+  return { keys: rawKeys, values: o.values, count };
+}
+
+/** Animationen nach Namen: fps, frames, loop und höchstens eine Spur je Knochen. */
+function checkClips(value, boneCount) {
+  const L = COSMETIC_LIMITS_2;
+  const o = object(value, 'animations');
+  const names = Object.keys(o);
+  if (names.length < 1 || names.length > L.animationsMax) fail(`„animations“ muss 1 bis ${L.animationsMax} Animationen enthalten`);
+  const clips = {};
+  for (const name of names) {
+    const path = `animations.${name}`;
+    if (!ANIMATION_NAME_RE.test(name)) fail(`${q(path)}: Der Name ist ungültig (1–24 Zeichen aus A–Z, a–z, 0–9 und _)`);
+    const a = object(o[name], path);
+    onlyKeys(a, path, ['fps', 'frames', 'loop', 'tracks'], COSMETIC_FORMAT_2);
+    const fps = integer(required(a, 'fps', path), sub(path, 'fps'), 1, L.fpsMax);
+    const frames = integer(required(a, 'frames', path), sub(path, 'frames'), 1, L.framesMax);
+    const loop = boolean(required(a, 'loop', path), sub(path, 'loop'));
+    const rawTracks = required(a, 'tracks', path);
+    if (!Array.isArray(rawTracks) || rawTracks.length > boneCount) fail(`${q(sub(path, 'tracks'))} muss eine Liste mit höchstens ${boneCount} Spuren sein (eine je Knochen)`);
+    const seen = new Set();
+    const tracks = rawTracks.map((raw, i) => {
+      const tp = `${path}.tracks[${i}]`;
+      const tr = object(raw, tp);
+      onlyKeys(tr, tp, ['bone', 'rot', 'move', 'scale'], COSMETIC_FORMAT_2);
+      const bone = integer(required(tr, 'bone', tp), sub(tp, 'bone'), 0, boneCount - 1);
+      if (seen.has(bone)) fail(`${q(sub(tp, 'bone'))}: Für den Knochen ${bone} gibt es in dieser Animation schon eine Spur`);
+      seen.add(bone);
+      if (!has(tr, 'rot') && !has(tr, 'move') && !has(tr, 'scale')) fail(`${q(tp)} braucht mindestens eins von „rot“, „move“ und „scale“`);
+      return {
+        bone,
+        rot: has(tr, 'rot') ? checkKeys(tr.rot, sub(tp, 'rot'), frames, 'rot') : null,
+        move: has(tr, 'move') ? checkKeys(tr.move, sub(tp, 'move'), frames, 'move') : null,
+        scale: has(tr, 'scale') ? checkKeys(tr.scale, sub(tp, 'scale'), frames, 'scale') : null,
+      };
+    });
+    // defineProperty: Auch ein Name wie „__proto__“ wird ein eigenes Feld.
+    Object.defineProperty(clips, name, { value: { fps, frames, loop, tracks }, enumerable: true, writable: true, configurable: true });
+  }
+  return clips;
+}
+
+const animationList = (clips) => Object.keys(clips).join(', ');
+
+/** Zustände: idle Pflicht, jeder Wert eine vorhandene Animation, dazu blendSeconds. */
+function checkStates(value, clips) {
+  const L = COSMETIC_LIMITS_2;
+  const o = object(value, 'states');
+  onlyKeys(o, 'states', [...COSMETIC_STATES, 'blendSeconds'], COSMETIC_FORMAT_2);
+  const blendSeconds = number(required(o, 'blendSeconds', 'states'), 'states.blendSeconds', 0, L.blendSecondsMax);
+  const states = { blendSeconds };
+  for (const key of COSMETIC_STATES) {
+    if (!has(o, key)) {
+      if (key === 'idle') fail('„states.idle“ fehlt');
+      continue;
+    }
+    const name = o[key];
+    if (typeof name !== 'string' || !Object.hasOwn(clips, name)) fail(`„states.${key}“ muss der Name einer Animation sein (${animationList(clips)})`);
+    states[key] = name;
+  }
+  return states;
+}
+
+/** Partikel an Knochen: erlaubte IDs, perSecond, color nur bei dust, states = Animationen. */
+function checkMeshParticles(value, boneCount, clips) {
+  const L = COSMETIC_LIMITS_2;
+  if (!Array.isArray(value) || value.length > L.particlesMax) fail(`„particles“ muss eine Liste mit höchstens ${L.particlesMax} Einträgen sein`);
+  return value.map((raw, i) => {
+    const path = `particles[${i}]`;
+    const p = object(raw, path);
+    onlyKeys(p, path, ['bone', 'at', 'particle', 'perSecond', 'color', 'states'], COSMETIC_FORMAT_2);
+    const bone = integer(required(p, 'bone', path), sub(path, 'bone'), 0, boneCount - 1);
+    const at = oneOf(required(p, 'at', path), sub(path, 'at'), PARTICLE_ANCHORS);
+    const given = required(p, 'particle', path);
+    const id = typeof given === 'string' && given.startsWith('minecraft:') ? given.slice('minecraft:'.length) : given;
+    if (typeof id !== 'string' || !COSMETIC_PARTICLE_IDS.includes(id)) fail(`${q(sub(path, 'particle'))} ist kein erlaubter Partikel (${COSMETIC_PARTICLE_IDS.join(', ')}; mit oder ohne „minecraft:“)`);
+    const perSecond = number(required(p, 'perSecond', path), sub(path, 'perSecond'), L.perSecondMin, L.perSecondMax);
+    let color = null;
+    if (has(p, 'color')) {
+      if (id !== 'dust') fail(`${q(sub(path, 'color'))} gibt es nur beim Partikel dust`);
+      if (typeof p.color !== 'string' || !COLOR_RE.test(p.color)) fail(`${q(sub(path, 'color'))} muss eine Farbe wie #ffcc00 sein`);
+      color = p.color;
+    }
+    let states = null;
+    if (has(p, 'states')) {
+      const list = p.states;
+      if (!Array.isArray(list) || list.length < 1 || list.length > L.animationsMax) fail(`${q(sub(path, 'states'))} muss eine Liste mit 1 bis ${L.animationsMax} Animationen sein`);
+      list.forEach((name, j) => {
+        const where = `${path}.states[${j}]`;
+        if (typeof name !== 'string' || !Object.hasOwn(clips, name)) fail(`${q(where)} muss der Name einer Animation sein (${animationList(clips)})`);
+        if (list.indexOf(name) !== j) fail(`${q(where)}: „${name}“ steht doppelt in der Liste`);
+      });
+      states = [...list];
+    }
+    return { bone, at, particle: id, perSecond, color, states };
+  });
+}
+
+function checkAttach(value) {
+  const L = COSMETIC_LIMITS_2;
+  const o = object(value, 'attach');
+  onlyKeys(o, 'attach', ['origin', 'side'], COSMETIC_FORMAT_2);
+  return {
+    origin: has(o, 'origin') ? vec3(o.origin, 'attach.origin', around(L.originMax)) : [0, 0, 0],
+    side: has(o, 'side') ? oneOf(o.side, 'attach.side', ATTACH_SIDES) : 'left',
+  };
+}
+
+/** Format 2 (type und format sind schon geprüft). */
+function checkFormat2(m) {
+  const L = COSMETIC_LIMITS_2;
+  onlyKeys(m, '', MANIFEST_KEYS_2, COSMETIC_FORMAT_2);
+  const { id, version, slot, name, description, access, date } = checkHead(m, MESH_SLOTS);
+
+  if (!has(m, 'texture')) fail('„texture“ fehlt');
+  const image = png(m.texture, 'texture', L.pngBytes);
+  const fits = (v) => isPowerOfTwo(v) && v >= L.textureMin && v <= L.textureMax;
+  if (!fits(image.width) || !fits(image.height)) fail(`„texture“ muss je eine Zweierpotenz von ${L.textureMin} bis ${L.textureMax} Pixel breit und hoch sein (ist ${image.width} × ${image.height})`);
+  let emissive = null;
+  let glow = null;
+  if (has(m, 'glow') !== has(m, 'emissive')) fail(has(m, 'glow') ? '„emissive“ fehlt (Pflicht mit „glow“)' : '„glow“ fehlt (Pflicht mit „emissive“)');
+  if (has(m, 'emissive')) {
+    emissive = checkEmissive(m.emissive);
+    const glowImage = png(m.glow, 'glow', L.pngBytes);
+    const height = image.height * emissive.frames;
+    if (glowImage.width !== image.width || glowImage.height !== height) {
+      fail(`„glow“ muss ${image.width} × ${height} Pixel groß sein (so breit wie „texture“, ${emissive.frames} Bilder zu je ${image.height} Pixel untereinander; ist ${glowImage.width} × ${glowImage.height})`);
+    }
+    glow = m.glow;
+  }
+
+  const bones = checkMeshBones(required(m, 'bones', ''));
+  const mesh = checkMesh(required(m, 'mesh', ''), bones.length);
+  const animations = checkClips(required(m, 'animations', ''), bones.length);
+  const states = checkStates(required(m, 'states', ''), animations);
+  const particles = has(m, 'particles') ? checkMeshParticles(m.particles, bones.length, animations) : [];
+  if (slot !== 'companion' && has(m, 'attach')) fail(`„attach“ gibt es nur beim Slot companion (nicht beim Slot ${slot})`);
+  const attach = slot === 'companion' ? checkAttach(has(m, 'attach') ? m.attach : {}) : null;
+
+  return { type: COSMETIC_TYPE, format: COSMETIC_FORMAT_2, id, version, slot, name, description, access, date, texture: m.texture, image, glow, emissive, mesh, bones, animations, states, particles, attach };
+}
+
+// ---------- Text und Umschlag ----------
+
+/** Länge des Umschlags, wie der Dienst ihn ausliefert, zu einem Manifest-Text (die Signatur hat immer 88 Zeichen). */
+export function cosmeticEnvelopeLength(manifest) {
+  return utf8Length(cosmeticEnvelopeText({ manifest, signature: 'A'.repeat(88) }));
+}
+
+/**
+ * Manifest-Text lesen und prüfen (der Text muss vorher mit seiner Signatur geprüft sein). Hier kommt auch die
+ * Größengrenze des Formats dazu: Format 1 höchstens 160 KB Manifest bzw. 192 KB Umschlag, Format 2 512 KB bzw. 544 KB.
+ */
 export function parseCosmeticManifest(manifest) {
   let parsed;
   try {
@@ -543,24 +1057,31 @@ export function parseCosmeticManifest(manifest) {
   } catch {
     return '„manifest“ ist kein gültiges JSON';
   }
+  const format = typeof parsed === 'object' && parsed !== null ? parsed.format : undefined;
+  if (format === COSMETIC_FORMAT || format === COSMETIC_FORMAT_2) {
+    const L = format === COSMETIC_FORMAT ? COSMETIC_LIMITS : COSMETIC_LIMITS_2;
+    if (utf8Length(manifest) > L.manifestBytes) return `„manifest“ ist zu groß (höchstens ${L.manifestBytes / 1024} KB bei Format ${format})`;
+    if (cosmeticEnvelopeLength(manifest) > L.envelopeBytes) return `Der Umschlag ist zu groß (höchstens ${L.envelopeBytes / 1024} KB bei Format ${format})`;
+  }
   return checkCosmeticManifest(parsed);
 }
 
 /**
  * Prüft die Form eines Umschlags `{ manifest, signature }` (ohne Kryptografie): beide als Text, Manifest höchstens
- * 160 KB (UTF-8) ohne einzelne Ersatzzeichen, Signatur als kanonisches Base64 von 64 Byte, der Umschlag wie
- * ausgeliefert höchstens 192 KB. Zusatzfelder im Umschlag werden ignoriert. Liefert { manifest, signature } oder Text.
+ * 512 KB (UTF-8, größte Grenze aller Formate) ohne einzelne Ersatzzeichen, Signatur als kanonisches Base64 von 64 Byte,
+ * der Umschlag wie ausgeliefert höchstens 544 KB. Die engere Grenze von Format 1 (160 KB / 192 KB) prüft
+ * parseCosmeticManifest, sobald das Format bekannt ist. Zusatzfelder im Umschlag werden ignoriert. Liefert
+ * { manifest, signature } oder Text.
  */
 export function checkCosmeticEnvelope(value) {
-  const L = COSMETIC_LIMITS;
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'Der Umschlag ist kein JSON-Objekt';
   const { manifest, signature } = value;
   if (typeof manifest !== 'string' || manifest === '') return '„manifest“ fehlt oder ist kein Text';
   if (typeof signature !== 'string' || signature === '') return '„signature“ fehlt oder ist kein Text';
   if (LONE_SURROGATE_RE.test(manifest)) return '„manifest“ enthält ungültige Zeichen';
-  if (utf8Length(manifest) > L.manifestBytes) return `„manifest“ ist zu groß (höchstens ${L.manifestBytes / 1024} KB)`;
+  if (utf8Length(manifest) > COSMETIC_MAX_MANIFEST_BYTES) return `„manifest“ ist zu groß (höchstens ${COSMETIC_MAX_MANIFEST_BYTES / 1024} KB)`;
   if (!SIGNATURE_RE.test(signature)) return '„signature“ muss eine Ed25519-Signatur als Base64 sein (88 Zeichen)';
-  if (utf8Length(cosmeticEnvelopeText({ manifest, signature })) > L.envelopeBytes) return `Der Umschlag ist zu groß (höchstens ${L.envelopeBytes / 1024} KB)`;
+  if (utf8Length(cosmeticEnvelopeText({ manifest, signature })) > COSMETIC_MAX_ENVELOPE_BYTES) return `Der Umschlag ist zu groß (höchstens ${COSMETIC_MAX_ENVELOPE_BYTES / 1024} KB)`;
   return { manifest, signature };
 }
 
@@ -607,14 +1128,14 @@ export function importCosmeticKey(pem = UPDATE_PUBLIC_KEY) {
 }
 
 /**
- * Umschlag prüfen: Form, Ed25519-Signatur über "heldix-cosmetic\n" + manifest, alle Regeln von Format 1.
+ * Umschlag prüfen: Form, Ed25519-Signatur über "heldix-cosmetic\n" + manifest, alle Regeln von Format 1 bzw. 2.
  * envelope: Objekt oder JSON-Text. expect: { id, slot, version } aus dem Katalog (müssen übereinstimmen).
  * Liefert das geprüfte Manifest; wirft CosmeticError mit deutschem Hinweis.
  */
 export async function verifyCosmeticEnvelope(envelope, { publicKey = UPDATE_PUBLIC_KEY, expect = null } = {}) {
   let value = envelope;
   if (typeof value === 'string') {
-    if (utf8Length(value) > COSMETIC_LIMITS.envelopeBytes) throw new CosmeticError(`Der Umschlag ist zu groß (höchstens ${COSMETIC_LIMITS.envelopeBytes / 1024} KB)`, 'envelope');
+    if (utf8Length(value) > COSMETIC_MAX_ENVELOPE_BYTES) throw new CosmeticError(`Der Umschlag ist zu groß (höchstens ${COSMETIC_MAX_ENVELOPE_BYTES / 1024} KB)`, 'envelope');
     try {
       value = JSON.parse(value);
     } catch {
@@ -659,7 +1180,7 @@ export function normalizeCatalogEntry(entry) {
     version: Number.isInteger(entry.version) && entry.version > 0 ? entry.version : null,
     name: clean(entry.name, COSMETIC_LIMITS.nameMax) || entry.id,
     description: clean(entry.description, COSMETIC_LIMITS.descriptionMax),
-    access: entry.access === 'team' ? 'team' : 'all',
+    access: COSMETIC_ACCESS.includes(entry.access) ? entry.access : 'all',
     sha256: typeof entry.sha256 === 'string' && SHA256_RE.test(entry.sha256) ? entry.sha256 : '',
     size: Number.isInteger(entry.size) && entry.size > 0 ? entry.size : null,
     date: typeof entry.date === 'string' && Number.isFinite(Date.parse(entry.date)) ? entry.date : null,
@@ -736,7 +1257,10 @@ export async function loadVerifiedCosmetics(entries, { onItem = null, concurrenc
 
 let builtinCapes = null;
 
-/** Die neun eingebauten Capes (/capes/capes.json aus der Mod): [{ id, name, description, frames, fps, glow }]. */
+/**
+ * Die 13 eingebauten Capes (/capes/capes.json aus der Mod): [{ id, name, description, frames, fps, glow, team }].
+ * team: nur für das HeldixClient-Team wählbar (capes.json "team": true; der Dienst prüft selbst).
+ */
 export function loadBuiltinCapes() {
   if (!builtinCapes) {
     builtinCapes = fetch('/capes/capes.json', { credentials: 'omit' })
@@ -744,7 +1268,7 @@ export function loadBuiltinCapes() {
       .then((data) =>
         (Array.isArray(data?.capes) ? data.capes : [])
           .filter((cape) => cape && BUILTIN_CAPE_IDS.includes(cape.id))
-          .map((cape) => ({ id: cape.id, name: clean(cape.name, 40) || cape.id, description: clean(cape.description, 300), frames: Number(cape.frames) || 1, fps: Number(cape.fps) || 10, glow: cape.glow === true })),
+          .map((cape) => ({ id: cape.id, name: clean(cape.name, 40) || cape.id, description: clean(cape.description, 300), frames: Number(cape.frames) || 1, fps: Number(cape.fps) || 10, glow: cape.glow === true, team: cape.team === true })),
       );
     builtinCapes.catch(() => (builtinCapes = null));
   }
@@ -753,6 +1277,7 @@ export function loadBuiltinCapes() {
 
 /** Bewegt sich das Cosmetic (Animationen, Partikel, mehrere Cape-Bilder)? */
 export function cosmeticAnimated(manifest) {
+  if (manifest.format === 2) return Object.values(manifest.animations ?? {}).some((clip) => clip.frames > 1 && clip.tracks.length > 0) || (manifest.emissive?.frames ?? 1) > 1;
   if (manifest.slot === 'aura') return true;
   if (manifest.slot === 'cape') return (manifest.cape?.frames ?? 1) > 1;
   return manifest.animations.some((a) => a.speed > 0 && (a.type === 'spin' || a.amplitude > 0));
@@ -883,7 +1408,6 @@ export function cosmeticPose(model, animations, t, flapFactor = 1) {
   return pose;
 }
 
-const identity = () => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const translation = (x, y, z) => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1];
 
 /** 4×4-Matrizen spaltenweise (wie three.js/WebGL): m[spalte * 4 + zeile]. */
@@ -908,12 +1432,18 @@ export function mat4Apply(m, p, w = 1) {
   return [m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12] * w, m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13] * w, m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14] * w];
 }
 
-/** Matrix jedes Bones (Modellkoordinaten), Eltern zuerst; pose aus cosmeticPose() oder Ruhelage. */
+/**
+ * Matrix jedes Bones (Modellkoordinaten), Eltern zuerst; pose aus cosmeticPose() oder Ruhelage. Enthält schon
+ * model.scale (wie launcher/src/main/core/cosmetics.ts): Ergebnis = S(scale) · Matrix des Bones, jede Kette beginnt mit
+ * S statt der Einheitsmatrix – das ganze Modell wird um den Anker skaliert. Beim Begleiter kommt companion.scale dazu.
+ */
 export function cosmeticBoneMatrices(model, pose) {
   const matrices = new Map();
+  const s = model.scale ?? 1;
+  const root = [s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, 0, 0, 0, 1];
   for (const bone of model.bones) {
     const p = pose?.get(bone.name) ?? { rotation: bone.rotation, offset: [0, 0, 0] };
-    const parent = bone.parent ? (matrices.get(bone.parent) ?? identity()) : identity();
+    const parent = bone.parent ? (matrices.get(bone.parent) ?? root) : root;
     let m = mat4Multiply(parent, translation(bone.pivot[0] + p.offset[0], bone.pivot[1] + p.offset[1], bone.pivot[2] + p.offset[2]));
     m = mat4Multiply(m, rotationMatrix(2, p.rotation[2]));
     m = mat4Multiply(m, rotationMatrix(1, p.rotation[1]));
@@ -928,6 +1458,468 @@ export function cosmeticBoneMatrices(model, pose) {
 export function cosmeticLoopSeconds(animations) {
   const speeds = animations.map((a) => a.speed).filter((s) => s > 0);
   return speeds.length ? 1 / Math.min(...speeds) : 0;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Format 2: Mesh, Knochen, Keyframes (wie launcher/src/renderer/cosmetic-mesh.ts)
+//
+// Body-Modellraum in Pixeln: Ursprung Hals-Pivot, +X links, +Y unten, +Z hinten (die Szene hat +Y oben, +Z vorn:
+// (x, −y, −z)). Begleiter: Ecken, pivot und tail zählen relativ zu attach.origin. Zwischen Keys slerp bzw. linear;
+// nach dem letzten Key: loop → zurück auf Key 0 interpolieren (Frame frames = Frame 0, wie Blender), sonst halten.
+// Frame = Sekunden × fps, loop → modulo frames, sonst am letzten Frame halten. W_b = W_eltern · T(move) · T(pivot) · R · S · T(−pivot); v' = W_knochen · v (weiche Haut:
+// Σ wᵢ · W_jointᵢ · v). Leuchten: Bild ⌊Ticks / frametimeTicks⌋ mod frames, Stärke min + (max − min)(½ + ½ sin(2πt/period)).
+// ---------------------------------------------------------------------------------------------------------
+
+/** Lage eines Knochens in einer Pose: qx, qy, qz, qw, mx, my, mz, s */
+const POSE_STRIDE = 8;
+
+function meshBytes(base64) {
+  const bytes = base64 ? decodeBase64(base64) : null;
+  if (!bytes) throw new CosmeticError('Das Mesh ließ sich nicht lesen.', 'manifest');
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+
+function meshChannel(track, kind) {
+  if (!track) return null;
+  const keyView = meshBytes(track.keys);
+  const count = keyView.byteLength / 2;
+  const keys = new Uint16Array(count);
+  for (let k = 0; k < count; k++) keys[k] = keyView.getUint16(k * 2, true);
+  const view = meshBytes(track.values);
+  const stride = kind === 'rot' ? 4 : kind === 'move' ? 3 : 1;
+  const values = new Float32Array(count * stride);
+  for (let k = 0; k < count * stride; k++) {
+    if (kind === 'rot') values[k] = view.getInt16(k * 2, true) / 32767;
+    else if (kind === 'move') values[k] = view.getInt16(k * 2, true) / 32;
+    else values[k] = view.getUint16(k * 2, true) / 1000;
+  }
+  if (kind === 'rot') {
+    for (let k = 0; k < count; k++) {
+      const o = k * 4;
+      const length = Math.hypot(values[o], values[o + 1], values[o + 2], values[o + 3]) || 1;
+      for (let c = 0; c < 4; c++) values[o + c] /= length;
+    }
+  }
+  return { keys, values, stride };
+}
+
+const meshRigs = new WeakMap();
+
+/**
+ * Geprüftes Format-2-Manifest → Zahlenfelder (einmal je Manifest): { vertexCount, triangleCount, positions (Pixel, Body-
+ * Raum), normals, uvs (v = 0 oben), bone, joints, weights, triangles, parents, pivots, clips (Reihenfolge des
+ * Manifests), byName, states, blendSeconds, emissive, offset (attach.origin), mirrored (attach.side right) }.
+ */
+export function meshRig(manifest) {
+  if (meshRigs.has(manifest)) return meshRigs.get(manifest);
+  const { mesh } = manifest;
+  const n = mesh.vertexCount;
+  const boneCount = manifest.bones.length;
+  const positionsView = meshBytes(mesh.positions);
+  const positions = new Float32Array(n * 3);
+  for (let i = 0; i < n * 3; i++) positions[i] = positionsView.getInt16(i * 2, true) / 32;
+  const normalView = meshBytes(mesh.normals);
+  const normals = new Float32Array(n * 3);
+  for (let i = 0; i < n * 3; i++) normals[i] = normalView.getInt8(i) / 127;
+  const uvView = meshBytes(mesh.uvs);
+  const uvs = new Float32Array(n * 2);
+  for (let i = 0; i < n * 2; i++) uvs[i] = uvView.getUint16(i * 2, true) / 65535;
+  const boneView = meshBytes(mesh.bones);
+  const bone = new Uint8Array(n);
+  for (let i = 0; i < n; i++) bone[i] = Math.min(boneCount - 1, boneView.getUint8(i));
+  const triangleView = meshBytes(mesh.triangles);
+  const triangles = new Uint16Array(mesh.triangleCount * 3);
+  for (let i = 0; i < triangles.length; i++) {
+    const v = triangleView.getUint16(i * 2, true);
+    triangles[i] = v < n ? v : 0;
+  }
+  let joints = null;
+  let weights = null;
+  if (mesh.joints && mesh.weights) {
+    const jointView = meshBytes(mesh.joints);
+    const weightView = meshBytes(mesh.weights);
+    joints = new Uint8Array(n * 4);
+    weights = new Float32Array(n * 4);
+    for (let i = 0; i < n * 4; i++) {
+      joints[i] = Math.min(boneCount - 1, jointView.getUint8(i));
+      weights[i] = weightView.getUint8(i) / 255;
+    }
+  }
+  const parents = new Int16Array(boneCount);
+  const pivots = new Float32Array(boneCount * 3);
+  manifest.bones.forEach((b, i) => {
+    parents[i] = b.parent >= 0 && b.parent < i ? b.parent : -1;
+    pivots.set(b.pivot, i * 3);
+  });
+  const clips = Object.entries(manifest.animations).map(([name, a]) => {
+    const clip = { name, fps: a.fps, frames: a.frames, loop: a.loop, rot: new Array(boneCount).fill(null), move: new Array(boneCount).fill(null), scale: new Array(boneCount).fill(null) };
+    for (const track of a.tracks) {
+      if (track.bone < 0 || track.bone >= boneCount) continue;
+      clip.rot[track.bone] = meshChannel(track.rot, 'rot');
+      clip.move[track.bone] = meshChannel(track.move, 'move');
+      clip.scale[track.bone] = meshChannel(track.scale, 'scale');
+    }
+    return clip;
+  });
+  const { blendSeconds = 0, ...states } = manifest.states ?? {};
+  const origin = manifest.slot === 'companion' ? manifest.attach?.origin : null;
+  const rig = {
+    vertexCount: n,
+    triangleCount: mesh.triangleCount,
+    positions,
+    normals,
+    uvs,
+    bone,
+    joints,
+    weights,
+    triangles,
+    parents,
+    pivots,
+    clips,
+    byName: new Map(clips.map((clip) => [clip.name, clip])),
+    states,
+    blendSeconds,
+    emissive: manifest.emissive ?? null,
+    offset: origin ? [origin[0], origin[1], origin[2]] : [0, 0, 0],
+    mirrored: manifest.attach?.side === 'right',
+  };
+  meshRigs.set(manifest, rig);
+  return rig;
+}
+
+/** Frame-Position (mit Bruchteil) einer Animation nach `seconds` Sekunden. */
+export function meshClipFrame(clip, seconds) {
+  const f = Math.max(0, seconds) * clip.fps;
+  if (clip.loop) return clip.frames > 0 ? f % clip.frames : 0;
+  return Math.min(f, Math.max(0, clip.frames - 1));
+}
+
+function slerpInto(a, ao, b, bo, t, out, o) {
+  let bx = b[bo];
+  let by = b[bo + 1];
+  let bz = b[bo + 2];
+  let bw = b[bo + 3];
+  const ax = a[ao];
+  const ay = a[ao + 1];
+  const az = a[ao + 2];
+  const aw = a[ao + 3];
+  let cos = ax * bx + ay * by + az * bz + aw * bw;
+  if (cos < 0) {
+    cos = -cos;
+    bx = -bx;
+    by = -by;
+    bz = -bz;
+    bw = -bw;
+  }
+  let ka = 1 - t;
+  let kb = t;
+  if (cos <= 0.9995) {
+    const angle = Math.acos(Math.min(1, cos));
+    const sin = Math.sin(angle);
+    ka = Math.sin((1 - t) * angle) / sin;
+    kb = Math.sin(t * angle) / sin;
+  }
+  const x = ax * ka + bx * kb;
+  const y = ay * ka + by * kb;
+  const z = az * ka + bz * kb;
+  const w = aw * ka + bw * kb;
+  const length = Math.hypot(x, y, z, w) || 1;
+  out[o] = x / length;
+  out[o + 1] = y / length;
+  out[o + 2] = z / length;
+  out[o + 3] = w / length;
+}
+
+/**
+ * Wert einer Spur bei Frame f nach out[o…] (Drehung: slerp, sonst linear). loopFrames (Schleifen: frames der Animation):
+ * nach dem letzten Key zurück auf Key 0 bei Frame loopFrames; ohne (null) den letzten Wert halten.
+ */
+export function sampleMeshChannel(ch, f, out, o, rotation, loopFrames = null) {
+  const { keys, values, stride } = ch;
+  const last = keys.length - 1;
+  if (loopFrames !== null && f > keys[last] && loopFrames > keys[last]) {
+    const t = Math.min(1, (f - keys[last]) / (loopFrames - keys[last]));
+    if (rotation) slerpInto(values, last * stride, values, 0, t, out, o);
+    else for (let c = 0; c < stride; c++) out[o + c] = values[last * stride + c] + (values[c] - values[last * stride + c]) * t;
+    return;
+  }
+  let i;
+  if (f <= keys[0]) i = -1;
+  else if (f >= keys[last]) i = last;
+  else {
+    let lo = 0;
+    let hi = last;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (keys[mid] <= f) lo = mid;
+      else hi = mid;
+    }
+    i = lo;
+  }
+  if (i < 0 || i >= last) {
+    const k = i < 0 ? 0 : last;
+    for (let c = 0; c < stride; c++) out[o + c] = values[k * stride + c];
+    return;
+  }
+  const t = (f - keys[i]) / (keys[i + 1] - keys[i]);
+  if (rotation) slerpInto(values, i * stride, values, (i + 1) * stride, t, out, o);
+  else for (let c = 0; c < stride; c++) out[o + c] = values[i * stride + c] + (values[(i + 1) * stride + c] - values[i * stride + c]) * t;
+}
+
+function restMeshPose(bones) {
+  const pose = new Float32Array(bones * POSE_STRIDE);
+  for (let b = 0; b < bones; b++) {
+    pose[b * POSE_STRIDE + 3] = 1;
+    pose[b * POSE_STRIDE + 7] = 1;
+  }
+  return pose;
+}
+
+/** Lage aller Knochen einer Animation nach `seconds` Sekunden (ohne Spur: Ruhelage). */
+export function sampleMeshPose(rig, clip, seconds, out = restMeshPose(rig.parents.length)) {
+  const f = meshClipFrame(clip, seconds);
+  const wrap = clip.loop ? clip.frames : null;
+  for (let b = 0; b < rig.parents.length; b++) {
+    const o = b * POSE_STRIDE;
+    if (clip.rot[b]) sampleMeshChannel(clip.rot[b], f, out, o, true, wrap);
+    else out.set([0, 0, 0, 1], o);
+    if (clip.move[b]) sampleMeshChannel(clip.move[b], f, out, o + 4, false, wrap);
+    else out.set([0, 0, 0], o + 4);
+    if (clip.scale[b]) sampleMeshChannel(clip.scale[b], f, out, o + 7, false, wrap);
+    else out[o + 7] = 1;
+  }
+  return out;
+}
+
+/** Überblenden from → to (w 0 … 1). */
+export function blendMeshPose(from, to, w, out) {
+  for (let o = 0; o < out.length; o += POSE_STRIDE) {
+    slerpInto(from, o, to, o, w, out, o);
+    for (let c = 4; c < POSE_STRIDE; c++) out[o + c] = from[o + c] + (to[o + c] - from[o + c]) * w;
+  }
+  return out;
+}
+
+/** Matrizen aller Knochen (je 16 Werte, spaltenweise) im Body-Modellraum. */
+export function meshBoneMatrices(rig, pose, out = new Float32Array(rig.parents.length * 16)) {
+  const local = new Float32Array(16);
+  for (let b = 0; b < rig.parents.length; b++) {
+    const p = b * POSE_STRIDE;
+    const x = pose[p];
+    const y = pose[p + 1];
+    const z = pose[p + 2];
+    const w = pose[p + 3];
+    const s = pose[p + 7];
+    const px = rig.pivots[b * 3];
+    const py = rig.pivots[b * 3 + 1];
+    const pz = rig.pivots[b * 3 + 2];
+    local[0] = (1 - 2 * (y * y + z * z)) * s;
+    local[1] = 2 * (x * y + z * w) * s;
+    local[2] = 2 * (x * z - y * w) * s;
+    local[3] = 0;
+    local[4] = 2 * (x * y - z * w) * s;
+    local[5] = (1 - 2 * (x * x + z * z)) * s;
+    local[6] = 2 * (y * z + x * w) * s;
+    local[7] = 0;
+    local[8] = 2 * (x * z + y * w) * s;
+    local[9] = 2 * (y * z - x * w) * s;
+    local[10] = (1 - 2 * (x * x + y * y)) * s;
+    local[11] = 0;
+    local[12] = px + pose[p + 4] - (local[0] * px + local[4] * py + local[8] * pz);
+    local[13] = py + pose[p + 5] - (local[1] * px + local[5] * py + local[9] * pz);
+    local[14] = pz + pose[p + 6] - (local[2] * px + local[6] * py + local[10] * pz);
+    local[15] = 1;
+    const parent = rig.parents[b];
+    const o = b * 16;
+    if (parent < 0) out.set(local, o);
+    else {
+      const q = parent * 16;
+      for (let c = 0; c < 4; c++) {
+        for (let r = 0; r < 4; r++) out[o + c * 4 + r] = out[q + r] * local[c * 4] + out[q + 4 + r] * local[c * 4 + 1] + out[q + 8 + r] * local[c * 4 + 2] + out[q + 12 + r] * local[c * 4 + 3];
+      }
+    }
+  }
+  return out;
+}
+
+/** Ecken und Normalen mit den Knochen-Matrizen bewegen (starr; weiche Haut: gewichtete Summe). */
+export function skinMeshRig(rig, matrices, positions, normals) {
+  const src = rig.positions;
+  const nrm = rig.normals;
+  const { joints, weights } = rig;
+  const m3 = new Float32Array(12);
+  for (let i = 0; i < rig.vertexCount; i++) {
+    if (joints && weights) {
+      m3.fill(0);
+      for (let k = 0; k < 4; k++) {
+        const w = weights[i * 4 + k];
+        if (w <= 0) continue;
+        const j = joints[i * 4 + k] * 16;
+        for (let c = 0; c < 4; c++) for (let r = 0; r < 3; r++) m3[c * 3 + r] += w * matrices[j + c * 4 + r];
+      }
+    } else {
+      const j = rig.bone[i] * 16;
+      for (let c = 0; c < 4; c++) for (let r = 0; r < 3; r++) m3[c * 3 + r] = matrices[j + c * 4 + r];
+    }
+    const o = i * 3;
+    const x = src[o];
+    const y = src[o + 1];
+    const z = src[o + 2];
+    positions[o] = m3[0] * x + m3[3] * y + m3[6] * z + m3[9];
+    positions[o + 1] = m3[1] * x + m3[4] * y + m3[7] * z + m3[10];
+    positions[o + 2] = m3[2] * x + m3[5] * y + m3[8] * z + m3[11];
+    const nx = nrm[o];
+    const ny = nrm[o + 1];
+    const nz = nrm[o + 2];
+    const ax = m3[0] * nx + m3[3] * ny + m3[6] * nz;
+    const ay = m3[1] * nx + m3[4] * ny + m3[7] * nz;
+    const az = m3[2] * nx + m3[5] * ny + m3[8] * nz;
+    const length = Math.hypot(ax, ay, az) || 1;
+    normals[o] = ax / length;
+    normals[o + 1] = ay / length;
+    normals[o + 2] = az / length;
+  }
+}
+
+/** Bild des Leucht-Streifens nach `seconds` Sekunden. */
+export function meshGlowFrame(emissive, seconds) {
+  if (!emissive || emissive.frames <= 1) return 0;
+  return Math.floor((Math.max(0, seconds) * 20) / emissive.frametimeTicks) % emissive.frames;
+}
+
+/** Stärke des Leuchtens (Puls) nach `seconds` Sekunden; ohne Puls 1. */
+export function meshGlowIntensity(emissive, seconds) {
+  const pulse = emissive?.pulse;
+  if (!pulse) return 1;
+  return pulse.min + (pulse.max - pulse.min) * (0.5 + 0.5 * Math.sin((2 * Math.PI * seconds) / pulse.period));
+}
+
+/** Animation eines Zustands (fehlt er: Idle). */
+export function meshStateClip(rig, state) {
+  return rig.byName.get(rig.states[state] ?? '') ?? rig.byName.get(rig.states.idle ?? '') ?? rig.clips[0] ?? null;
+}
+
+/**
+ * Animationen eines Format-2-Cosmetics für die Auswahl: [{ name, loop, seconds }] in der Reihenfolge des Manifests,
+ * dazu idle und emote (Namen der Zustände). Format 1: null.
+ */
+export function cosmeticAnimations(manifest) {
+  if (manifest?.format !== 2) return null;
+  const rig = meshRig(manifest);
+  return {
+    clips: rig.clips.map((clip) => ({ name: clip.name, loop: clip.loop, seconds: (clip.loop ? clip.frames : Math.max(1, clip.frames - 1)) / clip.fps })),
+    idle: meshStateClip(rig, 'idle')?.name ?? null,
+    emote: rig.byName.has(rig.states.emote ?? '') ? rig.states.emote : null,
+  };
+}
+
+/**
+ * Knöpfe für die Auswahl der Animation (Format 2, Klasse anim-chip): info aus cosmeticAnimations(), active = gewählter
+ * Name, onPick(name). Einmalige Animationen tragen „1×“ (laufen einmal und kehren dann zurück).
+ */
+export function animationButtons(info, active, onPick) {
+  const seconds = (s) => s.toFixed(1).replace('.', ',');
+  return info.clips.map((clip) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'anim-chip';
+    button.dataset.animation = clip.name;
+    button.setAttribute('aria-pressed', String(clip.name === active));
+    button.title = clip.loop ? `${clip.name} abspielen (${seconds(clip.seconds)} s, Schleife)` : `${clip.name} einmal abspielen (${seconds(clip.seconds)} s), danach zurück`;
+    button.append(clip.name);
+    if (!clip.loop) {
+      const once = document.createElement('span');
+      once.className = 'anim-once';
+      once.textContent = '1×';
+      button.append(once);
+    }
+    button.addEventListener('click', () => onPick(clip.name));
+    return button;
+  });
+}
+
+/**
+ * Spielt Animationen wie im Spiel: Wechsel mit Überblenden (blendSeconds), einmalige Animationen laufen zu Ende und
+ * kehren zur gewählten Schleife zurück (start_flying → danach der Elytra-Zustand, falls es ihn gibt).
+ */
+export class MeshAnimator {
+  constructor(rig, initial = null) {
+    this.rig = rig;
+    const bones = rig.parents.length;
+    this.target = restMeshPose(bones);
+    this.pose = restMeshPose(bones);
+    this.base = (initial ? rig.byName.get(initial) : null) ?? meshStateClip(rig, 'idle');
+    this.clip = this.base;
+    this.started = 0;
+    this.blendStart = -1;
+    this.blendFrom = null;
+    this.update(0);
+  }
+
+  get current() {
+    return this.clip?.name ?? null;
+  }
+
+  get chosen() {
+    return this.base?.name ?? null;
+  }
+
+  /** Animation wechseln (now in Sekunden). restart: von vorn; immediate: ohne Überblenden. */
+  play(name, now, { restart = false, immediate = false } = {}) {
+    const next = this.rig.byName.get(name);
+    if (!next) return;
+    if (next.loop) this.base = next;
+    if (next === this.clip && !restart) return;
+    this.blendFrom = immediate ? null : new Float32Array(this.pose);
+    this.blendStart = this.rig.blendSeconds > 0 && this.blendFrom ? now : -1;
+    this.clip = next;
+    this.started = now;
+  }
+
+  update(now) {
+    const clip = this.clip;
+    if (!clip) return this.pose;
+    if (!clip.loop && (now - this.started) * clip.fps >= clip.frames - 1) {
+      const after = this.rig.states.start_flying === clip.name ? (this.rig.byName.get(this.rig.states.elytra ?? '') ?? this.base) : this.base;
+      if (after && after !== clip) {
+        if (this.blendStart < 0) this.pose.set(sampleMeshPose(this.rig, clip, now - this.started, this.target));
+        this.play(after.name, now);
+      }
+    }
+    sampleMeshPose(this.rig, this.clip, now - this.started, this.target);
+    if (this.blendStart >= 0 && this.blendFrom) {
+      const w = (now - this.blendStart) / this.rig.blendSeconds;
+      if (w >= 1) {
+        this.blendStart = -1;
+        this.blendFrom = null;
+        this.pose.set(this.target);
+      } else blendMeshPose(this.blendFrom, this.target, Math.max(0, w), this.pose);
+    } else this.pose.set(this.target);
+    return this.pose;
+  }
+}
+
+/** Bewegte Ecken einer Pose (Body-Raum, Pixel; Begleiter schon um attach.origin verschoben). */
+function skinnedMesh(rig, pose) {
+  const matrices = meshBoneMatrices(rig, pose);
+  const positions = new Float32Array(rig.vertexCount * 3);
+  const normals = new Float32Array(rig.vertexCount * 3);
+  skinMeshRig(rig, matrices, positions, normals);
+  const [ox, oy, oz] = rig.offset;
+  if (ox || oy || oz) {
+    for (let i = 0; i < positions.length; i += 3) {
+      positions[i] += ox;
+      positions[i + 1] += oy;
+      positions[i + 2] += oz;
+    }
+  }
+  if (rig.mirrored) {
+    for (let i = 0; i < positions.length; i += 3) {
+      positions[i] = -positions[i];
+      normals[i] = -normals[i];
+    }
+  }
+  return { positions, normals };
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -999,13 +1991,152 @@ function auraFramesCached(item) {
 }
 
 /** Wie Slots am besten zu sehen sind (Drehung um y in Rad; 0 = von vorn). */
-const PREVIEW_YAW = { head: -0.55, back: Math.PI - 0.6, companion: -0.6 };
+const PREVIEW_YAW = { head: -0.55, back: Math.PI - 0.6, companion: -0.6, aura: -0.45 };
+/** Format 2: Neigung von oben je Slot (Auren steiler, damit der Boden-Kreis zu sehen ist). */
+const MESH_PITCH = { aura: 0.62 };
+
+const texelCache = new WeakMap();
+/** Farbe eines Texels (für Dreiecke ohne UV-Fläche): [r, g, b, a] 0–255. */
+function texel(image, u, v) {
+  let data = texelCache.get(image);
+  if (!data) {
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0);
+    data = context.getImageData(0, 0, canvas.width, canvas.height);
+    texelCache.set(image, data);
+  }
+  const x = Math.min(data.width - 1, Math.max(0, Math.floor(u * data.width)));
+  const y = Math.min(data.height - 1, Math.max(0, Math.floor(v * data.height)));
+  const i = (y * data.width + x) * 4;
+  return [data.data[i], data.data[i + 1], data.data[i + 2], data.data[i + 3]];
+}
+
+/**
+ * 2D-Vorschau eines Format-2-Cosmetics: Pose der Animation (Standard: Zustand idle) zur Zeit t, Dreiecke von hinten nach
+ * vorn (beidseitig), Textur je Dreieck affin abgebildet, drei Helligkeiten nach der Normalen wie Format 1, Leuchten
+ * aufaddiert (Bild des Streifens und Puls zur Zeit t).
+ */
+function drawMeshPreview(context, W, H, item, { t, yaw, pitch, padding, animation }) {
+  const { manifest } = item;
+  const rig = meshRig(manifest);
+  const clip = (animation && rig.byName.get(animation)) || meshStateClip(rig, 'idle');
+  const pose = clip ? sampleMeshPose(rig, clip, t) : restMeshPose(rig.parents.length);
+  const { positions, normals } = skinnedMesh(rig, pose);
+  const view = yaw ?? PREVIEW_YAW[manifest.slot] ?? -0.55;
+  const tilt = pitch ?? MESH_PITCH[manifest.slot] ?? 0.42;
+  const cy = Math.cos(view);
+  const sy = Math.sin(view);
+  const cp = Math.cos(tilt);
+  const sp = Math.sin(tilt);
+  const n = rig.vertexCount;
+  // Body-Raum (x, y unten, z hinten) → Szene (x, −y, −z) → um y drehen, von oben neigen; z zum Betrachter
+  const projected = new Float32Array(n * 3);
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (let i = 0; i < n; i++) {
+    const x = positions[i * 3];
+    const y = -positions[i * 3 + 1];
+    const z = -positions[i * 3 + 2];
+    const px = x * cy + z * sy;
+    const z0 = -x * sy + z * cy;
+    const py = y * cp - z0 * sp;
+    projected[i * 3] = px;
+    projected[i * 3 + 1] = py;
+    projected[i * 3 + 2] = y * sp + z0 * cp;
+    minX = Math.min(minX, px);
+    maxX = Math.max(maxX, px);
+    minY = Math.min(minY, py);
+    maxY = Math.max(maxY, py);
+  }
+  if (!Number.isFinite(minX)) return false;
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
+  const scale = Math.min((W * (1 - padding * 2)) / spanX, (H * (1 - padding * 2)) / spanY);
+  const offX = W / 2 - ((minX + maxX) / 2) * scale;
+  const offY = H / 2 + ((minY + maxY) / 2) * scale;
+  const order = [];
+  for (let k = 0; k < rig.triangleCount; k++) {
+    const a = rig.triangles[k * 3];
+    const b = rig.triangles[k * 3 + 1];
+    const c = rig.triangles[k * 3 + 2];
+    const depth = projected[a * 3 + 2] + projected[b * 3 + 2] + projected[c * 3 + 2];
+    // Helligkeit nach der (flachen) Normalen in der Szene: oben hell, unten dunkel, Seiten dazwischen
+    const up = -(normals[a * 3 + 1] + normals[b * 3 + 1] + normals[c * 3 + 1]) / 3;
+    order.push({ a, b, c, depth, light: up > 0.55 ? 0 : up < -0.55 ? 2 : 1 });
+  }
+  order.sort((p, q) => p.depth - q.depth);
+  const shades = shadedTextures(item.texture);
+  const tw = item.texture.naturalWidth;
+  const th = item.texture.naturalHeight;
+  const glow = item.glow;
+  const frames = Math.max(1, manifest.emissive?.frames ?? 1);
+  const glowFrame = meshGlowFrame(manifest.emissive, t);
+  const glowAlpha = Math.min(1, meshGlowIntensity(manifest.emissive, t));
+  const screen = (i) => [offX + projected[i * 3] * scale, offY - projected[i * 3 + 1] * scale];
+  const FACTORS = [1, 0.82, 0.64];
+  for (const tri of order) {
+    const p = [screen(tri.a), screen(tri.b), screen(tri.c)];
+    const area = Math.abs((p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[2][0] - p[0][0]) * (p[1][1] - p[0][1]));
+    if (area < 0.01) continue;
+    const uv = [tri.a, tri.b, tri.c].map((i) => [rig.uvs[i * 2] * tw, rig.uvs[i * 2 + 1] * th]);
+    // gegen Haarrisse: Dreieck um ~0,6 Pixel vom Schwerpunkt weg vergrößern
+    const cx = (p[0][0] + p[1][0] + p[2][0]) / 3;
+    const cyy = (p[0][1] + p[1][1] + p[2][1]) / 3;
+    const grown = p.map(([x, y]) => {
+      const d = Math.hypot(x - cx, y - cyy) || 1;
+      return [x + ((x - cx) / d) * 0.6, y + ((y - cyy) / d) * 0.6];
+    });
+    context.save();
+    context.beginPath();
+    context.moveTo(grown[0][0], grown[0][1]);
+    context.lineTo(grown[1][0], grown[1][1]);
+    context.lineTo(grown[2][0], grown[2][1]);
+    context.closePath();
+    const det = (uv[1][0] - uv[0][0]) * (uv[2][1] - uv[0][1]) - (uv[2][0] - uv[0][0]) * (uv[1][1] - uv[0][1]);
+    if (Math.abs(det) < 1e-6) {
+      // keine UV-Fläche (z. B. Kante eines Pixel-Sprites): einfarbig mit dem Texel in der Mitte
+      const [r, g, b, alpha] = texel(item.texture, (uv[0][0] + uv[1][0] + uv[2][0]) / 3 / tw, (uv[0][1] + uv[1][1] + uv[2][1]) / 3 / th);
+      if (alpha >= 26) {
+        const f = FACTORS[tri.light];
+        context.fillStyle = `rgb(${Math.round(r * f)}, ${Math.round(g * f)}, ${Math.round(b * f)})`;
+        context.fill();
+      }
+      context.restore();
+      continue;
+    }
+    context.clip();
+    const solve = (k) => [
+      ((p[1][k] - p[0][k]) * (uv[2][1] - uv[0][1]) - (p[2][k] - p[0][k]) * (uv[1][1] - uv[0][1])) / det,
+      ((p[2][k] - p[0][k]) * (uv[1][0] - uv[0][0]) - (p[1][k] - p[0][k]) * (uv[2][0] - uv[0][0])) / det,
+    ];
+    const [a, c] = solve(0);
+    const [b, d] = solve(1);
+    context.setTransform(a, b, c, d, p[0][0] - a * uv[0][0] - c * uv[0][1], p[0][1] - b * uv[0][0] - d * uv[0][1]);
+    context.drawImage(shades[tri.light], 0, 0);
+    if (glow) {
+      context.globalCompositeOperation = 'lighter';
+      context.globalAlpha = glowAlpha;
+      context.drawImage(glow, 0, glowFrame * (glow.naturalHeight / frames), glow.naturalWidth, glow.naturalHeight / frames, 0, 0, tw, th);
+    }
+    context.restore();
+  }
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.globalCompositeOperation = 'source-over';
+  context.globalAlpha = 1;
+  return true;
+}
 
 /**
  * Zeichnet eine 2D-Vorschau auf canvas (Größe aus canvas.width/height). prepared: aus prepareCosmetic() oder
- * prepareBuiltinCape(). options: { t (Sekunden, Animationen und Cape-Bild), yaw, pitch, padding (0–0.4) }.
+ * prepareBuiltinCape(). options: { t (Sekunden, Animationen und Cape-Bild), yaw, pitch, padding (0–0.4), animation
+ * (Format 2: Name der Animation; Standard: Zustand idle) }.
  */
-export function drawCosmeticPreview(canvas, item, { t = 0, yaw, pitch = 0.42, padding = 0.12 } = {}) {
+export function drawCosmeticPreview(canvas, item, { t = 0, yaw, pitch, padding = 0.12, animation = null } = {}) {
   const context = canvas.getContext('2d');
   const W = canvas.width;
   const H = canvas.height;
@@ -1035,6 +2166,8 @@ export function drawCosmeticPreview(canvas, item, { t = 0, yaw, pitch = 0.42, pa
     return true;
   }
   const { manifest } = item;
+  if (manifest.format === 2) return drawMeshPreview(context, W, H, item, { t, yaw, pitch, padding, animation });
+  pitch ??= 0.42;
   if (manifest.slot === 'aura') {
     const frames = auraFramesCached(item);
     const count = 7;
@@ -1049,6 +2182,8 @@ export function drawCosmeticPreview(canvas, item, { t = 0, yaw, pitch = 0.42, pa
     return true;
   }
   const { model, animations } = manifest;
+  // UV zählt in Texeln von textureSize; das Bild kann die 2- oder 4-fache Auflösung haben
+  const res = item.texture.naturalWidth / model.textureSize[0];
   const matrices = cosmeticBoneMatrices(model, cosmeticPose(model, animations, t));
   const view = yaw ?? PREVIEW_YAW[manifest.slot] ?? -0.55;
   const cy = Math.cos(view);
@@ -1107,7 +2242,7 @@ export function drawCosmeticPreview(canvas, item, { t = 0, yaw, pitch = 0.42, pa
     const sh = v1 - v0;
     const draw = (source) => {
       context.setTransform(p1[0] - p0[0], p1[1] - p0[1], p3[0] - p0[0], p3[1] - p0[1], p0[0], p0[1]);
-      context.drawImage(source, u0, v0, sw, sh, -grow / sw, -grow / sh, 1 + (2 * grow) / sw, 1 + (2 * grow) / sh);
+      context.drawImage(source, u0 * res, v0 * res, sw * res, sh * res, -grow / sw, -grow / sh, 1 + (2 * grow) / sw, 1 + (2 * grow) / sh);
     };
     context.globalCompositeOperation = 'source-over';
     draw(shades[face.light]);
@@ -1215,9 +2350,16 @@ function random(seed) {
 
 /**
  * Cosmetics auf einer skinview3d-Figur zeigen. Liefert { supported, wear(slot, item), worn(slot), setPlaying(bool),
- * setElytra(bool), update(dt), dispose() }. item: aus prepareCosmetic() (alle Slots) oder prepareBuiltinCape()
- * (cape); null legt ab. Die Animation läuft über viewer.animation (FunctionAnimation, mit Ruhe-Animation der Arme,
- * wenn idle: true). Ohne passende three.js-Klassen ist supported false – dann bleibt nur die 2D-Vorschau.
+ * setElytra(bool), update(dt), animations(slot), setAnimation(slot, name), emote(slot, on), dispose() }. item: aus
+ * prepareCosmetic() (alle Slots) oder prepareBuiltinCape() (cape); null legt ab. Die Animation läuft über
+ * viewer.animation (FunctionAnimation, mit Ruhe-Animation der Arme, wenn idle: true). Ohne passende three.js-Klassen ist
+ * supported false – dann bleibt nur die 2D-Vorschau.
+ *
+ * Format 2 (manifest.format 2): ein Mesh je Cosmetic, die Ecken bewegt die CPU je Bild mit den Knochen-Matrizen. Der
+ * Body-Raum hängt am Rumpf auf Halshöhe (head, back, companion) bzw. am Spielerobjekt auf Halshöhe ohne Rumpf (aura),
+ * gedreht um 180° um X. Leuchten: zweites Mesh, additiv ohne Licht, Streifen-Bild über die Textur-Verschiebung, Puls über
+ * emissiveIntensity. animations(slot) → { clips, chosen, playing, emote } oder null; setAnimation wählt (null = idle),
+ * emote(slot, true) zeigt solange den Zustand emote.
  */
 export function createCosmeticLayer(viewer, { skinview3d = globalThis.skinview3d, idle = true, playing = true } = {}) {
   const three = threeFrom(viewer, skinview3d);
@@ -1226,6 +2368,9 @@ export function createCosmeticLayer(viewer, { skinview3d = globalThis.skinview3d
   const state = { playing, time: 0, elytra: false, capeFrame: -1, capeTime: 0 };
   const worn = { head: null, back: null, aura: null, companion: null, cape: null };
   const nodes = { head: null, back: null, aura: null, companion: null };
+  /** Format 2: gewählte Animation je Manifest, Emote je Slot */
+  const chosenAnimation = new WeakMap();
+  const emoting = { head: false, back: false, aura: false, companion: false };
   const capeCanvas = document.createElement('canvas');
   capeCanvas.width = CAPE_W;
   capeCanvas.height = CAPE_H;
@@ -1238,15 +2383,20 @@ export function createCosmeticLayer(viewer, { skinview3d = globalThis.skinview3d
         back: Object.assign(new three.Group(), { name: 'heldix-cosmetic-back' }),
         companion: Object.assign(new three.Group(), { name: 'heldix-cosmetic-companion' }),
         aura: Object.assign(new three.Group(), { name: 'heldix-cosmetic-aura' }),
+        stand: Object.assign(new three.Group(), { name: 'heldix-cosmetic-stand' }),
       }
     : null;
   if (anchors) {
     anchors.head.position.set(0, 8, 0); // Mitte der Kopf-Oberseite
     player.skin.head.add(anchors.head);
-    anchors.back.position.set(0, 6, 0); // Rücken auf Schulterhöhe (Rumpf-Mitte in z, Rückenfläche bei z = -2)
+    // Rücken auf Schulterhöhe (Rumpf-Mitte in z, Rückenfläche bei z = -2) = Hals-Pivot des Rumpfs (Ursprung Format 2)
+    anchors.back.position.set(0, 6, 0);
     player.skin.body.add(anchors.back);
     player.add(anchors.companion);
     player.add(anchors.aura);
+    // Format-2-Auren: Halshöhe am Spielerobjekt (Füße 24 darunter), ohne Rumpf
+    anchors.stand.position.set(0, 8, 0);
+    player.add(anchors.stand);
   }
 
   function disposeNode(node) {
@@ -1289,7 +2439,8 @@ export function createCosmeticLayer(viewer, { skinview3d = globalThis.skinview3d
     }
     if (manifest.slot === 'companion') {
       const { offset, scale } = manifest.companion;
-      // offset in Blöcken: x rechts (= -X im Modell), y hoch ab den Füßen (y = -16), z vorn
+      // offset in Blöcken: x rechts (= -X im Modell), y hoch ab den Füßen (y = -16), z vorn; companion.scale hier,
+      // model.scale steckt schon in den Bone-Matrizen (beide multiplizieren sich)
       root.position.set(-offset[0] * 16, -16 + offset[1] * 16, offset[2] * 16);
       root.scale.setScalar(scale);
     }
@@ -1306,6 +2457,97 @@ export function createCosmeticLayer(viewer, { skinview3d = globalThis.skinview3d
       group.matrix.fromArray(matrices.get(name));
       group.matrixWorldNeedsUpdate = true;
     }
+  }
+
+  /** Format 2: Mesh im Body-Raum (gedreht um 180° um X), Albedo und Leuchten mit derselben Geometrie. */
+  function buildMesh(item, slot) {
+    const { manifest } = item;
+    const rig = meshRig(manifest);
+    const root = new three.Group();
+    root.rotation.set(Math.PI, 0, 0);
+    if (rig.mirrored) root.scale.set(-1, 1, 1);
+    const inner = new three.Group();
+    inner.position.set(rig.offset[0], rig.offset[1], rig.offset[2]);
+    root.add(inner);
+    const uvs = new Float32Array(rig.vertexCount * 2);
+    for (let i = 0; i < rig.vertexCount; i++) {
+      uvs[i * 2] = rig.uvs[i * 2];
+      uvs[i * 2 + 1] = 1 - rig.uvs[i * 2 + 1];
+    }
+    const geometry = new three.BufferGeometry();
+    geometry.setAttribute('position', new three.Float32BufferAttribute(rig.positions, 3));
+    geometry.setAttribute('normal', new three.Float32BufferAttribute(rig.normals, 3));
+    geometry.setAttribute('uv', new three.Float32BufferAttribute(uvs, 2));
+    geometry.setIndex(Array.from(rig.triangles));
+    const texture = makeTexture(three, item.texture, colorSpace);
+    const glowTexture = item.glow ? makeTexture(three, item.glow, colorSpace) : null;
+    const base = new three.MeshStandardMaterial({ map: texture, side: DOUBLE_SIDE, alphaTest: 0.1 });
+    const materials = [base];
+    const mesh = new three.Mesh(geometry, base);
+    mesh.frustumCulled = false;
+    inner.add(mesh);
+    let glowMaterial = null;
+    const frames = Math.max(1, rig.emissive?.frames ?? 1);
+    if (glowTexture) {
+      glowTexture.repeat.set(1, 1 / frames);
+      glowTexture.offset.set(0, (frames - 1) / frames);
+      // nur das Leuchten: schwarz und metallisch (kein Licht, kein Glanz), Farbe aus emissiveMap, aufaddiert
+      glowMaterial = new three.MeshStandardMaterial({ color: 0x000000, metalness: 1, roughness: 1, emissive: 0xffffff, emissiveMap: glowTexture, side: DOUBLE_SIDE, transparent: true, depthWrite: false, blending: ADDITIVE_BLENDING, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4 });
+      materials.push(glowMaterial);
+      const shine = new three.Mesh(geometry, glowMaterial);
+      shine.renderOrder = 1;
+      shine.frustumCulled = false;
+      inner.add(shine);
+    }
+    (slot === 'aura' ? anchors.stand : anchors.back).add(root);
+    const node = {
+      kind: 'mesh',
+      slot,
+      item,
+      root,
+      rig,
+      animator: new MeshAnimator(rig),
+      matrices: new Float32Array(rig.parents.length * 16),
+      position: geometry.getAttribute('position'),
+      normal: geometry.getAttribute('normal'),
+      glowMaterial,
+      glowTexture,
+      frames,
+      shownFrame: -1,
+      geometries: [geometry],
+      materials,
+      textures: [texture, glowTexture].filter(Boolean),
+    };
+    applyAnimation(node, false);
+    return node;
+  }
+
+  function poseMesh(node) {
+    const pose = node.animator.update(state.time);
+    meshBoneMatrices(node.rig, pose, node.matrices);
+    skinMeshRig(node.rig, node.matrices, node.position.array, node.normal.array);
+    node.position.needsUpdate = true;
+    node.normal.needsUpdate = true;
+    if (node.glowMaterial) {
+      const frame = meshGlowFrame(node.rig.emissive, state.time);
+      if (frame !== node.shownFrame) {
+        node.shownFrame = frame;
+        // Bild 0 oben im Streifen; die Textur ist gespiegelt geladen (v = 0 unten)
+        node.glowTexture.offset.set(0, (node.frames - 1 - frame) / node.frames);
+      }
+      node.glowMaterial.emissiveIntensity = meshGlowIntensity(node.rig.emissive, state.time);
+    }
+  }
+
+  /** Gewählte Animation (bzw. Emote) eines Format-2-Knotens abspielen; im Standbild ohne Überblenden. */
+  function applyAnimation(node, restart) {
+    const { rig } = node;
+    const emote = emoting[node.slot] && rig.byName.has(rig.states.emote ?? '') ? rig.states.emote : null;
+    const chosen = chosenAnimation.get(node.item.manifest);
+    const name = emote ?? (chosen && rig.byName.has(chosen) ? chosen : meshStateClip(rig, 'idle')?.name);
+    const clip = name ? rig.byName.get(name) : null;
+    if (clip) node.animator.play(name, state.time, { restart: restart && !clip.loop, immediate: !state.playing });
+    poseMesh(node);
   }
 
   function buildAura(item) {
@@ -1464,11 +2706,13 @@ export function createCosmeticLayer(viewer, { skinview3d = globalThis.skinview3d
     const step = state.playing ? Math.min(0.1, Math.max(0, dt)) : 0;
     state.time += step;
     state.capeTime += step;
-    for (const slot of ['head', 'back', 'companion']) {
+    for (const slot of ['head', 'back', 'aura', 'companion']) {
       const node = nodes[slot];
-      if (node && step && node.item.manifest.animations.length) poseModel(node);
+      if (!node || !step) continue;
+      if (node.kind === 'mesh') poseMesh(node);
+      else if (slot !== 'aura' && node.item.manifest.animations.length) poseModel(node);
     }
-    if (nodes.aura && step) stepAura(nodes.aura, step);
+    if (nodes.aura && nodes.aura.kind !== 'mesh' && step) stepAura(nodes.aura, step);
     if (worn.cape && step) drawCape();
   }
 
@@ -1501,16 +2745,44 @@ export function createCosmeticLayer(viewer, { skinview3d = globalThis.skinview3d
       disposeNode(nodes[slot]);
       nodes[slot] = null;
       if (!item) return;
-      if (slot === 'aura') {
+      if (item.manifest?.format === 2) nodes[slot] = buildMesh(item, slot);
+      else if (slot === 'aura') {
         nodes.aura = buildAura(item);
         if (!state.playing) settleAura(nodes.aura);
         else for (let i = 0; i < 12; i++) stepAura(nodes.aura, 0.1);
       } else nodes[slot] = buildModel(item, anchors[slot]);
     },
     worn: (slot) => worn[slot] ?? null,
+    /** Format 2: { clips: [Namen], chosen, playing, emote } des getragenen Cosmetics, sonst null */
+    animations(slot) {
+      const node = nodes[slot];
+      if (node?.kind !== 'mesh') return null;
+      const { rig } = node;
+      const chosen = chosenAnimation.get(node.item.manifest);
+      return {
+        clips: rig.clips.map((clip) => clip.name),
+        chosen: chosen && rig.byName.has(chosen) ? chosen : (meshStateClip(rig, 'idle')?.name ?? null),
+        playing: node.animator.current,
+        emote: rig.byName.has(rig.states.emote ?? '') ? rig.states.emote : null,
+      };
+    },
+    /** Format 2: Animation wählen (null = Zustand idle); einmalige laufen von vorn und kehren zurück */
+    setAnimation(slot, name) {
+      const node = nodes[slot];
+      if (node?.kind !== 'mesh') return;
+      if (name) chosenAnimation.set(node.item.manifest, name);
+      else chosenAnimation.delete(node.item.manifest);
+      applyAnimation(node, true);
+    },
+    /** Format 2: solange on, den Zustand emote zeigen (z. B. beim Überfahren der Kachel) */
+    emote(slot, on) {
+      if (!(slot in emoting) || emoting[slot] === Boolean(on)) return;
+      emoting[slot] = Boolean(on);
+      if (nodes[slot]?.kind === 'mesh') applyAnimation(nodes[slot], false);
+    },
     setPlaying(value) {
       state.playing = Boolean(value);
-      if (!state.playing && nodes.aura) settleAura(nodes.aura);
+      if (!state.playing && nodes.aura && nodes.aura.kind !== 'mesh') settleAura(nodes.aura);
       if (worn.cape) drawCape(true);
     },
     setElytra(value) {

@@ -1,9 +1,9 @@
 ---
 titel: Einstellungen im Launcher
-beschreibung: Arbeitsspeicher, Fenstergröße, Java, Discord-Status und Datenordner – was die Einstellungen im Launcher bewirken.
+beschreibung: Arbeitsspeicher, Fenstergröße, Infobereich, Java, Discord-Status, Benachrichtigungen und Datenordner – was die Einstellungen im Launcher bewirken.
 kategorie: launcher
 reihenfolge: 5
-stichworte: einstellungen, arbeitsspeicher, ram, speicher, java, jvm, fenstergröße, auflösung, discord, rich presence, datenordner, launcher ausblenden
+stichworte: einstellungen, arbeitsspeicher, ram, speicher, java, jvm, fenstergröße, auflösung, discord, rich presence, datenordner, launcher ausblenden, infobereich, tray, glocke, benachrichtigungen, einrichtung erneut starten
 ---
 Unter **Einstellungen** in der Seitenleiste legst du fest, was für alle Instanzen gilt. Änderungen werden sofort gespeichert.
 
@@ -18,13 +18,21 @@ Hier wählst du die **Grafik-API** (Vulkan, Automatisch oder OpenGL) und schalte
 ## Spiel
 - **Eigene Fenstergröße:** Minecraft startet mit der angegebenen Breite und Höhe.
 - **Launcher beim Spielstart ausblenden:** Der Launcher verschwindet, solange du spielst, und kommt nach dem Beenden wieder.
+- **Beim Schließen in den Infobereich:** Schließt du den Launcher, während ein Spiel läuft, bleibt er als Symbol neben der Uhr – mit Freunden online und Benachrichtigungen. Nach dem Spiel beendet er sich. Ab Werk an.
 
 ## Discord
-Der Launcher zeigt deinen Freunden in Discord, was du spielst – zum Beispiel „Im Hauptmenü“ oder „Spielt auf hypixel.net“. Dafür muss die Discord-App auf deinem Rechner laufen.
+Der Launcher zeigt deinen Freunden in Discord, was du spielst – zum Beispiel „Spielt auf hypixel.net“ und „Im Nether · Überleben“. Dafür muss die Discord-App auf deinem Rechner laufen.
 - **Discord-Status anzeigen** schaltet die Anzeige ein oder aus.
-- **Server anzeigen** legt fest, ob der Server zu sehen ist. Gezeigt werden nur öffentliche Server wie hypixel.net, nie IP-Adressen.
+- **Umfang:** **Ausführlich** oder **Nur „Spielt HeldixClient“**.
+- **Was zu sehen ist:** Server und Welten, Dimension und Spielmodus, Weltname im Einzelspieler, Spielerzahl, Voice Chat, Kopf als Bild und Knöpfe – jeweils einzeln abschaltbar. Gezeigt werden nur öffentliche Server wie hypixel.net, nie IP-Adressen.
 
-Ob die Verbindung zu Discord steht, siehst du direkt in der Karte.
+Ob die Verbindung zu Discord steht, siehst du direkt in der Karte, daneben eine Vorschau deines Status. Alles Weitere unter [Discord-Status](/hilfe/discord-status).
+
+## Benachrichtigungen
+Die **Glocke** oben rechts sammelt Freundschaftsanfragen, Nachrichten, Einladungen in Welten und Partys, Freischaltungen, geöffnete Welten von Freunden und Updates. Der Verlauf bleibt nur auf deinem PC (höchstens 100 Einträge, 30 Tage).
+
+## Einrichtung erneut starten
+Unter **Über HeldixClient** startet **Einrichtung erneut starten** den [Einrichtungs-Assistenten](/hilfe/einrichtung) noch einmal.
 
 ## Java
 Lass das Feld **Java-Pfad** leer. Dann nimmt der Launcher automatisch die passende Java-Version und lädt sie bei Bedarf selbst. Unter **Zusätzliche JVM-Argumente** lassen sich Java-Optionen ergänzen – lass das Feld leer, wenn du dir nicht sicher bist. Mehr unter [Java-Fehler](/hilfe/java).

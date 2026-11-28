@@ -1,6 +1,9 @@
-// HeldixClient – Webseite: Team-Bereich (/team) für Moderatoren und Admins
-// (Meldungen, Support, Spieler, Sperren, Neuigkeiten, Addons: Einreichungen und Addon-Meldungen (team-addons.js), Mein
-// Teamprofil; Admins zusätzlich Updates, Addons freigeben und veröffentlichen, Cosmetics, Team, Protokoll).
+// HeldixClient – Webseite: Team-Bereich (/team) für alle Team-Rollen (Heldix-Dienst 1.12.0: Admin, Entwickler,
+// Moderator, Supporter, Designer, Tester). Welche Bereiche erscheinen, entscheiden die Rechte der Rolle
+// (WebMe.permissions, rollen.js); der Dienst prüft jede Route selbst. Bereiche: Meldungen, Support, Spieler (mit
+// Zeitleiste), Sperren, Neuigkeiten, Updates, Addons (team-addons.js), Cosmetics (team-cosmetics.js), Team & Rollen
+// (Rollen-Verwaltung, Community-Abzeichen, Rechte-Übersicht), Protokoll, Mein Teamprofil. Listen mit Suche, Filtern,
+// Sortierung, Seiten und Sammelaktionen: team-tabelle.js.
 // Startseite ist die Übersicht (team-overview.js); dazu Schnellsuche (Strg+K, team-search.js) und Aktivität mit Glocke
 // (team-activity.js). Übersicht und Glocke nutzen dieselben Daten wie das Nachfragen alle 30 Sekunden (live).
 // Zugang: Cookie-Sitzung + Team-Rolle + Zwei-Faktor-Anmeldung (TOTP), in dieser Sitzung bestätigt (12 Stunden).
@@ -35,8 +38,8 @@ import {
   poller,
   reasonLabel,
   relativeTime,
+  REPORT_REASONS,
   rerender,
-  ROLE_LABELS,
   setSkinSource,
   showError,
   textBlocks,
@@ -55,6 +58,8 @@ import { initTeamCosmetics } from './team-cosmetics.js';
 import { initTeamOverview } from './team-overview.js';
 import { initTeamSearch } from './team-search.js';
 import { attachmentList, normalizeAttachments } from './support-attachments.js';
+import { COMMUNITY_BADGES, PERMISSIONS, ROLES, ROLE_PERMISSIONS, allows, badgeIcon, badgeLabel, permissionsOf, roleIcon, roleLabel } from './rollen.js';
+import { createListTools } from './team-tabelle.js';
 
 // Spielerbilder im Team-Bereich: Minecraft-Köpfe über die Cookie-Sitzung (das bestätigte Team darf alle).
 setSkinSource('auth');
@@ -94,6 +99,11 @@ const state = {
   profile: null, // eigenes Teamprofil { public, title, about }
   since: undefined, // „im Team seit“ für die Vorschau
   previewHead: null,
+  bans: null, // Sperren (Liste mit Werkzeugen)
+  audit: null, // Protokoll-Einträge
+  members: [], // Team-Mitglieder
+  badges: [], // Community-Abzeichen
+  permissionTable: null, // GET /v1/team/permissions
 };
 
 /** Bereich, wenn die Adresse keinen nennt. */
@@ -331,13 +341,15 @@ function showVerify(message) {
 // Team-Bereich
 // ---------------------------------------------------------------------------------------------------------
 
-const isAdmin = () => state.me?.role === 'admin';
+/** Darf die eigene Rolle das (mindestens eines der Rechte)? */
+const can = (needed) => allows(permissionsOf(state.me), needed);
+/** Team verwalten (früher „Admin“) – für Teile, die nur Verwalter sehen. */
+const isAdmin = () => can('team.manage');
 
 function showApp() {
-  const admin = isAdmin();
-  // Unterreiter nur für Admins (die Bereiche in der Seitenleiste blendet die Shell selbst aus)
-  for (const tab of $$('[data-admin]')) tab.hidden = !admin;
-  shell.setMeta([`Angemeldet als ${state.me.name}`, h('span', { class: 'chip success' }, icon('lock'), '2FA bestätigt')]);
+  // Unterreiter und Teile nach Rechten (die Bereiche in der Seitenleiste blendet die Shell selbst aus)
+  for (const element of $$('#team-app [data-recht]')) element.hidden = !can(element.dataset.recht.split(' '));
+  shell.setMeta([h('span', { class: 'rolle-name' }, roleIcon(state.me.role), roleLabel(state.me.role)), `Angemeldet als ${state.me.name}`, h('span', { class: 'chip success' }, icon('lock'), '2FA bestätigt')]);
   showView('team-app');
   quickSearch.enable();
   activity.start(state.me);
@@ -353,7 +365,7 @@ function showApp() {
 
 /** Zähler (Meldungen, Support, Einreichungen, Addon-Meldungen) neu laden – dieselben Anfragen wie das Nachfragen. */
 function refreshLive() {
-  return Promise.all([refreshReportCount(), refreshSupportCount(), teamAddonsUi.refreshCounts()]);
+  return Promise.all([can('moderation') ? refreshReportCount() : null, can('support') ? refreshSupportCount() : null, can(['addons', 'addon-reports']) ? teamAddonsUi.refreshCounts() : null]);
 }
 
 /** Werte aus der Adresse (#reiter=…&anfrage=12) als Zahl bzw. Text. */
@@ -393,7 +405,7 @@ function onTab(name, { params = null } = {}) {
     addons: async () => {
       teamAddonsUi.show({ sub: addon ? 'veroeffentlicht' : sub, submission });
       // Admins: Liste, öffentlicher Schlüssel (für die Prüfung der Schlüsseldatei) und ausgeblendete Addons
-      if (isAdmin()) await loadTeamAddons();
+      if (can('addons')) await loadTeamAddons();
       if (addon) focusTeamAddon(addon);
     },
     cosmetics: () => cosmeticsUi.show({ focusId: cosmetic }),
@@ -501,6 +513,7 @@ async function loadReports({ focusId } = {}) {
   if (!box.firstChild || box.dataset.filter !== state.reportFilter) {
     box.dataset.signature = '';
     box.replaceChildren(loadingState());
+    reportTools?.reset();
   }
   box.dataset.filter = state.reportFilter;
   const filter = state.reportFilter;
@@ -540,17 +553,10 @@ async function refreshReportCount() {
 }
 
 function renderReports() {
-  const filter = state.reportFilter;
-  rerender($('#meldungen'), JSON.stringify(state.reports), () => {
-    if (!state.reports.length) {
-      const text = filter === 'open' ? 'Keine offenen Meldungen. Alles erledigt!' : filter === 'done' ? 'Noch keine erledigten Meldungen.' : 'Keine Meldungen in den letzten 90 Tagen.';
-      return emptyState(text, 'check');
-    }
-    return state.reports.map(reportCard);
-  });
+  setupReportTools().refresh();
 }
 
-function reportCard(report) {
+function reportCard(report, select = null) {
   const done = report.status === 'done';
   const reported = report.reported ?? {};
   const messages = Array.isArray(report.messages) ? report.messages : [];
@@ -560,6 +566,7 @@ function reportCard(report) {
     h(
       'div',
       { class: 'report-head' },
+      select,
       h('h2', { class: 'report-id', id: `meldung-${report.id}-titel`, text: `Meldung #${report.id}` }),
       chip(done ? 'Erledigt' : 'Offen', done ? 'success' : 'warning'),
       chip(reasonLabel(report.reason)),
@@ -692,7 +699,7 @@ function renderPlayers() {
             h(
               'span',
               { class: 'row-main' },
-              h('span', { class: 'row-title' }, h('span', { text: player.name }), player.banned ? chip('gesperrt', 'danger') : null, player.role ? chip(ROLE_LABELS[player.role] ?? player.role, 'accent') : null),
+              h('span', { class: 'row-title' }, h('span', { text: player.name }), player.banned ? chip('gesperrt', 'danger') : null, player.role ? chip(roleLabel(player.role), 'accent') : null, player.communityBadge ? chip(badgeLabel(player.communityBadge), 'warning') : null),
               h('span', { class: `row-sub${player.online ? ' online' : ''}`, text: player.online ? 'online' : `zuletzt online ${relativeTime(player.lastSeen)}` }),
             ),
             icon('chevron-right'),
@@ -738,7 +745,7 @@ function reportChips(ids) {
 
 function renderPlayerDetail(player) {
   const detail = $('#spieler-detail');
-  const admin = isAdmin();
+  const moderate = can('moderation');
   const copy = h('button', { type: 'button', class: 'icon-button small', 'aria-label': 'UUID kopieren', title: 'UUID kopieren' }, icon('copy'));
   copy.addEventListener('click', async () => toast((await copyText(player.uuid)) ? 'UUID kopiert.' : 'Kopieren ging nicht – bitte von Hand markieren.', 'info'));
   const facts = [
@@ -765,7 +772,7 @@ function renderPlayerDetail(player) {
         'div',
         { class: 'detail-title' },
         h('h2', { id: 'spieler-detail-titel', tabindex: '-1', text: player.name }),
-        h('div', { class: 'chips-row' }, player.online ? chip('online', 'success') : chip('offline'), ban ? chip('gesperrt', 'danger') : null, player.role ? chip(ROLE_LABELS[player.role] ?? player.role, 'accent') : null),
+        h('div', { class: 'chips-row' }, player.online ? chip('online', 'success') : chip('offline'), ban ? chip('gesperrt', 'danger') : null, player.role ? h('span', { class: 'chip accent' }, roleIcon(player.role), roleLabel(player.role)) : null, player.communityBadge ? h('span', { class: 'chip warning' }, badgeIcon(player.communityBadge, { label: false }), badgeLabel(player.communityBadge)) : null),
       ),
     ),
     h('dl', { class: 'facts-list' }, facts.map(([term, value]) => [h('dt', { text: term }), h('dd', null, value)])),
@@ -776,23 +783,27 @@ function renderPlayerDetail(player) {
           { class: 'ban-box' },
           h('p', { class: 'ban-title' }, icon('ban'), h('strong', { text: 'Gesperrt' }), h('span', { class: 'muted', text: ` seit ${formatDateTime(ban.at)}${ban.by ? ` von ${ban.by}` : ''}` })),
           ban.reason ? h('blockquote', { class: 'quote', text: ban.reason }) : null,
-          h('div', { class: 'card-actions' }, h('button', { type: 'button', class: 'button tiny ghost', onClick: () => unbanPlayer(player) }, 'Sperre aufheben')),
+          moderate ? h('div', { class: 'card-actions' }, h('button', { type: 'button', class: 'button tiny ghost', onClick: () => unbanPlayer(player) }, 'Sperre aufheben')) : null,
         )
-      : h('div', { class: 'card-actions' }, h('button', { type: 'button', class: 'button tiny ghost danger-text', onClick: () => banPlayer(player) }, icon('ban'), 'Sperren …')),
-    admin
+      : moderate
+        ? h('div', { class: 'card-actions' }, h('button', { type: 'button', class: 'button tiny ghost danger-text', onClick: () => banPlayer(player) }, icon('ban'), 'Sperren …'))
+        : null,
+    moderate || can('players.delete')
       ? h(
           'div',
           { class: 'admin-actions' },
-          h('h3', { text: 'Nur für Admins' }),
+          h('h3', { text: 'Verwalten' }),
           h(
             'div',
             { class: 'card-actions' },
-            h('button', { type: 'button', class: 'button tiny ghost', disabled: !player.cape || undefined, title: player.cape ? undefined : 'Kein Cape gewählt', onClick: () => resetCape(player) }, 'Cape zurücksetzen'),
-            h('button', { type: 'button', class: 'button tiny ghost danger-text', onClick: () => deletePlayer(player) }, icon('trash'), 'Daten löschen …'),
+            moderate ? h('button', { type: 'button', class: 'button tiny ghost', disabled: !player.cape || undefined, title: player.cape ? undefined : 'Kein Cape gewählt', onClick: () => resetCape(player) }, 'Cape zurücksetzen') : null,
+            can('players.delete') ? h('button', { type: 'button', class: 'button tiny ghost danger-text', onClick: () => deletePlayer(player) }, icon('trash'), 'Daten löschen …') : null,
           ),
         )
       : null,
+    h('section', { class: 'player-timeline', 'aria-labelledby': 'spieler-zeitleiste-titel' }, h('h3', { id: 'spieler-zeitleiste-titel', text: 'Zeitleiste' }), h('ol', { class: 'timeline', id: 'spieler-zeitleiste' }, h('li', { class: 'timeline__empty', text: 'Wird geladen …' }))),
   );
+  loadTimeline(player).catch(() => {});
 }
 
 async function refreshPlayer(uuid) {
@@ -867,45 +878,41 @@ async function loadBans() {
 }
 
 function renderBans(data) {
-  const bans = Array.isArray(data?.bans) ? data.bans : [];
-  $('#sperren-anzahl').textContent = bans.length ? `(${bans.length})` : '';
-  rerender($('#sperren'), JSON.stringify(bans), () => {
-    if (!bans.length) return emptyState('Niemand ist gesperrt.', 'check');
-    return h(
-      'ul',
-      { class: 'rows' },
-      bans.map((ban) =>
-        h(
-          'li',
-          { class: 'row' },
-          avatar(ban.name, ban.uuid, { size: 'sm' }),
-          h(
-            'div',
-            { class: 'row-main' },
-            h('div', { class: 'row-title' }, playerButton(ban)),
-            h('div', { class: 'row-sub', text: ban.reason || 'Ohne Grund' }),
-            h('div', { class: 'row-meta', text: `seit ${formatDateTime(ban.at)} · ${ban.by ? `von ${ban.by}` : 'über die Kommandozeile'}` }),
-          ),
-          h(
-            'div',
-            { class: 'row-actions' },
-            h(
-              'button',
-              {
-                type: 'button',
-                class: 'button tiny ghost',
-                dataset: { focusKey: `${ban.uuid}:unban` },
-                onClick: async () => {
-                  if (await unbanDialog(ban)) await loadBans().catch(showError);
-                },
-              },
-              'Sperre aufheben',
-            ),
-          ),
-        ),
+  state.bans = Array.isArray(data?.bans) ? data.bans : [];
+  $('#sperren-anzahl').textContent = state.bans.length ? `(${state.bans.length})` : '';
+  setupBanTools().refresh();
+}
+
+function banRow(ban, select = null) {
+  return h(
+    'li',
+    { class: 'row', dataset: { uuid: ban.uuid } },
+    select,
+    avatar(ban.name, ban.uuid, { size: 'sm' }),
+    h(
+      'div',
+      { class: 'row-main' },
+      h('div', { class: 'row-title' }, playerButton(ban)),
+      h('div', { class: 'row-sub', text: ban.reason || 'Ohne Grund' }),
+      h('div', { class: 'row-meta', text: `seit ${formatDateTime(ban.at)} · ${ban.by ? `von ${ban.by}` : 'über die Kommandozeile'}` }),
+    ),
+    h(
+      'div',
+      { class: 'row-actions' },
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'button tiny ghost',
+          dataset: { focusKey: `${ban.uuid}:unban` },
+          onClick: async () => {
+            if (await unbanDialog(ban)) await loadBans().catch(showError);
+          },
+        },
+        'Sperre aufheben',
       ),
-    );
-  });
+    ),
+  );
 }
 
 async function onBanSubmit(event) {
@@ -2055,73 +2062,129 @@ async function publishAddon(event) {
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// Team (nur Admins)
+// Team & Rollen (ansehen: team.view; ändern, Abzeichen vergeben: team.manage)
 // ---------------------------------------------------------------------------------------------------------
+
+/** Rollen und Rechte: vom Dienst (GET /v1/team/permissions), sonst die feste Tabelle aus rollen.js. */
+async function loadPermissions() {
+  if (state.permissionTable) return state.permissionTable;
+  try {
+    const data = await teamCall('GET', '/v1/team/permissions');
+    if (Array.isArray(data?.roles) && data.roles.length) state.permissionTable = data;
+  } catch {
+    // älterer Dienst: Tabelle aus rollen.js
+  }
+  state.permissionTable ??= { roles: ROLES.map((role) => ({ id: role.id, label: role.label, permissions: ROLE_PERMISSIONS[role.id] })), permissions: PERMISSIONS.map(({ id, label }) => ({ id, label })), badges: COMMUNITY_BADGES.map(({ id, label }) => ({ id, label })) };
+  return state.permissionTable;
+}
+
+const rolePermissions = (role) => state.permissionTable?.roles.find((entry) => entry.id === role)?.permissions ?? ROLE_PERMISSIONS[role] ?? [];
+const permissionName = (id) => state.permissionTable?.permissions.find((entry) => entry.id === id)?.label ?? PERMISSIONS.find((entry) => entry.id === id)?.label ?? id;
+
+/** Was sich mit einer neuen Rolle ändert: [dazu], [weg]. */
+function roleDiff(from, to) {
+  const before = new Set(from ? rolePermissions(from) : []);
+  const after = new Set(rolePermissions(to));
+  return { added: [...after].filter((id) => !before.has(id)), removed: [...before].filter((id) => !after.has(id)), kept: [...after].filter((id) => before.has(id)) };
+}
+
+/** Vorschau der Rechte einer Rolle (beim Wählen), optional im Vergleich zur bisherigen. */
+function rolePreview(role, from = null) {
+  const diff = roleDiff(from, role);
+  const item = (id, kind) => h('li', { class: `role-perm role-perm--${kind}` }, icon(kind === 'removed' ? 'close' : 'check'), h('span', { text: permissionName(id) }));
+  return h(
+    'div',
+    { class: 'role-preview__box', dataset: { rolle: role } },
+    h('p', { class: 'role-preview__title' }, roleIcon(role), h('strong', { text: roleLabel(role) }), from && from !== role ? h('span', { class: 'tiny text-3', text: `statt ${roleLabel(from)}` }) : null),
+    h(
+      'ul',
+      { class: 'role-perms' },
+      diff.added.map((id) => item(id, from ? 'added' : 'kept')),
+      from ? diff.kept.map((id) => item(id, 'kept')) : null,
+      diff.removed.map((id) => item(id, 'removed')),
+    ),
+    from && (diff.added.length || diff.removed.length) ? h('p', { class: 'tiny text-3', text: `${diff.added.length ? `${diff.added.length} dazu` : ''}${diff.added.length && diff.removed.length ? ' · ' : ''}${diff.removed.length ? `${diff.removed.length} weg` : ''}` }) : null,
+  );
+}
+
+function roleOptions(select) {
+  select.replaceChildren(...(state.permissionTable?.roles ?? ROLES).map((role) => h('option', { value: role.id, text: role.label ?? roleLabel(role.id) })));
+}
 
 async function loadMembers() {
   const box = $('#mitglieder');
   if (!box.firstChild) box.replaceChildren(loadingState());
-  renderMembers(await teamCall('GET', '/v1/team/members'));
+  await loadPermissions();
+  roleOptions($('#mitglied-rolle'));
+  if (!$('#mitglied-rolle').value || $('#mitglied-rolle').value === 'admin') $('#mitglied-rolle').value = 'moderator';
+  updateMemberPreview();
+  $('#abzeichen-wahl').replaceChildren(...(state.permissionTable.badges ?? COMMUNITY_BADGES).map((badge) => h('option', { value: badge.id, text: badge.label })));
+  const manage = can('team.manage');
+  for (const element of $$('#panel-team [data-recht]')) element.hidden = !can(element.dataset.recht.split(' '));
+  $('#mitglieder-hinweis').textContent = manage ? 'Rolle wählen zeigt vorher, welche Rechte sich ändern.' : 'Nur ansehen – Rollen vergibt, wer das Recht „Team verwalten“ hat.';
+  renderRights();
+  const [members, badges] = await Promise.all([teamCall('GET', '/v1/team/members'), teamCall('GET', '/v1/team/badges').catch((error) => (error.status === 404 ? { badges: null } : Promise.reject(error)))]);
+  renderMembers(members);
+  renderBadges(badges);
+}
+
+function updateMemberPreview() {
+  const role = $('#mitglied-rolle').value;
+  $('#mitglied-vorschau').replaceChildren(role ? rolePreview(role) : '');
 }
 
 function renderMembers(data) {
-  const members = Array.isArray(data?.members) ? [...data.members] : [];
-  members.sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }) : a.role === 'admin' ? -1 : 1));
-  $('#mitglieder-anzahl').textContent = members.length ? `(${members.length})` : '';
-  rerender($('#mitglieder'), JSON.stringify(members), () => {
-    if (!members.length) return emptyState('Noch niemand im Team.', 'friends');
-    return h(
-      'ul',
-      { class: 'rows' },
-      members.map((member) => {
-        const self = member.uuid === state.me.uuid;
-        const selectId = uid('rolle');
-        const select = h(
-          'select',
-          { class: 'input select tiny-select', id: selectId, dataset: { focusKey: `${member.uuid}:role` } },
-          Object.entries(ROLE_LABELS).map(([value, label]) => h('option', { value, text: label })),
-        );
-        select.value = member.role;
-        select.addEventListener('change', () => changeRole(member, select));
-        return h(
-          'li',
-          { class: 'row member-row' },
-          avatar(member.name, member.uuid),
-          h(
-            'div',
-            { class: 'row-main' },
-            h(
-              'div',
-              { class: 'row-title' },
-              h('span', { text: member.name }),
-              self ? chip('du') : null,
-              member.twoFactor ? h('span', { class: 'chip success' }, icon('lock'), '2FA aktiv') : chip('2FA fehlt', 'warning'),
-            ),
-            h('div', { class: 'row-meta', text: `im Team seit ${formatDate(member.addedAt)} · ${member.addedBy ? `hinzugefügt von ${member.addedBy}` : 'über die Kommandozeile'}` }),
-          ),
-          h(
-            'div',
-            { class: 'row-actions' },
-            h('label', { class: 'visually-hidden', for: selectId, text: `Rolle von ${member.name}` }),
-            select,
-            h(
-              'button',
-              {
-                type: 'button',
-                class: 'button tiny ghost',
-                disabled: !member.twoFactor || undefined,
-                title: member.twoFactor ? undefined : 'Noch nicht eingerichtet',
-                dataset: { focusKey: `${member.uuid}:2fa` },
-                onClick: () => resetTwoFactor(member),
-              },
-              '2FA zurücksetzen',
-            ),
-            h('button', { type: 'button', class: 'button tiny ghost quiet-danger', 'aria-label': `${member.name} aus dem Team entfernen`, dataset: { focusKey: `${member.uuid}:remove` }, onClick: () => removeMember(member) }, icon('trash'), h('span', { class: 'label', text: 'Entfernen' })),
-          ),
-        );
-      }),
-    );
+  state.members = Array.isArray(data?.members) ? [...data.members] : [];
+  $('#mitglieder-anzahl').textContent = state.members.length ? `(${state.members.length})` : '';
+  memberTools ??= createListTools({
+    id: 'mitglieder',
+    toolbar: $('#mitglieder-werkzeuge'),
+    list: $('#mitglieder'),
+    items: () => state.members,
+    key: (member) => member.uuid,
+    text: (member) => `${member.name} ${roleLabel(member.role)}`,
+    filters: [{ id: 'rolle', label: 'Rolle', options: [['alle', 'Alle Rollen'], ...ROLES.map((role) => [role.id, role.label])], test: (member, value) => member.role === value }],
+    sorts: [
+      { id: 'rang', label: 'Nach Rolle', compare: (a, b) => ROLES.findIndex((role) => role.id === a.role) - ROLES.findIndex((role) => role.id === b.role) || a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }) },
+      { id: 'name', label: 'Nach Name', compare: (a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }) },
+      { id: 'neu', label: 'Neueste zuerst', compare: (a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0) },
+    ],
+    pageSizes: [25, 50],
+    render: (members) => h('ul', { class: 'rows', id: 'mitglieder-liste' }, members.map(memberRow)),
+    empty: (any) => emptyState(any ? 'Niemand passt zum Filter.' : 'Noch niemand im Team.', 'friends'),
   });
+  memberTools.refresh();
+}
+
+function memberRow(member) {
+  const self = member.uuid === state.me.uuid;
+  const manage = can('team.manage');
+  const selectId = uid('rolle');
+  const select = h('select', { class: 'input select tiny-select', id: selectId, dataset: { focusKey: `${member.uuid}:role` }, disabled: !manage || undefined });
+  roleOptions(select);
+  select.value = member.role;
+  select.addEventListener('change', () => changeRole(member, select));
+  return h(
+    'li',
+    { class: 'row member-row', dataset: { uuid: member.uuid, rolle: member.role } },
+    avatar(member.name, member.uuid),
+    h(
+      'div',
+      { class: 'row-main' },
+      h('div', { class: 'row-title' }, h('span', { text: member.name }), h('span', { class: 'rolle-name' }, roleIcon(member.role, { label: true }), roleLabel(member.role)), self ? chip('du') : null, member.twoFactor ? h('span', { class: 'chip success' }, icon('lock'), '2FA aktiv') : chip('2FA fehlt', 'warning')),
+      h('div', { class: 'row-meta', text: `im Team seit ${formatDate(member.addedAt)} · ${member.addedBy ? `hinzugefügt von ${member.addedBy}` : 'über die Kommandozeile'}` }),
+    ),
+    manage
+      ? h(
+          'div',
+          { class: 'row-actions' },
+          h('label', { class: 'visually-hidden', for: selectId, text: `Rolle von ${member.name}` }),
+          select,
+          h('button', { type: 'button', class: 'button tiny ghost', disabled: !member.twoFactor || undefined, title: member.twoFactor ? undefined : 'Noch nicht eingerichtet', dataset: { focusKey: `${member.uuid}:2fa` }, onClick: () => resetTwoFactor(member) }, '2FA zurücksetzen'),
+          h('button', { type: 'button', class: 'button tiny ghost quiet-danger', 'aria-label': `${member.name} aus dem Team entfernen`, dataset: { focusKey: `${member.uuid}:remove` }, onClick: () => removeMember(member) }, icon('trash'), h('span', { class: 'label', text: 'Entfernen' })),
+        )
+      : null,
+  );
 }
 
 async function afterSelfChange(member) {
@@ -2130,16 +2193,18 @@ async function afterSelfChange(member) {
 
 async function changeRole(member, select) {
   const role = select.value;
-  const label = ROLE_LABELS[role] ?? role;
+  const label = roleLabel(role);
   const self = member.uuid === state.me.uuid;
-  const ok = await confirmAction({
-    title: `${member.name} zum ${label} machen?`,
-    text: [
-      role === 'admin' ? 'Admins können zusätzlich Updates und Addons veröffentlichen, das Team verwalten, das Protokoll lesen, Capes zurücksetzen und Spielerdaten löschen.' : 'Moderatoren sehen Meldungen, Spieler und Sperren und schreiben Neuigkeiten.',
-      self ? 'Das betrifft dich selbst: Danach siehst du nur noch die Bereiche für Moderatoren.' : null,
+  const lost = roleDiff(member.role, role).removed;
+  const ok = await openDialog({
+    title: `${member.name}: ${roleLabel(member.role)} → ${label}?`,
+    body: [
+      h('p', { text: 'So ändern sich die Rechte (grün dazu, rot weg):' }),
+      rolePreview(role, member.role),
+      self && lost.length ? h('p', { class: 'notice small', text: 'Das betrifft dich selbst: Bereiche ohne Recht verschwinden danach aus deiner Navigation.' }) : null,
     ],
     confirmLabel: 'Rolle ändern',
-    danger: self && role !== 'admin',
+    danger: self && lost.length > 0,
     onConfirm: async () => renderMembers(await teamCall('PUT', `/v1/team/members/${member.uuid}`, { role })),
   });
   if (!ok) {
@@ -2190,10 +2255,10 @@ async function onMemberSubmit(event) {
     input.focus();
     return;
   }
-  const label = ROLE_LABELS[role] ?? role;
-  const ok = await confirmAction({
+  const label = roleLabel(role);
+  const ok = await openDialog({
     title: `${name} als ${label} hinzufügen?`,
-    text: role === 'admin' ? 'Admins haben alle Rechte, auch für Updates, Addons und das Team.' : 'Moderatoren sehen Meldungen mit Chatverlauf, Spieler und Sperren.',
+    body: [h('p', { text: `${name} bekommt diese Rechte, sobald die Zwei-Faktor-Anmeldung eingerichtet ist:` }), rolePreview(role)],
     confirmLabel: 'Hinzufügen',
     onConfirm: async () => renderMembers(await teamCall('POST', '/v1/team/members', { name, role })),
   });
@@ -2202,8 +2267,117 @@ async function onMemberSubmit(event) {
   toast(`${name} ist jetzt im Team (${label}).`, 'success');
 }
 
+// --- Community-Abzeichen
+
+function renderBadges(data) {
+  const box = $('#abzeichen');
+  if (data?.badges === null) {
+    $('#abzeichen-karte').hidden = true;
+    return;
+  }
+  state.badges = Array.isArray(data?.badges) ? data.badges : [];
+  $('#abzeichen-anzahl').textContent = state.badges.length ? `(${state.badges.length})` : '';
+  const manage = can('team.manage');
+  rerender(box, JSON.stringify([state.badges, manage]), () => {
+    if (!state.badges.length) return emptyState('Noch keine Community-Abzeichen vergeben.', 'star');
+    return h(
+      'ul',
+      { class: 'rows', id: 'abzeichen-liste' },
+      state.badges.map((entry) =>
+        h(
+          'li',
+          { class: 'row', dataset: { uuid: entry.uuid, abzeichen: entry.badge } },
+          avatar(entry.name, entry.uuid, { size: 'sm' }),
+          h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, h('span', { text: entry.name }), h('span', { class: 'rolle-name' }, badgeIcon(entry.badge, { label: false }), badgeLabel(entry.badge))), h('div', { class: 'row-meta', text: `seit ${formatDate(entry.addedAt)}${entry.addedBy ? ` · von ${entry.addedBy}` : ''}` })),
+          manage ? h('div', { class: 'row-actions' }, h('button', { type: 'button', class: 'button tiny ghost quiet-danger', dataset: { focusKey: `abzeichen:${entry.uuid}` }, onClick: () => removeBadge(entry) }, icon('close'), h('span', { class: 'label', text: 'Entziehen' }))) : null,
+        ),
+      ),
+    );
+  });
+}
+
+async function onBadgeSubmit(event) {
+  event.preventDefault();
+  const input = $('#abzeichen-name');
+  const badge = $('#abzeichen-wahl').value;
+  const error = $('#abzeichen-fehler');
+  const name = input.value.trim();
+  error.hidden = true;
+  if (!isPlayerName(name)) {
+    error.textContent = 'Ein Spielername hat 1 bis 16 Zeichen: Buchstaben, Ziffern und _.';
+    error.hidden = false;
+    input.focus();
+    return;
+  }
+  try {
+    const found = await teamCall('GET', `/v1/team/players?q=${encodeURIComponent(name.toLowerCase())}`);
+    const player = (found?.players ?? []).find((entry) => entry.name.toLowerCase() === name.toLowerCase());
+    if (!player) throw new Error('Diesen Spieler gibt es beim Heldix-Dienst nicht – er muss sich zuerst einmal mit HeldixClient anmelden.');
+    const before = state.badges.find((entry) => entry.uuid === player.uuid);
+    const ok = await confirmAction({
+      title: `${player.name}: Abzeichen ${badgeLabel(badge)}?`,
+      text: [before ? `Ersetzt das bisherige Abzeichen ${badgeLabel(before.badge)}.` : null, 'Andere Spieler sehen das Abzeichen im Spiel (Tab-Liste, Namensschild), im Launcher und auf der Webseite – solange der Spieler „Für andere erkennbar“ an hat.'],
+      confirmLabel: 'Vergeben',
+      onConfirm: async () => renderBadges(await teamCall('PUT', `/v1/team/badges/${player.uuid}`, { badge })),
+    });
+    if (!ok) return;
+    input.value = '';
+    toast(`${player.name} hat jetzt das Abzeichen ${badgeLabel(badge)}.`, 'success');
+  } catch (problem) {
+    if (problem.handled) return;
+    error.textContent = problem.message;
+    error.hidden = false;
+  }
+}
+
+async function removeBadge(entry) {
+  const ok = await confirmAction({
+    title: `Abzeichen von ${entry.name} entziehen?`,
+    text: `${entry.name} ist danach wieder ein normaler Heldix-Spieler (ohne ${badgeLabel(entry.badge)}).`,
+    confirmLabel: 'Entziehen',
+    danger: true,
+    onConfirm: async () => renderBadges(await teamCall('DELETE', `/v1/team/badges/${entry.uuid}`)),
+  });
+  if (ok) toast(`${entry.name} hat kein Community-Abzeichen mehr.`);
+}
+
+// --- Rechte-Übersicht (Tabelle: Rechte × Rollen)
+
+function renderRights() {
+  const table = state.permissionTable;
+  const roles = table.roles;
+  const mine = state.me?.role;
+  rerender($('#rechte'), JSON.stringify([table, mine]), () =>
+    h(
+      'div',
+      { class: 'table-wrap rights-wrap' },
+      h(
+        'table',
+        { class: 'table rights-table', id: 'rechte-tabelle' },
+        h('caption', { class: 'visually-hidden', text: 'Rechte je Rolle' }),
+        h('thead', null, h('tr', null, h('th', { scope: 'col', text: 'Recht' }), roles.map((role) => h('th', { scope: 'col', class: role.id === mine ? 'is-mine' : undefined }, h('span', { class: 'rights-role' }, roleIcon(role.id), h('span', { text: role.label })))))),
+        h(
+          'tbody',
+          null,
+          table.permissions.map((permission) =>
+            h(
+              'tr',
+              null,
+              h('th', { scope: 'row' }, h('span', { text: permission.label }), h('small', { text: PERMISSIONS.find((entry) => entry.id === permission.id)?.text ?? '' })),
+              roles.map((role) => {
+                const has = role.permissions.includes(permission.id);
+                return h('td', { class: `${has ? 'has' : 'not'}${role.id === mine ? ' is-mine' : ''}`, 'data-label': role.label }, has ? icon('check') : h('span', { class: 'rights-none', 'aria-hidden': 'true', text: '–' }), h('span', { class: 'visually-hidden', text: has ? 'ja' : 'nein' }));
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 // ---------------------------------------------------------------------------------------------------------
-// Support (Moderatoren und Admins)
+// Support (Recht „support“)
 // ---------------------------------------------------------------------------------------------------------
 
 const SUPPORT_CATEGORIES = { hilfe: 'Hilfe', fehler: 'Fehler', konto: 'Konto', sonstiges: 'Sonstiges' };
@@ -2455,7 +2629,7 @@ async function closeTeamTicket() {
 /** Alle 30 Sekunden (solange sichtbar): Zähler am Reiter, im Support-Reiter auch Liste und offene Anfrage. */
 async function teamTick() {
   if ($('#team-app').hidden) return;
-  const tasks = [refreshReportCount(), refreshSupportCount(), teamAddonsUi.refreshCounts()];
+  const tasks = [refreshLive()];
   if (shell.current() === 'support') {
     tasks.push(loadSupport());
     const id = state.ticket?.id;
@@ -2601,7 +2775,7 @@ async function onProfileSubmit(event) {
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// Protokoll (nur Admins)
+// Protokoll (Recht „audit“)
 // ---------------------------------------------------------------------------------------------------------
 
 const ACTIONS = {
@@ -2670,37 +2844,240 @@ async function loadAudit() {
   if (!box.firstChild) box.replaceChildren(loadingState());
   const limit = state.auditLimit;
   const data = await teamCall('GET', `/v1/team/audit?limit=${limit}`);
-  const entries = Array.isArray(data?.entries) ? data.entries : [];
-  $('#protokoll-mehr').hidden = entries.length < limit || limit >= AUDIT_MAX;
-  rerender(box, JSON.stringify(entries), () => {
-    if (!entries.length) return emptyState('Noch keine Einträge.', 'clock');
-    return h(
-      'div',
-      { class: 'table-wrap' },
-      h(
-        'table',
-        { class: 'table' },
-        h('caption', { class: 'visually-hidden', text: 'Protokoll der Team-Aktionen' }),
-        h('thead', null, h('tr', null, ['Zeit', 'Wer', 'Aktion', 'Betrifft', 'Details'].map((title) => h('th', { scope: 'col', text: title })))),
-        h(
-          'tbody',
-          null,
-          entries.map((entry) => {
-            const label = actionLabel(entry.action);
-            return h(
-              'tr',
-              null,
-              h('td', { class: 'nowrap', 'data-label': 'Zeit' }, timeEl(entry.at, formatDateTime(entry.at))),
-              h('td', { class: 'nowrap', 'data-label': 'Wer' }, h('span', { class: 'player-inline' }, avatar(entry.actor?.name, entry.actor?.uuid, { size: 'xs' }), h('strong', { text: entry.actor?.name ?? '?' }))),
-              h('td', { 'data-label': 'Aktion' }, label ? h('span', { title: entry.action, text: label }) : h('code', { class: 'mono', text: entry.action ?? '?' })),
-              h('td', { 'data-label': 'Betrifft', text: entry.target ?? '–' }),
-              h('td', { class: 'muted', 'data-label': 'Details', text: entry.detail ?? '' }),
-            );
-          }),
-        ),
-      ),
-    );
+  state.audit = Array.isArray(data?.entries) ? data.entries : [];
+  $('#protokoll-mehr').hidden = state.audit.length < limit || limit >= AUDIT_MAX;
+  setupAuditTools();
+  fillAuditActors();
+  auditTools.refresh();
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Listen mit Werkzeugen (team-tabelle.js): Meldungen, Sperren, Protokoll
+// ---------------------------------------------------------------------------------------------------------
+
+let reportTools = null;
+let banTools = null;
+let auditTools = null;
+let memberTools = null;
+
+const byTimeDesc = (a, b) => (b.at ?? 0) - (a.at ?? 0);
+const byTimeAsc = (a, b) => (a.at ?? 0) - (b.at ?? 0);
+
+function setupReportTools() {
+  reportTools ??= createListTools({
+    id: 'meldungen',
+    toolbar: $('#meldungen-werkzeuge'),
+    list: $('#meldungen'),
+    items: () => state.reports,
+    key: (report) => report.id,
+    text: (report) => `#${report.id} ${report.reporter?.name ?? ''} ${report.reported?.name ?? ''} ${report.note ?? ''} ${reasonLabel(report.reason)}`,
+    filters: [{ id: 'grund', label: 'Grund', options: [['alle', 'Alle Gründe'], ...REPORT_REASONS], test: (report, value) => report.reason === value }],
+    sorts: [
+      { id: 'neu', label: 'Neueste zuerst', compare: byTimeDesc },
+      { id: 'alt', label: 'Älteste zuerst', compare: byTimeAsc },
+      { id: 'spieler', label: 'Nach gemeldetem Spieler', compare: (a, b) => String(a.reported?.name ?? '').localeCompare(String(b.reported?.name ?? ''), 'de') || byTimeDesc(a, b) },
+    ],
+    pageSizes: [10, 25, 50],
+    selectable: (report) => report.status !== 'done',
+    bulk: [
+      {
+        id: 'erledigt',
+        label: 'Als erledigt markieren',
+        icon: 'check',
+        run: async (reports) => {
+          let done = 0;
+          for (const report of reports) {
+            try {
+              await teamCall('POST', `/v1/team/reports/${report.id}/done`);
+              done++;
+            } catch (error) {
+              showError(error);
+              break;
+            }
+          }
+          toast(done === 1 ? '1 Meldung ist erledigt.' : `${done} Meldungen sind erledigt.`, 'success');
+          await loadReports().catch(showError);
+          refreshReportCount().catch(() => {});
+        },
+      },
+    ],
+    render: (reports, { checkbox }) => reports.map((report) => reportCard(report, checkbox(report))),
+    empty: (any) => {
+      const filter = state.reportFilter;
+      if (any) return emptyState('Keine Meldung passt zum Filter.', 'search');
+      return emptyState(filter === 'open' ? 'Keine offenen Meldungen. Alles erledigt!' : filter === 'done' ? 'Noch keine erledigten Meldungen.' : 'Keine Meldungen in den letzten 90 Tagen.', 'check');
+    },
   });
+  return reportTools;
+}
+
+function setupBanTools() {
+  banTools ??= createListTools({
+    id: 'sperren',
+    toolbar: $('#sperren-werkzeuge'),
+    list: $('#sperren'),
+    items: () => state.bans ?? [],
+    key: (ban) => ban.uuid,
+    text: (ban) => `${ban.name} ${ban.reason ?? ''} ${ban.by ?? ''}`,
+    filters: [{ id: 'wer', label: 'Gesperrt von', options: [['alle', 'Von allen'], ['team', 'Vom Team'], ['konsole', 'Über die Kommandozeile']], test: (ban, value) => (value === 'konsole' ? !ban.by : Boolean(ban.by)) }],
+    sorts: [
+      { id: 'neu', label: 'Neueste zuerst', compare: byTimeDesc },
+      { id: 'alt', label: 'Älteste zuerst', compare: byTimeAsc },
+      { id: 'name', label: 'Nach Name', compare: (a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }) },
+    ],
+    pageSizes: [10, 25, 50],
+    selectable: () => true,
+    bulk: [
+      {
+        id: 'aufheben',
+        label: 'Sperren aufheben',
+        icon: 'check',
+        run: async (bans) => {
+          const ok = await confirmAction({
+            title: bans.length === 1 ? `Sperre von ${bans[0].name} aufheben?` : `${bans.length} Sperren aufheben?`,
+            text: [`Betrifft: ${bans.map((ban) => ban.name).join(', ')}.`, 'Die Spieler können den Heldix-Dienst danach wieder nutzen.'],
+            confirmLabel: 'Aufheben',
+            onConfirm: async () => {
+              for (const ban of bans) await teamCall('DELETE', `/v1/team/bans/${ban.uuid}`);
+            },
+          });
+          if (!ok) return false;
+          toast(bans.length === 1 ? 'Sperre aufgehoben.' : `${bans.length} Sperren aufgehoben.`, 'success');
+          await loadBans().catch(showError);
+          return true;
+        },
+      },
+    ],
+    render: (bans, { checkbox }) => h('ul', { class: 'rows' }, bans.map((ban) => banRow(ban, checkbox(ban)))),
+    empty: (any) => emptyState(any ? 'Keine Sperre passt zum Filter.' : 'Niemand ist gesperrt.', 'check'),
+  });
+  return banTools;
+}
+
+function auditCategory(action) {
+  const key = String(action ?? '').toLowerCase();
+  if (/^(report|ban|unban|player)/.test(key)) return 'moderation';
+  if (key.startsWith('news')) return 'news';
+  if (key.startsWith('update')) return 'updates';
+  if (key.startsWith('addon')) return 'addons';
+  if (key.startsWith('cosmetic')) return 'cosmetics';
+  if (/^(member|team|2fa|badge)/.test(key)) return 'team';
+  if (key.startsWith('support')) return 'support';
+  return 'sonstiges';
+}
+
+function setupAuditTools() {
+  auditTools ??= createListTools({
+    id: 'protokoll',
+    toolbar: $('#protokoll-werkzeuge'),
+    list: $('#protokoll'),
+    items: () => state.audit ?? [],
+    key: (entry) => entry.id,
+    text: (entry) => `${entry.actor?.name ?? ''} ${actionLabel(entry.action) ?? entry.action} ${entry.target ?? ''} ${entry.detail ?? ''}`,
+    filters: [
+      {
+        id: 'bereich',
+        label: 'Bereich',
+        options: [['alle', 'Alle Bereiche'], ['moderation', 'Meldungen und Sperren'], ['support', 'Support'], ['news', 'Neuigkeiten'], ['updates', 'Updates'], ['addons', 'Addons'], ['cosmetics', 'Cosmetics'], ['team', 'Team und Abzeichen'], ['sonstiges', 'Sonstiges']],
+        test: (entry, value) => auditCategory(entry.action) === value,
+      },
+      { id: 'wer', label: 'Wer', options: [['alle', 'Alle im Team']], test: (entry, value) => entry.actor?.uuid === value },
+      { id: 'zeit', label: 'Zeitraum', options: [['alle', 'Ganzer Zeitraum'], ['1', 'Letzte 24 Stunden'], ['7', 'Letzte 7 Tage'], ['30', 'Letzte 30 Tage']], test: (entry, value) => Date.now() - (entry.at ?? 0) <= Number(value) * 86_400_000 },
+    ],
+    sorts: [
+      { id: 'neu', label: 'Neueste zuerst', compare: (a, b) => byTimeDesc(a, b) || (b.id ?? 0) - (a.id ?? 0) },
+      { id: 'alt', label: 'Älteste zuerst', compare: (a, b) => byTimeAsc(a, b) || (a.id ?? 0) - (b.id ?? 0) },
+    ],
+    pageSizes: [25, 50, 100],
+    render: (entries) => auditTable(entries),
+    empty: (any) => emptyState(any ? 'Kein Eintrag passt zum Filter.' : 'Noch keine Einträge.', 'clock'),
+  });
+  return auditTools;
+}
+
+/** Filter „Wer“ mit den Namen aus dem Protokoll füllen (bleibt, was gewählt ist). */
+function fillAuditActors() {
+  const select = $('#protokoll-werkzeuge [data-tabelle="filter-wer"]');
+  if (!select) return;
+  const actors = new Map();
+  for (const entry of state.audit ?? []) if (entry.actor?.uuid) actors.set(entry.actor.uuid, entry.actor.name ?? entry.actor.uuid);
+  const current = select.value;
+  select.replaceChildren(h('option', { value: 'alle', text: 'Alle im Team' }), ...[...actors].sort((a, b) => a[1].localeCompare(b[1], 'de')).map(([uuid, name]) => h('option', { value: uuid, text: name })));
+  select.value = actors.has(current) ? current : 'alle';
+  auditTools.state.filters.wer = select.value;
+}
+
+function auditTable(entries) {
+  return h(
+    'div',
+    { class: 'table-wrap' },
+    h(
+      'table',
+      { class: 'table' },
+      h('caption', { class: 'visually-hidden', text: 'Protokoll der Team-Aktionen' }),
+      h('thead', null, h('tr', null, ['Zeit', 'Wer', 'Aktion', 'Betrifft', 'Details'].map((title) => h('th', { scope: 'col', text: title })))),
+      h(
+        'tbody',
+        null,
+        entries.map((entry) => {
+          const label = actionLabel(entry.action);
+          return h(
+            'tr',
+            { dataset: { bereich: auditCategory(entry.action) } },
+            h('td', { class: 'nowrap', 'data-label': 'Zeit' }, timeEl(entry.at, formatDateTime(entry.at))),
+            h('td', { class: 'nowrap', 'data-label': 'Wer' }, h('span', { class: 'player-inline' }, avatar(entry.actor?.name, entry.actor?.uuid, { size: 'xs' }), h('strong', { text: entry.actor?.name ?? '?' }))),
+            h('td', { 'data-label': 'Aktion' }, label ? h('span', { title: entry.action, text: label }) : h('code', { class: 'mono', text: entry.action ?? '?' })),
+            h('td', { 'data-label': 'Betrifft', text: entry.target ?? '–' }),
+            h('td', { class: 'muted', 'data-label': 'Details', text: entry.detail ?? '' }),
+          );
+        }),
+      ),
+    ),
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Spieler: Zeitleiste (Meldungen, Sperren, Support, Team-Aktionen – nur, was die eigene Rolle sehen darf)
+// ---------------------------------------------------------------------------------------------------------
+
+async function loadTimeline(player) {
+  const box = $('#spieler-zeitleiste');
+  if (!box) return;
+  const [reports, tickets, audit] = await Promise.all([
+    can('moderation') ? teamCall('GET', '/v1/team/reports?status=all').then((data) => data?.reports ?? []).catch(() => []) : [],
+    can('support') ? teamCall('GET', '/v1/team/support?status=all').then((data) => data?.tickets ?? []).catch(() => []) : [],
+    can('audit') ? teamCall('GET', '/v1/team/audit?limit=500').then((data) => data?.entries ?? []).catch(() => []) : [],
+  ]);
+  if (state.selectedPlayer?.uuid !== player.uuid) return;
+  const events = [];
+  if (player.createdAt) events.push({ at: player.createdAt, kind: 'start', icon: 'user', title: 'Erste Anmeldung beim Heldix-Dienst' });
+  for (const report of reports) {
+    if (report.reported?.uuid === player.uuid) events.push({ at: report.at, kind: 'meldung', icon: 'flag', title: `Gemeldet von ${report.reporter?.name ?? '?'} · ${reasonLabel(report.reason)}`, text: report.status === 'done' ? `erledigt${report.doneBy ? ` von ${report.doneBy}` : ''}` : 'offen', report: report.id });
+    if (report.reporter?.uuid === player.uuid) events.push({ at: report.at, kind: 'meldung', icon: 'flag', title: `Hat ${report.reported?.name ?? '?'} gemeldet · ${reasonLabel(report.reason)}`, report: report.id });
+  }
+  if (player.ban) events.push({ at: player.ban.at, kind: 'sperre', icon: 'ban', title: `Gesperrt${player.ban.by ? ` von ${player.ban.by}` : ''}`, text: player.ban.reason });
+  for (const ticket of tickets) if (ticket.player?.uuid === player.uuid) events.push({ at: ticket.at, kind: 'support', icon: 'chat', title: `Support #${ticket.id}: ${ticket.subject}`, text: SUPPORT_STATUS[ticket.status]?.[0] ?? ticket.status, ticket: ticket.id });
+  for (const entry of audit) if (entry.target === player.name || String(entry.target ?? '').includes(`(${player.name})`)) events.push({ at: entry.at, kind: 'team', icon: 'shield', title: `${actionLabel(entry.action) ?? entry.action} (${entry.actor?.name ?? '?'})`, text: entry.detail ?? '' });
+  if (player.communityBadge) events.push({ at: null, kind: 'abzeichen', icon: 'star', title: `Community-Abzeichen: ${badgeLabel(player.communityBadge)}` });
+  events.sort((a, b) => (b.at ?? Infinity) - (a.at ?? Infinity));
+  box.replaceChildren(
+    ...(events.length
+      ? events.map((event) =>
+          h(
+            'li',
+            { class: `timeline__item timeline__item--${event.kind}`, dataset: { art: event.kind } },
+            h('span', { class: 'timeline__icon', 'aria-hidden': 'true' }, icon(event.icon)),
+            h(
+              'div',
+              null,
+              event.report ? h('button', { type: 'button', class: 'link-button', onClick: () => showReport(event.report) }, event.title) : event.ticket ? h('button', { type: 'button', class: 'link-button', onClick: () => jump('support', { anfrage: event.ticket }) }, event.title) : h('strong', { text: event.title }),
+              event.text ? h('span', { class: 'timeline__text', text: event.text }) : null,
+              event.at ? h('span', null, timeEl(event.at, formatDateTime(event.at))) : null,
+            ),
+          ),
+        )
+      : [h('li', { class: 'timeline__empty', text: 'Noch nichts passiert, was das Team sehen kann.' })]),
+  );
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -2722,13 +3099,48 @@ async function logout() {
   showGuest('Du hast dich abgemeldet.');
 }
 
+/** Dateien auf die Karte eines Datei-Felds ziehen: setzt die Auswahl und löst „change“ aus (wie „wählen …“). */
+function enableDrop(input) {
+  if (!input) return;
+  const zone = input.closest('.app-card, .card') ?? input.parentElement;
+  zone.classList.add('drop-zone');
+  zone.dataset.drop = input.id;
+  let depth = 0;
+  zone.addEventListener('dragenter', (event) => {
+    if (!event.dataTransfer?.types?.includes('Files')) return;
+    event.preventDefault();
+    depth++;
+    zone.classList.add('is-dragover');
+  });
+  zone.addEventListener('dragover', (event) => {
+    if (!event.dataTransfer?.types?.includes('Files')) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  });
+  zone.addEventListener('dragleave', () => {
+    depth = Math.max(0, depth - 1);
+    if (!depth) zone.classList.remove('is-dragover');
+  });
+  zone.addEventListener('drop', (event) => {
+    if (!event.dataTransfer?.files?.length) return;
+    event.preventDefault();
+    depth = 0;
+    zone.classList.remove('is-dragover');
+    if (input.disabled) return;
+    const transfer = new DataTransfer();
+    const files = input.multiple ? [...event.dataTransfer.files] : [event.dataTransfer.files[0]];
+    for (const dropped of files) transfer.items.add(dropped);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
 function init() {
   shell = createShell({ root: $('#team-shell'), page: 'team', defaultSection: DEFAULT_SECTION, onSelect: onTab, onSignOut: logout });
-  shell.mountOverview($('#uebersicht-kacheln'));
   teamAddonsUi = initTeamAddons({
     teamCall,
     handleAccessError,
-    isAdmin,
+    isAdmin: () => can('addons'),
     openPlayer: (uuid) => openPlayerFromAddons(uuid),
     getTeamAddons: () => state.teamAddons,
     loadTeamAddons,
@@ -2742,13 +3154,14 @@ function init() {
     },
     onNavigate: (params) => syncHash('addons', params),
   });
-  overview = initTeamOverview({ shell, teamCall, isAdmin, getMe: () => state.me, getLive: () => live, refreshLive, actionLabel });
+  overview = initTeamOverview({ shell, teamCall, can, getMe: () => state.me, getLive: () => live, refreshLive, actionLabel });
   activity = initTeamActivity({ shell });
   cosmeticsUi = initTeamCosmetics({ teamCall, onChange: () => quickSearch?.invalidate() });
   quickSearch = initTeamSearch({
     shell,
     teamCall,
-    isAdmin,
+    isAdmin: () => can('cosmetics'),
+    can,
     sections: () => shell.sections().map((id) => AREAS.team.sections.find((section) => section.id === id)).filter(Boolean),
     getTeamAddons: () => state.teamAddons,
     getCosmetics: () => cosmeticsUi.list(),
@@ -2758,16 +3171,17 @@ function init() {
       ticket: (id) => jump('support', { anfrage: id }),
       report: (id) => jump('meldungen', { meldung: id }),
       submission: (id) => jump('addons', { einreichung: id }),
-      addon: (id) => (isAdmin() ? jump('addons', { addon: id }) : window.open(`/addons#${encodeURIComponent(id)}`, '_blank', 'noopener')),
+      addon: (id) => (can('addons') ? jump('addons', { addon: id }) : window.open(`/addons#${encodeURIComponent(id)}`, '_blank', 'noopener')),
       cosmetic: (id) => jump('cosmetics', { cosmetic: id }),
     },
     actions: () =>
       [
-        { id: 'neuigkeit', label: 'Neue Neuigkeit schreiben', text: 'Neuigkeiten → Editor öffnen', icon: 'news', keywords: ['news', 'beitrag', 'schreiben', 'neuigkeit'], run: () => jumpThen('neuigkeiten', () => openEditor(null)) },
-        { id: 'sperren', label: 'Spieler sperren …', text: 'Sperren → Name und Grund eingeben', icon: 'ban', keywords: ['bann', 'ban', 'sperre'], run: () => jumpThen('sperren', () => $('#sperre-name').focus()) },
-        isAdmin() ? { id: 'mitglied', label: 'Mitglied hinzufügen …', text: 'Team → Spielername und Rolle', icon: 'user-plus', keywords: ['team', 'moderator', 'admin', 'rolle'], run: () => jumpThen('team', () => $('#mitglied-name').focus()) } : null,
-        isAdmin() ? { id: 'cosmetic', label: 'Cosmetic veröffentlichen …', text: 'Cosmetics → .cosmetic.json wählen', icon: 'sparkles', keywords: ['cosmetic', 'hut', 'flügel', 'cape', 'katalog'], run: () => jumpThen('cosmetics', () => $('#cosmetic-datei').focus()) } : null,
-        isAdmin() ? { id: 'update', label: 'Launcher-Update veröffentlichen …', text: 'Updates → Installer und update.json', icon: 'download', keywords: ['update', 'version', 'release', 'installer'], run: () => jumpThen('updates', () => $('#upload-exe').focus()) } : null,
+        can('news') ? { id: 'neuigkeit', label: 'Neue Neuigkeit schreiben', text: 'Neuigkeiten → Editor öffnen', icon: 'news', keywords: ['news', 'beitrag', 'schreiben', 'neuigkeit'], run: () => jumpThen('neuigkeiten', () => openEditor(null)) } : null,
+        can('moderation') ? { id: 'sperren', label: 'Spieler sperren …', text: 'Sperren → Name und Grund eingeben', icon: 'ban', keywords: ['bann', 'ban', 'sperre'], run: () => jumpThen('sperren', () => $('#sperre-name').focus()) } : null,
+        can('team.manage') ? { id: 'abzeichen', label: 'Community-Abzeichen vergeben …', text: 'Team & Rollen → Partner, Creator, Botschafter', icon: 'star', keywords: ['abzeichen', 'partner', 'creator', 'botschafter', 'badge'], run: () => jumpThen('team', () => $('#abzeichen-name').focus()) } : null,
+        can('team.manage') ? { id: 'mitglied', label: 'Mitglied hinzufügen …', text: 'Team → Spielername und Rolle', icon: 'user-plus', keywords: ['team', 'moderator', 'admin', 'rolle'], run: () => jumpThen('team', () => $('#mitglied-name').focus()) } : null,
+        can('cosmetics') ? { id: 'cosmetic', label: 'Cosmetic veröffentlichen …', text: 'Cosmetics → .cosmetic.json wählen', icon: 'sparkles', keywords: ['cosmetic', 'hut', 'flügel', 'cape', 'katalog'], run: () => jumpThen('cosmetics', () => $('#cosmetic-datei').focus()) } : null,
+        can('updates') ? { id: 'update', label: 'Launcher-Update veröffentlichen …', text: 'Updates → Installer und update.json', icon: 'download', keywords: ['update', 'version', 'release', 'installer'], run: () => jumpThen('updates', () => $('#upload-exe').focus()) } : null,
       ].filter(Boolean),
   });
   $('#team-erneut').addEventListener('click', start);
@@ -2823,6 +3237,10 @@ function init() {
   renderAddonCheck();
 
   $('#mitglied-form').addEventListener('submit', onMemberSubmit);
+  $('#mitglied-rolle').addEventListener('change', updateMemberPreview);
+  $('#abzeichen-form').addEventListener('submit', onBadgeSubmit);
+  // Ziehen und Ablegen: Dateien auf die Karte ziehen statt „wählen …“
+  for (const id of ['upload-exe', 'upload-json', 'upload-mac', 'addon-dateien', 'cosmetic-datei']) enableDrop($(`#${id}`));
 
   $('#support-filter').addEventListener('click', (event) => {
     const button = event.target.closest('button[data-status]');

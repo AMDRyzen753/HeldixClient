@@ -38,6 +38,11 @@
 #                        Client-Geheimnis aus dieser Datei übernehmen (schaltet die Anmeldung ein; Datei danach löschen)
 #   --ms-client-id <id>  andere App-ID (nur für eigene Builds: muss die von Mojang freigegebene App-ID des Launchers sein)
 #   --no-minecraft-login Anmeldung mit dem Minecraft-Konto wieder ausschalten (löscht auch das gespeicherte Geheimnis)
+#   --world-domain <name>
+#                        Welt teilen: Adressen <code>.<name> (Standard welt.<domain>). Ohne Option schaltet der Installer
+#                        Welt teilen nur ein, wenn *.welt.<domain> per DNS auf diesen Server zeigt. Braucht Port 25565/tcp.
+#   --world-port <zahl>  anderer Port für Welt teilen (Standard 25565; Spieler geben dann <code>.<name>:<zahl> ein)
+#   --no-world           Welt teilen ausschalten
 #   --uninstall          alles entfernen (Daten bleiben); mit --purge auch Daten und Zertifikate
 #   --yes                keine Rückfragen
 #   --help               diese Hilfe
@@ -87,6 +92,14 @@ ASSUME_YES=0
 MS_LOGIN=""
 MS_CLIENT_ID=""
 MS_SECRET_SOURCE=""
+# Welt teilen: "" = wie bisher bzw. automatisch (nur mit DNS-Eintrag *.welt.<domain>), 1 = einschalten, 0 = ausschalten
+WORLD=""
+WORLD_DOMAIN=""
+WORLD_PORT=""
+WORLD_BIND=""
+# Ergebnis der Prüfung: WORLD_ENABLE=1 schreibt die Einstellungen, WORLD_ACTIVE=1 heißt danach an (auch unverändert)
+WORLD_ENABLE=0
+WORLD_ACTIVE=0
 
 # ---------------------------------------------------------------------------------------------
 # Ausgabe
@@ -148,6 +161,11 @@ parse_args() {
       --ms-client-id=*) MS_CLIENT_ID="${1#*=}"; [ "$MS_LOGIN" != 0 ] || die "--ms-client-id passt nicht zu --no-minecraft-login."; MS_LOGIN=1; shift ;;
       --ms-client-secret-file) MS_SECRET_SOURCE="${2:-}"; [ "$MS_LOGIN" != 0 ] || die "--ms-client-secret-file passt nicht zu --no-minecraft-login."; MS_LOGIN=1; shift 2 ;;
       --ms-client-secret-file=*) MS_SECRET_SOURCE="${1#*=}"; [ "$MS_LOGIN" != 0 ] || die "--ms-client-secret-file passt nicht zu --no-minecraft-login."; MS_LOGIN=1; shift ;;
+      --world-domain) WORLD_DOMAIN="${2:-}"; [ "$WORLD" != 0 ] || die "--world-domain passt nicht zu --no-world."; WORLD=1; shift 2 ;;
+      --world-domain=*) WORLD_DOMAIN="${1#*=}"; [ "$WORLD" != 0 ] || die "--world-domain passt nicht zu --no-world."; WORLD=1; shift ;;
+      --world-port) WORLD_PORT="${2:-}"; shift 2 ;;
+      --world-port=*) WORLD_PORT="${1#*=}"; shift ;;
+      --no-world) [ "$WORLD" != 1 ] || die "--world-domain und --no-world schließen sich aus."; WORLD=0; shift ;;
       --uninstall) UNINSTALL=1; shift ;;
       --purge) PURGE=1; shift ;;
       --yes|-y) ASSUME_YES=1; shift ;;
@@ -184,6 +202,23 @@ parse_args() {
     case "$PORT" in ''|*[!0-9]*) die "Ungültiger Port: $PORT" ;; esac
     [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] || die "Port bitte zwischen 1024 und 65535 wählen."
     check_microsoft_args
+    check_world_args
+  fi
+}
+
+check_world_args() {
+  WORLD_DOMAIN="$(printf '%s' "$WORLD_DOMAIN" | tr '[:upper:]' '[:lower:]')"
+  WORLD_DOMAIN="${WORLD_DOMAIN%.}"
+  if [ "$WORLD" = 1 ]; then
+    [ -n "$WORLD_DOMAIN" ] || die "Bitte die Domain für Welt teilen angeben, z. B. --world-domain welt.example.de."
+    printf '%s' "$WORLD_DOMAIN" | grep -Eq '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' \
+      || die "Ungültige Domain für Welt teilen: $WORLD_DOMAIN"
+  fi
+  if [ -n "$WORLD_PORT" ]; then
+    case "$WORLD_PORT" in *[!0-9]*) die "Ungültiger Port für Welt teilen: $WORLD_PORT" ;; esac
+    # Der Dienst läuft ohne Rechte: Ports unter 1024 darf er nicht öffnen
+    [ "$WORLD_PORT" -ge 1024 ] && [ "$WORLD_PORT" -le 65535 ] || die "Port für Welt teilen bitte zwischen 1024 und 65535 wählen (Standard 25565)."
+    [ "$WORLD_PORT" != "$PORT" ] || die "Welt teilen braucht einen anderen Port als der Dienst selbst ($PORT)."
   fi
 }
 
@@ -298,10 +333,15 @@ site_hosts() {
   if [ "$WWW" = 1 ]; then printf 'www.%s\n' "$DOMAIN"; fi
 }
 
+local_addresses() {
+  # alle IP-Adressen dieses Servers, eine je Zeile
+  ip -o addr show 2>/dev/null | awk '{split($4, a, "/"); print a[1]}' || hostname -I 2>/dev/null | tr ' ' '\n'
+}
+
 check_dns() {
   [ "$HTTPS" = 1 ] || return 0
   local host resolved local_ips match ip missing=""
-  local_ips="$(ip -o addr show 2>/dev/null | awk '{split($4, a, "/"); print a[1]}' || hostname -I 2>/dev/null | tr ' ' '\n')"
+  local_ips="$(local_addresses)"
   for host in $(site_hosts); do
     resolved="$(getent ahosts "$host" 2>/dev/null | awk '{print $1}' | sort -u || true)"
     if [ -z "$resolved" ]; then
@@ -323,6 +363,94 @@ check_dns() {
   if [ -n "$missing" ]; then
     confirm "Trotzdem weitermachen? (Caddy holt die Zertifikate von selbst, sobald die DNS-Einträge stimmen)" \
       || die "Abgebrochen. Erst A- bzw. AAAA-Einträge für$missing auf diesen Server setzen."
+  fi
+}
+
+env_value() {
+  # env_value <schlüssel>: Wert aus der bestehenden env-Datei (leer, wenn nicht gesetzt)
+  sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null | tail -n1
+}
+
+check_world() {
+  # Welt teilen (Relay auf eigenem TCP-Port, nicht über Caddy). Ohne Option: bestehende Einstellung behalten, sonst nur
+  # einschalten, wenn ein zufälliger Name unter *.<welt-domain> auf diesen Server zeigt und der Port frei ist.
+  [ "$WORLD" != 0 ] || return 0
+  local existing mode probe resolved local_ips ip match=0 v6=0
+  existing="$(env_value HELDIX_DIENST_WELT_DOMAIN)"
+  [ -n "$WORLD_DOMAIN" ] || WORLD_DOMAIN="$existing"
+  if [ -z "$WORLD_DOMAIN" ] && [ -n "$DOMAIN" ]; then WORLD_DOMAIN="welt.$DOMAIN"; fi
+  [ -n "$WORLD_PORT" ] || WORLD_PORT="$(env_value HELDIX_DIENST_WELT_PORT)"
+  [ -n "$WORLD_PORT" ] || WORLD_PORT=25565
+  if [ -z "$WORLD_DOMAIN" ]; then
+    info "Welt teilen: aus (ohne --domain bitte --world-domain angeben)"
+    return 0
+  fi
+  # option: --world-domain; bestehend: schon eingerichtet (bleibt, auch wenn die DNS-Prüfung nur warnt); sonst automatisch
+  if [ "$WORLD" = 1 ]; then mode=option; elif [ -n "$existing" ]; then mode=bestehend; else mode=automatisch; fi
+
+  if port_taken_by_other "$WORLD_PORT"; then
+    warn "Welt teilen: Port $WORLD_PORT/tcp ist schon belegt (von $PORT_OWNER), z. B. von einem Minecraft-Server."
+    if [ "$mode" = bestehend ]; then
+      warn "Die Einstellung bleibt; solange der Port belegt ist, schaltet der Dienst Welt teilen von selbst ab (Log)."
+    else
+      warn "Welt teilen bleibt aus."
+    fi
+    warn "Anderer Port: --world-port <zahl> (Spieler geben dann <code>.$WORLD_DOMAIN:<zahl> ein)."
+    return 0
+  fi
+
+  # Platzhalter-Eintrag prüfen: ein zufälliger Name muss auflösen
+  probe="pruefung-$RANDOM$RANDOM.$WORLD_DOMAIN"
+  resolved="$(getent ahosts "$probe" 2>/dev/null | awk '{print $1}' | sort -u || true)"
+  if [ -z "$resolved" ]; then
+    case "$mode" in
+      automatisch)
+        info "Welt teilen: aus – *.$WORLD_DOMAIN hat (noch) keinen DNS-Eintrag. Einen A- bzw. AAAA-Eintrag *.$WORLD_DOMAIN"
+        info "auf diesen Server setzen und den Installer erneut ausführen (oder mit --world-domain <name> einschalten)."
+        return 0
+        ;;
+      option)
+        warn "DNS: *.$WORLD_DOMAIN hat (noch) keinen Eintrag – ohne ihn findet niemand die geteilten Welten."
+        confirm "Welt teilen trotzdem einschalten?" || { info "Welt teilen bleibt aus."; return 0; }
+        ;;
+      *) warn "DNS: *.$WORLD_DOMAIN hat (noch) keinen Eintrag – Welt teilen bleibt eingestellt, ist aber so nicht erreichbar." ;;
+    esac
+  else
+    local_ips="$(local_addresses)"
+    for ip in $resolved; do
+      if printf '%s\n' "$local_ips" | grep -qx "$ip"; then
+        match=1
+        case "$ip" in *:*) v6=1 ;; esac
+      fi
+    done
+    if [ "$match" = 1 ]; then
+      ok "DNS: *.$WORLD_DOMAIN zeigt auf diesen Server"
+    elif [ "$mode" = automatisch ]; then
+      info "Welt teilen: aus – *.$WORLD_DOMAIN zeigt auf $(printf '%s' "$resolved" | tr '\n' ' ')– keine Adresse dieses Servers."
+      info "Hinter NAT oder einem Load-Balancer mit --world-domain $WORLD_DOMAIN einschalten."
+      return 0
+    else
+      warn "DNS: *.$WORLD_DOMAIN zeigt auf $(printf '%s' "$resolved" | tr '\n' ' ')– keine Adresse dieses Servers (hinter NAT normal)."
+    fi
+  fi
+  # zeigt der Eintrag (auch) per IPv6 hierher: auf IPv4 und IPv6 lauschen
+  [ "$v6" = 1 ] && WORLD_BIND="::"
+  WORLD_ENABLE=1
+  WORLD_ACTIVE=1
+}
+
+configure_world() {
+  # Welt teilen in der env-Datei (die systemd-Unit liest sie als EnvironmentFile)
+  if [ "$WORLD" = 0 ]; then
+    sed -i '/^HELDIX_DIENST_WELT_DOMAIN=/d; /^HELDIX_DIENST_WELT_PORT=/d; /^HELDIX_DIENST_WELT_BIND=/d' "$ENV_FILE"
+    ok "Welt teilen: aus"
+    return 0
+  fi
+  if [ "$WORLD_ENABLE" = 1 ]; then
+    set_env HELDIX_DIENST_WELT_DOMAIN "$WORLD_DOMAIN"
+    set_env HELDIX_DIENST_WELT_PORT "$WORLD_PORT"
+    [ -z "$WORLD_BIND" ] || set_env HELDIX_DIENST_WELT_BIND "$WORLD_BIND"
+    ok "Welt teilen: an (Adressen <code>.$WORLD_DOMAIN, Port $WORLD_PORT/tcp)"
   fi
 }
 
@@ -462,6 +590,7 @@ EOF
   # Öffentliche Adresse der API: daraus die Umleitungs-URI der Anmeldung mit dem Minecraft-Konto (allein ändert sie nichts)
   if [ -n "$API_DOMAIN" ]; then set_env HELDIX_DIENST_API_URL "https://$API_DOMAIN"; fi
   configure_microsoft
+  configure_world
   # Update-Schlüssel aus dem Installer (fehlt er, bleibt Veröffentlichen im Team-Bereich aus)
   if [ -f "$INSTALL_DIR/app/update-public-key.pem" ]; then
     install -m 644 "$INSTALL_DIR/app/update-public-key.pem" "$UPDATE_KEY_FILE"
@@ -581,10 +710,12 @@ EOF
 # Webseite
 $DOMAIN {
 	import sicherheit
+	# Voice Chat im Browser (/einladung, /voice): Mikrofon nur für die eigene Seite, WebSocket über wss:// auf
+	# derselben Adresse (manche Browser zählen wss:// nicht zu 'self').
 	header {
-		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'"
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; connect-src 'self' wss://$DOMAIN; frame-ancestors 'none'; base-uri 'self'; form-action 'none'"
 		X-Frame-Options "DENY"
-		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Permissions-Policy "camera=(), microphone=(self), geolocation=()"
 	}
 	@static path /assets/* /images/* /fonts/*
 	header @static Cache-Control "public, max-age=604800"
@@ -604,7 +735,9 @@ $DOMAIN {
 	}
 	# Anmeldung, Spieler- und Team-Bereich: der Dienst unter /api auf derselben Adresse (Cookie der Webseite,
 	# CSP connect-src 'self'). Wie bei der API: ohne Grenze für den Anfragekörper, gestreamt, ohne Zeitgrenze
-	# für die Antwort; der Dienst sieht die IP des Besuchers über X-Forwarded-For.
+	# für die Antwort; der Dienst sieht die IP des Besuchers über X-Forwarded-For. Auch der Voice Chat im Browser
+	# (wss://$DOMAIN/api/v1/voice) läuft hier durch: reverse_proxy reicht WebSockets (Upgrade) von selbst weiter,
+	# samt Origin, Cookie und Sec-WebSocket-Protocol; ohne Kompression (encode gilt nicht für /api).
 	handle /api/* {
 		uri strip_prefix /api
 		reverse_proxy 127.0.0.1:$PORT
@@ -742,13 +875,27 @@ EOF
 }
 
 open_firewall() {
-  [ "$HTTPS" = 1 ] || return 0
+  # Ports 80 und 443 (Caddy) und der Port für Welt teilen (Relay direkt im Dienst)
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-    ufw allow 80/tcp >/dev/null && ufw allow 443/tcp >/dev/null
-    ok "Firewall (ufw): Ports 80 und 443 offen"
+    if [ "$HTTPS" = 1 ]; then
+      ufw allow 80/tcp >/dev/null && ufw allow 443/tcp >/dev/null
+      ok "Firewall (ufw): Ports 80 und 443 offen"
+    fi
+    if [ "$WORLD_ACTIVE" = 1 ]; then
+      ufw allow "$WORLD_PORT/tcp" >/dev/null
+      ok "Firewall (ufw): Port $WORLD_PORT/tcp für Welt teilen offen"
+    fi
   elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 2>&1; then
-    firewall-cmd --permanent --add-service=http --add-service=https >/dev/null && firewall-cmd --reload >/dev/null
-    ok "Firewall (firewalld): Ports 80 und 443 offen"
+    if [ "$HTTPS" = 1 ]; then
+      firewall-cmd --permanent --add-service=http --add-service=https >/dev/null
+    fi
+    if [ "$WORLD_ACTIVE" = 1 ]; then
+      firewall-cmd --permanent --add-port="$WORLD_PORT/tcp" >/dev/null
+    fi
+    if [ "$HTTPS" = 1 ] || [ "$WORLD_ACTIVE" = 1 ]; then
+      firewall-cmd --reload >/dev/null
+      ok "Firewall (firewalld): $([ "$HTTPS" = 1 ] && printf 'Ports 80 und 443 ')$([ "$WORLD_ACTIVE" = 1 ] && printf 'Port %s/tcp (Welt teilen) ' "$WORLD_PORT")offen"
+    fi
   fi
 }
 
@@ -833,6 +980,19 @@ summary() {
   else
     echo "  Voice Chat (/v1/voice) ist an. Ausschalten: HELDIX_DIENST_VOICE=0 in $ENV_FILE, danach systemctl restart $UNIT."
   fi
+  local world_domain world_port
+  world_domain="$(env_value HELDIX_DIENST_WELT_DOMAIN)"
+  world_port="$(env_value HELDIX_DIENST_WELT_PORT)"
+  if [ -n "$world_domain" ]; then
+    echo "  Welt teilen ist an: Welten heißen <code>.$world_domain (Port ${world_port:-25565}/tcp, direkt zum Dienst)."
+    echo "  Dafür muss der DNS-Eintrag *.$world_domain (A bzw. AAAA) auf diesen Server zeigen. Ausschalten: --no-world."
+    if [ -n "$world_port" ] && [ "$world_port" != 25565 ]; then
+      echo "  Achtung: anderer Port als 25565 – Spieler ohne HeldixClient geben die Adresse mit :$world_port ein."
+    fi
+  else
+    echo "  Welt teilen ist aus. Einschalten: DNS-Eintrag *.welt.${DOMAIN:-<domain>} (A bzw. AAAA) auf diesen Server setzen"
+    echo "  und den Installer erneut ausführen (oder mit --world-domain <name>). Port 25565/tcp muss frei sein."
+  fi
   echo ""
   if [ "$WEBSITE" = 1 ] && grep -q '^HELDIX_DIENST_MS_CLIENT_ID=' "$ENV_FILE" 2>/dev/null; then
     echo "  Anmeldung mit dem Minecraft-Konto auf der Webseite ist an. Einmalig in Azure (dieselbe App-Registrierung wie der Launcher)"
@@ -903,6 +1063,7 @@ main() {
   ensure_tools
   check_ports
   check_dns
+  check_world
   if [ "$HTTPS" = 1 ]; then
     info "Webseite: $([ "$WEBSITE" = 1 ] && printf %s "$DOMAIN" || printf aus) · API: $API_DOMAIN · interner Port: $PORT"
   else

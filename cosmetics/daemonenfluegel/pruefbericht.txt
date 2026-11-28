@@ -1,0 +1,35 @@
+Prüfbericht: Dämonenflügel (daemonenfluegel), Slot back, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  DemonWings/DemonWings.cosmetic.json  816,2 KB  sha256 0372c310725161e60e8517ef67f5b52031780174002c1381a573b034144eed4a
+  DemonWings/textures/DemonWings_albedo.png  2,4 KB  sha256 3663843937697f15b1a91525c1c3e5651fca36b6c9350d6ee59a10b9c8e4fd34
+  DemonWings/textures/DemonWings_emissive_anim.png  12,8 KB  sha256 7b9a91dca82e7fc604e2bb888121bb22101899c9aadcd2fdf2d69988645df151
+
+Größe:
+  vorher: 831,4 KB (JSON 816,2 KB + Texturen)
+  nachher: Manifest 286,3 KB von höchstens 512,0 KB, Umschlag etwa 289,3 KB von 544,0 KB
+
+Mesh:
+  6352 Vertices, 3176 Dreiecke, 21 Knochen, größte Rundung der Positionen 0,0156 px
+  4960 Vertices mit mehreren Knochen (Membran); starr gerechnet bis 3,140 px Abweichung → weiche Haut (mesh.joints/weights)
+
+Animationen (10), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 72 Frames bei 24 fps, Schleife, 20 Spuren, 236 Keys
+  Flap: 28 Frames bei 24 fps, Schleife, 20 Spuren, 408 Keys
+  Glide: 48 Frames bei 24 fps, Schleife, 20 Spuren, 378 Keys
+  Hover: 14 Frames bei 24 fps, Schleife, 20 Spuren, 254 Keys
+  Fold: 72 Frames bei 24 fps, Schleife, 20 Spuren, 148 Keys
+  Emote: 96 Frames bei 24 fps, Schleife, 20 Spuren, 864 Keys
+  Celebrate: 37 Frames bei 24 fps, einmalig, 20 Spuren, 408 Keys
+  Takeoff: 33 Frames bei 24 fps, einmalig, 20 Spuren, 454 Keys
+  Land: 19 Frames bei 24 fps, einmalig, 20 Spuren, 252 Keys
+  Hurt: 13 Frames bei 24 fps, einmalig, 20 Spuren, 204 Keys
+  zusammen 3606 Keys statt 9072 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1500°, move 0,0000 px, scale 0,0000
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,1031 px (Emote, Frame 39, Vertex 2699)
+
+Zustände: 15 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,25 s
+Partikel: 3 Vorschläge → 6 Einträge (.L-Knochen auch für .R)
+Leuchten: 8 Bilder, 2 Ticks je Bild, Puls 1,6 s zwischen 0,5 und 1
+Texturen: texture.png 128 × 128 (2,4 KB) = DemonWings_albedo.png; glow.png 128 × 1024 (12,8 KB) = DemonWings_emissive_anim.png

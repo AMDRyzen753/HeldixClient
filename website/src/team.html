@@ -1,17 +1,17 @@
-<!--seite {"titel":"Team-Bereich","beschreibung":"Team-Bereich des Heldix-Dienstes für Moderatoren und Admins.","noindex":true}-->
+<!--seite {"titel":"Team-Bereich","beschreibung":"Team-Bereich des Heldix-Dienstes: Meldungen, Support, Spieler, Inhalte und Verwaltung – je nach Rolle.","noindex":true}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
-<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/bereich-bausteine.css">
+<link rel="stylesheet" href="/bereich.css">
 <link rel="stylesheet" href="/team.css">
 <script type="module" src="/team.js"></script>
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body class="bereich bereich--team" data-seite="team">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap app">
+<main id="inhalt" class="bereich-main">
   <noscript><p class="notice">Für den Team-Bereich braucht dein Browser JavaScript.</p></noscript>
 
   <div class="app-loading" id="team-laden" role="status">
@@ -24,7 +24,7 @@
       <div class="badge-lg warn">{{icon:warning}}</div>
       <h1>Der Heldix-Dienst antwortet gerade nicht</h1>
       <p class="lead" id="team-fehler-text">Bitte versuche es in ein paar Minuten noch einmal.</p>
-      <p><button class="button" type="button" id="team-erneut">{{icon:refresh}}Erneut versuchen</button></p>
+      <p><button class="btn btn--primary" type="button" id="team-erneut">{{icon:refresh}}Erneut versuchen</button></p>
     </div>
   </div>
 
@@ -37,7 +37,7 @@
       <p class="notice" id="team-gast-hinweis" role="alert" hidden></p>
       <!-- Nur, wenn der Dienst die Anmeldung mit dem Minecraft-Konto anbietet (anmelden.js); danach geht es zurück nach /team -->
       <div class="mc-login" id="team-minecraft" data-mit-minecraft hidden>
-        <a class="button big mc-login-button" id="team-minecraft-knopf" data-minecraft-knopf href="/api/v1/web/auth/microsoft?ziel=team">{{icon:loader-vanilla}}<span>Mit Minecraft-Konto anmelden</span></a>
+        <a class="btn btn--primary btn--lg mc-login-button" id="team-minecraft-knopf" data-minecraft-knopf href="/api/v1/web/auth/microsoft?ziel=team">{{icon:loader-vanilla}}<span>Mit Minecraft-Konto anmelden</span></a>
         <p class="mc-login-hint">{{icon:microsoft}}<span>Du meldest dich bei Microsoft an – dort liegt dein Minecraft-Konto. Wir übernehmen nur deinen Minecraft-Namen und deine UUID.</span></p>
         <p class="mc-login-alt">Oder im <a href="/konto">Konto-Bereich</a> über den Launcher oder im Spiel anmelden.</p>
       </div>
@@ -127,11 +127,7 @@
 
     <!-- Übersicht (team-overview.js): was ansteht, neueste Einträge, Zahlen des Dienstes; darunter alle Bereiche -->
     <div class="panel" id="panel-uebersicht" role="tabpanel" aria-labelledby="tab-uebersicht" tabindex="0" hidden>
-      <div id="team-dashboard" class="dash"></div>
-      <section class="dash-areas" aria-labelledby="uebersicht-bereiche-titel">
-        <h2 class="dash-section-title" id="uebersicht-bereiche-titel">Alle Bereiche</h2>
-        <div id="uebersicht-kacheln"></div>
-      </section>
+      <div id="team-dashboard" class="team-dash"></div>
     </div>
 
     <!-- Meldungen -->
@@ -144,6 +140,7 @@
         </div>
         <button class="button tiny ghost" type="button" id="meldungen-neu">{{icon:refresh}}Aktualisieren</button>
       </div>
+      <div id="meldungen-werkzeuge"></div>
       <div id="meldungen" class="stack"></div>
     </div>
 
@@ -208,6 +205,7 @@
         <div class="card-head">
           <h2>Gesperrte Spieler <span class="muted" id="sperren-anzahl"></span></h2>
         </div>
+        <div id="sperren-werkzeuge"></div>
         <div id="sperren"></div>
       </div>
     </div>
@@ -316,9 +314,9 @@
     <div class="panel" id="panel-addons" role="tabpanel" aria-labelledby="tab-addons" tabindex="0" hidden>
       <p class="notice small-notice key-notice" id="addon-schluessel-fehlt" role="alert" hidden>Im Heldix-Dienst ist kein Update-Schlüssel eingerichtet (<code>HELDIX_DIENST_UPDATE_KEY</code>). Ohne ihn kann der Dienst keine Signatur prüfen und nimmt kein Addon an – weder Team-Uploads noch Freigaben. Hochladen geht trotzdem.</p>
       <div class="subtabs" role="tablist" aria-label="Addons" id="addon-unterreiter">
-        <button class="subtab" type="button" role="tab" id="unterreiter-einreichungen" data-tab="einreichungen" aria-controls="addons-einreichungen" aria-selected="true">{{icon:file}}Einreichungen<span class="count" id="count-einreichungen" hidden></span></button>
-        <button class="subtab" type="button" role="tab" id="unterreiter-veroeffentlicht" data-tab="veroeffentlicht" data-admin aria-controls="addons-veroeffentlicht" aria-selected="false" tabindex="-1" hidden>{{icon:addons}}Veröffentlicht</button>
-        <button class="subtab" type="button" role="tab" id="unterreiter-meldungen" data-tab="meldungen" aria-controls="addons-meldungen" aria-selected="false" tabindex="-1">{{icon:flag}}Meldungen<span class="count" id="count-addon-meldungen" hidden></span></button>
+        <button class="subtab" type="button" role="tab" id="unterreiter-einreichungen" data-tab="einreichungen" data-recht="addons" aria-controls="addons-einreichungen" aria-selected="true">{{icon:file}}Einreichungen<span class="count" id="count-einreichungen" hidden></span></button>
+        <button class="subtab" type="button" role="tab" id="unterreiter-veroeffentlicht" data-tab="veroeffentlicht" data-recht="addons" aria-controls="addons-veroeffentlicht" aria-selected="false" tabindex="-1" hidden>{{icon:addons}}Veröffentlicht</button>
+        <button class="subtab" type="button" role="tab" id="unterreiter-meldungen" data-tab="meldungen" data-recht="addon-reports" aria-controls="addons-meldungen" aria-selected="false" tabindex="-1">{{icon:flag}}Meldungen<span class="count" id="count-addon-meldungen" hidden></span></button>
       </div>
 
       <!-- Einreichungen von Spielern -->
@@ -460,30 +458,52 @@
 
     <!-- Team -->
     <div class="panel" id="panel-team" role="tabpanel" aria-labelledby="tab-team" tabindex="0" hidden>
-      <div class="app-card">
-        <h2>Mitglied hinzufügen</h2>
-        <p class="muted small">Der Spieler muss sich schon einmal mit HeldixClient beim Dienst angemeldet haben. Danach richtet er im Team-Bereich seine Zwei-Faktor-Anmeldung ein.</p>
-        <form class="ban-form" id="mitglied-form" novalidate>
-          <label class="field">
-            <span>Spielername</span>
-            <input class="input" id="mitglied-name" name="name" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="16" required>
-          </label>
-          <label class="field">
-            <span>Rolle</span>
-            <select class="input select" id="mitglied-rolle" name="role">
-              <option value="moderator">Moderator</option>
-              <option value="admin">Admin</option>
-            </select>
-          </label>
-          <button class="button small" type="submit">{{icon:user-plus}}Hinzufügen</button>
-        </form>
-        <p class="form-error" id="mitglied-fehler" role="alert" hidden></p>
-        <p class="hint"><strong>Moderatoren</strong> sehen Meldungen, Spieler und Sperren, schreiben Neuigkeiten, prüfen Addon-Einreichungen (ablehnen) und bearbeiten Addon-Meldungen. <strong>Admins</strong> zusätzlich: Addons freigeben und veröffentlichen, Updates, Team, Protokoll, Cape zurücksetzen und Spielerdaten löschen.</p>
-      </div>
-      <div class="app-card">
-        <div class="card-head"><h2>Mitglieder <span class="muted" id="mitglieder-anzahl"></span></h2></div>
+      <section class="card" aria-labelledby="mitglieder-titel">
+        <div class="card__head">
+          <span class="icon-tile">{{icon:friends}}</span>
+          <div><h2 class="card__title" id="mitglieder-titel">Mitglieder <span class="text-3" id="mitglieder-anzahl"></span></h2><p class="tiny text-3" id="mitglieder-hinweis">Rolle wählen zeigt vorher, welche Rechte sich ändern.</p></div>
+        </div>
+        <div id="mitglieder-werkzeuge"></div>
         <div id="mitglieder"></div>
+      </section>
+      <div class="panel-grid">
+        <section class="card" id="mitglied-karte" aria-labelledby="mitglied-titel" data-recht="team.manage">
+          <div class="card__head"><span class="icon-tile">{{icon:user-plus}}</span><div><h2 class="card__title" id="mitglied-titel">Mitglied hinzufügen</h2><p class="tiny text-3">Der Spieler muss sich schon einmal mit HeldixClient beim Dienst angemeldet haben. Danach richtet er im Team-Bereich seine Zwei-Faktor-Anmeldung ein.</p></div></div>
+          <form class="ban-form role-form" id="mitglied-form" novalidate>
+            <label class="field">
+              <span class="field__label">Spielername</span>
+              <input class="input" id="mitglied-name" name="name" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="16" required>
+            </label>
+            <label class="field">
+              <span class="field__label">Rolle</span>
+              <select class="input select" id="mitglied-rolle" name="role"></select>
+            </label>
+            <button class="btn btn--primary btn--sm" type="submit">{{icon:plus}}Hinzufügen</button>
+          </form>
+          <div class="role-preview" id="mitglied-vorschau" aria-live="polite"></div>
+          <p class="form-error" id="mitglied-fehler" role="alert" hidden></p>
+        </section>
+        <section class="card" id="abzeichen-karte" aria-labelledby="abzeichen-titel">
+          <div class="card__head"><span class="icon-tile icon-tile--reward">{{icon:star}}</span><div><h2 class="card__title" id="abzeichen-titel">Community-Abzeichen <span class="text-3" id="abzeichen-anzahl"></span></h2><p class="tiny text-3">Partner, Creator und Botschafter – sichtbar im Spiel, im Launcher und auf der Webseite. Keine Team-Rechte.</p></div></div>
+          <form class="ban-form role-form" id="abzeichen-form" data-recht="team.manage" novalidate>
+            <label class="field">
+              <span class="field__label">Spielername</span>
+              <input class="input" id="abzeichen-name" name="name" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="16" required>
+            </label>
+            <label class="field">
+              <span class="field__label">Abzeichen</span>
+              <select class="input select" id="abzeichen-wahl" name="badge"></select>
+            </label>
+            <button class="btn btn--primary btn--sm" type="submit">{{icon:check}}Vergeben</button>
+          </form>
+          <p class="form-error" id="abzeichen-fehler" role="alert" hidden></p>
+          <div id="abzeichen"></div>
+        </section>
       </div>
+      <section class="card" aria-labelledby="rechte-titel">
+        <div class="card__head"><span class="icon-tile">{{icon:shield}}</span><div><h2 class="card__title" id="rechte-titel">Rechte der Rollen</h2><p class="tiny text-3">Was jede Rolle darf. Alle Rollen brauchen die Zwei-Faktor-Anmeldung; der letzte Admin bleibt immer.</p></div></div>
+        <div id="rechte"></div>
+      </section>
     </div>
 
     <!-- Protokoll -->
@@ -496,6 +516,7 @@
           </div>
           <button class="button tiny ghost" type="button" id="protokoll-neu">{{icon:refresh}}Aktualisieren</button>
         </div>
+        <div id="protokoll-werkzeuge"></div>
         <div id="protokoll"></div>
         <div class="card-actions">
           <button class="button small ghost" type="button" id="protokoll-mehr" hidden>Ältere Einträge laden</button>

@@ -30,6 +30,12 @@ public class FriendsStrip extends AbstractButton {
 
 	@Override
 	public void onPress(InputWithModifiers input) {
+		// hat ein Freund eine Welt geöffnet: direkt zu Heldix-Welten (dort „Beitreten“)
+		net.minecraft.client.Minecraft mc = net.minecraft.client.Minecraft.getInstance();
+		if (mc.level == null && Social.online() && !dev.heldixclient.share.WorldInvites.open().isEmpty()) {
+			dev.heldixclient.ui.Shell.open(mc, dev.heldixclient.ui.Shell.Page.HELDIX_WORLDS, mc.gui.screen());
+			return;
+		}
 		action.run();
 	}
 
@@ -41,8 +47,17 @@ public class FriendsStrip extends AbstractButton {
 		int x = getX();
 		int y = getY();
 		int h = getHeight();
-		String text = online.isEmpty() ? "Keine Freunde online" : online.size() == 1 ? online.getFirst().name() + " ist online"
+		String text = online.isEmpty() ? "Keine Freunde online" : online.size() == 1 ? online.getFirst().shownName() + " ist online"
 				: online.size() + " Freunde online";
+		// Party (ab Heldix-Dienst 1.12.0) bzw. eine Einladung vorne
+		dev.heldixclient.social.Party.State party = dev.heldixclient.social.Party.party();
+		if (party != null) text = "Party " + party.members().size() + "/" + party.max() + "  ·  " + text;
+		else if (!dev.heldixclient.social.Party.invites().isEmpty()) text = dev.heldixclient.social.Party.invites().getLast().fromName() + " lädt dich in die Party ein  ·  " + text;
+		// geteilte Welt eines Freundes: „In Welt von X · Beitreten“
+		List<dev.heldixclient.share.WorldService.FriendWorld> worlds = Social.online() ? dev.heldixclient.share.WorldInvites.open() : List.of();
+		if (!worlds.isEmpty()) {
+			text = worlds.size() == 1 ? "In Welt von " + worlds.getFirst().hostName() + "  ·  Beitreten" : worlds.size() + " Welten von Freunden offen  ·  Beitreten";
+		}
 		int faces = Math.min(4, online.size());
 		int facesW = faces == 0 ? 0 : 12 + (faces - 1) * 9 + 6;
 		int w = 22 + facesW + Ui.width(text, Ui.Font.SMALL) + 18;

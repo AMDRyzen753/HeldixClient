@@ -1,0 +1,33 @@
+Prüfbericht: Runenkreis (runenkreis), Slot aura, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  auras/ArcaneSigil/ArcaneSigil.cosmetic.json  815,7 KB  sha256 98fcbbd7e18332451f550ef1abfa3420abc348ea32c807011c621676d2499fef
+  auras/ArcaneSigil/textures/ArcaneSigil_albedo.png  3,8 KB  sha256 4aec050e2a055f49210dafc9ed3018b54a819a45d40a250f2383fc041c437510
+  auras/ArcaneSigil/textures/ArcaneSigil_emissive_anim.png  45,8 KB  sha256 83ea46833b261f73c57059963933deb73acd75547a7cca5213168593fbd0b8ae
+
+Größe:
+  vorher: 865,2 KB (JSON 815,7 KB + Texturen)
+  nachher: Manifest 251,0 KB von höchstens 512,0 KB, Umschlag etwa 255,1 KB von 544,0 KB
+
+Mesh:
+  5104 Vertices, 2552 Dreiecke, 28 Knochen, größte Rundung der Positionen 0,0152 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+
+Animationen (7), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 96 Frames bei 24 fps, Schleife, 28 Spuren, 1039 Keys
+  Active: 48 Frames bei 24 fps, Schleife, 28 Spuren, 869 Keys
+  Sneak: 144 Frames bei 24 fps, Schleife, 28 Spuren, 968 Keys
+  Emote: 120 Frames bei 24 fps, Schleife, 28 Spuren, 1476 Keys
+  Spawn: 31 Frames bei 24 fps, einmalig, 28 Spuren, 656 Keys
+  Despawn: 25 Frames bei 24 fps, einmalig, 28 Spuren, 552 Keys
+  Celebrate: 41 Frames bei 24 fps, einmalig, 28 Spuren, 1304 Keys
+  zusammen 6864 Keys statt 29932 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1493°, move 0,0200 px, scale 0,0020
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,0598 px (Despawn, Frame 5, Vertex 3861)
+
+Zustände: 15 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,35 s
+Partikel: 6 Vorschläge → 6 Einträge (.L-Knochen auch für .R)
+  gekürzt: minecraft:enchant an sg_inner: 30/s → 20/s (Grenze)
+Leuchten: 8 Bilder, 2 Ticks je Bild, Puls 2,5 s zwischen 0,6 und 1
+Texturen: texture.png 256 × 256 (3,8 KB) = ArcaneSigil_albedo.png; glow.png 256 × 2048 (45,8 KB) = ArcaneSigil_emissive_anim.png

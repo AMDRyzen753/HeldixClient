@@ -3,6 +3,11 @@
 //
 // Protokoll: jede Nachricht = 4 Byte Opcode + 4 Byte Länge (Little Endian) + JSON.
 // Ablauf: HANDSHAKE { v: 1, client_id } → Discord antwortet mit READY → SET_ACTIVITY.
+//
+// Zuverlässigkeit: Läuft Discord nicht (oder startet neu), versucht der Launcher es still alle 15 Sekunden wieder und
+// setzt den Status nach dem Verbinden sofort. Änderungen werden gebündelt: höchstens alle 15 Sekunden eine (Discord
+// erlaubt 5 in 20 Sekunden, mehr wird verworfen), immer der neueste Stand und nur, wenn er sich geändert hat.
+// stop() löscht den Status und wartet kurz, bis die Nachricht raus ist (Beenden des Launchers).
 
 import { randomUUID } from 'node:crypto';
 import net from 'node:net';
@@ -15,21 +20,33 @@ const OP_CLOSE = 2;
 const OP_PING = 3;
 const OP_PONG = 4;
 
-/** Discord erlaubt höchstens 5 Statusänderungen in 20 Sekunden. */
-const MIN_SEND_INTERVAL_MS = 4000;
-const RETRY_MS = 15000;
+/** Höchstens alle 15 Sekunden eine Statusänderung (Discord erlaubt 5 in 20 Sekunden). */
+export const MIN_SEND_INTERVAL_MS = 15_000;
+/** So oft wird still neu verbunden, wenn Discord nicht läuft oder die Verbindung abbricht */
+export const RETRY_MS = 15_000;
+/** Discord legt die Pipe als discord-ipc-0 … discord-ipc-9 an */
+const PIPES = 10;
 
 export interface DiscordActivity {
   details?: string;
   state?: string;
   timestamps?: { start?: number; end?: number };
   assets?: { large_image?: string; large_text?: string; small_image?: string; small_text?: string };
+  /** Spielerzahl („(3 von 8)“ hinter state), id zufällig je Party */
+  party?: { id: string; size: [number, number] };
   buttons?: { label: string; url: string }[];
 }
 
 export type DiscordConnection = DiscordStatus;
 
-function pipePath(index: number): string {
+/** Nur für Tests: eigene Pipe (nie die echte von Discord) und kürzere Zeiten */
+export interface DiscordRpcOptions {
+  pipePath?(index: number): string;
+  minIntervalMs?: number;
+  retryMs?: number;
+}
+
+export function pipePath(index: number): string {
   if (process.platform === 'win32') return `\\\\?\\pipe\\discord-ipc-${index}`;
   const base = process.env.XDG_RUNTIME_DIR ?? process.env.TMPDIR ?? process.env.TMP ?? process.env.TEMP ?? '/tmp';
   return path.join(base, `discord-ipc-${index}`);
@@ -58,6 +75,9 @@ export class DiscordRpc {
   private sendTimer: NodeJS.Timeout | null = null;
   private retryTimer: NodeJS.Timeout | null = null;
   private status: DiscordConnection = { state: 'disabled' };
+  private readonly minInterval: number;
+  private readonly retryMs: number;
+  private readonly pipe: (index: number) => string;
 
   /** Wird bei jeder Änderung der Verbindung aufgerufen (für die Anzeige in den Einstellungen). */
   onStatus: (status: DiscordConnection) => void = () => undefined;
@@ -65,10 +85,20 @@ export class DiscordRpc {
   constructor(
     private readonly clientId: string,
     private readonly log: (message: string) => void = () => undefined,
-  ) {}
+    options: DiscordRpcOptions = {},
+  ) {
+    this.minInterval = options.minIntervalMs ?? MIN_SEND_INTERVAL_MS;
+    this.retryMs = options.retryMs ?? RETRY_MS;
+    this.pipe = options.pipePath ?? pipePath;
+  }
 
   get connection(): DiscordConnection {
     return this.status;
+  }
+
+  /** zuletzt gewünschter Status (null = keiner) */
+  get current(): DiscordActivity | null {
+    return this.activity;
   }
 
   /** Verbindet (und hält die Verbindung), bis stop() aufgerufen wird. */
@@ -82,13 +112,25 @@ export class DiscordRpc {
     void this.connect();
   }
 
-  /** Löscht den Status in Discord und trennt die Verbindung. */
-  stop(): void {
-    if (!this.enabled) return;
+  /** Löscht den Status in Discord und trennt die Verbindung; fertig, sobald die Nachricht raus ist (höchstens 500 ms). */
+  stop(): Promise<void> {
+    if (!this.enabled) return Promise.resolve();
     this.enabled = false;
-    if (this.ready) this.write(OP_FRAME, { cmd: 'SET_ACTIVITY', args: { pid: process.pid, activity: null }, nonce: randomUUID() });
+    let sent: Promise<void> = Promise.resolve();
+    const socket = this.socket;
+    if (this.ready && socket) {
+      sent = new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 500);
+        timer.unref();
+        socket.write(this.frame(OP_FRAME, JSON.stringify({ cmd: 'SET_ACTIVITY', args: { pid: process.pid, activity: null }, nonce: randomUUID() })), () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
     this.disconnect();
     this.setStatus({ state: 'disabled' });
+    return sent;
   }
 
   /** Neuer Status (null = keiner). Wird gebündelt und erst bei bestehender Verbindung gesendet. */
@@ -108,8 +150,8 @@ export class DiscordRpc {
     // Beim erneuten Versuch bleibt die letzte Meldung (z. B. "Discord läuft nicht") stehen, damit nichts flackert
     if (this.status.state === 'disabled') this.setStatus({ state: 'connecting' });
     let socket: net.Socket | null = null;
-    for (let i = 0; i < 10 && !socket; i++) {
-      socket = await openPipe(pipePath(i)).catch(() => null);
+    for (let i = 0; i < PIPES && !socket; i++) {
+      socket = await openPipe(this.pipe(i)).catch(() => null);
     }
     this.connecting = false;
     if (!this.enabled) {
@@ -126,6 +168,8 @@ export class DiscordRpc {
     socket.on('data', (chunk: Buffer) => this.onData(chunk));
     socket.on('error', () => undefined);
     socket.on('close', () => {
+      // eine ältere Verbindung (nach stop/start) meldet sich nicht mehr
+      if (this.socket !== socket) return;
       const wasReady = this.ready;
       this.socket = null;
       this.ready = false;
@@ -159,7 +203,7 @@ export class DiscordRpc {
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
       void this.connect();
-    }, RETRY_MS);
+    }, this.retryMs);
     this.retryTimer.unref();
   }
 
@@ -168,6 +212,11 @@ export class DiscordRpc {
     while (this.buffer.length >= 8) {
       const op = this.buffer.readInt32LE(0);
       const length = this.buffer.readInt32LE(4);
+      if (length < 0 || length > 1024 * 1024) {
+        // kaputte Nachricht: Verbindung neu aufbauen
+        this.socket?.destroy();
+        return;
+      }
       if (this.buffer.length < 8 + length) return;
       const body = this.buffer.subarray(8, 8 + length).toString('utf8');
       this.buffer = this.buffer.subarray(8 + length);
@@ -200,6 +249,10 @@ export class DiscordRpc {
       const user = data?.user?.global_name ?? data?.user?.username ?? null;
       this.log(`Verbunden${user ? ` als ${user}` : ''}`);
       this.setStatus({ state: 'connected', user });
+      // nach dem (Neu-)Verbinden sofort den aktuellen Stand
+      if (this.sendTimer) clearTimeout(this.sendTimer);
+      this.sendTimer = null;
+      this.lastSend = 0;
       this.scheduleSend(true);
     } else if (payload.cmd === 'SET_ACTIVITY' && payload.evt == null) {
       this.log(payload.data ? 'Status gesetzt' : 'Status gelöscht');
@@ -211,7 +264,7 @@ export class DiscordRpc {
 
   private scheduleSend(immediate = false): void {
     if (this.sendTimer) return;
-    const wait = immediate ? 0 : Math.max(800, this.lastSend + MIN_SEND_INTERVAL_MS - Date.now());
+    const wait = immediate ? 0 : Math.max(Math.min(800, this.minInterval), this.lastSend + this.minInterval - Date.now());
     this.sendTimer = setTimeout(() => {
       this.sendTimer = null;
       this.flush();
@@ -224,7 +277,7 @@ export class DiscordRpc {
     const json = JSON.stringify(this.activity);
     if (json === this.sentJson) return;
     const sinceLast = Date.now() - this.lastSend;
-    if (sinceLast < MIN_SEND_INTERVAL_MS) {
+    if (sinceLast < this.minInterval) {
       this.scheduleSend();
       return;
     }

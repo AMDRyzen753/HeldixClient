@@ -1,7 +1,7 @@
 // Hilfen für Tests der Cosmetics: PNGs bauen, gültige Manifeste für jeden Slot und signierte Umschläge.
 import { randomBytes, sign, type KeyObject } from 'node:crypto';
 import { crc32, deflateSync } from 'node:zlib';
-import { COSMETIC_SIGNATURE_PREFIX, type CosmeticSlot } from '../src/cosmetics-format';
+import { COSMETIC_SIGNATURE_PREFIX, encodeInt16LE, encodeInt8, encodeUint16LE, encodeUint8, type CosmeticSlot } from '../src/cosmetics-format';
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -129,6 +129,72 @@ export const VALID: Record<CosmeticSlot, () => Manifest> = {
 export function manifestOf(slot: CosmeticSlot, changes: Manifest = {}): Manifest {
   const manifest: Manifest = { ...VALID[slot](), ...changes };
   for (const [key, value] of Object.entries(changes)) if (value === undefined) delete manifest[key];
+  return manifest;
+}
+
+// ---------- Format 2 (Mesh mit Keyframes) ----------
+
+/** Quaternion für eine Drehung um y (Grad) als Int16 × 32767. */
+export function quatY(degrees: number): number[] {
+  const half = (degrees * Math.PI) / 360;
+  return [0, Math.round(Math.sin(half) * 32767), 0, Math.round(Math.cos(half) * 32767)];
+}
+
+/** Ein Rechteck (4 Vertices, 2 Dreiecke) an zwei Knochen, 1/32 Pixel; dazu Normalen, UVs, Dreiecke. */
+export function quadMesh(): Record<string, unknown> {
+  const px = (v: number) => v * 32;
+  return {
+    vertexCount: 4,
+    triangleCount: 2,
+    positions: encodeInt16LE([0, 0, 2, 4, 0, 2, 4, 8, 2, 0, 8, 2].map(px)),
+    normals: encodeInt8([0, 0, 127, 0, 0, 127, 0, 0, 127, 0, 0, 127]),
+    uvs: encodeUint16LE([0, 0, 65535, 0, 65535, 65535, 0, 65535]),
+    bones: encodeUint8([0, 0, 1, 1]),
+    triangles: encodeUint16LE([0, 1, 2, 0, 2, 3]),
+  };
+}
+
+const base2 = (id: string, slot: CosmeticSlot, name: string): Manifest => ({ ...base(id, slot, name), format: 2 });
+
+/** Gültiges Manifest nach Format 2 (wie aus dem Blender-Konverter), je Slot ohne Cape. */
+export function valid2(slot: Exclude<CosmeticSlot, 'cape'> = 'back'): Manifest {
+  const manifest: Manifest = {
+    ...base2(`mesh-${slot}`, slot, `Mesh ${slot}`),
+    texture: dataUrl(makePng(16, 16)),
+    glow: dataUrl(makePng(16, 16 * 4)),
+    emissive: { frames: 4, frametimeTicks: 2, pulse: { period: 2, min: 0.5, max: 1 } },
+    mesh: quadMesh(),
+    bones: [
+      { name: 'root', parent: -1, pivot: [0, 0, 2], tail: [0, 4, 2] },
+      { name: 'wing.L', parent: 0, pivot: [4, 0, 2], tail: [4, 8, 2] },
+    ],
+    animations: {
+      Idle: {
+        fps: 24,
+        frames: 48,
+        loop: true,
+        tracks: [{ bone: 1, rot: { keys: encodeUint16LE([0, 24, 47]), values: encodeInt16LE([...quatY(0), ...quatY(30), ...quatY(1)]) } }],
+      },
+      Hurt: {
+        fps: 24,
+        frames: 12,
+        loop: false,
+        tracks: [
+          {
+            bone: 0,
+            move: { keys: encodeUint16LE([0, 6]), values: encodeInt16LE([0, 0, 0, 0, -32, 0]) },
+            scale: { keys: encodeUint16LE([0]), values: encodeUint16LE([1000]) },
+          },
+        ],
+      },
+    },
+    states: { idle: 'Idle', hurt: 'Hurt', blendSeconds: 0.25 },
+    particles: [
+      { bone: 1, at: 'tail', particle: 'minecraft:dust', color: '#ffcc00', perSecond: 2, states: ['Idle'] },
+      { bone: 0, at: 'pivot', particle: 'end_rod', perSecond: 0.5 },
+    ],
+  };
+  if (slot === 'companion') manifest.attach = { origin: [14, -6, 1], side: 'left' };
   return manifest;
 }
 

@@ -8,7 +8,7 @@ const from = path.join(root, 'src', 'renderer');
 const to = path.join(root, 'dist', 'renderer');
 
 await mkdir(to, { recursive: true });
-for (const file of ['index.html', 'styles.css', 'instances.css', 'home.css', 'store.css', 'friends.css', 'profile.css', 'logo.svg', 'background.svg']) {
+for (const file of ['index.html', 'splash.html', 'styles.css', 'instances.css', 'home.css', 'store.css', 'friends.css', 'profile.css', 'setup.css', 'notifications.css', 'worlds.css', 'logo.svg', 'background.svg', 'tray.png', 'tray@2x.png']) {
   await cp(path.join(from, file), path.join(to, file));
 }
 
@@ -31,3 +31,8 @@ await cp(path.join(root, 'node_modules', 'three', 'LICENSE'), path.join(to, 'ven
 const capesFrom = path.join(root, '..', 'mod', 'src', 'main', 'resources', 'assets', 'heldixclient', 'textures', 'cape');
 await mkdir(path.join(to, 'capes'), { recursive: true });
 await cp(capesFrom, path.join(to, 'capes'), { recursive: true });
+
+// Bilder des Discord-Status für die Vorschau in den Einstellungen (dieselben wie auf der Webseite unter /discord/,
+// erzeugt von scripts/render-discord-art.mjs)
+await mkdir(path.join(to, 'discord'), { recursive: true });
+await cp(path.join(root, '..', 'website', 'src', 'discord'), path.join(to, 'discord'), { recursive: true });

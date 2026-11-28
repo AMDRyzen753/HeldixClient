@@ -1,17 +1,17 @@
-<!--seite {"titel":"Konto","beschreibung":"Dein Konto beim Heldix-Dienst: Cape und Cosmetics, Freunde, Nachrichten, Support, eigene Addons, Privatsphäre, Sicherheit und deine Daten.","noindex":true}-->
+<!--seite {"titel":"Konto","beschreibung":"Dein Konto beim Heldix-Dienst: Freunde, Nachrichten und Party im Browser, Einladungen, Cosmetics, Welten, Support, Privatsphäre, Sicherheit und deine Daten.","noindex":true}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
-<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/bereich-bausteine.css">
+<link rel="stylesheet" href="/bereich.css">
 <link rel="stylesheet" href="/konto.css">
 <script type="module" src="/konto.js"></script>
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body class="bereich bereich--konto" data-seite="konto">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap app">
+<main id="inhalt" class="bereich-main">
   <noscript><p class="notice">Für den Konto-Bereich braucht dein Browser JavaScript.</p></noscript>
 
   <!-- Wird geprüft -->
@@ -25,7 +25,7 @@
       <div class="badge-lg warn">{{icon:warning}}</div>
       <h1>Der Heldix-Dienst antwortet gerade nicht</h1>
       <p class="lead" id="konto-fehler-text">Bitte versuche es in ein paar Minuten noch einmal.</p>
-      <p><button class="button" type="button" id="konto-erneut">{{icon:refresh}}Erneut versuchen</button></p>
+      <p><button class="btn btn--primary" type="button" id="konto-erneut">{{icon:refresh}}Erneut versuchen</button></p>
     </div>
   </div>
 
@@ -34,17 +34,17 @@
     <div class="gate-head">
       <div class="badge-lg">{{icon:user}}</div>
       <h1>Dein HeldixClient-Konto</h1>
-      <p class="lead">Hier verwaltest du dein Profil beim Heldix-Dienst: Cape und Cosmetics, Freunde, Nachrichten, eigene Addons, Privatsphäre, Sicherheit und deine Daten.</p>
+      <p class="lead">Freunde, Nachrichten und Party – auch unterwegs auf dem Handy –, dazu Cape und Cosmetics, deine geteilten Welten, eigene Addons, Privatsphäre, Sicherheit und deine Daten beim Heldix-Dienst.</p>
     </div>
     <p class="notice" id="konto-gast-hinweis" role="alert" hidden></p>
     <!-- Nur, wenn der Dienst die Anmeldung mit dem Minecraft-Konto anbietet (anmelden.js) -->
     <div class="mc-login" id="konto-minecraft" data-mit-minecraft hidden>
-      <a class="button big mc-login-button" id="konto-minecraft-knopf" data-minecraft-knopf href="/api/v1/web/auth/microsoft">{{icon:loader-vanilla}}<span>Mit Minecraft-Konto anmelden</span></a>
+      <a class="btn btn--primary btn--lg mc-login-button" id="konto-minecraft-knopf" data-minecraft-knopf href="/api/v1/web/auth/microsoft">{{icon:loader-vanilla}}<span>Mit Minecraft-Konto anmelden</span></a>
       <p class="mc-login-hint">{{icon:microsoft}}<span>Du meldest dich bei Microsoft an – dort liegt dein Minecraft-Konto. Wir übernehmen nur deinen Minecraft-Namen und deine UUID.</span></p>
     </div>
     <h2 class="gate-sub"><span data-ohne-minecraft>So meldest du dich an</span><span data-mit-minecraft hidden>Oder über Launcher und Spiel</span></h2>
     <div class="ways">
-      <div class="app-card way">
+      <div class="card way">
         <div class="way-head"><span class="way-icon">{{icon:loader-heldix}}</span><h3>Im Launcher</h3></div>
         <ol class="steps">
           <li><span>HeldixClient-Launcher öffnen und mit deinem Minecraft-Konto anmelden.</span></li>
@@ -52,7 +52,7 @@
           <li><span>Dein Browser öffnet diese Seite – fertig.</span></li>
         </ol>
       </div>
-      <div class="app-card way">
+      <div class="card way">
         <div class="way-head"><span class="way-icon">{{icon:modules}}</span><h3>Im Spiel</h3></div>
         <ol class="steps">
           <li><span><strong>Heldix-Menü</strong> öffnen (rechte Umschalttaste).</span></li>
@@ -68,51 +68,177 @@
     <p class="gate-foot">Noch kein HeldixClient? <a href="/#download">Hier herunterladen</a>.</p>
   </div>
 
-  <!-- Angemeldet: Rahmen mit Seitenleiste (app-shell.js baut Leiste und Kopfzeile) -->
+  <!-- Angemeldet: Rahmen mit Seitenleiste (app-shell.js baut Seitenleiste, Seitenkopf und die untere Leiste) -->
   <div class="shell" id="konto-app" hidden>
     <div class="shell-main">
     <div class="shell-content">
 
-    <!-- Übersicht -->
+    <!-- Übersicht (konto-uebersicht.js) -->
     <div class="panel" id="panel-uebersicht" role="tabpanel" aria-labelledby="tab-uebersicht" tabindex="0" hidden>
-      <section class="app-card ov-hero" aria-labelledby="uebersicht-gruss">
-        <div class="ov-hero-main">
-          <span class="ov-avatar" id="uebersicht-avatar"></span>
-          <div class="ov-hero-text">
-            <p class="ov-eyebrow" id="uebersicht-tageszeit">Willkommen</p>
-            <h2 id="uebersicht-gruss">Hallo!</h2>
-            <p class="ov-lead" id="uebersicht-zeile">Hier siehst du auf einen Blick, was in deinem Konto los ist.</p>
+      <div class="dash" id="uebersicht-dash">
+        <section class="card card--accent dash__hero" aria-labelledby="uebersicht-gruss">
+          <figure class="figur" id="uebersicht-figur" data-webgl="">
+            <canvas id="uebersicht-canvas" role="img" aria-label="Deine Figur mit Skin, Cape und Cosmetics. Ziehen zum Drehen."></canvas>
+            <span class="figur__ersatz" id="uebersicht-figur-ersatz" hidden></span>
+            <figcaption class="chip" id="uebersicht-figur-hinweis">{{icon:refresh}}Zum Drehen ziehen</figcaption>
+          </figure>
+          <div class="dash__hero-text">
+            <span class="eyebrow" id="uebersicht-tageszeit">Willkommen</span>
+            <h2 class="h2" id="uebersicht-gruss">Hallo!</h2>
+            <p class="text-2" id="uebersicht-zeile">Hier siehst du auf einen Blick, was in deinem Konto los ist.</p>
+            <p class="dash__status" id="uebersicht-status-zeile" hidden></p>
+            <ul class="look-chips" id="uebersicht-look" aria-label="Du trägst gerade"></ul>
+            <div class="btn-group" id="uebersicht-aktionen">
+              <a class="btn btn--primary" href="#reiter=profil" data-goto="profil">{{icon:cape}}Cosmetics ändern</a>
+              <button class="btn btn--secondary" type="button" id="uebersicht-status-knopf">{{icon:edit}}Status setzen</button>
+            </div>
           </div>
-        </div>
-        <div class="ov-actions" id="uebersicht-aktionen" role="group" aria-label="Schnellaktionen">
-          <a class="ov-action" href="#reiter=freunde" data-aktion="freund">{{icon:user-plus}}<span>Freund hinzufügen</span></a>
-          <a class="ov-action" href="#reiter=nachrichten" data-aktion="nachricht">{{icon:chat}}<span>Nachricht schreiben</span></a>
-          <a class="ov-action" href="#reiter=profil" data-aktion="cosmetics">{{icon:cape}}<span>Cosmetics wählen</span></a>
-          <a class="ov-action" href="#reiter=support" data-aktion="support">{{icon:info}}<span>Support-Anfrage</span></a>
-          <a class="ov-action" href="#reiter=addons" data-aktion="addon">{{icon:addons}}<span>Addon einreichen</span></a>
-        </div>
-      </section>
-
-      <div class="ov-status" id="uebersicht-status" role="list" aria-label="Stand deines Kontos"></div>
-
-      <div class="ov-columns">
-        <section class="app-card ov-activity" aria-labelledby="uebersicht-aktivitaet-titel">
-          <div class="ov-card-head">
-            <h2 id="uebersicht-aktivitaet-titel">Letzte Aktivität</h2>
-            <button class="button tiny ghost" type="button" id="aktivitaet-gelesen" hidden>{{icon:check}}Alles gelesen</button>
-          </div>
-          <div id="uebersicht-aktivitaet"></div>
-          <p class="hint ov-activity-hint">Neue Nachrichten, Anfragen, Antworten des Teams und Entscheidungen zu deinen Addons. Was du gesehen hast, merkt sich nur dieser Browser.</p>
         </section>
-        <section class="app-card ov-all" aria-labelledby="uebersicht-bereiche-titel">
-          <h2 id="uebersicht-bereiche-titel">Alle Bereiche</h2>
-          <div id="uebersicht-kacheln"></div>
-        </section>
+        <section class="card card--reward dash__invite" id="uebersicht-einladen" aria-labelledby="uebersicht-einladen-titel" hidden></section>
+        <section class="card dash__friends" id="uebersicht-freunde" aria-labelledby="uebersicht-freunde-titel"></section>
+        <section class="card dash__messages" id="uebersicht-nachrichten" aria-labelledby="uebersicht-nachrichten-titel"></section>
+        <section class="card dash__party" id="uebersicht-party" aria-labelledby="uebersicht-party-titel"></section>
+        <section class="card dash__worlds" id="uebersicht-welten" aria-labelledby="uebersicht-welten-titel"></section>
+        <section class="card dash__support" id="uebersicht-support" aria-labelledby="uebersicht-support-titel"></section>
+        <section class="card dash__security" id="uebersicht-sicherheit" aria-labelledby="uebersicht-sicherheit-titel"></section>
       </div>
+    </div>
+
+    <!-- Freunde (konto-freunde.js) -->
+    <div class="panel" id="panel-freunde" role="tabpanel" aria-labelledby="tab-freunde" tabindex="0" hidden>
+      <div class="friends-layout">
+        <section class="card friends-main" aria-labelledby="freunde-titel">
+          <div class="card__head">
+            <span class="icon-tile icon-tile--online">{{icon:friends}}</span>
+            <div><h2 class="card__title" id="freunde-titel">Freunde <span class="text-3" id="freunde-anzahl"></span></h2><p class="tiny text-3" id="freunde-stand">Wird geladen …</p></div>
+            <span class="chip chip--online live-chip card__head-end" id="freunde-live" hidden><span class="dot dot--online"></span>Live</span>
+          </div>
+          <div class="friends-tools">
+            <div class="segmented segmented--sm" role="radiogroup" aria-label="Freunde filtern" id="freunde-filter">
+              <label><input type="radio" name="freunde-filter" value="alle" checked><span>Alle</span></label>
+              <label><input type="radio" name="freunde-filter" value="online"><span>Online</span></label>
+              <label><input type="radio" name="freunde-filter" value="favoriten"><span>Favoriten</span></label>
+            </div>
+            <label class="search search--inline">{{icon:search}}<span class="sr-only">Freunde durchsuchen</span><input class="input" type="search" id="freunde-suche" placeholder="Name oder Spitzname" autocomplete="off" spellcheck="false" maxlength="24"></label>
+          </div>
+          <div id="freunde"></div>
+        </section>
+        <div class="friends-side">
+          <section class="card" aria-labelledby="freund-hinzufuegen-titel">
+            <div class="card__head"><span class="icon-tile">{{icon:user-plus}}</span><div><h2 class="card__title" id="freund-hinzufuegen-titel">Freund hinzufügen</h2><p class="tiny text-3">Mit dem Minecraft-Namen</p></div></div>
+            <form class="inline-form" id="freund-form" novalidate>
+              <label class="field">
+                <span class="field__label">Spielername</span>
+                <input class="input" id="freund-name" name="name" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="16" placeholder="z. B. Steve" required>
+              </label>
+              <button class="btn btn--primary btn--sm" type="submit">{{icon:send}}Anfrage senden</button>
+            </form>
+            <p class="form-error" id="freund-fehler" role="alert" hidden></p>
+            <p class="tiny text-3">Dein Freund muss HeldixClient nutzen und schon einmal online gewesen sein. Noch nicht dabei? <a href="#reiter=einladen" data-goto="einladen">Lade ihn ein</a>.</p>
+          </section>
+          <section class="card" id="anfragen-karte" aria-labelledby="anfragen-titel" hidden>
+            <div class="card__head"><span class="icon-tile">{{icon:bell}}</span><div><h2 class="card__title" id="anfragen-titel">Anfragen</h2></div></div>
+            <div id="anfragen"></div>
+          </section>
+          <section class="card" id="vorschlaege-karte" aria-labelledby="vorschlaege-titel" hidden>
+            <div class="card__head"><span class="icon-tile icon-tile--voice">{{icon:sparkles}}</span><div><h2 class="card__title" id="vorschlaege-titel">Vielleicht kennst du</h2><p class="tiny text-3">Freunde deiner Freunde, die in Vorschlägen erscheinen möchten</p></div></div>
+            <div id="vorschlaege"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- Nachrichten (konto-chat.js) -->
+    <div class="panel" id="panel-nachrichten" role="tabpanel" aria-labelledby="tab-nachrichten" hidden>
+      <div class="chat card" id="chat">
+        <div class="conv-list" id="unterhaltungen" aria-label="Unterhaltungen"></div>
+        <div class="chat-pane" id="chat-bereich">
+          <div class="chat-empty" id="chat-leer">
+            {{icon:chat}}
+            <p>Wähle links einen Freund, um zu schreiben.</p>
+          </div>
+          <div class="chat-active" id="chat-aktiv" hidden>
+            <div class="chat-head">
+              <button class="btn btn--ghost btn--icon btn--sm back" type="button" id="chat-zurueck" aria-label="Zurück zu den Unterhaltungen">{{icon:back}}</button>
+              <button class="chat-who" type="button" id="chat-profil" aria-label="Profil ansehen">
+                <span id="chat-avatar"></span>
+                <span class="chat-who__text"><span class="chat-name" id="chat-name"></span><span class="row-sub" id="chat-status"></span></span>
+              </button>
+              <div class="chat-actions">
+                <button class="btn btn--secondary btn--sm" type="button" id="chat-party" hidden>{{icon:friends}}<span class="label">In Party einladen</span></button>
+                <button class="btn btn--ghost btn--sm" type="button" id="chat-melden">{{icon:flag}}<span class="label">Melden</span></button>
+                <button class="btn btn--ghost btn--sm danger-text" type="button" id="chat-blockieren">{{icon:ban}}<span class="label">Blockieren</span></button>
+              </div>
+            </div>
+            <div class="chat-scroll" id="chat-verlauf" role="log" aria-live="polite" aria-labelledby="chat-name" tabindex="0"></div>
+            <p class="chat-typing" id="chat-tippt" aria-live="polite" hidden></p>
+            <div class="chat-reply" id="chat-antwort" hidden>
+              {{icon:reply}}
+              <span class="chat-reply__text"><strong id="chat-antwort-wer"></strong><span id="chat-antwort-text"></span></span>
+              <button class="btn btn--ghost btn--icon btn--sm" type="button" id="chat-antwort-weg" aria-label="Antwort abbrechen">{{icon:close}}</button>
+            </div>
+            <form class="chat-form" id="chat-form" novalidate>
+              <button class="btn btn--secondary btn--icon" type="button" id="chat-teilen" aria-label="Server, Welt oder Einladung teilen" aria-haspopup="dialog">{{icon:plus}}</button>
+              <label class="sr-only" for="chat-text">Nachricht</label>
+              <input class="input" id="chat-text" name="text" maxlength="500" autocomplete="off" placeholder="Nachricht schreiben …">
+              <button class="btn btn--primary" type="submit" id="chat-senden" aria-label="Senden">{{icon:send}}<span class="label">Senden</span></button>
+            </form>
+            <p class="form-error chat-error" id="chat-fehler" role="alert" hidden></p>
+            <div class="chat-note">
+              <span>{{icon:info}}Nachrichten werden höchstens 30 Tage gespeichert und sind nicht Ende-zu-Ende verschlüsselt.</span>
+              <span class="counter" id="chat-zaehler">0/500</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Party (konto-party.js) -->
+    <div class="panel" id="panel-party" role="tabpanel" aria-labelledby="tab-party" tabindex="0" hidden>
+      <div class="party-layout">
+        <div id="party-einladungen"></div>
+        <div id="party-inhalt"></div>
+      </div>
+    </div>
+
+    <!-- Freunde einladen (konto-einladungen.js) -->
+    <div class="panel" id="panel-einladen" role="tabpanel" aria-labelledby="tab-einladen" tabindex="0" hidden>
+      <section class="card card--reward invite-card" id="einladen-karte" aria-labelledby="einladen-titel" hidden>
+        <div class="card__head">
+          <span class="icon-tile icon-tile--reward"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="9" width="16" height="11" rx="2"/><path d="M3.5 9h17"/><path d="M12 9v11"/><path d="M12 9c-1.5-3.5-5.5-4-5.5-1.5S10 9 12 9z"/><path d="M12 9c1.5-3.5 5.5-4 5.5-1.5S14 9 12 9z"/></svg></span>
+          <div>
+            <h2 class="card__title" id="einladen-titel">Freunde einladen</h2>
+            <p class="small text-2">Schick deinen Link an Freunde. Wer neu zu HeldixClient kommt und annimmt, wird dein Freund und bekommt die Willkommens-Belohnung – und mit jedem bestätigten Freund kommst du deinen eigenen Belohnungen näher.</p>
+          </div>
+        </div>
+        <div id="einladen-inhalt"></div>
+      </section>
+      <section class="card" id="einladen-aus" hidden>
+        <p class="text-2">Einladungen gibt es mit dem Heldix-Dienst ab Version 1.11.0. Dieser Dienst kennt sie noch nicht.</p>
+      </section>
     </div>
 
     <!-- Profil & Cosmetics -->
     <div class="panel" id="panel-profil" role="tabpanel" aria-labelledby="tab-profil" tabindex="0" hidden>
+      <section class="card profile-status" aria-labelledby="profil-status-titel">
+        <div class="card__head">
+          <span class="icon-tile">{{icon:edit}}</span>
+          <div><h2 class="card__title" id="profil-status-titel">Profil</h2><p class="tiny text-3">Statustext und „Nicht stören“ – Freunde sehen beides in Spiel, Launcher und hier.</p></div>
+          <span class="saved card__head-end" id="profil-gespeichert" aria-live="polite"></span>
+        </div>
+        <form class="status-form" id="status-form" novalidate>
+          <label class="field">
+            <span class="field-row"><span class="field__label">Statustext</span><span class="counter" id="status-zaehler"></span></span>
+            <input class="input" id="status-text" name="statusText" maxlength="40" autocomplete="off" placeholder="z. B. Baue an der Brücke">
+          </label>
+          <div class="btn-group">
+            <button class="btn btn--primary btn--sm" type="submit" id="status-speichern">{{icon:check}}Speichern</button>
+            <button class="btn btn--ghost btn--sm" type="button" id="status-loeschen">Löschen</button>
+          </div>
+        </form>
+        <p class="form-error" id="status-fehler" role="alert" hidden></p>
+        <label class="switch-row"><span class="switch-text"><strong>Nicht stören</strong><small>Keine Hinweise und Töne in Spiel, Launcher und hier; Party-Einladungen kommen still an. Nachrichten kommen trotzdem an.</small></span><input type="checkbox" class="switch" role="switch" id="profil-dnd" name="dnd"></label>
+      </section>
       <div class="app-card cos-card">
         <div class="card-head">
           <div>
@@ -158,157 +284,11 @@
         </div>
         <p class="hint">Jedes Cosmetic kommt signiert vom HeldixClient-Team; diese Seite prüft die Signatur, bevor sie es zeigt. Deine Auswahl gilt sofort – im Spiel, im Launcher und hier. Eigene Capes aus dem Ordner <em>heldix-capes</em> bleiben auf deinem PC und stehen deshalb nicht hier.</p>
       </div>
-      <div class="app-card">
-        <div class="card-head">
-          <div>
-            <h2>Was andere sehen</h2>
-            <p>Dieselben Schalter wie im Spiel unter Heldix-Menü → Freunde → Privatsphäre.</p>
-          </div>
-          <span class="saved" id="einstellungen-gespeichert" aria-live="polite"></span>
-        </div>
-        <div class="switches" id="einstellungen"></div>
-        <p class="hint">Hier im Browser bist du für deine Freunde nicht online – das zeigt nur HeldixClient selbst.</p>
-      </div>
     </div>
 
-    <!-- Freunde -->
-    <div class="panel" id="panel-freunde" role="tabpanel" aria-labelledby="tab-freunde" tabindex="0" hidden>
-      <div class="app-card">
-        <h2>Freund hinzufügen</h2>
-        <form class="inline-form" id="freund-form" novalidate>
-          <label class="field">
-            <span>Spielername</span>
-            <input class="input" id="freund-name" name="name" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="16" placeholder="z. B. Steve" required>
-          </label>
-          <button class="button small" type="submit">{{icon:user-plus}}Anfrage senden</button>
-        </form>
-        <p class="form-error" id="freund-fehler" role="alert" hidden></p>
-        <p class="hint">Dein Freund muss HeldixClient nutzen und schon einmal online gewesen sein.</p>
-      </div>
-      <div class="app-card" id="anfragen-karte" hidden>
-        <h2>Anfragen</h2>
-        <div id="anfragen"></div>
-      </div>
-      <div class="app-card">
-        <div class="card-head">
-          <h2>Freunde <span class="muted" id="freunde-anzahl"></span></h2>
-          <span class="hint live-hint">{{icon:refresh}}aktualisiert sich alle 10 Sekunden</span>
-        </div>
-        <div id="freunde"></div>
-      </div>
-    </div>
-
-    <!-- Nachrichten -->
-    <div class="panel" id="panel-nachrichten" role="tabpanel" aria-labelledby="tab-nachrichten" hidden>
-      <div class="chat" id="chat">
-        <div class="conv-list" id="unterhaltungen" aria-label="Unterhaltungen"></div>
-        <div class="chat-pane" id="chat-bereich">
-          <div class="chat-empty" id="chat-leer">
-            {{icon:chat}}
-            <p>Wähle links einen Freund, um zu schreiben.</p>
-          </div>
-          <div class="chat-active" id="chat-aktiv" hidden>
-            <div class="chat-head">
-              <button class="icon-button back" type="button" id="chat-zurueck" aria-label="Zurück zu den Unterhaltungen">{{icon:chevron-left}}</button>
-              <span id="chat-avatar"></span>
-              <div class="chat-who">
-                <h2 id="chat-name"></h2>
-                <p class="row-sub" id="chat-status"></p>
-              </div>
-              <div class="chat-actions">
-                <button class="button tiny ghost" type="button" id="chat-melden">{{icon:flag}}<span class="label">Melden</span></button>
-                <button class="button tiny ghost danger-text" type="button" id="chat-blockieren">{{icon:ban}}<span class="label">Blockieren</span></button>
-              </div>
-            </div>
-            <div class="chat-scroll" id="chat-verlauf" role="log" aria-live="polite" aria-labelledby="chat-name" tabindex="0"></div>
-            <form class="chat-form" id="chat-form" novalidate>
-              <label class="visually-hidden" for="chat-text">Nachricht</label>
-              <input class="input" id="chat-text" name="text" maxlength="500" autocomplete="off" placeholder="Nachricht schreiben …">
-              <button class="button small" type="submit" id="chat-senden" aria-label="Senden">{{icon:send}}<span class="label">Senden</span></button>
-            </form>
-            <p class="form-error chat-error" id="chat-fehler" role="alert" hidden></p>
-            <div class="chat-note">
-              <span>{{icon:info}}Nachrichten werden höchstens 30 Tage gespeichert und sind nicht Ende-zu-Ende verschlüsselt.</span>
-              <span class="counter" id="chat-zaehler">0/500</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Support -->
-    <div class="panel" id="panel-support" role="tabpanel" aria-labelledby="tab-support" hidden>
-      <div class="support" id="support">
-        <div class="app-card support-list">
-          <div class="card-head">
-            <div>
-              <h2>Deine Anfragen</h2>
-              <p>Fragen, Fehler oder Probleme mit deinem Konto? Das Team antwortet hier, Antworten siehst du auch im Spiel.</p>
-            </div>
-            <button class="button small" type="button" id="support-neu">{{icon:plus}}Neue Anfrage</button>
-          </div>
-          <p class="notice small-notice" id="support-limit" hidden>Du hast schon 3 offene Anfragen. Schließ eine, bevor du eine neue schreibst.</p>
-          <div id="support-liste"></div>
-        </div>
-        <div class="app-card support-detail" id="support-detail" tabindex="-1">
-          <div class="empty" id="support-leer">{{icon:chat}}<p>Wähle eine Anfrage, um den Verlauf zu sehen – oder schreib eine neue.</p></div>
-
-          <form class="support-form" id="support-form" novalidate hidden>
-            <div class="detail-top">
-              <button class="icon-button back" type="button" data-support-back aria-label="Zurück zur Liste">{{icon:chevron-left}}</button>
-              <h2 id="support-form-titel">Neue Anfrage</h2>
-            </div>
-            <label class="field">
-              <span>Worum geht es?</span>
-              <select class="input select" id="support-kategorie" name="category">
-                <option value="hilfe">Hilfe – Frage zur Bedienung</option>
-                <option value="fehler">Fehler – etwas funktioniert nicht</option>
-                <option value="konto">Konto – Anmeldung, Daten, Sperre</option>
-                <option value="sonstiges">Sonstiges</option>
-              </select>
-            </label>
-            <label class="field">
-              <span class="field-row"><span>Betreff</span><span class="counter" id="support-betreff-zaehler"></span></span>
-              <input class="input" id="support-betreff" name="subject" maxlength="100" autocomplete="off" required placeholder="z. B. Cape wird auf Servern nicht angezeigt">
-            </label>
-            <label class="field">
-              <span class="field-row"><span>Nachricht</span><span class="counter" id="support-text-zaehler"></span></span>
-              <textarea class="input textarea" id="support-text" name="text" maxlength="2000" rows="8" required placeholder="Was ist passiert? Welche Version, welcher Server, was hast du schon probiert?"></textarea>
-            </label>
-            <p class="hint">Betreff bis 100 Zeichen in einer Zeile, Nachricht bis 2000 Zeichen. Höchstens 3 offene Anfragen gleichzeitig und 5 neue in 24 Stunden. Bitte keine Passwörter oder Zahlungsdaten schicken.</p>
-            <p class="form-error" id="support-fehler" role="alert" hidden></p>
-            <div class="card-actions">
-              <button class="button small" type="submit" id="support-absenden">{{icon:send}}Anfrage senden</button>
-              <button class="button small ghost" type="button" id="support-abbrechen">Abbrechen</button>
-            </div>
-          </form>
-
-          <div class="ticket" id="support-ticket" hidden>
-            <div class="detail-top">
-              <button class="icon-button back" type="button" data-support-back aria-label="Zurück zur Liste">{{icon:chevron-left}}</button>
-              <div class="ticket-title">
-                <h2 id="ticket-betreff" tabindex="-1"></h2>
-                <p class="row-meta" id="ticket-meta"></p>
-              </div>
-            </div>
-            <ol class="ticket-messages" id="ticket-verlauf" aria-labelledby="ticket-betreff"></ol>
-            <div id="ticket-anhaenge"></div>
-            <form class="ticket-reply" id="ticket-antwort" novalidate>
-              <label class="field">
-                <span class="field-row"><span>Antwort</span><span class="counter" id="ticket-zaehler"></span></span>
-                <textarea class="input textarea small-textarea" id="ticket-text" name="text" maxlength="2000" rows="4" placeholder="Deine Antwort an das Team …"></textarea>
-              </label>
-              <p class="form-error" id="ticket-fehler" role="alert" hidden></p>
-              <div class="card-actions">
-                <button class="button small" type="submit" id="ticket-senden">{{icon:send}}Antworten</button>
-                <button class="button small ghost" type="button" id="ticket-schliessen">{{icon:check}}Anfrage schließen</button>
-              </div>
-              <p class="hint">Ist dein Problem gelöst? Dann schließ die Anfrage – das Team sieht das.</p>
-            </form>
-            <p class="notice small-notice closed-notice" id="ticket-geschlossen" hidden>Diese Anfrage ist geschlossen. Brauchst du noch Hilfe, schreib eine neue Anfrage.</p>
-          </div>
-        </div>
-      </div>
+    <!-- Meine Welten (konto-welten.js) -->
+    <div class="panel" id="panel-welten" role="tabpanel" aria-labelledby="tab-welten" tabindex="0" hidden>
+      <div id="welten-inhalt"></div>
     </div>
 
     <!-- Meine Addons -->
@@ -461,28 +441,138 @@
       </div>
     </div>
 
-    <!-- Privatsphäre -->
+    <!-- Support -->
+    <div class="panel" id="panel-support" role="tabpanel" aria-labelledby="tab-support" hidden>
+      <div class="support" id="support">
+        <div class="app-card support-list">
+          <div class="card-head">
+            <div>
+              <h2>Deine Anfragen</h2>
+              <p>Fragen, Fehler oder Probleme mit deinem Konto? Das Team antwortet hier, Antworten siehst du auch im Spiel.</p>
+            </div>
+            <button class="button small" type="button" id="support-neu">{{icon:plus}}Neue Anfrage</button>
+          </div>
+          <p class="notice small-notice" id="support-limit" hidden>Du hast schon 3 offene Anfragen. Schließ eine, bevor du eine neue schreibst.</p>
+          <div id="support-liste"></div>
+        </div>
+        <div class="app-card support-detail" id="support-detail" tabindex="-1">
+          <div class="empty" id="support-leer">{{icon:chat}}<p>Wähle eine Anfrage, um den Verlauf zu sehen – oder schreib eine neue.</p></div>
+
+          <form class="support-form" id="support-form" novalidate hidden>
+            <div class="detail-top">
+              <button class="icon-button back" type="button" data-support-back aria-label="Zurück zur Liste">{{icon:chevron-left}}</button>
+              <h2 id="support-form-titel">Neue Anfrage</h2>
+            </div>
+            <label class="field">
+              <span>Worum geht es?</span>
+              <select class="input select" id="support-kategorie" name="category">
+                <option value="hilfe">Hilfe – Frage zur Bedienung</option>
+                <option value="fehler">Fehler – etwas funktioniert nicht</option>
+                <option value="konto">Konto – Anmeldung, Daten, Sperre</option>
+                <option value="sonstiges">Sonstiges</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-row"><span>Betreff</span><span class="counter" id="support-betreff-zaehler"></span></span>
+              <input class="input" id="support-betreff" name="subject" maxlength="100" autocomplete="off" required placeholder="z. B. Cape wird auf Servern nicht angezeigt">
+            </label>
+            <label class="field">
+              <span class="field-row"><span>Nachricht</span><span class="counter" id="support-text-zaehler"></span></span>
+              <textarea class="input textarea" id="support-text" name="text" maxlength="2000" rows="8" required placeholder="Was ist passiert? Welche Version, welcher Server, was hast du schon probiert?"></textarea>
+            </label>
+            <p class="hint">Betreff bis 100 Zeichen in einer Zeile, Nachricht bis 2000 Zeichen. Höchstens 3 offene Anfragen gleichzeitig und 5 neue in 24 Stunden. Bitte keine Passwörter oder Zahlungsdaten schicken.</p>
+            <p class="form-error" id="support-fehler" role="alert" hidden></p>
+            <div class="card-actions">
+              <button class="button small" type="submit" id="support-absenden">{{icon:send}}Anfrage senden</button>
+              <button class="button small ghost" type="button" id="support-abbrechen">Abbrechen</button>
+            </div>
+          </form>
+
+          <div class="ticket" id="support-ticket" hidden>
+            <div class="detail-top">
+              <button class="icon-button back" type="button" data-support-back aria-label="Zurück zur Liste">{{icon:chevron-left}}</button>
+              <div class="ticket-title">
+                <h2 id="ticket-betreff" tabindex="-1"></h2>
+                <p class="row-meta" id="ticket-meta"></p>
+              </div>
+            </div>
+            <ol class="ticket-messages" id="ticket-verlauf" aria-labelledby="ticket-betreff"></ol>
+            <div id="ticket-anhaenge"></div>
+            <form class="ticket-reply" id="ticket-antwort" novalidate>
+              <label class="field">
+                <span class="field-row"><span>Antwort</span><span class="counter" id="ticket-zaehler"></span></span>
+                <textarea class="input textarea small-textarea" id="ticket-text" name="text" maxlength="2000" rows="4" placeholder="Deine Antwort an das Team …"></textarea>
+              </label>
+              <p class="form-error" id="ticket-fehler" role="alert" hidden></p>
+              <div class="card-actions">
+                <button class="button small" type="submit" id="ticket-senden">{{icon:send}}Antworten</button>
+                <button class="button small ghost" type="button" id="ticket-schliessen">{{icon:check}}Anfrage schließen</button>
+              </div>
+              <p class="hint">Ist dein Problem gelöst? Dann schließ die Anfrage – das Team sieht das.</p>
+            </form>
+            <p class="notice small-notice closed-notice" id="ticket-geschlossen" hidden>Diese Anfrage ist geschlossen. Brauchst du noch Hilfe, schreib eine neue Anfrage.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Privatsphäre (konto-einstellungen.js: Schalter; konto.js: Blockierte, Meldungen) -->
     <div class="panel" id="panel-privatsphaere" role="tabpanel" aria-labelledby="tab-privatsphaere" tabindex="0" hidden>
+      <section class="card" aria-labelledby="privat-titel">
+        <div class="card__head">
+          <span class="icon-tile">{{icon:eye-off}}</span>
+          <div><h2 class="card__title" id="privat-titel">Was andere sehen</h2><p class="tiny text-3">Dieselben Schalter wie im Spiel unter Heldix-Menü → Freunde → Privatsphäre.</p></div>
+          <span class="saved card__head-end" id="einstellungen-gespeichert" aria-live="polite"></span>
+        </div>
+        <p class="notice small-notice" id="cape-unsichtbar" hidden>„Für andere erkennbar“ ist aus – solange sieht niemand dein Cape und deine Cosmetics.</p>
+        <div class="switches" id="einstellungen"></div>
+        <p class="tiny text-3">Hier im Browser bist du für deine Freunde nicht online – das zeigt nur HeldixClient selbst. Mitglieder deiner Party sehen untereinander immer, wo ihr gerade spielt.</p>
+      </section>
       <div class="panel-grid">
-        <div class="app-card">
-          <h2>Blockierte Spieler</h2>
-          <p class="muted small">Blockierte Spieler können dir keine Anfragen schicken und erfahren nicht, dass du sie blockiert hast. Freigeben bringt Freundschaft und Nachrichten nicht zurück.</p>
+        <section class="card" aria-labelledby="blockiert-titel">
+          <div class="card__head"><span class="icon-tile">{{icon:ban}}</span><div><h2 class="card__title" id="blockiert-titel">Blockierte Spieler</h2></div></div>
+          <p class="small text-2">Blockierte Spieler können dir keine Anfragen schicken und erfahren nicht, dass du sie blockiert hast. Freigeben bringt Freundschaft und Nachrichten nicht zurück.</p>
           <form class="inline-form" id="block-form" novalidate>
             <label class="field">
-              <span>Spieler blockieren</span>
+              <span class="field__label">Spieler blockieren</span>
               <input class="input" id="block-name" name="name" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="16" placeholder="Spielername" required>
             </label>
-            <button class="button small ghost" type="submit">{{icon:ban}}Blockieren</button>
+            <button class="btn btn--secondary btn--sm" type="submit">{{icon:ban}}Blockieren</button>
           </form>
           <p class="form-error" id="block-fehler" role="alert" hidden></p>
           <div id="blockiert" class="list-gap"></div>
-        </div>
-        <div class="app-card">
-          <h2>Deine Meldungen</h2>
-          <p class="muted small">Spieler meldest du im Chat unter Nachrichten. Das Team prüft jede Meldung; nach 90 Tagen wird sie gelöscht.</p>
+        </section>
+        <section class="card" aria-labelledby="meine-meldungen-titel">
+          <div class="card__head"><span class="icon-tile">{{icon:flag}}</span><div><h2 class="card__title" id="meine-meldungen-titel">Deine Meldungen</h2></div></div>
+          <p class="small text-2">Spieler meldest du im Chat unter Nachrichten. Das Team prüft jede Meldung; nach 90 Tagen wird sie gelöscht.</p>
           <div id="meldungen" class="list-gap"></div>
-        </div>
+        </section>
       </div>
+    </div>
+
+    <!-- Benachrichtigungen (konto-einstellungen.js) -->
+    <div class="panel" id="panel-benachrichtigungen" role="tabpanel" aria-labelledby="tab-benachrichtigungen" tabindex="0" hidden>
+      <section class="card" aria-labelledby="hinweise-titel">
+        <div class="card__head">
+          <span class="icon-tile">{{icon:bell}}</span>
+          <div><h2 class="card__title" id="hinweise-titel">„Ist online“-Hinweise</h2><p class="tiny text-3">Gilt für Spiel, Launcher und diese Seite.</p></div>
+          <span class="saved card__head-end" id="hinweise-gespeichert" aria-live="polite"></span>
+        </div>
+        <fieldset class="choice-cards" id="online-hinweise">
+          <legend class="sr-only">Hinweis, wenn Freunde online kommen</legend>
+          <label class="choice-card"><input type="radio" name="onlineNotify" value="all"><span><strong>Alle Freunde</strong><small>Hinweis, sobald ein Freund online kommt</small></span></label>
+          <label class="choice-card"><input type="radio" name="onlineNotify" value="favorites"><span><strong>Nur Favoriten</strong><small>Nur Freunde mit Stern</small></span></label>
+          <label class="choice-card"><input type="radio" name="onlineNotify" value="none"><span><strong>Keine</strong><small>Du siehst es nur in der Freundesliste</small></span></label>
+        </fieldset>
+        <label class="switch-row"><span class="switch-text"><strong>Nicht stören</strong><small>Keine Hinweise und Töne; Party-Einladungen kommen still an. Freunde sehen, dass du gerade nicht gestört werden möchtest.</small></span><input type="checkbox" class="switch" role="switch" id="hinweise-dnd" name="dnd"></label>
+      </section>
+      <section class="card" aria-labelledby="hinweise-seite-titel">
+        <div class="card__head">
+          <span class="icon-tile">{{icon:monitor}}</span>
+          <div><h2 class="card__title" id="hinweise-seite-titel">Auf dieser Seite</h2><p class="tiny text-3">Nur in diesem Browser gespeichert. Hinweise erscheinen, solange die Seite offen ist.</p></div>
+        </div>
+        <div class="switches" id="hinweise-lokal"></div>
+      </section>
     </div>
 
     <!-- Sicherheit -->
@@ -533,9 +623,11 @@
         <div class="app-card">
           <h2>Was der Heldix-Dienst speichert</h2>
           <ul class="checks compact">
-            <li>{{icon:user}}<span>Minecraft-UUID, Spielername, Heldix-Cape, deine Cosmetics und deine Einstellungen</span></li>
-            <li>{{icon:friends}}<span>Freundschaften und offene Anfragen</span></li>
-            <li>{{icon:chat}}<span>Nachrichten an Freunde, höchstens 30 Tage</span></li>
+            <li>{{icon:user}}<span>Minecraft-UUID, Spielername, Heldix-Cape, deine Cosmetics, dein Statustext und deine Einstellungen (auch „Nicht stören“, „Zuletzt online zeigen“, Vorschläge, Hinweise); ungefähr, wann du zuletzt im Spiel warst</span></li>
+            <li>{{icon:friends}}<span>Freundschaften und offene Anfragen – mit deinen eigenen Favoriten, Spitznamen und Notizen (nur für dich)</span></li>
+            <li>{{icon:user-plus}}<span>Deine Einladungs-Links, wer dich eingeladen hat (bis zur Bestätigung mit deiner Spielzeit-Summe) und freigeschaltete Belohnungen</span></li>
+            <li>{{icon:chat}}<span>Nachrichten an Freunde mit Antworten, Beitreten-Karten und Reaktionen, höchstens 30 Tage. Party, Party-Chat und „schreibt …“ nur im Arbeitsspeicher, nie gespeichert</span></li>
+            <li>{{icon:world}}<span>Deine geteilten Welten mit Einstellungen und Mitgliedern</span></li>
             <li>{{icon:ban}}<span>Spieler, die du blockiert hast, und deine Meldungen (90 Tage)</span></li>
             <li>{{icon:info}}<span>Support-Anfragen mit deinen Nachrichten und den Antworten des Teams</span></li>
             <li>{{icon:addons}}<span>Addon-Einreichungen samt JAR und Screenshots, deine Bewertungen und Addon-Meldungen</span></li>
@@ -545,7 +637,7 @@
           <div class="card-actions">
             <button class="button small" type="button" id="export">{{icon:download}}Daten herunterladen (JSON)</button>
           </div>
-          <p class="hint">Eine Datei mit allem, was der Dienst über dich gespeichert hat – auch deine Support-Anfragen, Addon-Einreichungen, Bewertungen, Addon-Meldungen und deine Cosmetics. Höchstens fünfmal pro Stunde.</p>
+          <p class="hint">Eine Datei mit allem, was der Dienst über dich gespeichert hat – auch deine Support-Anfragen, Addon-Einreichungen, Bewertungen, Addon-Meldungen, deine Cosmetics, Einladungen und Freischaltungen. Höchstens fünfmal pro Stunde.</p>
         </div>
         <div class="app-card">
           <h2>Anmeldungen</h2>
@@ -557,7 +649,7 @@
       </div>
       <div class="app-card danger-zone">
         <h2>Alle Daten löschen</h2>
-        <p>Löscht sofort alles, was der Heldix-Dienst über dich gespeichert hat: Profil, Einstellungen, Freundschaften und Anfragen in beide Richtungen, Nachrichten, Blockierte, deine Meldungen, deine Support-Anfragen, Addon-Einreichungen, Bewertungen und Addon-Meldungen und alle Anmeldungen – auch diese hier. Eine Sperre bleibt bestehen; Meldungen über dich bleiben bis zum Ablauf der 90 Tage. Schon veröffentlichte Addons bleiben im Store, als Entwickler steht dann „Gelöschter Spieler“.</p>
+        <p>Löscht sofort alles, was der Heldix-Dienst über dich gespeichert hat: Profil, Einstellungen, Freundschaften und Anfragen in beide Richtungen, Nachrichten, Blockierte, deine Meldungen, deine Support-Anfragen, Addon-Einreichungen, Bewertungen und Addon-Meldungen, Einladungen und Freischaltungen und alle Anmeldungen – auch diese hier. Eine Sperre bleibt bestehen; Meldungen über dich bleiben bis zum Ablauf der 90 Tage. Schon veröffentlichte Addons bleiben im Store, als Entwickler steht dann „Gelöschter Spieler“.</p>
         <p class="muted small">Verbindet sich HeldixClient danach wieder mit dem Dienst, legt er dich mit Standardwerten neu an. Willst du das nicht, schalte vorher im Spiel unter Heldix-Menü → Freunde → Privatsphäre „Heldix-Dienst nutzen“ aus.</p>
         <div class="card-actions">
           <button class="button small danger" type="button" id="loeschen">{{icon:trash}}Alle Daten löschen …</button>

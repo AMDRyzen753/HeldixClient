@@ -4,6 +4,8 @@ import dev.heldixclient.hud.Notifications;
 import dev.heldixclient.loader.api.event.WorldEvents;
 import dev.heldixclient.module.Module;
 import dev.heldixclient.module.ModuleManager;
+import dev.heldixclient.share.WorldShare;
+import dev.heldixclient.social.Invites;
 import dev.heldixclient.social.Social;
 import dev.heldixclient.ui.Shell;
 import dev.heldixclient.ui.Ui;
@@ -29,7 +31,8 @@ import java.util.function.Supplier;
 /**
  * Pausemenü im Heldix-Design (ersetzt Minecrafts Pausemenü, wenn das Heldix-Design an ist).
  * Links die gewohnten Knöpfe und darunter Schnellschalter für Module; rechts (in breiten Fenstern) Karten für
- * die Sitzung (Spielzeit, Position, Ping), Freunde und Wegpunkte. In schmalen Fenstern eine Schnellzeile.
+ * die Sitzung (Spielzeit, Position, Ping), Freunde (mit Knöpfen zum Einladen) und Wegpunkte. In schmalen Fenstern eine
+ * Schnellzeile.
  * Das Vanilla-Pausemenü mit Knöpfen anderer Mods bleibt über "Klassisches Pausemenü" erreichbar.
  */
 public class PauseMenuScreen extends ShellScreen {
@@ -57,6 +60,20 @@ public class PauseMenuScreen extends ShellScreen {
 	private int quickH;
 	/** Was die Freunde-Karte zeigt (ändert es sich, werden die Widgets neu angelegt) */
 	private FriendsMode friendsMode;
+	/** Knopf für den Browser-Link der Voice-Gruppe da? Linker Rand der Knöpfe im Kopf der Freunde-Karte */
+	private boolean inviteVoice;
+	private int friendsHeaderRight;
+
+	/** Tooltips (und Beschriftungen) der Einladungs-Knöpfe in der Freunde-Karte, auch für den Autotest */
+	public static final String INVITE_BUTTON = "Freunde einladen – Link kopieren";
+	public static final String BROWSER_LINK_BUTTON = "Browser-Link für die Voice-Gruppe kopieren (24 Std.)";
+	/** Knopf „Welt teilen“ (Einzelspieler) und die Knöpfe der Karte „Welt geteilt“ */
+	public static final String SHARE_BUTTON = "Welt teilen";
+	public static final String SHARE_COPY_BUTTON = "Adresse kopieren";
+	public static final String SHARE_MANAGE_BUTTON = "Verwalten";
+	/** Stand der Karte „Welt geteilt“ beim Aufbau (ändert er sich, wird neu aufgebaut) */
+	private String shareSignature;
+	private boolean shareCard;
 	private String waypointMessage;
 	private long waypointMessageAt;
 	private boolean quickRow;
@@ -107,11 +124,16 @@ public class PauseMenuScreen extends ShellScreen {
 		entries.add(new Entry("Fortschritte", "star", () -> open(() -> new AdvancementsScreen(minecraft.player.connection.getAdvancements(), this))));
 		entries.add(new Entry("Statistiken", "list", () -> open(() -> new StatsScreen(this, minecraft.player.getStats()))));
 		entries.add(new Entry("Optionen", "options", () -> open(() -> new OptionsScreen(this, minecraft.options))));
-		if (minecraft.isLocalServer()) entries.add(new Entry("Welt-Optionen", "world", () -> open(() -> new WorldOptionsScreen(this, minecraft.level))));
-		else entries.add(new Entry("Spieler", "user", () -> open(() -> new SocialInteractionsScreen(this))));
+		if (minecraft.isLocalServer()) {
+			entries.add(new Entry("Welt-Optionen", "world", () -> open(() -> new WorldOptionsScreen(this, minecraft.level))));
+			// Welt teilen über den Heldix-Dienst (neben „Im LAN öffnen“ in den Welt-Optionen)
+			entries.add(new Entry(SHARE_BUTTON, "lan", () -> open(ShareWorldScreen::new)));
+		} else {
+			entries.add(new Entry("Spieler", "user", () -> open(() -> new SocialInteractionsScreen(this))));
+		}
 		entries.add(new Entry("Module", "modules", () -> open(() -> new HeldixMenuScreen(this, Shell.Page.MODULES))));
 		entries.add(new Entry("HUD-Editor", "hud", () -> open(() -> new HudEditorScreen(this))));
-		int colW = (w - gap) / 2;
+
 		int bottom = contentY + contentH;
 		// bis über den Verlassen-Knopf; die letzte Reihe braucht keinen Abstand nach unten
 		int rowsAvailable = Math.max(1, (bottom - rowH - gap - y + gap) / (rowH + gap));
@@ -129,15 +151,20 @@ public class PauseMenuScreen extends ShellScreen {
 				entries.add(new Entry("Wegpunkte", "pin", () -> open(() -> new HeldixMenuScreen(this, Shell.Page.WAYPOINTS))));
 			}
 		}
-		int shown = Math.min(entries.size(), rowsAvailable * 2);
+		// passen nicht alle Knöpfe in zwei Spalten (z. B. „Welt teilen“ in kleinen Fenstern), dann drei
+		int columns = entries.size() > rowsAvailable * 2 && (w - 2 * gap) / 3 >= 100 ? 3 : 2;
+		int cellW = (w - (columns - 1) * gap) / columns;
+		int shown = Math.min(entries.size(), rowsAvailable * columns);
 		for (int i = 0; i < shown; i++) {
 			Entry entry = entries.get(i);
-			int bx = x + (i % 2) * (colW + gap);
-			int by = y + (i / 2) * (rowH + gap);
-			int bw = i % 2 == 0 ? colW : w - colW - gap;
+			int column = i % columns;
+			int bx = x + column * (cellW + gap);
+			int by = y + (i / columns) * (rowH + gap);
+			// letzte Spalte bis zum Rand; der letzte Knopf füllt seine Reihe
+			int bw = column == columns - 1 || i == shown - 1 ? x + w - bx : cellW;
 			addRenderableWidget(new ActionButton(bx, by, bw, rowH, entry.label(), false, entry.action()).withIcon(entry.icon()));
 		}
-		int gridBottom = y + (shown + 1) / 2 * (rowH + gap) - gap;
+		int gridBottom = y + (shown + columns - 1) / columns * (rowH + gap) - gap;
 
 		String leave = minecraft.isLocalServer() ? "Speichern und zum Hauptmenü" : "Verbindung trennen";
 		disconnect = new ActionButton(x, bottom - rowH, w, rowH, leave, false, this::leave).withIcon("quit").withVariant(ActionButton.Variant.DANGER);
@@ -223,14 +250,25 @@ public class PauseMenuScreen extends ShellScreen {
 			friendsY = contentY;
 			friendsH = waypointsY - gap - friendsY;
 		}
+		// geteilte Welt: statt der Sitzung die Karte „Welt geteilt“ (Adresse, Anklopfen, Verwalten)
+		shareCard = WorldShare.active() && sessionH > 0;
+		shareSignature = shareSignature();
+		if (shareCard) buildShareCard();
 
 		// Freunde: Liste, leerer Zustand mit Knopf oder Hinweis zum Dienst
 		friendsMode = friendsMode();
 		Runnable openFriends = () -> open(() -> new HeldixMenuScreen(this, Shell.Page.FRIENDS));
+		partyShown = PartyWidget.hasContent();
 		if (friendsMode == FriendsMode.LIST) {
 			int rows = Math.max(0, (friendsH - CARD_HEAD - 4) / 32);
-			for (int i = 0; i < rows; i++) {
-				int index = i;
+			// Party (ab Heldix-Dienst 1.12.0) als erste Zeile der Freunde-Karte
+			int first = 0;
+			if (partyShown && rows > 1) {
+				addRenderableWidget(new PartyWidget(sideX + 4, friendsY + CARD_HEAD, sideW - 8, 30, () -> open(() -> new HeldixMenuScreen(this, Shell.Page.PARTY))));
+				first = 1;
+			}
+			for (int i = first; i < rows; i++) {
+				int index = i - first;
 				addRenderableWidget(new FriendWidget(sideX + 4, friendsY + CARD_HEAD + i * 32, sideW - 8, 30, () -> friendAt(index), openFriends));
 			}
 		} else if (friendsMode == FriendsMode.EMPTY && friendsH >= CARD_HEAD + 64) {
@@ -240,14 +278,76 @@ public class PauseMenuScreen extends ShellScreen {
 		}
 		String all = "Alle";
 		int aw = ActionButton.widthFor(all, "chevron-right") - 4;
-		addRenderableWidget(new ActionButton(sideX + sideW - 6 - aw, friendsY + 4, aw, 18, all, false, openFriends)
+		int bx = sideX + sideW - 6 - aw;
+		addRenderableWidget(new ActionButton(bx, friendsY + 4, aw, 18, all, false, openFriends)
 				.withIcon("chevron-right").withVariant(ActionButton.Variant.GHOST));
+		// Freunde einladen (ab Heldix-Dienst 1.11.0): Link kopieren, in einer Voice-Gruppe auch den Browser-Link
+		inviteVoice = Invites.browserLinkAvailable();
+		if (Social.online()) {
+			bx -= 20;
+			addRenderableWidget(ActionButton.icon(bx, friendsY + 4, 18, "user-plus", INVITE_BUTTON, () -> Invites.copyInvite(minecraft, null)));
+			if (inviteVoice) {
+				bx -= 20;
+				addRenderableWidget(ActionButton.icon(bx, friendsY + 4, 18, "headphones", BROWSER_LINK_BUTTON, () -> Invites.copyBrowserLink(minecraft, null)));
+			}
+		}
+		friendsHeaderRight = bx;
 
 		// Wegpunkte: hier setzen, verwalten
 		int half = (sideW - 16 - 6) / 2;
 		addRenderableWidget(new ActionButton(sideX + 8, waypointsY + CARD_HEAD - 2, half, 20, "Hier setzen", true, this::setWaypoint).withIcon("plus"));
 		addRenderableWidget(new ActionButton(sideX + 8 + half + 6, waypointsY + CARD_HEAD - 2, sideW - 16 - half - 6, 20, "Verwalten", false,
 				() -> open(() -> new HeldixMenuScreen(this, Shell.Page.WAYPOINTS))).withIcon("pin"));
+	}
+
+	/** Karte „Welt geteilt“: oben Adresse (Kopieren) bzw. wer anklopft, darunter Erlauben/Ablehnen bzw. Einladen, Verwalten, Beenden */
+	private void buildShareCard() {
+		int x = sideX + 8;
+		int w = sideW - 16;
+		int row1 = sessionY + CARD_HEAD - 2;
+		int row2 = row1 + 24;
+		WorldShare.Knock knock = WorldShare.currentKnock();
+		if (knock != null) {
+			String name = knock.name();
+			int half = (w - 6) / 2;
+			addRenderableWidget(new ActionButton(x, row2, half, 20, ShareWorldScreen.ALLOW_LABEL, true, () -> {
+				WorldShare.allow(name);
+				rebuildWidgets();
+			}).withIcon("check"));
+			addRenderableWidget(new ActionButton(x + half + 6, row2, w - half - 6, 20, ShareWorldScreen.DENY_LABEL, false, () -> {
+				WorldShare.deny(name);
+				rebuildWidgets();
+			}).withIcon("close"));
+			return;
+		}
+		if (WorldShare.address() != null && WorldShare.online()) {
+			addRenderableWidget(ActionButton.icon(x + w - 18, row1 + 1, 18, "copy", SHARE_COPY_BUTTON, () -> {
+				minecraft.keyboardHandler.setClipboard(WorldShare.normalizeAddress(WorldShare.address()));
+				Notifications.show("welt-teilen", "Adresse kopiert", WorldShare.normalizeAddress(WorldShare.address()), null);
+			}));
+		}
+		int stopW = ActionButton.widthFor("Beenden", "quit");
+		int third = (w - stopW - 12) / 2;
+		boolean text = third >= 64;
+		if (text) {
+			addRenderableWidget(new ActionButton(x, row2, third, 20, "Einladen", false, () -> open(() -> new ShareWorldScreen(ShareWorldScreen.Mode.INVITE)))
+					.withIcon("user-plus").withTooltip(ShareWorldScreen.INVITE_LABEL));
+			addRenderableWidget(new ActionButton(x + third + 6, row2, third, 20, SHARE_MANAGE_BUTTON, false, () -> open(ShareWorldScreen::new)).withIcon("settings"));
+		} else {
+			addRenderableWidget(ActionButton.icon(x, row2, 20, "user-plus", ShareWorldScreen.INVITE_LABEL,
+					() -> open(() -> new ShareWorldScreen(ShareWorldScreen.Mode.INVITE))).withVariant(ActionButton.Variant.SECONDARY));
+			addRenderableWidget(ActionButton.icon(x + 24, row2, 20, "settings", SHARE_MANAGE_BUTTON, () -> open(ShareWorldScreen::new))
+					.withVariant(ActionButton.Variant.SECONDARY));
+		}
+		addRenderableWidget(new ActionButton(x + w - stopW, row2, stopW, 20, "Beenden", false, () -> {
+			WorldShare.stop();
+			rebuildWidgets();
+		}).withIcon("quit").withVariant(ActionButton.Variant.DANGER).withTooltip(ShareWorldScreen.STOP_LABEL));
+	}
+
+	private static String shareSignature() {
+		WorldShare.Knock knock = WorldShare.currentKnock();
+		return WorldShare.active() + "|" + WorldShare.state() + "|" + WorldShare.address() + "|" + (knock == null ? "" : knock.name());
 	}
 
 	private static FriendsMode friendsMode() {
@@ -258,16 +358,23 @@ public class PauseMenuScreen extends ShellScreen {
 	@Override
 	public void tick() {
 		super.tick();
-		// Dienst verbunden oder erster Freund: Freunde-Karte neu aufbauen
-		if (sideW > 0 && friendsMode != friendsMode()) rebuildWidgets();
+		// Dienst verbunden, erster Freund oder Voice-Gruppe betreten/verlassen: Freunde-Karte neu aufbauen
+		if (sideW > 0 && (friendsMode != friendsMode() || inviteVoice != Invites.browserLinkAvailable() || !shareSignature().equals(shareSignature)
+				|| partyShown != PartyWidget.hasContent())) {
+			rebuildWidgets();
+		}
 	}
 
+	/** Freund Nummer index: online zuerst (innerhalb: Favoriten zuerst, wie die Liste des Dienstes sortiert ist) */
 	private static Social.Friend friendAt(int index) {
 		if (!Social.online()) return null;
 		List<Social.Friend> friends = new ArrayList<>(Social.friends());
 		friends.sort(java.util.Comparator.comparing((Social.Friend f) -> !f.online()));
 		return index < friends.size() ? friends.get(index) : null;
 	}
+
+	/** Party-Zeile in der Freunde-Karte (beim Aufbau): ändert es sich, wird neu aufgebaut */
+	private boolean partyShown;
 
 	private void setWaypoint() {
 		Waypoints.Waypoint waypoint = Waypoints.add(minecraft, "");
@@ -298,6 +405,7 @@ public class PauseMenuScreen extends ShellScreen {
 		if (server != null && !minecraft.isLocalServer()) return "Mehrspieler  ·  " + server.name;
 		if (minecraft.getSingleplayerServer() != null) {
 			String world = minecraft.getSingleplayerServer().getWorldData().getLevelName();
+			if (WorldShare.online()) return "Einzelspieler  ·  " + world + "  ·  geteilt über den Heldix-Dienst";
 			return "Einzelspieler  ·  " + world + (minecraft.getSingleplayerServer().isPublished() ? "  ·  im LAN geöffnet" : "");
 		}
 		return "Spiel pausiert";
@@ -317,8 +425,10 @@ public class PauseMenuScreen extends ShellScreen {
 			long on = toggles.stream().filter(ToggleChip::isOn).count();
 			card(g, quickX, quickY, quickW, quickH, "options", "Schnell umschalten", on + " von " + toggles.size() + " an");
 		}
-		// Sitzung
-		if (sessionH > 0) {
+		// Welt geteilt (statt der Sitzung)
+		if (shareCard) {
+			drawShareCard(g);
+		} else if (sessionH > 0) {
 			card(g, sideX, sessionY, sideW, sessionH, "clock", "Sitzung", null);
 			String[][] stats = sessionStats();
 			int tileW = (sideW - 16 - 6) / 2;
@@ -331,7 +441,8 @@ public class PauseMenuScreen extends ShellScreen {
 		// Freunde
 		List<Social.Friend> friends = Social.online() ? Social.friends() : List.of();
 		long online = friends.stream().filter(Social.Friend::online).count();
-		card(g, sideX, friendsY, sideW, friendsH, "friends", "Freunde", friends.isEmpty() ? null : online + " von " + friends.size() + " online");
+		card(g, sideX, friendsY, sideW, friendsH, "friends", "Freunde", friends.isEmpty() ? null : online + " von " + friends.size() + " online",
+				friendsHeaderRight - 4);
 		if (friendsMode != FriendsMode.LIST) {
 			String text = friendsMode == FriendsMode.EMPTY ? "Noch keine Freunde. Schick eine Anfrage an jemanden, der HeldixClient nutzt."
 					: FriendWidget.serviceHint();
@@ -360,6 +471,25 @@ public class PauseMenuScreen extends ShellScreen {
 		String detail = waypointMessage != null && System.currentTimeMillis() - waypointMessageAt < 5000 ? waypointMessage
 				: count == 0 ? "noch keine" : count + " in dieser Welt";
 		card(g, sideX, waypointsY, sideW, WAYPOINTS_H, "pin", "Wegpunkte", detail);
+	}
+
+	private void drawShareCard(GuiGraphicsExtractor g) {
+		WorldShare.Settings settings = WorldShare.settings();
+		int players = minecraft.getSingleplayerServer() == null ? 1 : minecraft.getSingleplayerServer().getPlayerCount();
+		String extra = WorldShare.online() ? players + "/" + (settings == null ? 8 : settings.maxPlayers()) + " Spieler" : "wird geöffnet …";
+		card(g, sideX, sessionY, sideW, sessionH, "lan", "Welt geteilt", extra);
+		int x = sideX + 10;
+		int y = sessionY + CARD_HEAD + 4;
+		int w = sideW - 20;
+		WorldShare.Knock knock = WorldShare.currentKnock();
+		if (knock != null) {
+			Ui.text(g, Ui.ellipsize(knock.name() + " möchte beitreten", w, Ui.Font.LABEL), x, y, Ui.ACCENT_TEXT, Ui.Font.LABEL);
+			return;
+		}
+		String line = WorldShare.notice() != null ? WorldShare.notice() : WorldShare.online() && WorldShare.address() != null
+				? WorldShare.normalizeAddress(WorldShare.address()) : WorldShare.step() != null ? WorldShare.step() : "Wird geöffnet …";
+		int color = WorldShare.notice() != null ? Ui.WARNING : WorldShare.online() ? Ui.TEXT : Ui.MUTED;
+		Ui.text(g, Ui.ellipsize(line, w - 22, Ui.Font.LABEL), x, y, color, Ui.Font.LABEL);
 	}
 
 	/** Werte der Karte Sitzung: {Icon, Bezeichnung, Wert} */
@@ -395,6 +525,11 @@ public class PauseMenuScreen extends ShellScreen {
 
 	/** Karte: Fläche, Icon, Titel und ein Zusatz daneben */
 	private void card(GuiGraphicsExtractor g, int x, int y, int w, int h, String icon, String title, String extra) {
+		card(g, x, y, w, h, icon, title, extra, x + w - 50);
+	}
+
+	/** wie oben; der Zusatz endet vor {@code extraRight} (Knöpfe im Kopf der Karte) */
+	private void card(GuiGraphicsExtractor g, int x, int y, int w, int h, String icon, String title, String extra, int extraRight) {
 		Ui.rect(g, x, y, w, h, 10, Ui.SURFACE);
 		Ui.outline(g, x, y, w, h, 10, Ui.LINE);
 		Ui.rect(g, x + 8, y + 6, 14, 14, 4, Ui.ACCENT_SOFT);
@@ -402,7 +537,7 @@ public class PauseMenuScreen extends ShellScreen {
 		Ui.text(g, title, x + 28, y + 9, Ui.TEXT, Ui.Font.LABEL);
 		if (extra != null) {
 			int ex = x + 34 + Ui.width(title, Ui.Font.LABEL);
-			Ui.text(g, Ui.ellipsize(extra, x + w - 50 - ex, Ui.Font.SMALL), ex, y + 10, Ui.FAINT, Ui.Font.SMALL);
+			if (extraRight - ex > 12) Ui.text(g, Ui.ellipsize(extra, extraRight - ex, Ui.Font.SMALL), ex, y + 10, Ui.FAINT, Ui.Font.SMALL);
 		}
 	}
 

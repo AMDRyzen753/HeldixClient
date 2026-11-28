@@ -22,7 +22,18 @@ export const DEFAULT_CAPES: readonly string[] = [
   'sakura',
   'gewitter',
   'galaxie',
+  'matrix',
+  'matrix_rot',
+  'matrix_tuerkis',
+  'sakura_orange',
 ];
+
+/**
+ * Eingebaute Capes nur fürs Team (wie Katalog-Cosmetics mit `access: team`): wählen nur Spieler in der Tabelle team
+ * (Rolle egal), und ausgeliefert werden sie nur, solange der Träger im Team ist. Gilt auch, wenn HELDIX_DIENST_CAPES die
+ * Liste ersetzt; steht ein Team-Cape dort nicht, ist es wie bisher unbekannt.
+ */
+export const TEAM_CAPES: ReadonlySet<string> = new Set(['matrix_rot', 'matrix_tuerkis', 'sakura_orange']);
 
 export function isUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID_RE.test(value);
@@ -38,6 +49,13 @@ export function normalizeUuid(value: unknown): string | null {
     return null;
   }
   return plain;
+}
+
+/** Code einer Einladung: 10 Zeichen aus a–z und 2–9 ohne i, l, o, 0 und 1 (nichts zum Verwechseln). */
+export const INVITE_CODE_RE = /^[a-hjkmnp-z2-9]{10}$/;
+
+export function isInviteCode(value: unknown): value is string {
+  return typeof value === 'string' && INVITE_CODE_RE.test(value);
 }
 
 export function isName(value: unknown): value is string {

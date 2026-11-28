@@ -5,7 +5,8 @@
 //   npm run cosmetic -- --pruefen       nur prüfen, nichts signieren (braucht keinen Schlüssel)
 //
 // Quellen: cosmetics/<id>/cosmetic.json (Manifest ohne type, date, texture, glow) + texture.png (+ glow.png).
-// Jede Quelle wird nach allen Regeln geprüft, bekommt date und die PNGs als data-URL und wird mit dem privaten
+// Format 1 (Würfel) und Format 2 (Mesh mit Keyframes, "format": 2 in cosmetic.json, aus npm run blender-import).
+// Jede Quelle wird nach allen Regeln ihres Formats geprüft (gemeinsamer Prüfer core/cosmetics-format.ts), bekommt date und die PNGs als data-URL und wird mit dem privaten
 // Update-Schlüssel (%USERPROFILE%\.heldixclient-dev\update-key.pem) signiert, über die Bytes von
 // "heldix-cosmetic\n" + Manifest. Vor dem Schreiben prüft das Skript den Umschlag mit dem öffentlichen Schlüssel des
 // Launchers. Ergebnis: release/cosmetics/<id>-<version>.cosmetic.json – danach im Team-Bereich der Webseite unter
@@ -17,7 +18,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { COSMETIC_SLOT_NAMES, cosmeticSignedBytes, verifyCosmeticEnvelope } from '../main/core/cosmetics';
-import { COSMETIC_LIMITS, cosmeticEnvelopeText, utf8Length } from '../main/core/cosmetics-format';
+import { COSMETIC_LIMITS, COSMETIC_LIMITS_2, cosmeticEnvelopeLength, cosmeticEnvelopeText, utf8Length, type AnyCosmeticManifest } from '../main/core/cosmetics-format';
 import { UPDATE_PUBLIC_KEY } from '../main/update-public-key';
 import { buildCosmetic, COSMETICS_DIR, listCosmeticSources, type BuiltCosmetic } from './cosmetic-sources';
 
@@ -25,6 +26,8 @@ const UPDATE_KEY_PATH = path.join(os.homedir(), '.heldixclient-dev', 'update-key
 const ROOT = path.join(__dirname, '..', '..');
 
 const kb = (bytes: number) => `${(bytes / 1024).toFixed(1).replace('.', ',')} KB`;
+/** Grenzen des Formats (Format 1: 160 KB / 192 KB, Format 2: 512 KB / 544 KB) */
+const limitsOf = (manifest: AnyCosmeticManifest) => (manifest.format === 2 ? COSMETIC_LIMITS_2 : COSMETIC_LIMITS);
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -44,7 +47,13 @@ async function main(): Promise<void> {
   const built: BuiltCosmetic[] = [];
   for (const id of ids) built.push(await buildCosmetic(id, date));
   if (checkOnly) {
-    for (const b of built) console.log(`OK  ${b.id} (${COSMETIC_SLOT_NAMES[b.manifest.slot]}, Version ${b.manifest.version}, Manifest ${kb(utf8Length(b.text))})`);
+    for (const b of built) {
+      const L = limitsOf(b.manifest);
+      console.log(
+        `OK  ${b.id} (${COSMETIC_SLOT_NAMES[b.manifest.slot]}, Format ${b.manifest.format}, Version ${b.manifest.version}, ` +
+          `Manifest ${kb(utf8Length(b.text))} von ${kb(L.manifestBytes)}, Umschlag etwa ${kb(cosmeticEnvelopeLength(b.text))} von ${kb(L.envelopeBytes)})`,
+      );
+    }
     console.log(`${built.length} Cosmetics geprüft – nichts signiert (--pruefen).`);
     return;
   }
@@ -69,7 +78,7 @@ async function main(): Promise<void> {
     await writeFile(file, envelope);
     const size = utf8Length(envelope);
     console.log(`${b.manifest.name} (${b.id}, ${COSMETIC_SLOT_NAMES[b.manifest.slot]}, Version ${b.manifest.version}${b.manifest.access === 'team' ? ', nur Team' : ''}) signiert:`);
-    console.log(`  ${file} (${kb(size)} von höchstens ${kb(COSMETIC_LIMITS.envelopeBytes)})${replaced ? ' – ersetzt' : ''}`);
+    console.log(`  ${file} (${kb(size)} von höchstens ${kb(limitsOf(b.manifest).envelopeBytes)})${replaced ? ' – ersetzt' : ''}`);
   }
   console.log('');
   console.log('Veröffentlichen: heldixclient.com/team → Cosmetics → Datei wählen → Veröffentlichen.');

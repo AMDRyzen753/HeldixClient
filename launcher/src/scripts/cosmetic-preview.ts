@@ -359,7 +359,13 @@ function modelQuads(item: Loaded, t: number): Quad[] {
   const pose = cosmeticPose(m.model, m.animations, t);
   const matrices = cosmeticBoneMatrices(m.model, pose);
   const base = anchor(m);
-  return m.model.bones.flatMap((bone) => bone.cubes.flatMap((cube) => cubeQuads(cube, mat4Multiply(base, matrices.get(bone.name)!), item.texture, item.glow)));
+  // UV zählt in Texeln von textureSize; das PNG kann die 2- oder 4-fache Auflösung haben
+  const k = item.texture.w / m.model.textureSize[0];
+  return m.model.bones.flatMap((bone) =>
+    bone.cubes.flatMap((cube) =>
+      cubeQuads(cube, mat4Multiply(base, matrices.get(bone.name)!), item.texture, item.glow).map((q) => (k === 1 ? q : { ...q, uvs: q.uvs.map(([u, v]) => [u * k, v * k] as [number, number]) })),
+    ),
+  );
 }
 
 /** Cape wie in Minecraft: Würfel 10 × 16 × 1 mit uv (0, 0), hängt hinten an den Schultern, Außenseite nach hinten */
@@ -371,6 +377,7 @@ function capeQuads(item: Loaded, frame: number): Quad[] {
   const glow = item.glow ? crop(item.glow, 0, frame * (w / 2), w, w / 2) : null;
   const model: CosmeticModel = {
     textureSize: [64, 32],
+    scale: 1,
     bones: [{ name: 'cape', parent: null, pivot: [0, 24, -2], rotation: [-8, 180, 0], cubes: [{ origin: [-5, 8, -2], size: [10, 16, 1], uv: [0, 0], inflate: 0, mirror: false }] }],
   };
   const matrix = cosmeticBoneMatrices(model).get('cape')!;
@@ -505,6 +512,11 @@ async function main(): Promise<void> {
   const thumbs: { w: number; h: number; data: Uint8Array }[] = [];
   for (const id of ids) {
     const built = await buildCosmetic(id, new Date().toISOString());
+    if (built.manifest.format !== 1) {
+      // Meshes (Format 2) zeigen Launcher und Webseite in 3D; dieser Rasterizer kennt nur Würfel
+      console.log(`${id}: Format ${built.manifest.format} (Mesh) – Vorschau im Launcher bzw. auf der Webseite`);
+      continue;
+    }
     const m = built.manifest;
     const item: Loaded = {
       manifest: m,

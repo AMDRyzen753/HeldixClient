@@ -1,0 +1,211 @@
+<!--seite {"titel":"Zusammen spielen","beschreibung":"Freunde, Party, Voice Chat – auch im Browser –, Welt teilen ohne eigenen Server und Einladungen mit Belohnungen: alles, damit du mit deinen Freunden Minecraft spielst."}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
+</head>
+<body data-seite="zusammen">
+{{include:nav.html}}
+
+<main id="inhalt">
+  <section class="page-hero" aria-labelledby="seite-titel">
+    <div class="container page-hero__grid">
+      <div class="page-hero__inner">
+        <span class="eyebrow">{{icon:friends}}Zusammen spielen</span>
+        <h1 class="h1" id="seite-titel">Mit Freunden spielen – <span class="text-gradient">ohne Umwege.</span></h1>
+        <p class="lead">Freunde finden, als Party von Server zu Server ziehen, miteinander reden und deine eigene Welt öffnen – im Spiel, im Launcher und im Browser. Alles kostenlos.</p>
+        <div class="page-hero__actions">
+          <a class="btn btn--primary btn--lg" href="/download" data-download>{{icon:download}}<span data-download-label>{{t:download.knopf}}</span></a>
+          <a class="btn btn--social btn--lg" href="/konto#reiter=einladen">{{icon:user-plus}}{{t:nav.einladen}}</a>
+        </div>
+        <nav class="together-nav" aria-label="Auf dieser Seite">
+          <a class="chip chip--lg" href="#freunde">{{icon:friends}}Freunde</a>
+          <a class="chip chip--lg" href="#party">{{icon:party}}Party</a>
+          <a class="chip chip--lg" href="#voice">{{icon:mic}}Voice</a>
+          <a class="chip chip--lg" href="#welt">{{icon:world}}Welt teilen</a>
+          <a class="chip chip--lg" href="#einladen">{{icon:gift}}Einladen</a>
+        </nav>
+      </div>
+      <figure class="page-hero__media frame">
+        <img src="/bilder/welt-zusammen.webp" width="580" height="362" alt="Viele HeldixClient-Spieler stehen zusammen auf einer Wiese, mit Flügeln, Kronen und kleinen Drachen als Begleiter.">
+      </figure>
+    </div>
+  </section>
+
+  <!-- Freunde -->
+  <section class="section" id="freunde" aria-labelledby="freunde-titel">
+    <div class="container">
+      <div class="feature-row">
+        <div class="feature-row__text reveal">
+          <span class="eyebrow">{{icon:friends}}Freunde</span>
+          <h2 class="h2" id="freunde-titel">Deine Freunde, immer im Blick</h2>
+          <p class="lead">Die Freundesliste zeigt, wer gerade spielt und wo – im Spiel, im Launcher und in deinem Konto im Browser.</p>
+          <ul class="check-list">
+            <li>{{icon:check}}<span><strong>Beitreten mit einem Klick:</strong> Spielt ein Freund auf einem öffentlichen Server oder in einer offenen Welt, bringt dich „Beitreten“ direkt hin.</span></li>
+            <li>{{icon:check}}<span><strong>Nachrichten</strong> mit Antworten, Reaktionen und „schreibt …“ – Server und Welten teilst du als Karte mit „Beitreten“.</span></li>
+            <li>{{icon:check}}<span><strong>Favoriten</strong> oben anheften, <strong>Spitznamen und Notizen</strong>, die nur du siehst, eigener Status und „Nicht stören“.</span></li>
+            <li>{{icon:check}}<span><strong>Profilkarte</strong> mit 3D-Skin und gemeinsamen Freunden, „zuletzt online“ – alles einzeln abschaltbar.</span></li>
+            <li>{{icon:check}}<span><strong>Freundesvorschläge:</strong> Freunde deiner Freunde, aber nur, wer dem selbst zugestimmt hat.</span></li>
+          </ul>
+          <a class="link-arrow" href="/hilfe/freunde">Freunde hinzufügen und beitreten{{icon:chevron-right}}</a>
+        </div>
+        <figure class="feature-row__media reveal">
+          <div class="frame"><img src="/bilder/chat-spiel.webp" width="854" height="480" alt="Chat im Heldix-Menü: eine Antwort auf eine Nachricht, „Lenchen schreibt …“ und oben der Knopf „Beitreten“." loading="lazy"></div>
+          <figcaption>Nachrichten im Spiel – mit Antworten, „schreibt …“ und „Beitreten“.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Party -->
+  <section class="section section--raised" id="party" aria-labelledby="party-titel">
+    <div class="container">
+      <div class="feature-row feature-row--flip">
+        <div class="feature-row__text reveal">
+          <span class="eyebrow eyebrow--voice">{{icon:party}}Party</span>
+          <h2 class="h2" id="party-titel">Als Gruppe von Server zu Server</h2>
+          <p class="lead">Lade bis zu 7 Freunde in deine Party ein. Ihr seht, wo jeder gerade spielt, und habt einen eigenen Party-Chat.</p>
+          <ol class="mini-steps">
+            <li><span><strong>Einladen:</strong> im Launcher auf der Seite „Freunde“ oder im Spiel unter Freunde → Party – die Einladung gilt 10 Minuten.</span></li>
+            <li><span><strong>Folgen:</strong> Wechselt die Leitung den Server oder betritt eine Welt, folgt ihr mit „Beitreten“ – oder automatisch, solange gerade kein Spiel läuft.</span></li>
+            <li><span><strong>Reden:</strong> Seid ihr am selben Ort, landet ihr mit dem Voice-Chat-Addon automatisch in derselben Voice-Gruppe.</span></li>
+          </ol>
+          <p class="text-2 small">Partys liegen nur im Arbeitsspeicher des Heldix-Dienstes und sind nur für die Mitglieder sichtbar.</p>
+          <a class="link-arrow" href="/hilfe/party">So funktioniert die Party{{icon:chevron-right}}</a>
+        </div>
+        <figure class="feature-row__media reveal">
+          <div class="frame"><img src="/bilder/party-spiel.webp" width="854" height="480" alt="Party im Heldix-Menü: zwei Mitglieder mit Leitung und Ort, darunter der Party-Chat." loading="lazy"></div>
+          <figcaption>Die Party im Spiel: Leitung, Ort jedes Mitglieds und Party-Chat.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Voice -->
+  <section class="section" id="voice" aria-labelledby="voice-titel">
+    <div class="container">
+      <div class="feature-row">
+        <div class="feature-row__text reveal">
+          <span class="eyebrow eyebrow--voice">{{icon:mic}}Voice Chat</span>
+          <h2 class="h2" id="voice-titel">Reden wie am selben Tisch – auch im Browser</h2>
+          <p class="lead">Mit dem Voice-Chat-Addon hörst du Spieler in deiner Nähe, mit Richtung und Abstand – auf jedem Server, ohne Plugin.</p>
+          <ul class="check-list">
+            <li>{{icon:check}}<span><strong>Gruppen</strong> für den ganzen Server, Push-to-Talk oder Sprachaktivierung, Lautstärke je Person.</span></li>
+            <li>{{icon:check}}<span><strong>Party und geteilte Welt</strong> sind automatisch ein gemeinsamer Voice-Raum.</span></li>
+            <li>{{icon:check}}<span><strong>Freunde ohne HeldixClient</strong> reden über einen Gast-Link im Browser mit – 24 Stunden gültig, bis zu 4 Gäste je Gruppe.</span></li>
+            <li>{{icon:check}}<span>Sprache wird nie aufgenommen oder gespeichert.</span></li>
+          </ul>
+          <a class="link-arrow" href="/hilfe/voice-chat">Voice Chat einrichten{{icon:chevron-right}}</a>
+        </div>
+        <figure class="feature-row__media reveal">
+          <div class="frame"><img src="/bilder/voice-browser.webp" width="880" height="517" alt="Voice im Browser: ein Gast im Gespräch mit einem Spieler, mit Mikrofon, Sprachaktivierung und Lautstärke je Person." loading="lazy"></div>
+          <figcaption>Voice im Browser: ein Gast redet mit, ganz ohne Minecraft.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Welt teilen -->
+  <section class="section section--raised" id="welt" aria-labelledby="welt-titel">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">{{icon:world}}Welt teilen</span>
+        <h2 class="h2" id="welt-titel">Deine Welt. Deine Freunde. Kein Server nötig.</h2>
+        <p class="lead">Öffne deine Einzelspielerwelt mit einem Klick für Freunde – ohne Portfreigabe und ohne Abo. Der Heldix-Dienst leitet die Verbindungen nur weiter; die Welt bleibt auf deinem PC.</p>
+      </div>
+      <div class="feature-row">
+        <div class="feature-row__text reveal">
+          <ol class="mini-steps">
+            <li><span><strong>Teilen starten:</strong> im Pausenmenü auf „Welt teilen“, Zugang und Rollen wählen. Vorher legt HeldixClient eine Sicherung an (die letzten 5 bleiben).</span></li>
+            <li><span><strong>Freunde holen:</strong> „Freunde einladen“ oder die feste Adresse wie <code>k7m2xq.welt.heldixclient.com</code> weitergeben – sie bleibt für diese Welt gleich.</span></li>
+            <li><span><strong>Beitreten:</strong> mit HeldixClient per Klick aus Freundesliste, Launcher, Discord oder Link; ohne HeldixClient über die Adresse in der Serverliste (gleiche Minecraft-Version).</span></li>
+          </ol>
+          <ul class="access-list" aria-label="Wer darf rein">
+            <li>{{icon:lock}}<span><strong>Nur Eingeladene</strong>Wer nicht auf der Liste steht, klopft an – du entscheidest im Spiel mit <kbd>H</kbd> (Erlauben) oder <kbd>N</kbd> (Ablehnen).</span></li>
+            <li>{{icon:friends}}<span><strong>Freunde und Eingeladene</strong>Deine Heldix-Freunde kommen direkt rein, alle anderen klopfen an.</span></li>
+            <li>{{icon:world}}<span><strong>Jeder mit der Adresse</strong>Für offene Runden – höchstens so viele, wie du erlaubst (bis zu 20).</span></li>
+          </ul>
+          <p class="text-2 small">Rollen je Spieler: Besucher, Mitspieler oder Operator. Die IP-Adressen deiner Mitspieler siehst du nicht, und der Heldix-Dienst speichert sie nicht.</p>
+          <a class="link-arrow" href="/hilfe/welt-teilen">So teilst du deine Welt{{icon:chevron-right}}</a>
+        </div>
+        <div class="feature-row__media reveal">
+          <figure class="frame"><img src="/bilder/welt-geteilt.webp" width="826" height="365" alt="Welt teilen im Spiel: die Adresse der Welt, geöffnet, 1 von 8 Spielern, nur Eingeladene, mit „Freunde einladen“, „Mitglieder“, „Einstellungen“ und „Teilen beenden“." loading="lazy"></figure>
+          <figure class="frame"><img src="/bilder/launcher-welten.webp" width="990" height="225" alt="Launcher-Startseite: „Offene Welten deiner Freunde“ mit zwei geöffneten Welten und Freunde online." loading="lazy"></figure>
+          <p class="text-3 small">Oben: deine geteilte Welt im Spiel. Unten: offene Welten deiner Freunde im Launcher.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Einladen -->
+  <section class="section" id="einladen" aria-labelledby="einladen-titel">
+    <div class="container">
+      <div class="feature-row feature-row--flip">
+        <div class="feature-row__text reveal">
+          <span class="eyebrow eyebrow--reward">{{icon:gift}}Freunde einladen</span>
+          <h2 class="h2" id="einladen-titel">Ein Link – und ihr seid befreundet</h2>
+          <p class="lead">Teile deinen Einladungs-Link aus dem Launcher, dem Spiel oder deinem Konto. Wer ihn öffnet, lädt HeldixClient, nimmt die Einladung in der Einrichtung an – und ihr seid sofort befreundet.</p>
+          <ul class="check-list">
+            <li>{{icon:check}}<span><strong>Freundesfunken</strong> (Aura): für Neue sofort, für dich ab 1 bestätigtem Freund.</span></li>
+            <li>{{icon:check}}<span><strong>Cape Freundesband</strong> (animiert): für dich ab 3 bestätigten Freunden.</span></li>
+            <li>{{icon:check}}<span><strong>„Komm auf meinen Server“:</strong> Einladungen können eine Serveradresse und eine Voice-Gruppe mitbringen.</span></li>
+          </ul>
+          <p class="text-2 small">Bestätigt ist ein Freund, sobald er insgesamt 30 Minuten mit HeldixClient gespielt hat.</p>
+          <div class="btn-group">
+            <a class="btn btn--social" href="/konto#reiter=einladen">{{icon:link}}Meinen Link holen</a>
+            <a class="btn btn--secondary" href="/hilfe/einladungen">{{icon:help-circle}}Einladungen erklärt</a>
+          </div>
+        </div>
+        <figure class="feature-row__media reveal">
+          <div class="frame"><img src="/bilder/einladung-dialog.webp" width="520" height="390" alt="Launcher-Dialog: Wolkenlaeufer lädt dich ein, mit Server, Willkommens-Belohnung und dem Knopf „Annehmen und beitreten“." loading="lazy"></div>
+          <figcaption>So sieht eine Einladung im Launcher aus.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Mehr -->
+  <section class="section section--tight" aria-labelledby="mehr-titel">
+    <div class="container">
+      <h2 class="h3 page-section-title" id="mehr-titel">Und sonst noch</h2>
+      <div class="compare">
+        <article class="card">
+          <span class="icon-tile">{{icon:chat}}</span>
+          <h3 class="card__title">Discord-Status</h3>
+          <p class="card__text">Zeigt auf Wunsch, wo du spielst – mit „Mitspielen“-Knopf für Server, offene Welten und deine Party. Jeder Teil lässt sich einzeln abschalten.</p>
+          <a class="link-arrow" href="/hilfe/discord-status">Discord-Status{{icon:chevron-right}}</a>
+        </article>
+        <article class="card">
+          <span class="icon-tile">{{icon:bell}}</span>
+          <h3 class="card__title">Benachrichtigungen</h3>
+          <p class="card__text">Die Glocke im Launcher sammelt Anfragen, Nachrichten, Einladungen in Welten und Partys. „Ist online“-Hinweise gibt es auf Wunsch nur für Favoriten.</p>
+          <a class="link-arrow" href="/hilfe/launcher-einstellungen">Launcher-Einstellungen{{icon:chevron-right}}</a>
+        </article>
+        <article class="card">
+          <span class="icon-tile">{{icon:shield}}</span>
+          <h3 class="card__title">Privatsphäre</h3>
+          <p class="card__text">Online-Status, Server, „zuletzt online“, Vorschläge und Nachrichten schaltest du einzeln ab. Blockieren und Melden geht direkt in der Unterhaltung.</p>
+          <a class="link-arrow" href="/hilfe/privatsphaere">Privatsphäre{{icon:chevron-right}}</a>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight" aria-labelledby="cta-titel">
+    <div class="container">
+      <div class="support-box">
+        <span class="icon-tile icon-tile--lg icon-tile--voice">{{icon:user-plus}}</span>
+        <div><h2 id="cta-titel">Spiel nicht allein</h2><p>Hol dir HeldixClient und schick deinen Freunden einen Link – wer neu dazukommt, bekommt den Freundesfunken.</p></div>
+        <div class="btn-group">
+          <a class="btn btn--primary" href="/download" data-download>{{icon:download}}<span data-download-label>{{t:download.knopf}}</span></a>
+          <a class="btn btn--social" href="/konto#reiter=einladen">{{icon:user-plus}}{{t:nav.einladen}}</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+{{include:footer.html}}
+</body>
+</html>

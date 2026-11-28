@@ -1,0 +1,33 @@
+Prüfbericht: Flammenkreis (flammenkreis), Slot aura, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  auras/InfernoRing/InfernoRing.cosmetic.json  999,6 KB  sha256 773053bb45c45b82d3f3a5d4865d4d095b837cb9e2f1c4a2a8590f41545b7225
+  auras/InfernoRing/textures/InfernoRing_albedo.png  3,6 KB  sha256 4a7161a523d031a3e271053cfd6c848acbba63d19437052f37273a3911788dc1
+  auras/InfernoRing/textures/InfernoRing_emissive_anim.png  27,7 KB  sha256 b4b63ca4f1b657afead8a81f30a886d5b64a525d228efe0c48704ac16f550834
+
+Größe:
+  vorher: 1031,0 KB (JSON 999,6 KB + Texturen)
+  nachher: Manifest 284,4 KB von höchstens 512,0 KB, Umschlag etwa 290,3 KB von 544,0 KB
+
+Mesh:
+  4824 Vertices, 2412 Dreiecke, 34 Knochen, größte Rundung der Positionen 0,0156 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+
+Animationen (7), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 96 Frames bei 24 fps, Schleife, 34 Spuren, 2381 Keys
+  Active: 48 Frames bei 24 fps, Schleife, 34 Spuren, 1459 Keys
+  Sneak: 144 Frames bei 24 fps, Schleife, 34 Spuren, 2590 Keys
+  Emote: 120 Frames bei 24 fps, Schleife, 34 Spuren, 2814 Keys
+  Spawn: 31 Frames bei 24 fps, einmalig, 34 Spuren, 864 Keys
+  Despawn: 25 Frames bei 24 fps, einmalig, 34 Spuren, 721 Keys
+  Celebrate: 41 Frames bei 24 fps, einmalig, 34 Spuren, 1890 Keys
+  zusammen 12719 Keys statt 34453 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1498°, move 0,0198 px, scale 0,0020
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,0854 px (Emote, Frame 102, Vertex 1572)
+
+Zustände: 15 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,35 s
+Partikel: 6 Vorschläge → 6 Einträge (.L-Knochen auch für .R)
+  gekürzt: minecraft:flame an if_ring: 30/s → 20/s (Grenze)
+Leuchten: 8 Bilder, 1 Ticks je Bild, Puls 1,4 s zwischen 0,6 und 1
+Texturen: texture.png 256 × 256 (3,6 KB) = InfernoRing_albedo.png; glow.png 256 × 2048 (27,7 KB) = InfernoRing_emissive_anim.png

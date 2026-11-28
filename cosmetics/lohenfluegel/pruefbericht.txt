@@ -1,0 +1,35 @@
+Prüfbericht: Lohenflügel (lohenfluegel), Slot back, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  FlameWings/FlameWings.cosmetic.json  739,2 KB  sha256 0a269e4f227c180339f2d04c215f035940f6fa447cdd27e2f46d3a7f968b6b1f
+  FlameWings/textures/FlameWings_albedo.png  1,7 KB  sha256 acc126eac724ce43bcf495be800fdcf257852774635909406ccde00cfc53327a
+  FlameWings/textures/FlameWings_emissive_anim.png  22,9 KB  sha256 2275ee8a533034d68bbfd7e80c1a35e7f15a947c56b9859b6845bce8b798cd21
+
+Größe:
+  vorher: 763,7 KB (JSON 739,2 KB + Texturen)
+  nachher: Manifest 259,4 KB von höchstens 512,0 KB, Umschlag etwa 263,2 KB von 544,0 KB
+
+Mesh:
+  4720 Vertices, 2360 Dreiecke, 27 Knochen, größte Rundung der Positionen 0,0156 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+
+Animationen (10), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 48 Frames bei 24 fps, Schleife, 26 Spuren, 1080 Keys
+  Flap: 24 Frames bei 24 fps, Schleife, 26 Spuren, 608 Keys
+  Glide: 48 Frames bei 24 fps, Schleife, 26 Spuren, 1046 Keys
+  Hover: 12 Frames bei 24 fps, Schleife, 26 Spuren, 310 Keys
+  Fold: 72 Frames bei 24 fps, Schleife, 26 Spuren, 1296 Keys
+  Emote: 96 Frames bei 24 fps, Schleife, 26 Spuren, 2144 Keys
+  Celebrate: 37 Frames bei 24 fps, einmalig, 26 Spuren, 570 Keys
+  Takeoff: 31 Frames bei 24 fps, einmalig, 26 Spuren, 572 Keys
+  Land: 19 Frames bei 24 fps, einmalig, 26 Spuren, 340 Keys
+  Hurt: 13 Frames bei 24 fps, einmalig, 26 Spuren, 244 Keys
+  zusammen 8210 Keys statt 10800 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1500°, move 0,0000 px, scale 0,0000
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,1123 px (Fold, Frame 55, Vertex 1661)
+
+Zustände: 15 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,25 s
+Partikel: 4 Vorschläge → 8 Einträge (.L-Knochen auch für .R)
+Leuchten: 8 Bilder, 1 Ticks je Bild, Puls 0,9 s zwischen 0,7 und 1
+Texturen: texture.png 128 × 128 (1,7 KB) = FlameWings_albedo.png; glow.png 128 × 1024 (22,9 KB) = FlameWings_emissive_anim.png

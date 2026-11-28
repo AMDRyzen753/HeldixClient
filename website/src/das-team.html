@@ -1,47 +1,83 @@
-<!--seite {"titel":"Das Team","beschreibung":"Die Menschen hinter HeldixClient: Entwicklung, Moderation und Support."}-->
+<!--seite {"titel":"Das Team","beschreibung":"Die Menschen hinter HeldixClient – und was die Abzeichen für Team, Community und Addon-Entwickler bedeuten."}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
 <script type="module" src="/das-team.js"></script>
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="das-team">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap public-page">
-  <div class="page-head">
-    <span class="eyebrow">Das Team</span>
-    <h1>Die Menschen hinter HeldixClient</h1>
-    <p class="lead">HeldixClient ist ein kleines Projekt{{#github}} mit offenem Quellcode{{/github}}. Diese Leute entwickeln es weiter, prüfen Meldungen und beantworten Support-Anfragen. Hier steht nur, wer das selbst möchte.</p>
-  </div>
-
-  <div class="team-grid" id="team-liste" aria-live="polite" aria-busy="true">
-    <div class="loading-inline" role="status"><span class="spinner" aria-hidden="true"></span><span>Wird geladen …</span></div>
-  </div>
-  <noscript><p class="notice">Die Teamseite braucht JavaScript.</p></noscript>
-
-  <section class="contact" aria-labelledby="kontakt-titel">
-    <div class="section-head">
-      <span class="eyebrow">Kontakt</span>
-      <h2 id="kontakt-titel">So erreichst du das Team</h2>
+<main id="inhalt" class="public-page">
+  <section class="page-hero" aria-labelledby="seite-titel">
+    <div class="container">
+      <div class="page-hero__inner">
+        <span class="eyebrow">{{icon:friends}}Das Team</span>
+        <h1 class="h1" id="seite-titel">Die Menschen hinter <span class="text-gradient">HeldixClient</span></h1>
+        <p class="lead">HeldixClient ist ein kleines Projekt{{#github}} mit offenem Quellcode{{/github}}. Diese Leute entwickeln es weiter, gestalten Cosmetics, testen neue Versionen, prüfen Meldungen und beantworten Support-Anfragen. Hier steht nur, wer das selbst möchte.</p>
+      </div>
     </div>
-    <div class="contact-grid">
-      <div class="app-card contact-card">
-        <span class="way-icon">{{icon:info}}</span>
-        <h3>Support-Anfrage</h3>
-        <p>Fragen, Fehler oder Probleme mit deinem Konto: Schreib uns unter <strong>Konto → Support</strong>. Die Antwort siehst du dort und im Spiel.</p>
-        <p><a class="button small" href="/konto#support">Zum Support</a></p>
+  </section>
+
+  <div class="container">
+    <div class="team-grid" id="team-liste" aria-live="polite" aria-busy="true">
+      <div class="loading-inline" role="status"><span class="spinner" aria-hidden="true"></span><span>Wird geladen …</span></div>
+    </div>
+    <noscript><p class="notice">Die Teamseite braucht JavaScript.</p></noscript>
+  </div>
+
+  <section class="section" id="abzeichen" aria-labelledby="abzeichen-titel">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">{{icon:shield}}Abzeichen</span>
+        <h2 class="h2" id="abzeichen-titel">Wer ist wer?</h2>
+        <p class="lead">Das Abzeichen steht im Spiel neben dem Namen in der Tab-Liste und über dem Kopf, in der Freundesliste und auf der Profilkarte. Team-Rollen gehen vor Community-Abzeichen.</p>
       </div>
-      <div class="app-card contact-card">
-        <span class="way-icon">{{icon:flag}}</span>
-        <h3>Spieler melden</h3>
-        <p>Belästigt dich jemand im Chat, melde ihn direkt in der Unterhaltung – im Spiel oder unter <strong>Konto → Nachrichten</strong>. Das Team sieht dann die letzten Nachrichten.</p>
+      <h3 class="h4 page-section-title">Team</h3>
+      <ul class="badge-legend">
+        <li>{{abzeichen:admin}}<span><strong>Team-Admin</strong>Verwaltet das Team und den Heldix-Dienst.</span></li>
+        <li>{{abzeichen:developer-team}}<span><strong>Entwickler</strong>Baut HeldixClient, Addons und Updates.</span></li>
+        <li>{{abzeichen:moderator}}<span><strong>Moderator</strong>Prüft Meldungen und sorgt für Ordnung.</span></li>
+        <li>{{abzeichen:supporter}}<span><strong>Supporter</strong>Beantwortet Support-Anfragen.</span></li>
+        <li>{{abzeichen:designer}}<span><strong>Designer</strong>Gestaltet Capes und Cosmetics.</span></li>
+        <li>{{abzeichen:tester}}<span><strong>Tester</strong>Probiert neue Versionen vorab aus.</span></li>
+      </ul>
+      <h3 class="h4 page-section-title section--tight">Community</h3>
+      <ul class="badge-legend">
+        <li>{{abzeichen:partner}}<span><strong>Partner</strong>Vom Team vergeben, etwa für Server-Partner.</span></li>
+        <li>{{abzeichen:creator}}<span><strong>Creator</strong>Vom Team vergeben an Creator, die HeldixClient zeigen.</span></li>
+        <li>{{abzeichen:ambassador}}<span><strong>Botschafter</strong>Vom Team vergeben an Spieler, die anderen helfen.</span></li>
+        <li>{{abzeichen:developer}}<span><strong>Addon-Entwickler</strong>Automatisch für ein eigenes Addon im Addon-Store.</span></li>
+        <li>{{abzeichen:player}}<span><strong>HeldixClient-Spieler</strong>Alle anderen, die HeldixClient nutzen.</span></li>
+      </ul>
+      <p class="text-3 small section--tight"><a href="/hilfe/rollen-und-abzeichen">Rollen und Abzeichen erklärt</a> – mit allen Rechten je Rolle.</p>
+    </div>
+  </section>
+
+  <section class="section section--raised" aria-labelledby="kontakt-titel">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">{{icon:chat}}Kontakt</span>
+        <h2 class="h2" id="kontakt-titel">So erreichst du das Team</h2>
       </div>
-      <div class="app-card contact-card">
-        <span class="way-icon">{{icon:file}}</span>
-        <h3>Rechtliches</h3>
-        <p>Für alles andere gibt es die Kontaktdaten im <a href="/impressum">Impressum</a>. Was wir speichern, steht in der <a href="/datenschutz">Datenschutzerklärung</a>.</p>
+      <div class="contact-grid">
+        <article class="card">
+          <span class="icon-tile">{{icon:help-circle}}</span>
+          <h3 class="card__title">Support-Anfrage</h3>
+          <p class="card__text">Fragen, Fehler oder Probleme mit deinem Konto: Schreib uns unter <strong>Konto → Support</strong>. Die Antwort siehst du dort und im Spiel.</p>
+          <a class="btn btn--primary btn--sm" href="/konto#reiter=support">Zum Support</a>
+        </article>
+        <article class="card">
+          <span class="icon-tile icon-tile--reward">{{icon:flag}}</span>
+          <h3 class="card__title">Spieler melden</h3>
+          <p class="card__text">Belästigt dich jemand im Chat, melde ihn direkt in der Unterhaltung – im Spiel oder unter <strong>Konto → Nachrichten</strong>. Das Team sieht dann die letzten Nachrichten.</p>
+        </article>
+        <article class="card">
+          <span class="icon-tile">{{icon:file}}</span>
+          <h3 class="card__title">Rechtliches</h3>
+          <p class="card__text">Für alles andere gibt es die Kontaktdaten im <a href="/impressum">Impressum</a>. Was wir speichern, steht in der <a href="/datenschutz">Datenschutzerklärung</a>.</p>
+        </article>
       </div>
     </div>
   </section>

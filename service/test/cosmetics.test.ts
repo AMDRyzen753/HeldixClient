@@ -6,9 +6,11 @@ import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign, verify } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
 import { ADDON_SIGNATURE_PREFIX } from '../src/addons';
-import { COSMETIC_SIGNATURE_PREFIX, type CosmeticSlot } from '../src/cosmetics-format';
+import { Cosmetics } from '../src/cosmetics';
+import { COSMETIC_SIGNATURE_PREFIX, encodeUint16LE, type CosmeticSlot } from '../src/cosmetics-format';
+import { Store } from '../src/db';
 import { DEFAULT_CAPES } from '../src/validate';
-import { DATE, dataUrl, makePng, manifestOf, signCosmetic, VALID } from './cosmetic-fixtures';
+import { DATE, dataUrl, makePng, manifestOf, signCosmetic, VALID, valid2 } from './cosmetic-fixtures';
 import { api, connect, devPlayer, rawRequest, startService, type Player, type TestService, type WsClient } from './helpers';
 import { Clock, teamLogin, webApi, webLogin, WEBSITE } from './web-helpers';
 
@@ -16,10 +18,10 @@ const NO_COSMETIC = 'Dieses Cosmetic gibt es nicht.';
 const TEAM_ONLY = 'Dieses Cosmetic gibt es nur für das HeldixClient-Team.';
 const WRONG_SIGNATURE = 'Die Signatur stimmt nicht.';
 const NONE = { head: null, back: null, aura: null, companion: null };
-const NONE_ME = { ...NONE, cape: null, team: false };
+const NONE_ME = { ...NONE, cape: null, team: false, unlocked: [] };
 const SLOTS: CosmeticSlot[] = ['head', 'back', 'aura', 'companion', 'cape'];
-const LIST_KEYS = ['access', 'date', 'description', 'id', 'name', 'sha256', 'size', 'slot', 'version'];
-const TEAM_KEYS = ['access', 'createdAt', 'date', 'description', 'hidden', 'id', 'name', 'publishedAt', 'publishedBy', 'sha256', 'size', 'slot', 'version', 'wearers'];
+const LIST_KEYS = ['access', 'date', 'description', 'format', 'id', 'name', 'sha256', 'size', 'slot', 'version'];
+const TEAM_KEYS = ['access', 'createdAt', 'date', 'description', 'format', 'hidden', 'id', 'name', 'publishedAt', 'publishedBy', 'sha256', 'size', 'slot', 'version', 'wearers'];
 
 const sha256 = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
 
@@ -227,11 +229,13 @@ describe('Cosmetics-Katalog', () => {
     await expectError(signCosmetic(keys.privateKey, '{kaputt'), 400, 'Ungültiges Cosmetic-Manifest: „manifest“ ist kein gültiges JSON.');
     await expectError(signCosmetic(keys.privateKey, manifestOf('head', { id: 'neu', name: 'x'.repeat(41) })), 400, 'Ungültiges Cosmetic-Manifest: „name“ ist zu lang (höchstens 40 Zeichen).');
     await expectError(signCosmetic(keys.privateKey, manifestOf('aura', { id: 'neu', model: VALID.head().model })), 400, 'Ungültiges Cosmetic-Manifest: „model“ gibt es beim Slot aura nicht.');
-    // Grenzen: Körper über 192 KB (413), Manifest über 160 KB (400)
-    const tooBig = await webApi(service, 'PUT', '/v1/team/cosmetics', { cookie, rawBody: JSON.stringify({ manifest: 'a'.repeat(200 * 1024), signature: 'x' }) });
+    // Grenzen: Körper über 544 KB (413, größte Grenze aller Formate), Manifest über 512 KB (400), Format 1 über 160 KB (400)
+    const tooBig = await webApi(service, 'PUT', '/v1/team/cosmetics', { cookie, rawBody: JSON.stringify({ manifest: 'a'.repeat(550 * 1024), signature: 'x' }) });
     assert.equal(tooBig.status, 413);
-    assert.equal(tooBig.body.error, 'Die Anfrage ist zu groß (höchstens 192 KB).');
-    await expectError(signCosmetic(keys.privateKey, 'a'.repeat(161 * 1024)), 400, 'Ungültiger Cosmetic-Umschlag: „manifest“ ist zu groß (höchstens 160 KB).');
+    assert.equal(tooBig.body.error, 'Die Anfrage ist zu groß (höchstens 544 KB).');
+    await expectError(signCosmetic(keys.privateKey, 'a'.repeat(513 * 1024)), 400, 'Ungültiger Cosmetic-Umschlag: „manifest“ ist zu groß (höchstens 512 KB).');
+    const padded = `${text.slice(0, -1)}${' '.repeat(161 * 1024)}}`;
+    await expectError(signCosmetic(keys.privateKey, padded), 400, 'Ungültiges Cosmetic-Manifest: „manifest“ ist zu groß (höchstens 160 KB bei Format 1).');
     // IDs eingebauter Capes: die Liste im Format (400) und HELDIX_DIENST_CAPES des Servers (409)
     await expectError(signCosmetic(keys.privateKey, manifestOf('cape', { id: 'glut' })), 400, /eingebauten Capes/);
     await expectError(signCosmetic(keys.privateKey, manifestOf('cape', { id: 'extra' })), 409, 'Die ID „extra“ gehört schon einem eingebauten Cape.');
@@ -317,7 +321,7 @@ describe('Cosmetics-Katalog', () => {
     ]) {
       assert.equal((await choose(anna, slot!, id)).status, 200);
     }
-    assert.deepEqual(await mine(anna), { head: 'krone', back: 'engelsfluegel', aura: 'funken', companion: 'drache', cape: 'sternenregen', team: false });
+    assert.deepEqual(await mine(anna), { head: 'krone', back: 'engelsfluegel', aura: 'funken', companion: 'drache', cape: 'sternenregen', team: false, unlocked: [] });
 
     // Nur fürs Team: Spieler 403, jede Team-Rolle darf
     assert.equal((await publishSigned(manifestOf('head', { id: 'team-krone', name: 'Team-Krone', access: 'team' }))).status, 200);
@@ -516,6 +520,76 @@ test('Umschläge: höchstens N pro Minute und IP (hier 2), die Liste zählt nich
     assert.equal(res.status, 200, JSON.stringify(res.body));
     const listed = (await api(service.url, 'GET', '/v1/cosmetics')).body.cosmetics.find((c: { id: string }) => c.id === 'hd-cape');
     assert.ok(listed && listed.size <= 192 * 1024);
+  } finally {
+    await service.close();
+  }
+});
+
+test('Format 2: veröffentlichen bis 512 KB, Liste und Team-Übersicht mit format, Format-1-Umschläge unverändert', async () => {
+  const clock = new Clock();
+  const keys = generateKeyPairSync('ed25519');
+  const service = await startService({
+    dev: true,
+    website: WEBSITE,
+    totpNow: clock.read,
+    updateKey: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+  });
+  try {
+    const { cookie } = await teamLogin(service, await devPlayer(service.url, 'Chefin'), 'admin', clock);
+    const publish = (body: unknown) => webApi(service, 'PUT', '/v1/team/cosmetics', { cookie, body });
+    const oldEnvelope = signCosmetic(keys.privateKey, VALID.back());
+    assert.equal((await publish(oldEnvelope)).status, 200);
+    // Ein Mesh-Cosmetic mit Leerraum auf 400 KB gebracht: größer als Format 1 je erlaubt, für Format 2 in Ordnung
+    const text = JSON.stringify(valid2('companion'));
+    const big = `${text.slice(0, -1)}${' '.repeat(400 * 1024 - Buffer.byteLength(text))}}`;
+    const res = await publish(signCosmetic(keys.privateKey, big));
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual(
+      res.body.cosmetics.map((c: { id: string; format: number }) => [c.id, c.format]),
+      [['engelsfluegel', 1], ['mesh-companion', 2]],
+    );
+
+    const list = (await api(service.url, 'GET', '/v1/cosmetics')).body.cosmetics as { id: string; format: number; size: number; sha256: string }[];
+    assert.deepEqual(list.map((c) => [c.id, c.format]), [['engelsfluegel', 1], ['mesh-companion', 2]]);
+    assert.ok(list[1]!.size > 400 * 1024 && list[1]!.size <= 544 * 1024);
+    const team = (await webApi(service, 'GET', '/v1/team/cosmetics', { cookie })).body.cosmetics as { id: string; format: number }[];
+    assert.deepEqual(team.map((c) => [c.id, c.format]), [['engelsfluegel', 1], ['mesh-companion', 2]]);
+
+    // Format 1: Bytes genau wie früher (ältere Clients prüfen sie unverändert), höchstens 192 KB
+    const raw = await rawRequest(service.url, 'GET', '/v1/cosmetics/engelsfluegel');
+    assert.equal(raw.body.toString('utf8'), JSON.stringify(oldEnvelope));
+    assert.ok(raw.body.length <= 192 * 1024);
+    const mesh = await rawRequest(service.url, 'GET', '/v1/cosmetics/mesh-companion');
+    assert.equal(sha256(mesh.body), list[1]!.sha256);
+    assert.equal(JSON.parse(mesh.body.toString('utf8')).manifest, big);
+
+    // Neue Version: Das Format darf wechseln, die Liste folgt (Zwischenspeicher je sha256)
+    const smaller = { ...valid2('companion'), version: 2 };
+    assert.equal((await publish(signCosmetic(keys.privateKey, smaller))).status, 200);
+    const after = (await api(service.url, 'GET', '/v1/cosmetics')).body.cosmetics as { id: string; format: number; version: number }[];
+    assert.deepEqual(after.map((c) => [c.id, c.format, c.version]), [['engelsfluegel', 1, 1], ['mesh-companion', 2, 2]]);
+
+    // Fehler im Mesh: 400 mit dem Hinweis des Prüfers
+    const broken = structuredClone(valid2('back')) as Record<string, any>;
+    broken.mesh.triangles = encodeUint16LE([0, 1, 2, 0, 2, 9]);
+    const rejected = await publish(signCosmetic(keys.privateKey, broken));
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.body.error, 'Ungültiges Cosmetic-Manifest: „mesh.triangles“: Dreieck 1 nennt den Vertex 9, es gibt nur 4 (0 bis 3).');
+
+    // Wählen geht wie bei Format 1
+    const anna = await devPlayer(service.url, 'Anna');
+    const chosen = await api(service.url, 'PUT', '/v1/me/cosmetics', { token: anna.token, body: { slot: 'companion', id: 'mesh-companion' } });
+    assert.equal(chosen.status, 200);
+    assert.equal(chosen.body.companion, 'mesh-companion');
+
+    // Nach einem Neustart (frischer Zwischenspeicher) kommt das Format aus dem gespeicherten Manifest
+    const store = new Store(service.dataDir);
+    try {
+      const fresh = JSON.parse(new Cosmetics(store, new Set(DEFAULT_CAPES), () => undefined).list().text).cosmetics as { id: string; format: number }[];
+      assert.deepEqual(fresh.map((c) => [c.id, c.format]), [['engelsfluegel', 1], ['mesh-companion', 2]]);
+    } finally {
+      store.close();
+    }
   } finally {
     await service.close();
   }

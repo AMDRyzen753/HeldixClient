@@ -12,14 +12,14 @@ Das Heldix-Menü ist die Zentrale von HeldixClient im Spiel. Du öffnest es mit 
 ## Aufbau
 Oben stehen zwei Leisten. Die obere zeigt die vier **Bereiche**, die Suche, dein Profil und das Kreuz zum Schließen. Die Leiste darunter zeigt die Seiten des Bereichs, in dem du gerade bist. Hat eine Seite mehrere Ansichten, stehen sie als Reiter über dem Inhalt (z. B. bei **Module**: Alle, HUD, Funktionen, Addons).
 
-- **Spielen:** im Hauptmenü Start, Einzelspieler, Mehrspieler und Realms; im Spiel **Zurück zum Spiel** und das **Pausemenü**
+- **Spielen:** im Hauptmenü Start, Einzelspieler, Mehrspieler, **Heldix-Welten** (siehe [Welt teilen](/hilfe/welt-teilen)) und Realms; im Spiel **Zurück zum Spiel** und das **Pausemenü**
 - **Heldix:**
   - **Übersicht:** deine Spielfigur, Schnellschalter, Hinweise, Freunde, Wegpunkte bzw. Tasten und Neuigkeiten
   - **Module:** alle Module als Kacheln – siehe [Module im Überblick](/hilfe/module)
   - **Grafik:** Reiter **Shader** und **Leistung** – siehe [Heldix-Shader](/hilfe/heldix-shader) und [Mehr FPS](/hilfe/mehr-fps)
   - **Wegpunkte:** die Wegpunkte der aktuellen Welt – siehe [Wegpunkte](/hilfe/wegpunkte)
   - **Mods & Addons:** Reiter **Installiert** und **Store**
-- **Profil:** **Cape**, **Cosmetics** (siehe [Capes](/hilfe/capes) und [Cosmetics](/hilfe/cosmetics)), **Freunde** mit den Reitern Freunde, Nachrichten, Anfragen und Privatsphäre (siehe [Freunde hinzufügen](/hilfe/freunde)) und – wenn du aus dem Launcher spielst – **Konten**
+- **Profil:** **Cape**, **Cosmetics** (siehe [Capes](/hilfe/capes) und [Cosmetics](/hilfe/cosmetics)), **Freunde** mit den Reitern Freunde, Party, Nachrichten, Anfragen und Privatsphäre (siehe [Freunde hinzufügen](/hilfe/freunde)) und – wenn du aus dem Launcher spielst – **Konten**
 - **System:** **Einstellungen** (Reiter Allgemein und Info), **Minecraft-Optionen** und im Hauptmenü **Beenden**
 
 Ein Klick auf einen Bereich führt dorthin zurück, wo du zuletzt warst. Offene Freundschaftsanfragen, ungelesene Nachrichten und Addon-Updates stehen als Zahl an der Seite und als Punkt am Bereich. Ein Klick auf dein Profil oben rechts öffnet die Konten.
@@ -62,7 +62,7 @@ Die Tasten von HeldixClient änderst du direkt im Heldix-Menü: die Haupttasten 
 - [[B]] – Wegpunkt setzen
 
 ## Pausemenü
-Mit [[Esc]] öffnest du im Spiel das Pausemenü im Heldix-Design. Dort gibt es deine Schnellschalter, Infos zu deiner Sitzung, **Wegpunkt hier setzen** und Wege zu Modulen, HUD-Editor, Freunden und Wegpunkten.
+Mit [[Esc]] öffnest du im Spiel das Pausemenü im Heldix-Design. Dort gibt es deine Schnellschalter, Infos zu deiner Sitzung, **Wegpunkt hier setzen** und Wege zu Modulen, HUD-Editor, Freunden und Wegpunkten. In einer Einzelspielerwelt öffnest du hier mit **Welt teilen** deine Welt für Freunde – siehe [Welt teilen](/hilfe/welt-teilen).
 
 Das Pausemenü von Minecraft – etwa mit Knöpfen anderer Mods – erreichst du über **Klassisches Pausemenü**.
 

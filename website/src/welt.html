@@ -1,0 +1,84 @@
+<!--seite {"titel":"Geteilte Welt","beschreibung":"Eine geteilte Minecraft-Welt: Gastgeber, ob sie geöffnet ist, Spieler, Minecraft-Version und Adresse – beitreten mit HeldixClient oder über die Serverliste.","noindex":true,"og":"zusammen"}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
+<script type="module" src="/welt.js"></script>
+</head>
+<body data-seite="welt">
+{{include:nav.html}}
+
+<main id="inhalt">
+  <section class="page-hero" aria-label="Geteilte Welt">
+    <div class="container">
+      <div class="world-page" id="welt" data-zustand="laden" aria-live="polite" aria-busy="true">
+        <!-- Die Welt -->
+        <article class="card card--accent world-card" id="welt-karte">
+          <div class="world-card__head">
+            <span class="icon-tile">{{icon:world}}</span>
+            <div class="world-card__title">
+              <span class="eyebrow">{{icon:world}}Geteilte Welt</span>
+              <h1 id="welt-name"><span data-welt-wert>Welt wird geladen</span></h1>
+            </div>
+            <span class="chip chip--lg" id="welt-status" data-status="laden"><span class="dot"></span><span>wird geprüft …</span></span>
+          </div>
+          <div class="world-host" id="welt-gastgeber">
+            <img class="kopf" id="welt-kopf" src="/assets/standard-kopf.svg" width="40" height="40" alt="">
+            <span>Welt von <strong id="welt-gastgeber-name" data-welt-wert>…</strong></span>
+          </div>
+          <dl class="world-facts">
+            <div><dt>Spieler</dt><dd id="welt-spieler" data-welt-wert>–</dd></div>
+            <div><dt>Minecraft</dt><dd id="welt-version" data-welt-wert>–</dd></div>
+            <div><dt>Zugang</dt><dd id="welt-zugang" data-welt-wert>–</dd></div>
+          </dl>
+          <p class="text-2" id="welt-hinweis" hidden></p>
+          <div class="btn-group">
+            <a class="btn btn--primary btn--lg" id="welt-beitreten" href="/download">{{icon:play}}Mit HeldixClient beitreten</a>
+            <a class="btn btn--secondary btn--lg" href="/download" data-download id="welt-download">{{icon:download}}<span data-download-label>{{t:download.knopf}}</span></a>
+          </div>
+          <div class="world-address" id="welt-adresse-box">
+            <p class="small text-2"><strong>Ohne HeldixClient?</strong> Trag diese Adresse in Minecraft unter Mehrspieler → Server hinzufügen ein (gleiche Minecraft-Version):</p>
+            <div class="world-address__row">
+              <code id="welt-adresse">…</code>
+              <button class="btn btn--secondary btn--sm" type="button" id="welt-kopieren">{{icon:copy}}Kopieren</button>
+            </div>
+          </div>
+        </article>
+
+        <!-- Kein Code, unbekannt oder nicht erreichbar -->
+        <article class="card world-state" id="welt-fehler" hidden>
+          <span class="icon-tile icon-tile--lg">{{icon:warning}}</span>
+          <h1 class="h3" id="welt-fehler-titel">Diese Welt gibt es nicht</h1>
+          <p class="text-2" id="welt-fehler-text">Prüf den Link – vielleicht wurde die Welt gelöscht.</p>
+          <div class="btn-group">
+            <button class="btn btn--secondary" type="button" id="welt-erneut" hidden>{{icon:refresh}}Erneut versuchen</button>
+            <a class="btn btn--secondary" href="/zusammen#welt">{{icon:world}}Was ist Welt teilen?</a>
+          </div>
+        </article>
+
+        <aside class="world-side">
+          <div class="card">
+            <h2 class="h4">So trittst du bei</h2>
+            <ol class="mini-steps">
+              <li><span><strong>Mit HeldixClient:</strong> „Mit HeldixClient beitreten“ öffnet den Launcher; er wählt eine passende Instanz und verbindet direkt.</span></li>
+              <li><span><strong>Ohne HeldixClient:</strong> Adresse kopieren und in Minecraft als Server hinzufügen – mit derselben Minecraft-Version wie die Welt.</span></li>
+              <li><span><strong>Nicht eingeladen?</strong> Beim Beitreten klopfst du an; der Gastgeber entscheidet im Spiel.</span></li>
+            </ol>
+          </div>
+          <div class="card">
+            <span class="icon-tile">{{icon:shield}}</span>
+            <h2 class="h4">Sicher verbunden</h2>
+            <p class="card__text">Der Heldix-Dienst leitet die Verbindung nur weiter – der Gastgeber sieht deine IP-Adresse nicht. Die Welt selbst läuft auf seinem PC.</p>
+            <a class="link-arrow" href="/hilfe/welt-teilen">Welt teilen erklärt{{icon:chevron-right}}</a>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+</main>
+
+{{include:icons.html}}
+{{include:footer.html}}
+</body>
+</html>

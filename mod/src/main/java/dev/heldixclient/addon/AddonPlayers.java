@@ -7,15 +7,18 @@ import dev.heldixclient.api.VoiceChannel;
 import dev.heldixclient.player.PlayerMarkerStore;
 import dev.heldixclient.player.PlayerMenu;
 import dev.heldixclient.voice.VoiceLink;
+import net.minecraft.client.Minecraft;
 
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
- * Addon-API 6/7 rund um andere Spieler: Sprachkanal ({@link VoiceChannel}, ab 7 mit Status und Gruppen), Symbole am
+ * Addon-API 6/7/9 rund um andere Spieler: Sprachkanal ({@link VoiceChannel}, ab 7 mit Status und Gruppen, ab 9 mit Gästen
+ * und Browser-Link), Symbole am
  * Namensschild und über dem Kopf ({@link PlayerMarkers}) und Einträge im Spielermenü. Alles läuft unter der Id des Addons und wird beim Abschalten mit {@link #release} entfernt.
  */
 final class AddonPlayers {
@@ -181,6 +184,69 @@ final class AddonPlayers {
 			public String groupProblem() {
 				return VoiceLink.isActive(owner) ? VoiceLink.groupProblem() : null;
 			}
+
+			// --- API 9: Gäste und Browser-Teilnehmer ---
+
+			@Override
+			public boolean isGuest(UUID participant) {
+				return VoiceLink.isActive(owner) && VoiceLink.isGuest(participant);
+			}
+
+			@Override
+			public boolean inBrowser(UUID participant) {
+				return VoiceLink.isActive(owner) && VoiceLink.inBrowser(participant);
+			}
+
+			@Override
+			public boolean guestsAvailable() {
+				return VoiceLink.isActive(owner) && VoiceLink.guestsAvailable();
+			}
+
+			@Override
+			public void removeGuest(UUID guest) {
+				if (addon.isActive() && VoiceLink.isActive(owner) && guest != null) VoiceLink.removeGuest(guest);
+			}
+
+			@Override
+			public void createBrowserLink(Consumer<String> onLink, Consumer<String> onError) {
+				Objects.requireNonNull(onLink, "onLink");
+				Objects.requireNonNull(onError, "onError");
+				if (!addon.isActive()) return;
+				Minecraft minecraft = Minecraft.getInstance();
+				if (!VoiceLink.isActive(owner)) {
+					deliver(addon, minecraft, "createBrowserLink", onError, "Voice Chat ist aus – schalte ihn zuerst ein");
+					return;
+				}
+				if (!LINKS.add(owner)) {
+					deliver(addon, minecraft, "createBrowserLink", onError, "Der Link wird gerade erstellt …");
+					return;
+				}
+				VoiceLink.createBrowserLink().whenComplete((invite, error) -> {
+					LINKS.remove(owner);
+					if (error == null) {
+						deliver(addon, minecraft, "createBrowserLink", onLink, invite.url());
+						return;
+					}
+					Throwable cause = error instanceof java.util.concurrent.CompletionException && error.getCause() != null ? error.getCause() : error;
+					deliver(addon, minecraft, "createBrowserLink", onError,
+							cause instanceof dev.heldixclient.social.Social.ServiceException && cause.getMessage() != null ? cause.getMessage() : "Dienst nicht erreichbar");
+				});
+			}
 		};
+	}
+
+	/** Addons, für die gerade ein Browser-Link erstellt wird (höchstens einer gleichzeitig je Addon) */
+	private static final Set<String> LINKS = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+	/** Ergebnis im Haupt-Thread an das Addon geben (nur, solange es aktiv ist; Fehler zählen als Addon-Fehler) */
+	private static void deliver(LoadedAddon addon, Minecraft minecraft, String where, Consumer<String> callback, String value) {
+		minecraft.execute(() -> {
+			if (!addon.isActive()) return;
+			try {
+				callback.accept(value);
+			} catch (Throwable t) {
+				AddonManager.reportError(addon, where, t);
+			}
+		});
 	}
 }

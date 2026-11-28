@@ -10,6 +10,7 @@ import { avatar, h, icon, normalizeUuid, reasonLabel, relativeTime, uid } from '
 import { addonIcon, normalizeAddons } from './addon-common.js';
 import { publicGet } from './public-cards.js';
 import { shellIcon } from './app-shell.js';
+import { roleLabel } from './rollen.js';
 
 const CACHE_MS = 60_000;
 const GROUP_MAX = 5;
@@ -40,11 +41,11 @@ const SUPPORT_STATUS = { open: 'wartet', answered: 'beantwortet', closed: 'gesch
 const SUBMISSION_STATUS = { pending: 'zu prüfen', approved: 'freigegeben', rejected: 'abgelehnt', withdrawn: 'zurückgezogen' };
 
 /**
- * shell: Rahmen. teamCall: Team-Anfrage. isAdmin(). sections(): sichtbare Bereiche [{ id, label, description, icon }].
+ * shell: Rahmen. teamCall: Team-Anfrage. isAdmin(). can(recht): Recht der eigenen Rolle (nur erlaubte Listen). sections(): sichtbare Bereiche [{ id, label, description, icon }].
  * open: { section(id), player(uuid), ticket(id), report(id), submission(id), addon(id), cosmetic(id) }.
  * actions(): zusätzliche Befehle [{ id, label, text, icon, keywords, run }]. getCosmetics(): bekannte Cosmetics oder null.
  */
-export function initTeamSearch({ shell, teamCall, isAdmin, sections, open, actions, getTeamAddons, getCosmetics }) {
+export function initTeamSearch({ shell, teamCall, isAdmin, can = () => true, sections, open, actions, getTeamAddons, getCosmetics }) {
   const cache = new Map(); // name → { at, data }
   const loading = new Map(); // name → Promise
   const state = { query: '', results: [], active: 0, moved: false, players: { query: '', list: [], loading: false }, playerTimer: null, playerAbort: null, enabled: false };
@@ -62,7 +63,7 @@ export function initTeamSearch({ shell, teamCall, isAdmin, sections, open, actio
     reports: async () => (await teamCall('GET', '/v1/team/reports?status=all'))?.reports ?? [],
     submissions: async () => (await teamCall('GET', '/v1/team/addon-submissions?status=all'))?.submissions ?? [],
     addons: async () => {
-      if (isAdmin()) {
+      if (can('addons')) {
         const known = getTeamAddons();
         if (known?.addons) return known.addons.map((addon) => ({ id: addon.id, name: addon.name ?? addon.id, version: addon.versions?.[0]?.version ?? addon.latest ?? '', hidden: Boolean(addon.hidden), official: addon.official !== false && !addon.owner }));
         const data = await teamCall('GET', '/v1/team/addons');
@@ -78,7 +79,7 @@ export function initTeamSearch({ shell, teamCall, isAdmin, sections, open, actio
   };
 
   function listNames() {
-    return ['tickets', 'reports', 'submissions', 'addons', ...(isAdmin() ? ['cosmetics'] : [])];
+    return [can('support') ? 'tickets' : null, can('moderation') ? 'reports' : null, can('addons') ? 'submissions' : null, 'addons', can('cosmetics') ? 'cosmetics' : null].filter(Boolean);
   }
 
   function ensureLists() {
@@ -102,7 +103,7 @@ export function initTeamSearch({ shell, teamCall, isAdmin, sections, open, actio
     clearTimeout(state.playerTimer);
     state.playerAbort?.abort();
     const uuid = normalizeUuid(query);
-    if (!uuid && (query.length < 2 || !/^[A-Za-z0-9_]{1,16}$/.test(query))) {
+    if (!can('players') || (!uuid && (query.length < 2 || !/^[A-Za-z0-9_]{1,16}$/.test(query)))) {
       state.players = { query: '', list: [], loading: false };
       return;
     }
@@ -160,7 +161,7 @@ export function initTeamSearch({ shell, teamCall, isAdmin, sections, open, actio
         key: `spieler:${player.uuid}`,
         group: 'Spieler',
         title: player.name,
-        sub: [player.online ? 'online' : `zuletzt online ${relativeTime(player.lastSeen)}`, player.banned ? 'gesperrt' : null, player.role ? (player.role === 'admin' ? 'Admin' : 'Moderator') : null].filter(Boolean).join(' · '),
+        sub: [player.online ? 'online' : `zuletzt online ${relativeTime(player.lastSeen)}`, player.banned ? 'gesperrt' : null, player.role ? roleLabel(player.role) : null].filter(Boolean).join(' · '),
         lead: () => avatar(player.name, player.uuid, { size: 'sm' }),
         score: player.uuid === normalizeUuid(query) ? 100 : score(query, player.name) || 50,
         run: () => open.player(player.uuid),

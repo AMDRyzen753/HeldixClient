@@ -24,9 +24,13 @@ import dev.heldixclient.render.Performance;
 import dev.heldixclient.render.ShaderEngine;
 import dev.heldixclient.render.ShaderPreset;
 import dev.heldixclient.render.Shaders;
+import dev.heldixclient.share.WorldShare;
+import dev.heldixclient.social.Badge;
 import dev.heldixclient.social.BadgeDisplay;
 import dev.heldixclient.social.Messages;
+import dev.heldixclient.social.Party;
 import dev.heldixclient.social.Social;
+import dev.heldixclient.social.Suggestions;
 import dev.heldixclient.waypoint.Waypoints;
 import dev.heldixclient.ui.Shell;
 import dev.heldixclient.ui.Ui;
@@ -115,7 +119,7 @@ public class HeldixMenuScreen extends ShellScreen {
 	private enum CosmeticTab {
 		HEAD("Kopf", "star", "head"),
 		BACK("Rücken", "cape", "back"),
-		AURA("Partikel", "sparkles", "aura"),
+		AURA("Aura", "sparkles", "aura"),
 		COMPANION("Begleiter", "user", "companion"),
 		OPTIONS("Optionen", "options", null);
 
@@ -240,6 +244,28 @@ public class HeldixMenuScreen extends ShellScreen {
 	private String reportReason = "spam";
 	/** umbrochene Zeilen der Sprechblasen (je Nachricht und Breite) */
 	private final Map<Long, List<FormattedCharSequence>> bubbleLines = new HashMap<>();
+	/** offener Chat: Antwort auf diese Nachricht (Leiste über der Eingabe), sonst null */
+	private Messages.Message replyTo;
+	/** eigene Nachricht, deren Löschen gerade bestätigt werden muss (zweiter Klick) */
+	private long confirmDeleteMessage;
+	private long confirmDeleteMessageAt;
+
+	/** Profilkarte eines Freundes (Seite Freunde), sonst null */
+	private UUID openProfile;
+	private Social.Profile profile;
+	private String profileError;
+	/** Profil: Aktion, die gerade bestätigt werden muss ("remove", "block"), mit Zeitpunkt */
+	private String profileConfirm;
+	private long profileConfirmAt;
+	/** Spitzname und Notiz: Entwurf und wann zuletzt getippt (gespeichert wird nach kurzer Pause in tick) */
+	private String nicknameDraft;
+	private String noteDraft;
+	private long draftChangedAt;
+	/** Rechtsklick-Menü (Freunde, Nachrichten) */
+	private final dev.heldixclient.ui.ContextMenu menu = new dev.heldixclient.ui.ContextMenu(null, null);
+	/** Beitreten (Party-Ziel, Karte im Chat) aus einer Welt heraus: zweiter Klick innerhalb von 4 Sekunden bestätigt */
+	private String confirmAddress;
+	private long confirmAddressAt;
 
 	private int bodyX;
 	private int bodyW;
@@ -259,6 +285,21 @@ public class HeldixMenuScreen extends ShellScreen {
 		this(parent, Shell.Page.MESSAGES, null);
 		this.openChat = chatWith;
 		this.openChatName = name;
+	}
+
+	/** Profilkarte eines Freundes (Seite Freunde; „Zurück“ führt zur Liste) */
+	public static HeldixMenuScreen profile(Screen parent, UUID friend) {
+		HeldixMenuScreen screen = new HeldixMenuScreen(parent, Shell.Page.FRIENDS);
+		screen.openProfile = friend;
+		return screen;
+	}
+
+	/** Chat mit gleich geöffnetem „Melden“ (aus der Profilkarte) */
+	public static HeldixMenuScreen chatReport(Screen parent, UUID friend, String name) {
+		HeldixMenuScreen screen = new HeldixMenuScreen(parent, friend, name);
+		screen.reporting = true;
+		screen.chatToTop = true;
+		return screen;
 	}
 
 	/** Mit geöffnetem Untermenü eines Moduls (z. B. aus dem HUD-Editor per Rechtsklick). */
@@ -301,7 +342,7 @@ public class HeldixMenuScreen extends ShellScreen {
 	 */
 	public static List<SettingEntry> searchableSettings() {
 		List<SettingEntry> list = new ArrayList<>();
-		Object[][] sources = {{Shell.Page.SETTINGS, null}, {Shell.Page.PERFORMANCE, null}, {Shell.Page.SHADER, null}, {Shell.Page.PRIVACY, null},
+		Object[][] sources = {{Shell.Page.SETTINGS, null}, {Shell.Page.PERFORMANCE, null}, {Shell.Page.SHADER, null}, {Shell.Page.PRIVACY, null}, {Shell.Page.PARTY, null},
 				{Shell.Page.WAYPOINTS, "waypoints:DISPLAY"}, {Shell.Page.CAPE, "cape:OPTIONS"}, {Shell.Page.COSMETICS, "cosmetics:OPTIONS"}};
 		for (Object[] source : sources) {
 			Shell.Page page = (Shell.Page) source[0];
@@ -601,7 +642,8 @@ public class HeldixMenuScreen extends ShellScreen {
 		bodyX = openChat != null ? chatX() : contentX;
 		bodyW = (openChat != null ? chatW() : contentW) - 8;
 		bodyY = contentY;
-		bodyH = contentH - (openChat != null ? 30 : 0);
+		// offener Chat: unten die Eingabe, beim Antworten darüber die Leiste mit dem Bezug
+		bodyH = contentH - (openChat != null ? 30 + (replyTo != null ? 18 : 0) : 0);
 		rows = buildRows();
 		if (openChat != null && chatToTop) {
 			chatFromBottom = maxScroll();
@@ -850,19 +892,7 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	/** Untermenü: je Text-Einstellung ein Eingabefeld (unsichtbar, bis seine Zeile gezeichnet wird) */
 	private void addTextFields() {
-		for (Setting setting : openModule.settings()) {
-			if (!(setting instanceof Setting.Text text) || textFields.containsKey(text.label())) continue;
-			SearchField field = new SearchField(0, 0, 120, 20, "Text eingeben").withIcon("edit").withMaxLength(text.maxLength()).keepOnEscape();
-			field.setValue(text.get().get());
-			field.setResponder(value -> text.set().accept(value));
-			field.setOnEnter(() -> {
-				field.setFocused(false);
-				if (getFocused() == field) setFocused(null);
-			});
-			field.visible = false;
-			addRenderableWidget(field);
-			textFields.put(text.label(), field);
-		}
+		addTextFields(openModule.settings());
 	}
 
 	@Override
@@ -873,13 +903,26 @@ public class HeldixMenuScreen extends ShellScreen {
 		pageButton = null;
 		chatInput = null;
 		textFields.clear();
+		menu.close();
 		layout();
 		if (openChat != null) {
 			initChat();
 			return;
 		}
+		if (openProfile != null) {
+			initProfile();
+			return;
+		}
 		if (page == Shell.Page.MESSAGES) Messages.loadConversations();
-		if (page == Shell.Page.PRIVACY && Social.online()) Messages.loadBlocked();
+		if (page == Shell.Page.PRIVACY && Social.online()) {
+			Messages.loadBlocked();
+			Social.refreshMe();
+			addTextFields(statusSettings());
+		}
+		// Freunde 2.0: Vorschläge vom Dienst; Party-Chat gilt als gelesen, solange die Seite Party offen ist
+		if (page == Shell.Page.FRIENDS && Social.friends2()) dev.heldixclient.social.Suggestions.load();
+		dev.heldixclient.social.Party.setViewingChat(page == Shell.Page.PARTY);
+		if (page == Shell.Page.PARTY && Social.friends2()) dev.heldixclient.social.Party.refresh();
 		if (page == Shell.Page.ACCOUNTS) {
 			// alter Fehler (z. B. aus einer Welt heraus versucht) gilt beim neuen Öffnen nicht mehr
 			AccountSwitcher.clearStatus();
@@ -909,8 +952,138 @@ public class HeldixMenuScreen extends ShellScreen {
 			addRenderableWidget(search);
 		} else if (wantsPageInput()) {
 			if (page == Shell.Page.WAYPOINTS) addPageInput("Hier setzen", "plus", "Name (optional)", "pin", this::addWaypointHere);
-			else addPageInput("Anfrage senden", "user-plus", "Spielername", "user", this::sendFriendRequest);
+			else if (page == Shell.Page.PARTY) {
+				addPageInput("Senden", "send", "Nachricht an die Party", "chat", this::sendPartyChat);
+				pageInput.withMaxLength(dev.heldixclient.social.Party.CHAT_MAX);
+			} else addPageInput("Anfrage senden", "user-plus", "Spielername", "user", this::sendFriendRequest);
 		}
+	}
+
+	/** Untermenü bzw. Seite: je Text-Einstellung ein Eingabefeld (unsichtbar, bis seine Zeile gezeichnet wird) */
+	private void addTextFields(List<Setting> settings) {
+		for (Setting setting : settings) {
+			if (!(setting instanceof Setting.Text text) || textFields.containsKey(text.label())) continue;
+			SearchField field = new SearchField(0, 0, 120, 20, "Text eingeben").withIcon("edit").withMaxLength(text.maxLength()).keepOnEscape();
+			field.setValue(text.get().get());
+			field.setResponder(value -> text.set().accept(value));
+			field.setOnEnter(() -> {
+				field.setFocused(false);
+				if (getFocused() == field) setFocused(null);
+			});
+			field.visible = false;
+			addRenderableWidget(field);
+			textFields.put(text.label(), field);
+		}
+	}
+
+	/** Profilkarte: Zurück, Felder für Spitzname und Notiz; das Profil (gemeinsame Freunde) im Hintergrund laden */
+	private void initProfile() {
+		int bw = ActionButton.widthFor("Zurück", "back");
+		addRenderableWidget(new ActionButton(headerRight() - bw, headerButtonY(), bw, 20, "Zurück", false, this::closeProfile).withIcon("back"));
+		Social.Friend friend = friendOf(openProfile);
+		if (friend != null) {
+			if (nicknameDraft == null) nicknameDraft = friend.nickname() == null ? "" : friend.nickname();
+			if (noteDraft == null) noteDraft = friend.note() == null ? "" : friend.note();
+		}
+		addTextFields(profileSettings());
+		if (profile == null || !profile.friend().uuid().equals(openProfile)) loadProfile();
+	}
+
+	private void loadProfile() {
+		UUID id = openProfile;
+		profileError = null;
+		Social.profile(id).whenComplete((result, error) -> minecraft.execute(() -> {
+			if (!id.equals(openProfile)) return;
+			if (error != null) profileError = errorText(error);
+			else profile = result;
+		}));
+	}
+
+	/** Profilkarte öffnen (Seite Freunde) */
+	private void openProfile(UUID friend) {
+		if (page != Shell.Page.FRIENDS || openChat != null) {
+			minecraft.gui.setScreen(profile(parent, friend));
+			return;
+		}
+		saveProfileDrafts();
+		openProfile = friend;
+		profile = null;
+		profileConfirm = null;
+		nicknameDraft = null;
+		noteDraft = null;
+		scroll = 0;
+		rebuildWidgets();
+	}
+
+	private void closeProfile() {
+		saveProfileDrafts();
+		openProfile = null;
+		profile = null;
+		nicknameDraft = null;
+		noteDraft = null;
+		scroll = 0;
+		rebuildWidgets();
+	}
+
+	/** Spitzname und Notiz speichern, wenn sie sich geändert haben (gleich, ohne auf die Pause zu warten) */
+	private void saveProfileDrafts() {
+		if (openProfile == null || draftChangedAt == 0) return;
+		draftChangedAt = 0;
+		Social.Friend friend = friendOf(openProfile);
+		if (friend == null) return;
+		String nickname = nicknameDraft == null ? "" : nicknameDraft.strip();
+		String note = noteDraft == null ? "" : noteDraft.strip();
+		if (!nickname.equals(friend.nickname() == null ? "" : friend.nickname())) {
+			Social.setNickname(friend.uuid(), nickname).exceptionally(e -> {
+				minecraft.execute(() -> pageMessage(errorText(e), false));
+				return null;
+			});
+		}
+		if (!note.equals(friend.note() == null ? "" : friend.note())) {
+			Social.setNote(friend.uuid(), note).exceptionally(e -> {
+				minecraft.execute(() -> pageMessage(errorText(e), false));
+				return null;
+			});
+		}
+	}
+
+	/** Einstellungen „Nur für dich“ der Profilkarte (Spitzname, Notiz) */
+	private List<Setting> profileSettings() {
+		return List.of(
+				new Setting.Text("Spitzname", "Steht in deinen Listen statt des Namens – nur du siehst ihn", Social.NICKNAME_MAX,
+						() -> nicknameDraft == null ? "" : nicknameDraft, value -> {
+							nicknameDraft = value;
+							draftChangedAt = System.currentTimeMillis();
+						}),
+				new Setting.Text("Notiz", "Nur für dich, z. B. woher ihr euch kennt", Social.NOTE_MAX,
+						() -> noteDraft == null ? "" : noteDraft, value -> {
+							noteDraft = value;
+							draftChangedAt = System.currentTimeMillis();
+						}));
+	}
+
+	/** Eigener Statustext (Seite Privatsphäre): geht nach einer Sekunde ohne Tippen an den Dienst */
+	private List<Setting> statusSettings() {
+		return List.of(new Setting.Text("Statustext", "Sehen deine Freunde neben deinem Namen (höchstens 40 Zeichen, leer = keiner)", Social.STATUS_MAX,
+				() -> Social.me().statusText() == null ? "" : Social.me().statusText(),
+				value -> Social.setStatusText(value, message -> pageMessage(message, false))));
+	}
+
+	/** Seite Party: Nachricht aus dem Eingabefeld in den Party-Chat */
+	private void sendPartyChat() {
+		String text = pageInputText.strip();
+		if (text.isEmpty() || !dev.heldixclient.social.Party.active()) return;
+		click();
+		pageInputText = "";
+		if (pageInput != null) pageInput.setValue("");
+		dev.heldixclient.social.Party.sendChat(text).exceptionally(e -> {
+			minecraft.execute(() -> {
+				pageMessage(errorText(e), false);
+				pageInputText = text;
+				if (pageInput != null) pageInput.setValue(text);
+			});
+			return null;
+		});
 	}
 
 	/** Chat: Zurück, Melden und Blockieren im Kopf, Eingabe und Senden unten */
@@ -962,9 +1135,19 @@ public class HeldixMenuScreen extends ShellScreen {
 		int cx = chatX();
 		int cw = chatW();
 		addRenderableWidget(new ActionButton(cx + cw - sw, y, sw, 20, send, true, this::sendChat).withIcon("send"));
-		chatInput = new SearchField(cx, y, cw - sw - 6, 20, "Nachricht an " + openChatName).withIcon("chat").withMaxLength(Messages.MAX_LENGTH);
+		// ab Dienst 1.12.0: Server bzw. geteilte Welt als Beitreten-Karte schicken
+		int share = 0;
+		if (Social.friends2()) {
+			share = 24;
+			addRenderableWidget(ActionButton.icon(cx + cw - sw - 24, y, 20, "server", SHARE_LOCATION_LABEL, this::shareLocation));
+		}
+		chatInput = new SearchField(cx, y, cw - sw - 6 - share, 20, "Nachricht an " + openChatName).withIcon("chat").withMaxLength(Messages.MAX_LENGTH);
 		chatInput.setValue(chatText);
-		chatInput.setResponder(text -> chatText = text);
+		chatInput.setResponder(text -> {
+			// „schreibt …“ höchstens alle 3 Sekunden an den Freund (nur wenn sich wirklich etwas ändert)
+			if (!text.isBlank() && !text.equals(chatText)) Messages.typed(openChat);
+			chatText = text;
+		});
 		chatInput.setOnEnter(this::sendChat);
 		addRenderableWidget(chatInput);
 		setFocused(chatInput);
@@ -982,11 +1165,16 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	/** Nachricht senden: erscheint sofort (blass), ist sie angekommen, steht sie im Verlauf; sonst rot mit „erneut senden“ */
 	private void sendText(String text) {
-		PendingMessage pending = new PendingMessage(openChat, text);
+		sendText(text, replyTo != null ? replyTo.id() : 0, null);
+		replyTo = null;
+	}
+
+	private void sendText(String text, long reply, Messages.Card card) {
+		PendingMessage pending = new PendingMessage(openChat, text, reply, card);
 		pendingMessages.add(pending);
 		chatFromBottom = 0;
 		unreadAtOpen = 0;
-		Messages.send(openChat, text).whenComplete((ok, error) -> minecraft.execute(() -> {
+		Messages.send(openChat, text, reply, card).whenComplete((ok, error) -> minecraft.execute(() -> {
 			if (error == null) {
 				pendingMessages.remove(pending);
 				return;
@@ -1009,6 +1197,7 @@ public class HeldixMenuScreen extends ShellScreen {
 		reporting = false;
 		confirmingBlock = false;
 		chatOpenedFor = null;
+		replyTo = null;
 		rebuildWidgets();
 	}
 
@@ -1016,6 +1205,7 @@ public class HeldixMenuScreen extends ShellScreen {
 		Messages.setViewing(null);
 		openChat = null;
 		chatOpenedFor = null;
+		replyTo = null;
 		reporting = false;
 		confirmingBlock = false;
 		scroll = 0;
@@ -1032,6 +1222,122 @@ public class HeldixMenuScreen extends ShellScreen {
 		ServerData data = new ServerData(address, address, ServerData.Type.OTHER);
 		if (minecraft.level != null) minecraft.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE);
 		ConnectScreen.startConnecting(new TitleScreen(), minecraft, ServerAddress.parseString(address), data, false, null);
+	}
+
+	/** Beschriftung des Knopfs im Chat, der den eigenen Server bzw. die geteilte Welt als Karte schickt */
+	public static final String SHARE_LOCATION_LABEL = "Server/Welt teilen";
+
+	/**
+	 * „Server/Welt teilen“ im Chat: Beitreten-Karte mit dem Server, auf dem man spielt, bzw. der geteilten Welt (eigene oder
+	 * als Mitspieler). Der Text bleibt für ältere Clients lesbar („Komm auf …“).
+	 */
+	private void shareLocation() {
+		if (openChat == null) return;
+		Messages.Card card = locationCard();
+		if (card == null) {
+			pageMessage("Du bist gerade auf keinem Server und in keiner geteilten Welt.", false);
+			return;
+		}
+		String text = switch (card.kind()) {
+			case "world" -> "Komm in " + (card.title() != null ? "meine Welt „" + card.title() + "“" : "meine Welt") + ": "
+					+ (WorldShare.address() != null && WorldShare.online() ? WorldShare.normalizeAddress(WorldShare.address()) : card.target());
+			default -> "Komm auf " + card.target();
+		};
+		click();
+		sendText(text, replyTo != null ? replyTo.id() : 0, card);
+		replyTo = null;
+	}
+
+	/** Karte für den aktuellen Ort: geteilte Welt (Gastgeber oder Mitspieler) bzw. öffentlicher Server; sonst null */
+	private Messages.Card locationCard() {
+		if (minecraft.level == null) return null;
+		String own = WorldShare.online() ? WorldShare.address() : null;
+		if (own != null && WorldShare.isWorldAddress(own)) {
+			String title = minecraft.getSingleplayerServer() != null ? minecraft.getSingleplayerServer().getWorldData().getLevelName() : null;
+			return new Messages.Card("world", worldCode(own), title == null ? null : title.length() > 60 ? title.substring(0, 60) : title);
+		}
+		ServerData server = minecraft.getCurrentServer();
+		if (minecraft.isLocalServer() || server == null || server.isLan() || server.isRealm() || server.ip == null) return null;
+		String address = WorldShare.normalizeAddress(server.ip);
+		if (WorldShare.isWorldAddress(address)) return new Messages.Card("world", worldCode(address), null);
+		String title = server.name != null && !server.name.isBlank() && !server.name.equals(net.minecraft.client.resources.language.I18n.get("selectServer.defaultName"))
+				? server.name.strip() : null;
+		if (title != null && title.length() > 60) title = title.substring(0, 60);
+		return new Messages.Card("server", address, title);
+	}
+
+	/** Code einer Heldix-Welt aus ihrer Adresse ({@code <code>.welt.<Domain>}) */
+	private static String worldCode(String address) {
+		String clean = WorldShare.normalizeAddress(address);
+		return clean.substring(0, clean.indexOf('.'));
+	}
+
+	/**
+	 * Beitreten-Karte aus dem Chat: Server direkt, Welt über ihre Adresse beim Dienst ({@code GET /v1/public/worlds/<code>}),
+	 * Einladung annehmen ({@code POST /v1/invites/<code>/accept}). Aus einer Welt heraus erst nach einem zweiten Klick.
+	 */
+	private void useCard(Messages.Card card) {
+		switch (card.kind()) {
+			case "server" -> joinAddress(card.target(), card.shownTitle());
+			case "world" -> {
+				if (!confirmLeave("welt:" + card.target())) return;
+				Social.request("GET", "/v1/public/worlds/" + card.target(), null, false).whenComplete((json, error) -> minecraft.execute(() -> {
+					String address = error == null && json.isJsonObject() && json.getAsJsonObject().has("address")
+							? json.getAsJsonObject().get("address").getAsString() : null;
+					if (address == null) {
+						pageMessage(error != null ? errorText(error) : "Diese Welt gibt es nicht (mehr).", false);
+						return;
+					}
+					boolean open = json.getAsJsonObject().has("online") && json.getAsJsonObject().get("online").getAsBoolean();
+					if (!open) {
+						pageMessage("Die Welt ist gerade nicht geöffnet.", false);
+						return;
+					}
+					dev.heldixclient.social.Party.join(minecraft, new dev.heldixclient.social.Party.Location("world", card.target(), address, card.shownTitle()));
+				}));
+			}
+			case "invite" -> Social.request("POST", "/v1/invites/" + card.target() + "/accept", new com.google.gson.JsonObject(), true)
+					.whenComplete((json, error) -> minecraft.execute(() -> {
+						if (error != null) {
+							pageMessage(errorText(error), false);
+							return;
+						}
+						String friend = json.isJsonObject() && json.getAsJsonObject().has("friend") ? json.getAsJsonObject().get("friend").getAsString() : "";
+						pageMessage(switch (friend) {
+							case "new" -> "Einladung angenommen – ihr seid jetzt befreundet.";
+							case "already" -> "Ihr seid schon befreundet.";
+							case "self" -> "Das ist deine eigene Einladung.";
+							case "limit" -> "Deine Freundesliste ist voll.";
+							default -> "Einladung angenommen.";
+						}, !"limit".equals(friend));
+					}));
+			default -> {
+			}
+		}
+	}
+
+	/** In einer Welt: true erst beim zweiten Klick innerhalb von 4 Sekunden (vorher Hinweis); ohne Welt sofort true */
+	private boolean confirmLeave(String key) {
+		if (minecraft.level == null) return true;
+		if (key.equals(confirmAddress) && System.currentTimeMillis() - confirmAddressAt < 4000) {
+			confirmAddress = null;
+			return true;
+		}
+		confirmAddress = key;
+		confirmAddressAt = System.currentTimeMillis();
+		pageMessage("Nochmal klicken: Du verlässt dafür deine Welt.", true);
+		return false;
+	}
+
+	/** Server bzw. Ort betreten (aus einer Welt heraus mit Bestätigung) */
+	private void joinAddress(String address, String title) {
+		if (address == null || !ServerAddress.isValidAddress(address)) {
+			pageMessage("Die Adresse ist ungültig.", false);
+			return;
+		}
+		if (!confirmLeave("server:" + address)) return;
+		dev.heldixclient.social.Party.join(minecraft, new dev.heldixclient.social.Party.Location(
+				WorldShare.isWorldAddress(address) ? "world" : "server", address, address, title == null ? address : title));
 	}
 
 	/** Kann man diesem Freund folgen? (spielt auf einem öffentlichen Server, auf dem man nicht selbst ist) */
@@ -1095,8 +1401,10 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	/** Eingabefeld oben im Inhalt: Freunde und Anfragen (mit Verbindung), Wegpunkte (in einer Welt) */
 	private boolean wantsPageInput() {
-		if (openModule != null || openChat != null) return false;
+		if (openModule != null || openChat != null || openProfile != null) return false;
 		if (page == Shell.Page.WAYPOINTS) return minecraft.level != null;
+		// Seite Party: Eingabe für den Party-Chat, solange man in einer Party ist
+		if (page == Shell.Page.PARTY) return Party.active();
 		if (page != Shell.Page.FRIENDS && page != Shell.Page.REQUESTS) return false;
 		Social.State state = Social.state();
 		return state != Social.State.DISABLED && state != Social.State.OFFLINE_ACCOUNT && state != Social.State.OFF;
@@ -1108,12 +1416,16 @@ public class HeldixMenuScreen extends ShellScreen {
 		// Dienst ein- oder ausgeschaltet bzw. Welt betreten: Eingabefeld passend anlegen
 		if (openChat == null && wantsPageInput() != (pageInput != null)) rebuildWidgets();
 		if (bubbleLines.size() > 2000) bubbleLines.clear();
+		// Spitzname und Notiz nach einer kurzen Pause beim Tippen speichern
+		if (draftChangedAt > 0 && System.currentTimeMillis() - draftChangedAt > 1200) saveProfileDrafts();
+		// Freund entfernt bzw. blockiert: Profilkarte schließen
+		if (openProfile != null && friendOf(openProfile) == null && Social.online()) closeProfile();
 	}
 
 	/** Unter-Menü der Kategorie als Reiter unter dem Seitenkopf */
 	@Override
 	protected List<ShellTab.Spec> subTabs() {
-		if (openModule != null || openChat != null) return List.of();
+		if (openModule != null || openChat != null || openProfile != null) return List.of();
 		List<ShellTab.Spec> specs = new ArrayList<>();
 		switch (page) {
 			case MODULES -> {
@@ -1158,7 +1470,7 @@ public class HeldixMenuScreen extends ShellScreen {
 							}));
 				}
 			}
-			case FRIENDS, MESSAGES, REQUESTS, PRIVACY -> {
+			case FRIENDS, PARTY, MESSAGES, REQUESTS, PRIVACY -> {
 				Social.State state = Social.state();
 				if (state != Social.State.DISABLED && state != Social.State.OFFLINE_ACCOUNT) specs.addAll(pageTabs(this::go));
 			}
@@ -1258,13 +1570,14 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	@Override
 	protected boolean detailHeader() {
-		return openModule != null || openChat != null;
+		return openModule != null || openChat != null || openProfile != null;
 	}
 
 	/** Platz der Knöpfe rechts in der Werkzeugzeile (wie in initContent bzw. initChat angelegt) */
 	@Override
 	protected int toolbarActionsWidth() {
 		int back = ActionButton.widthFor("Zurück", "back");
+		if (openProfile != null) return back;
 		if (openChat != null) {
 			Social.Friend friend = friendOf(openChat);
 			int join = friend != null && joinable(friend) && contentW >= 360 ? ActionButton.widthFor("Beitreten", "play") + 6 : 0;
@@ -1280,15 +1593,23 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	@Override
 	protected Component headerTitle() {
-		if (openChat != null) return Component.literal(openChatName);
+		if (openChat != null) {
+			Social.Friend friend = friendOf(openChat);
+			return Component.literal(friend != null ? friend.shownName() : openChatName);
+		}
+		if (openProfile != null) {
+			Social.Friend friend = friendOf(openProfile);
+			return Component.literal(friend != null ? friend.shownName() : "Profil");
+		}
 		return openModule != null ? Component.literal(openModule.name()) : super.headerTitle();
 	}
 
 	@Override
 	protected boolean drawHeaderImage(GuiGraphicsExtractor g, int x, int y, int size) {
-		if (openChat == null) return false;
-		Social.Friend friend = friendOf(openChat);
-		FriendWidget.face(g, openChat, openChatName, x, y, size, fade);
+		UUID shown = openChat != null ? openChat : openProfile;
+		if (shown == null) return false;
+		Social.Friend friend = friendOf(shown);
+		FriendWidget.face(g, shown, friend != null ? friend.name() : openChatName, x, y, size, fade);
 		if (friend != null && friend.online()) {
 			Ui.circle(g, x + size, y + size, 4, Ui.withAlpha(0xFF0F1420, fade));
 			Ui.circle(g, x + size, y + size, 3, Ui.withAlpha(Ui.SUCCESS, fade));
@@ -1299,6 +1620,7 @@ public class HeldixMenuScreen extends ShellScreen {
 	@Override
 	protected String headerIcon() {
 		if (openChat != null) return "chat";
+		if (openProfile != null) return "user";
 		return openModule != null ? openModule.icon() : super.headerIcon();
 	}
 
@@ -1307,7 +1629,13 @@ public class HeldixMenuScreen extends ShellScreen {
 		if (openModule != null) return openModule.source() != null ? "Addon: " + openModule.source() : "Einstellungen des Moduls";
 		if (openChat != null) {
 			Social.Friend friend = friendOf(openChat);
-			return friend != null ? friend.activity() : "Nicht mehr in deiner Freundesliste";
+			if (friend == null) return "Nicht mehr in deiner Freundesliste";
+			// „schreibt …“ (ab Dienst 1.12.0) statt des Status
+			return Messages.typing(openChat) ? "schreibt …" : friend.activity();
+		}
+		if (openProfile != null) {
+			Social.Friend friend = friendOf(openProfile);
+			return friend == null ? "Nicht mehr in deiner Freundesliste" : friend.nickname() != null ? friend.name() + " · " + friend.activity() : friend.activity();
 		}
 		return switch (page) {
 			case MODULES -> {
@@ -1318,8 +1646,15 @@ public class HeldixMenuScreen extends ShellScreen {
 			case CAPE -> "Dein Cape in der Third-Person-Ansicht (F5)";
 			case COSMETICS -> dev.heldixclient.cosmetic.Cosmetics.serviceProblem() == null ? "Hüte, Flügel, Partikel und Begleiter – für alle HeldixClient-Spieler"
 					: Social.state() == Social.State.OFFLINE_ACCOUNT ? "Nur mit Microsoft-Konto" : "Braucht den Heldix-Dienst";
-			case FRIENDS, MESSAGES, REQUESTS, PRIVACY -> switch (Social.state()) {
+			case FRIENDS, PARTY, MESSAGES, REQUESTS, PRIVACY -> switch (Social.state()) {
 				case ONLINE -> {
+					if (page == Shell.Page.PARTY) {
+						Party.State party = Party.party();
+						if (party == null) yield Party.invites().isEmpty() ? "Spielt zusammen mit bis zu 8 Freunden" : Party.invites().size() == 1
+								? "1 Einladung" : Party.invites().size() + " Einladungen";
+						Party.Member leader = party.leaderMember();
+						yield party.members().size() + " von " + party.max() + " · Leiter: " + (leader != null ? leader.name() : "?");
+					}
 					if (page == Shell.Page.MESSAGES) {
 						int unread = Messages.unreadTotal();
 						yield unread == 0 ? "Mit deinen Freunden schreiben" : unread == 1 ? "1 ungelesene Nachricht" : unread + " ungelesene Nachrichten";
@@ -1361,6 +1696,10 @@ public class HeldixMenuScreen extends ShellScreen {
 			buildChatRows(list);
 			return list;
 		}
+		if (openProfile != null) {
+			buildProfileRows(list);
+			return list;
+		}
 		if (openModule != null) {
 			list.add(new ModuleHeader(openModule));
 			List<Setting> settings = openModule.settings();
@@ -1385,6 +1724,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			case CAPE -> buildCapeRows(list);
 			case COSMETICS -> buildCosmeticRows(list);
 			case FRIENDS -> buildFriendRows(list);
+			case PARTY -> buildPartyRows(list);
 			case MESSAGES -> buildMessageRows(list);
 			case REQUESTS -> buildRequestRows(list);
 			case PRIVACY -> buildPrivacyRows(list);
@@ -1501,7 +1841,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			list.add(new Group(List.of(
 					new SettingRow(configToggle("Cosmetics anderer zeigen", "Hüte, Flügel, Begleiter und Partikel anderer HeldixClient-Spieler",
 							() -> config.cosmeticsOthers, v -> config.cosmeticsOthers = v)),
-					new SettingRow(configToggle("Partikel anderer zeigen", "Auren anderer Spieler; deine eigenen siehst du immer",
+					new SettingRow(configToggle("Auren anderer zeigen", "Auren anderer Spieler; deine eigenen siehst du immer",
 							() -> config.cosmeticParticlesOthers, v -> config.cosmeticParticlesOthers = v)),
 					new SettingRow(configToggle("Hut über Helm zeigen", "Mit Helm sitzt dein Hut darüber; aus: mit Helm wird er ausgeblendet",
 							() -> config.cosmeticHatOverHelmet, v -> config.cosmeticHatOverHelmet = v)))));
@@ -1543,12 +1883,22 @@ public class HeldixMenuScreen extends ShellScreen {
 				+ "Deine Auswahl gilt auch im Launcher und auf der Webseite.", Ui.FAINT));
 	}
 
+	/** Hinweis, wenn eine gesperrte Belohnung (access "unlock") gewählt wird – mit dem Weg zu den Einladungen */
+	private static String unlockText(String name) {
+		return "„" + name + "“ ist eine " + dev.heldixclient.cosmetic.Cosmetics.UNLOCK_HINT
+				+ ": Lade Freunde zu HeldixClient ein (Freunde → Freunde einladen), dann schaltest du es frei.";
+	}
+
 	/** Cosmetic anlegen (item) oder ablegen (null) – über den Heldix-Dienst, mit Hinweis auf der Seite */
 	private void chooseCosmetic(String slot, dev.heldixclient.cosmetic.CosmeticCatalog.Item item) {
 		String id = item == null ? null : item.id();
 		if (java.util.Objects.equals(dev.heldixclient.cosmetic.Cosmetics.mine(slot), id) || cosmeticPending != null) return;
 		if (item != null && item.teamOnly() && !dev.heldixclient.cosmetic.Cosmetics.team()) {
 			pageMessage("„" + item.name() + "“ gibt es nur für das HeldixClient-Team.", false);
+			return;
+		}
+		if (item != null && dev.heldixclient.cosmetic.Cosmetics.lockReason(item) != null) {
+			pageMessage(unlockText(item.name()), false);
 			return;
 		}
 		String problem = dev.heldixclient.cosmetic.Cosmetics.serviceProblem();
@@ -1827,9 +2177,22 @@ public class HeldixMenuScreen extends ShellScreen {
 					: incoming.size() + " Spieler möchten mit dir befreundet sein.";
 			list.add(new Notice("user-plus", text, Ui.ACCENT_TEXT).action("Anzeigen", () -> go(Shell.Page.REQUESTS)));
 		}
+		// Freunde 2.0 (ab Dienst 1.12.0): Party-Einladungen und die eigene Party oben
+		List<Party.Invite> partyInvites = Party.invites();
+		if (!partyInvites.isEmpty()) {
+			list.add(new Section("Party-Einladungen", Integer.toString(partyInvites.size())));
+			list.add(new Group(partyInvites.stream().<Row>map(PartyInviteRow::new).toList()));
+		}
+		if (Party.active()) list.add(new Group(List.of(new PartySummaryRow())));
+		if (Social.online()) addInviteRows(list);
 		List<Social.Friend> friends = Social.friends();
-		List<Social.Friend> online = friends.stream().filter(Social.Friend::online).toList();
-		List<Social.Friend> offline = friends.stream().filter(f -> !f.online()).toList();
+		List<Social.Friend> favorites = friends.stream().filter(Social.Friend::favorite).toList();
+		List<Social.Friend> online = friends.stream().filter(f -> f.online() && !f.favorite()).toList();
+		List<Social.Friend> offline = friends.stream().filter(f -> !f.online() && !f.favorite()).toList();
+		if (!favorites.isEmpty()) {
+			list.add(new Section("Favoriten", Integer.toString(favorites.size())));
+			list.add(new Group(favorites.stream().<Row>map(FriendRow::new).toList()));
+		}
 		if (!online.isEmpty()) {
 			list.add(new Section("Online", Integer.toString(online.size())));
 			list.add(new Group(online.stream().<Row>map(FriendRow::new).toList()));
@@ -1842,6 +2205,210 @@ public class HeldixMenuScreen extends ShellScreen {
 			list.add(new EmptyState("friends", "Noch keine Freunde", "Gib oben den Namen eines Spielers ein und sende eine Anfrage. "
 					+ "Er muss HeldixClient nutzen und schon einmal damit online gewesen sein."));
 		}
+		if (!friends.isEmpty() && Social.friends2()) {
+			list.add(new Text("Klick auf einen Freund öffnet sein Profil, Rechtsklick zeigt alle Aktionen (Party, Favorit, Spitzname …).", Ui.FAINT));
+		}
+		addSuggestionRows(list);
+	}
+
+	/** Vorschläge: Freunde von Freunden (Dienst) und Spieler aus der Nähe (nur lokal) */
+	private void addSuggestionRows(List<Row> list) {
+		if (!Social.online()) return;
+		List<Row> rows = new ArrayList<>();
+		if (Social.friends2() && Social.me().showSuggestions()) {
+			for (Suggestions.Suggestion suggestion : Suggestions.server()) rows.add(new SuggestionRow(suggestion.uuid(), suggestion.name(),
+					suggestion.mutual() == 1 ? "1 gemeinsamer Freund" : suggestion.mutual() + " gemeinsame Freunde", false));
+		}
+		if (Suggestions.nearbyEnabled()) {
+			for (Suggestions.Nearby nearby : Suggestions.nearby()) {
+				long minutes = nearby.nearMs() / 60_000;
+				String time = minutes >= 120 ? (minutes / 60) + " Std." : minutes + " Min.";
+				rows.add(new SuggestionRow(nearby.uuid(), nearby.name(), time + " in deiner Nähe gespielt · " + Social.ago(nearby.lastSeen()), true));
+			}
+		}
+		if (rows.isEmpty()) return;
+		list.add(new Section("Vorschläge", Integer.toString(rows.size())));
+		list.add(new Group(rows));
+		list.add(new Text("Spieler aus der Nähe merkt sich nur dieser PC (30 Tage). Ein- und ausschalten unter Privatsphäre.", Ui.FAINT));
+	}
+
+	/**
+	 * Seite Party (ab Heldix-Dienst 1.12.0): Einladungen an dich, die Party mit Mitgliedern (Ort, Leiter, Verlassen,
+	 * Entfernen, Leitung übergeben), „Zum Leiter“, Party-Chat mit Eingabe, Freunde einladen und „Automatisch folgen“.
+	 */
+	private void buildPartyRows(List<Row> list) {
+		if (!addServiceState(list)) return;
+		if (Social.online() && !Party.available()) {
+			list.add(new Notice("info", "Die Party " + Social.FRIENDS2_MISSING.substring(4), Ui.ACCENT_TEXT));
+			return;
+		}
+		addPageMessage(list);
+		List<Party.Invite> invites = Party.invites();
+		if (!invites.isEmpty()) {
+			list.add(new Section("Einladungen", Integer.toString(invites.size())));
+			list.add(new Group(invites.stream().<Row>map(PartyInviteRow::new).toList()));
+		}
+		Party.State party = Party.party();
+		if (party == null) {
+			list.add(new EmptyState("headphones", "Noch keine Party", "Lade unten Freunde ein – du bist dann der Leiter. In einer Party seid ihr "
+					+ "am selben Ort automatisch in einer Voice-Gruppe, und wohin der Leiter geht, könnt ihr mit einem Klick folgen."));
+			addPartyInviteFriends(list);
+			addPartySettings(list, false);
+			return;
+		}
+		Party.Location target = Party.leaderTarget();
+		Party.Member leader = party.leaderMember();
+		if (target != null && leader != null) {
+			boolean confirming = ("party:" + target.address()).equals(confirmAddress) && System.currentTimeMillis() - confirmAddressAt < 4000;
+			list.add(new Notice("play", leader.name() + (target.world() ? " ist in der " + target.shown() + "." : " ist auf " + target.title() + "."), Ui.ACCENT_TEXT)
+					.action(confirming ? "Welt verlassen?" : "Beitreten", () -> {
+						if (confirmLeave("party:" + target.address())) Party.join(minecraft, target);
+					}));
+		}
+		boolean lead = Party.isLeader();
+		list.add(new Section("Mitglieder", party.members().size() + " von " + party.max()));
+		List<Row> members = new ArrayList<>();
+		for (Party.Member member : party.members()) members.add(new PartyMemberRow(member, lead));
+		for (Party.Pending pending : party.invites()) members.add(new PartyPendingRow(pending, lead));
+		list.add(new Group(members));
+		if (party.voiceGroup() != null) {
+			list.add(new Text(dev.heldixclient.voice.VoiceLink.inPartyGroup() ? "Voice: Du bist in der Voice-Gruppe der Party."
+					: dev.heldixclient.voice.VoiceLink.groupName() != null ? "Voice: Deine eigene Voice-Gruppe hat Vorrang vor der Gruppe der Party."
+					: "Voice: Schalte den Voice Chat ein – wer am selben Ort ist, ist dann in der Gruppe der Party.", Ui.FAINT));
+		}
+		list.add(new Section("Party-Chat", Party.chat().isEmpty() ? null : Integer.toString(Party.chat().size())));
+		List<Party.ChatMessage> chat = Party.chat();
+		if (chat.isEmpty()) list.add(new Text("Noch keine Nachrichten. Der Party-Chat liegt nur im Speicher des Dienstes (die letzten 50).", Ui.MUTED));
+		else {
+			List<Row> lines = new ArrayList<>();
+			for (Party.ChatMessage message : chat) lines.add(new PartyChatRow(message));
+			list.add(new Group(lines));
+		}
+		if (pageInput != null) list.add(inputRow);
+		if (lead) addPartyInviteFriends(list);
+		addPartySettings(list, true);
+	}
+
+	/** Freunde zum Einladen (online zuerst); nur ohne Party oder als Leiter */
+	private void addPartyInviteFriends(List<Row> list) {
+		List<Social.Friend> candidates = sortedFriends().stream().filter(f -> !Party.contains(f.uuid())).toList();
+		if (candidates.isEmpty()) return;
+		list.add(new Section("Freunde einladen", null));
+		list.add(new Group(candidates.stream().<Row>map(PartyInviteFriendRow::new).toList()));
+	}
+
+	private void addPartySettings(List<Row> list, boolean inParty) {
+		HeldixConfig.Data config = HeldixConfig.get();
+		List<Row> rows = new ArrayList<>();
+		rows.add(new SettingRow(configToggle(AUTO_FOLLOW_LABEL, "Wechselt der Leiter den Server bzw. die Welt, gehst du mit – nur aus dem Hauptmenü, nie mitten aus einer Welt",
+				() -> config.partyAutoFollow, v -> config.partyAutoFollow = v)));
+		if (inParty) {
+			rows.add(new SettingRow(new Setting.Action(LEAVE_PARTY_LABEL, Party.isLeader() ? "Die Leitung geht an den, der am längsten dabei ist"
+					: "Du kannst jederzeit wieder eingeladen werden", "Verlassen", () -> report(Party.leave(), "Du hast die Party verlassen."))));
+		}
+		list.add(new Section("Einstellungen", null));
+		list.add(new Group(rows));
+	}
+
+	/** Beschriftungen der Party (auch für den Autotest: {@link #settingCenter}) */
+	public static final String AUTO_FOLLOW_LABEL = "Automatisch folgen";
+	public static final String LEAVE_PARTY_LABEL = "Party verlassen";
+
+	/**
+	 * Profilkarte eines Freundes: Kopf, Name (Spitzname), Abzeichen, Status, befreundet seit, zuletzt online, gemeinsame
+	 * Freunde; Aktionen (Nachricht, Party, Beitreten, Favorit), „Nur für dich“ (Spitzname, Notiz) und Entfernen, Blockieren,
+	 * Melden.
+	 */
+	private void buildProfileRows(List<Row> list) {
+		Social.Friend friend = friendOf(openProfile);
+		if (friend == null) {
+			list.add(new EmptyState("user", "Kein Freund mehr", "Dieser Spieler ist nicht mehr in deiner Freundesliste."));
+			return;
+		}
+		addPageMessage(list);
+		list.add(new ProfileHero(friend));
+		List<Row> about = new ArrayList<>();
+		if (friend.since() > 0) about.add(new Info("Befreundet seit", date(friend.since())));
+		about.add(new Info(friend.online() ? "Gerade" : "Zuletzt online", friend.online() ? friend.activity()
+				: friend.lastOnline() > 0 ? Social.ago(friend.lastOnline()) : "nicht sichtbar"));
+		Badge.Role role = friend.badge() != null ? friend.badge() : Badge.Role.PLAYER;
+		about.add(new Info("Abzeichen", role.label() + (role.group() != Badge.Group.PLAYER ? " · " + role.group().label() : "")));
+		if (profile != null && profile.friend().uuid().equals(friend.uuid())) {
+			about.add(new Info("Gemeinsame Freunde", Integer.toString(profile.mutual().size())));
+		}
+		list.add(new Group("info", "Über " + friend.shownName(), null, about));
+		if (profileError != null) list.add(new Notice("warning", profileError, Ui.WARNING).action("Erneut", this::loadProfile));
+		else if (profile == null) list.add(new Text("Lade Profil …", Ui.MUTED));
+		else if (!profile.mutual().isEmpty()) {
+			list.add(new Section("Gemeinsame Freunde", Integer.toString(profile.mutual().size())));
+			list.add(new Group(profile.mutual().stream().<Row>map(MutualRow::new).toList()));
+		}
+		List<Row> own = new ArrayList<>();
+		for (Setting setting : profileSettings()) own.add(new SettingRow(setting));
+		own.add(new SettingRow(new Setting.Toggle("Favorit", "Steht oben in deiner Freundesliste; „Ist online“ wahlweise nur für Favoriten",
+				() -> friendOf(friend.uuid()) != null && friendOf(friend.uuid()).favorite(), on -> Social.setFavorite(friend.uuid(), on).exceptionally(e -> {
+					minecraft.execute(() -> pageMessage(errorText(e), false));
+					return null;
+				}))));
+		list.add(new Group("edit", "Nur für dich", "der Freund sieht das nicht", own));
+		boolean confirmRemoveNow = "remove".equals(profileConfirm) && System.currentTimeMillis() - profileConfirmAt < 5000;
+		boolean confirmBlockNow = "block".equals(profileConfirm) && System.currentTimeMillis() - profileConfirmAt < 5000;
+		list.add(new Group("shield", "Aktionen", null, List.of(
+				new SettingRow(new Setting.Action("Entfernen", confirmRemoveNow ? "Wirklich? Euer Chat wird dabei gelöscht."
+						: "Ihr seid danach nicht mehr befreundet", confirmRemoveNow ? "Endgültig entfernen" : "Entfernen", () -> {
+					if (confirmRemoveNow) {
+						profileConfirm = null;
+						report(Social.removeFriend(friend.uuid()), friend.name() + " ist nicht mehr dein Freund");
+					} else {
+						profileConfirm = "remove";
+						profileConfirmAt = System.currentTimeMillis();
+					}
+				})),
+				new SettingRow(new Setting.Action("Blockieren", confirmBlockNow ? "Wirklich? Freundschaft und Chat werden gelöscht, keine Anfragen mehr."
+						: "Freigeben geht unter Privatsphäre", confirmBlockNow ? "Endgültig blockieren" : "Blockieren", () -> {
+					if (confirmBlockNow) {
+						profileConfirm = null;
+						report(Messages.block(friend.uuid()), friend.name() + " ist blockiert");
+					} else {
+						profileConfirm = "block";
+						profileConfirmAt = System.currentTimeMillis();
+					}
+				})),
+				new SettingRow(new Setting.Action("Melden", "Mit der Meldung gehen die letzten Nachrichten eures Chats an den Betreiber", "Melden",
+						() -> minecraft.gui.setScreen(chatReport(parent, friend.uuid(), friend.name())))))));
+	}
+
+	private static String date(long at) {
+		return java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy").format(java.time.Instant.ofEpochMilli(at).atZone(java.time.ZoneId.systemDefault()));
+	}
+
+	/** Beschriftungen der Einladungs-Zeilen (auch für den Autotest: {@link #settingCenter}) */
+	public static final String INVITE_LABEL = "Freunde einladen";
+	public static final String BROWSER_LINK_LABEL = "Browser-Link für die Voice-Gruppe";
+
+	/**
+	 * Freunde einladen (ab Heldix-Dienst 1.11.0): Einladungslink kopieren – im Mehrspieler mit dem Server – und, wenn du in
+	 * einer Voice-Gruppe bist und der Dienst Gäste kann, den Browser-Link für die Gruppe (24 Std.).
+	 */
+	private void addInviteRows(List<Row> list) {
+		String server = dev.heldixclient.social.Invites.currentServer(minecraft);
+		boolean busy = dev.heldixclient.social.Invites.busy();
+		List<Row> rows = new ArrayList<>();
+		rows.add(new SettingRow(new Setting.Action(INVITE_LABEL, server != null
+				? "Link mit Download und deinem Server " + server + " – wer ihn annimmt, ist danach mit dir befreundet"
+				: "Link mit Download für Freunde ohne HeldixClient – wer ihn annimmt, ist danach mit dir befreundet",
+				busy ? "Erstellt …" : "Link kopieren",
+				() -> dev.heldixclient.social.Invites.copyInvite(minecraft, result -> pageMessage(result.message(), result.ok())))));
+		String group = dev.heldixclient.voice.VoiceLink.groupName();
+		if (group != null && dev.heldixclient.voice.VoiceLink.guestsAvailable()) {
+			rows.add(new SettingRow(new Setting.Action(BROWSER_LINK_LABEL,
+					"Kopieren (24 Std. gültig): Freunde reden ohne HeldixClient im Browser in „" + group + "“ mit",
+					busy ? "Erstellt …" : "Kopieren",
+					() -> dev.heldixclient.social.Invites.copyBrowserLink(minecraft, result -> pageMessage(result.message(), result.ok())))));
+		}
+		list.add(new Group("user-plus", "Freunde einladen", null, rows));
+		list.add(new Text("Für Freunde, die du einlädst, gibt es Belohnungen (Partikel und ein Cape) – den Fortschritt siehst du im Launcher "
+				+ "und auf der Webseite.", Ui.FAINT));
 	}
 
 	/** Seite Nachrichten: Unterhaltungen (neueste zuerst) und Freunde, denen man schreiben kann */
@@ -1933,6 +2500,8 @@ public class HeldixMenuScreen extends ShellScreen {
 			list.add(new Bubble(pending, afterMine));
 			afterMine = true;
 		}
+		// „schreibt …“ (ab Dienst 1.12.0, 6 Sekunden nach dem letzten Tippen weg)
+		if (Messages.typing(openChat)) list.add(new TypingRow());
 		// Hinweise (z. B. Senden fehlgeschlagen) unten, direkt über der Eingabe
 		addPageMessage(list);
 	}
@@ -1972,6 +2541,43 @@ public class HeldixMenuScreen extends ShellScreen {
 						() -> config.socialShowServer, v -> config.socialShowServer = v)),
 				new SettingRow(socialToggle("Nachrichten von Freunden", "Freunde können dir schreiben; aus: niemand kann dir Nachrichten schicken",
 						() -> config.socialMessages, v -> config.socialMessages = v)))));
+		// Freunde 2.0 (ab Dienst 1.12.0): diese Angaben gelten beim Dienst (auch Launcher und Webseite ändern sie)
+		if (Social.friends2()) {
+			List<Row> status = new ArrayList<>();
+			for (Setting setting : statusSettings()) status.add(new SettingRow(setting));
+			status.add(new SettingRow(meToggle(DND_LABEL, "Keine Einblendungen und Töne; Nachrichten kommen trotzdem an, Party-Einladungen landen still in der Liste",
+					() -> Social.me().dnd(), "dnd")));
+			list.add(new Section("Dein Status", null));
+			list.add(new Group(status));
+			list.add(new Section("Freunde", null));
+			list.add(new Group(List.of(
+					new SettingRow(meToggle("Zuletzt online zeigen", "Freunde sehen, wann du zuletzt online warst (gerundet), solange dein Online-Status sichtbar ist",
+							() -> Social.me().showLastOnline(), "showLastOnline")),
+					new SettingRow(meToggle("In Vorschlägen erscheinen", "Freunde deiner Freunde bekommen dich vorgeschlagen (ohne zu sehen, über wen)",
+							() -> Social.me().suggestable(), "suggestable")),
+					new SettingRow(meToggle("Vorschläge zeigen", "Freunde von Freunden auf der Seite Freunde vorschlagen",
+							() -> Social.me().showSuggestions(), "showSuggestions")),
+					new SettingRow(new Setting.Choice(ONLINE_NOTIFY_LABEL, "Einblendung, wenn ein Freund online kommt",
+							List.of("Alle Freunde", "Nur Favoriten", "Keine"), () -> switch (Social.me().onlineNotify()) {
+								case "favorites" -> 1;
+								case "none" -> 2;
+								default -> 0;
+							}, index -> Social.updateMe("onlineNotify", new com.google.gson.JsonPrimitive(index == 1 ? "favorites" : index == 2 ? "none" : "all"))
+									.exceptionally(e -> {
+										minecraft.execute(() -> pageMessage(errorText(e), false));
+										return null;
+									}))))));
+		}
+		list.add(new Section("Vorschläge aus der Nähe", null));
+		int remembered = Suggestions.nearbyCount();
+		list.add(new Group(List.of(
+				new SettingRow(new Setting.Toggle(NEARBY_LABEL, "HeldixClient-Spieler, mit denen du mindestens 10 Minuten in der Nähe gespielt hast – nur auf diesem PC, 30 Tage",
+						Suggestions::nearbyEnabled, Suggestions::setNearbyEnabled)),
+				new SettingRow(new Setting.Action("Gemerkte Spieler löschen", remembered == 0 ? "Gerade ist niemand gemerkt"
+						: remembered == 1 ? "1 Spieler gemerkt" : remembered + " Spieler gemerkt", "Löschen", () -> {
+					Suggestions.clearNearby();
+					pageMessage("Gemerkte Spieler aus der Nähe sind gelöscht.", true);
+				})))));
 		if (Social.online()) {
 			List<Messages.Blocked> blocked = Messages.blocked();
 			list.add(new Section("Blockiert", blocked.isEmpty() ? null : Integer.toString(blocked.size())));
@@ -2064,6 +2670,19 @@ public class HeldixMenuScreen extends ShellScreen {
 				signingIn ? "Läuft …" : "Hinzufügen", () -> AccountSwitcher.addAccount(true))))));
 		list.add(new Text("Beim ersten Wechsel zu einem Konto fragt der Launcher zur Sicherheit nach. Das gewählte Konto nutzt auch "
 				+ "der nächste Start aus dem Launcher.", Ui.FAINT));
+	}
+
+	/** Beschriftungen der Privatsphäre ab Freunde 2.0 (auch für den Autotest) */
+	public static final String DND_LABEL = "Nicht stören";
+	public static final String ONLINE_NOTIFY_LABEL = "„Ist online“-Einblendungen";
+	public static final String NEARBY_LABEL = "Spieler in der Nähe merken";
+
+	/** Schalter für eine Angabe beim Dienst ({@code PUT /v1/me}); beim Fehler zurück und Hinweis */
+	private Setting.Toggle meToggle(String label, String description, BooleanSupplier get, String field) {
+		return new Setting.Toggle(label, description, get, value -> Social.updateMe(field, new com.google.gson.JsonPrimitive(value)).exceptionally(e -> {
+			minecraft.execute(() -> pageMessage(errorText(e), false));
+			return null;
+		}));
 	}
 
 	private Setting.Toggle socialToggle(String label, String description, BooleanSupplier get, Consumer<Boolean> set) {
@@ -3495,6 +4114,13 @@ public class HeldixMenuScreen extends ShellScreen {
 						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
 						Ui.icon(g, locked ? "lock" : "shield", cx + 5, cy + 5, 10, locked ? Ui.WARNING : 0xFFFDE68A);
 						if (hover) Ui.requestTooltip(locked ? "Nur für das HeldixClient-Team" : "Nur fürs Team – du darfst es tragen", mouseX, mouseY);
+					} else if (cape.unlockOnly()) {
+						// Belohnung für Einladungen: gesperrt bis freigeschaltet
+						boolean locked = cape.lockReason() != null;
+						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
+						Ui.icon(g, locked ? "lock" : "star", cx + 5, cy + 5, 10, locked ? Ui.WARNING : 0xFFFDE68A);
+						if (hover) Ui.requestTooltip(locked ? dev.heldixclient.cosmetic.Cosmetics.UNLOCK_HINT + " – lade Freunde ein (Freunde → Freunde einladen)"
+								: dev.heldixclient.cosmetic.Cosmetics.UNLOCK_HINT + " – freigeschaltet", mouseX, mouseY);
 					} else if (cape.glows() && HeldixConfig.get().capeGlow) {
 						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
 						Ui.icon(g, "sparkles", cx + 5, cy + 5, 10, 0xFFFDE68A);
@@ -3521,6 +4147,12 @@ public class HeldixMenuScreen extends ShellScreen {
 				Object entry = capes.get(i);
 				if (entry instanceof Capes.Cape cape && cape.teamOnly() && !dev.heldixclient.cosmetic.Cosmetics.team()) {
 					capeMessage = "„" + cape.name() + "“ gibt es nur für das HeldixClient-Team.";
+					capeMessageOk = false;
+					capeMessageAt = System.currentTimeMillis();
+					return true;
+				}
+				if (entry instanceof Capes.Cape cape && cape.lockReason() != null) {
+					capeMessage = unlockText(cape.name());
 					capeMessageOk = false;
 					capeMessageAt = System.currentTimeMillis();
 					return true;
@@ -3592,8 +4224,8 @@ public class HeldixMenuScreen extends ShellScreen {
 				ly += 11;
 			}
 			if (preview) {
-				boolean locked = item != null && item.teamOnly() && !dev.heldixclient.cosmetic.Cosmetics.team();
-				Ui.text(g, locked ? "Nur für das HeldixClient-Team" : "Klicken zum Anlegen", tx, ly + 3, locked ? Ui.WARNING : Ui.FAINT, Ui.Font.SMALL);
+				String lock = dev.heldixclient.cosmetic.Cosmetics.lockReason(item);
+				Ui.text(g, lock != null ? lock : "Klicken zum Anlegen", tx, ly + 3, lock != null ? Ui.WARNING : Ui.FAINT, Ui.Font.SMALL);
 			}
 
 			int px = tx;
@@ -3604,8 +4236,9 @@ public class HeldixMenuScreen extends ShellScreen {
 			if (item != null) {
 				pills.add(new String[] {"eye", shared ? "Andere Heldix-Spieler sehen es" : "Nur für dich sichtbar"});
 				if (item.teamOnly()) pills.add(new String[] {"lock", "Nur fürs Team"});
+				if (item.unlockOnly()) pills.add(new String[] {dev.heldixclient.cosmetic.Cosmetics.unlocked(item.id()) ? "star" : "lock", "Belohnung"});
 				if (item.manifest().glow() != null) pills.add(new String[] {"sparkles", "Leuchtet"});
-				if (!item.manifest().animations().isEmpty() || item.manifest().particles() != null) pills.add(new String[] {"play", "Animiert"});
+				if (item.animated()) pills.add(new String[] {"play", "Animiert"});
 			}
 			for (String[] p : pills) {
 				int pillW = Ui.width(p[1], Ui.Font.SMALL) + 24;
@@ -3650,7 +4283,6 @@ public class HeldixMenuScreen extends ShellScreen {
 		@Override
 		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
 			String chosen = dev.heldixclient.cosmetic.Cosmetics.mine(slot);
-			boolean team = dev.heldixclient.cosmetic.Cosmetics.team();
 			for (int i = 0; i < entries.size(); i++) {
 				Object entry = entries.get(i);
 				dev.heldixclient.cosmetic.CosmeticCatalog.Item item = entry instanceof dev.heldixclient.cosmetic.CosmeticCatalog.Item it ? it : null;
@@ -3660,7 +4292,8 @@ public class HeldixMenuScreen extends ShellScreen {
 				int cy = cell[1];
 				int cw = cell[2];
 				boolean on = java.util.Objects.equals(chosen, id);
-				boolean locked = item != null && item.teamOnly() && !team;
+				String lock = dev.heldixclient.cosmetic.Cosmetics.lockReason(item);
+				boolean locked = lock != null;
 				boolean pending = cosmeticPending != null && cosmeticPending.equals(slot + ":" + (id == null ? "" : id));
 				boolean hover = Ui.inside(mouseX, mouseY, cx, cy, cw, TILE);
 				float t = animate("cosmetic:" + slot + ":" + id, on ? 1f : 0f);
@@ -3683,11 +4316,16 @@ public class HeldixMenuScreen extends ShellScreen {
 					if (locked) {
 						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
 						Ui.icon(g, "lock", cx + 5, cy + 5, 10, Ui.WARNING);
-						if (hover) Ui.requestTooltip("Nur für das HeldixClient-Team", mouseX, mouseY);
+						if (hover) Ui.requestTooltip(item.unlockOnly() && !item.teamOnly() ? lock + " – lade Freunde ein (Freunde → Freunde einladen)" : lock,
+								mouseX, mouseY);
 					} else if (item.teamOnly()) {
 						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
 						Ui.icon(g, "shield", cx + 5, cy + 5, 10, 0xFFFDE68A);
 						if (hover) Ui.requestTooltip("Nur fürs Team – du darfst es tragen", mouseX, mouseY);
+					} else if (item.unlockOnly()) {
+						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
+						Ui.icon(g, "star", cx + 5, cy + 5, 10, 0xFFFDE68A);
+						if (hover) Ui.requestTooltip(dev.heldixclient.cosmetic.Cosmetics.UNLOCK_HINT + " – freigeschaltet", mouseX, mouseY);
 					} else if (item.manifest().glow() != null) {
 						Ui.circle(g, cx + 10, cy + 10, 6, 0x66000000);
 						Ui.icon(g, "sparkles", cx + 5, cy + 5, 10, 0xFFFDE68A);
@@ -4121,6 +4759,9 @@ public class HeldixMenuScreen extends ShellScreen {
 			int[] join = joinPill(x, w);
 			int textW = (join != null ? join[0] : x + w - 60) - x - 46;
 			boolean confirmingRemove = friend.uuid().equals(confirmRemove) && System.currentTimeMillis() - confirmAt < 4000;
+			if (hover && !confirmingRemove && mouseX < (join != null ? join[0] : x + w - 56)) {
+				Ui.requestTooltip(Social.friends2() ? "Klick: Profil · Rechtsklick: Aktionen" : friend.name(), mouseX, mouseY);
+			}
 			if (!confirmingRemove) {
 				boolean overChat = Ui.inside(mouseX, mouseY, x + w - 56, y, 26, 36);
 				Ui.icon(g, "chat", x + w - 49, y + 12, 12, overChat ? Ui.ACCENT_TEXT : Ui.FAINT);
@@ -4138,13 +4779,20 @@ public class HeldixMenuScreen extends ShellScreen {
 					if (over && !confirming) Ui.requestTooltip("Auf " + friend.server() + " mitspielen", mouseX, mouseY);
 				}
 			}
-			Ui.text(g, Ui.ellipsize(friend.name(), textW, Ui.Font.LABEL), x + 38, y + 8, Ui.TEXT, Ui.Font.LABEL);
-			Ui.text(g, Ui.ellipsize(friend.activity(), textW, Ui.Font.SMALL), x + 38, y + 21, friend.online() ? Ui.SUCCESS : Ui.FAINT, Ui.Font.SMALL);
+			int nameEnd = friendName(g, friend, x + 38, y + 8, textW);
+			if (Party.contains(friend.uuid()) && nameEnd + 34 < x + 38 + textW) tag(g, "Party", nameEnd + 5, y + 7, Ui.ACCENT_SOFT, Ui.ACCENT_TEXT);
+			int statusColor = friend.online() ? friend.dnd() ? Ui.WARNING : Ui.SUCCESS : Ui.FAINT;
+			String line = friend.statusText() != null ? friend.activity() + " · „" + Messages.clean(friend.statusText()) + "“" : friend.activity();
+			Ui.text(g, Ui.ellipsize(line, textW, Ui.Font.SMALL), x + 38, y + 21, statusColor, Ui.Font.SMALL);
 			boolean overRemove = Ui.inside(mouseX, mouseY, x + w - 30, y, 30, 36);
 			if (confirmingRemove) {
 				Ui.textRight(g, "Nochmal klicken zum Entfernen", x + w - 30, y + 14, Ui.DANGER, Ui.Font.SMALL);
+				Ui.icon(g, "trash", x + w - 22, y + 12, 12, Ui.DANGER);
+			} else {
+				// „mehr“: alle Aktionen (wie Rechtsklick)
+				Ui.icon(g, "more", x + w - 22, y + 12, 12, overRemove ? Ui.TEXT : Ui.FAINT);
+				if (overRemove) Ui.requestTooltip("Aktionen", mouseX, mouseY);
 			}
-			Ui.icon(g, "trash", x + w - 22, y + 12, 12, confirmingRemove || overRemove ? Ui.DANGER : Ui.FAINT);
 		}
 
 		/** Knopf "Beitreten": {x, Breite}, null = Freund spielt nicht auf einem Server, dem man folgen kann */
@@ -4175,18 +4823,645 @@ public class HeldixMenuScreen extends ShellScreen {
 				openChat(friend.uuid(), friend.name());
 				return true;
 			}
-			if (mouseX < x + w - 30) return false;
+			if (mouseX < x + w - 30) {
+				// Klick auf den Freund: Profilkarte (ab Dienst 1.12.0)
+				if (!Social.friends2()) return false;
+				HeldixMenuScreen.this.click();
+				openProfile(friend.uuid());
+				return true;
+			}
 			if (friend.uuid().equals(confirmRemove) && System.currentTimeMillis() - confirmAt < 4000) {
 				confirmRemove = null;
 				HeldixMenuScreen.this.click();
 				report(Social.removeFriend(friend.uuid()), friend.name() + " ist nicht mehr dein Freund");
 			} else {
-				confirmRemove = friend.uuid();
-				confirmAt = System.currentTimeMillis();
+				HeldixMenuScreen.this.click();
+				openFriendMenu(friend, (int) mouseX, (int) mouseY);
 			}
 			return true;
 		}
+
+		@Override
+		public boolean secondaryClick(double mouseX, double mouseY, int x, int y, int w) {
+			HeldixMenuScreen.this.click();
+			openFriendMenu(friend, (int) mouseX, (int) mouseY);
+			return true;
+		}
 	}
+
+	/**
+	 * Name eines Freundes in einer Zeile: Spitzname bzw. Name, gelber Stern bei Favoriten, Abzeichen der Rolle (ohne das
+	 * normale Heldix-Symbol). Rückgabe: rechte Kante.
+	 */
+	private int friendName(GuiGraphicsExtractor g, Social.Friend friend, int x, int y, int maxW) {
+		boolean star = friend.favorite();
+		Badge.Role role = friend.badge() != null && friend.badge() != Badge.Role.PLAYER ? friend.badge() : null;
+		int extra = (star ? 12 : 0) + (role != null ? 11 : 0);
+		String name = Ui.ellipsize(friend.shownName(), Math.max(20, maxW - extra), Ui.Font.LABEL);
+		Ui.text(g, name, x, y, Ui.TEXT, Ui.Font.LABEL);
+		int cx = x + Ui.width(name, Ui.Font.LABEL) + 4;
+		if (role != null) {
+			g.text(font, Badge.symbol(role), cx, y, 0xFFFFFFFF, false);
+			if (Ui.inside(lastMouseX, lastMouseY, cx, y - 1, 9, 10)) Ui.requestTooltip(role.label() + " · " + role.group().label(), (int) lastMouseX, (int) lastMouseY);
+			cx += 11;
+		}
+		if (star) {
+			Ui.icon(g, "star", cx, y, 8, 0xFFFACC15);
+			cx += 12;
+		}
+		return cx;
+	}
+
+	/** Kleine Marke („Party“, „Leiter“) */
+	private void tag(GuiGraphicsExtractor g, String label, int x, int y, int fill, int color) {
+		int tw = Ui.width(label, Ui.Font.SMALL) + 8;
+		Ui.rect(g, x, y, tw, 11, 5.5f, fill);
+		Ui.text(g, label, x + 4, y + 2, color, Ui.Font.SMALL);
+	}
+
+	/** Rechtsklick-Menü eines Freundes: Profil, Nachricht, Party, Beitreten, Favorit, Spitzname, Entfernen, Blockieren */
+	private void openFriendMenu(Social.Friend friend, int x, int y) {
+		List<dev.heldixclient.ui.ContextMenu.Item> items = new ArrayList<>();
+		items.add(new dev.heldixclient.ui.ContextMenu.Header(friend.shownName(), "user"));
+		boolean v2 = Social.friends2();
+		if (v2) items.add(new dev.heldixclient.ui.ContextMenu.Action(MENU_PROFILE, "user", () -> openProfile(friend.uuid())));
+		items.add(new dev.heldixclient.ui.ContextMenu.Action("Nachricht schreiben", "chat", () -> openChat(friend.uuid(), friend.name())));
+		if (v2 && Party.available()) {
+			boolean member = Party.contains(friend.uuid());
+			items.add(new dev.heldixclient.ui.ContextMenu.Action(member ? "Schon in der Party" : MENU_PARTY_INVITE, "headphones", null,
+					!member && Party.canInvite(friend.uuid()), false, () -> report(Party.invite(friend.uuid()), friend.name() + " ist in die Party eingeladen")));
+		}
+		// im Menü ist der Klick selbst die Bestätigung – die Beschriftung sagt, dass die Welt verlassen wird
+		if (joinable(friend)) items.add(new dev.heldixclient.ui.ContextMenu.Action(minecraft.level != null ? "Welt verlassen und beitreten" : "Beitreten",
+				"play", friend.server(), true, false, () -> joinFriend(friend)));
+		if (v2) {
+			items.add(new dev.heldixclient.ui.ContextMenu.Separator());
+			items.add(new dev.heldixclient.ui.ContextMenu.Action(friend.favorite() ? "Favorit entfernen" : MENU_FAVORITE, "star",
+					() -> Social.setFavorite(friend.uuid(), !friend.favorite()).exceptionally(e -> {
+						minecraft.execute(() -> pageMessage(errorText(e), false));
+						return null;
+					})));
+			items.add(new dev.heldixclient.ui.ContextMenu.Action("Spitzname und Notiz …", "edit", () -> openProfile(friend.uuid())));
+		}
+		items.add(new dev.heldixclient.ui.ContextMenu.Separator());
+		items.add(new dev.heldixclient.ui.ContextMenu.Action("Entfernen …", "trash", null, true, true, () -> {
+			confirmRemove = friend.uuid();
+			confirmAt = System.currentTimeMillis();
+		}));
+		if (v2) items.add(new dev.heldixclient.ui.ContextMenu.Action("Blockieren …", "ban", null, true, true, () -> {
+			openProfile(friend.uuid());
+			profileConfirm = "block";
+			profileConfirmAt = System.currentTimeMillis();
+		}));
+		menu.open(items, x, y, width, height);
+	}
+
+	/** Einträge des Rechtsklick-Menüs (auch für den Autotest) */
+	public static final String MENU_PROFILE = "Profil anzeigen";
+	public static final String MENU_PARTY_INVITE = "In Party einladen";
+	public static final String MENU_FAVORITE = "Als Favorit markieren";
+
+	// ======================================================================================
+	// Freunde 2.0: Party, Vorschläge, Profilkarte
+	// ======================================================================================
+
+	/** Einladung in eine Party: von wem, wie viele dabei; Annehmen / Ablehnen */
+	private final class PartyInviteRow implements Row, Groupable {
+		private final Party.Invite invite;
+
+		PartyInviteRow(Party.Invite invite) {
+			this.invite = invite;
+		}
+
+		@Override
+		public void grouped() {
+		}
+
+		@Override
+		public int height(int width) {
+			return 36;
+		}
+
+		private int[] buttons(int x, int w) {
+			int accept = Ui.width("Annehmen", Ui.Font.SMALL) + 16;
+			int decline = Ui.width("Ablehnen", Ui.Font.SMALL) + 16;
+			int declineX = x + w - 10 - decline;
+			return new int[] {declineX - 6 - accept, accept, declineX, decline};
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			if (Ui.inside(mouseX, mouseY, x, y, w, 36)) Ui.rect(g, x + 3, y + 2, w - 6, 32, 7, Ui.SURFACE);
+			if (invite.fromUuid() != null) FriendWidget.face(g, invite.fromUuid(), invite.fromName(), x + 11, y + 9, 18, 1f);
+			int[] b = buttons(x, w);
+			int textW = b[0] - x - 46;
+			Ui.text(g, Ui.ellipsize(invite.fromName() + " lädt dich in die Party ein", textW, Ui.Font.LABEL), x + 38, y + 8, Ui.TEXT, Ui.Font.LABEL);
+			String detail = (invite.members() == 1 ? "1 Mitglied" : invite.members() + " Mitglieder") + " · Leiter: " + invite.leaderName()
+					+ (invite.expires() > 0 ? " · noch " + Math.max(1, (invite.expires() - System.currentTimeMillis()) / 60_000) + " Min." : "");
+			Ui.text(g, Ui.ellipsize(detail, textW, Ui.Font.SMALL), x + 38, y + 21, Ui.MUTED, Ui.Font.SMALL);
+			pill(g, "Annehmen", b[0], y + 10, b[1], true, Ui.inside(mouseX, mouseY, b[0], y + 10, b[1], 16));
+			pill(g, "Ablehnen", b[2], y + 10, b[3], false, Ui.inside(mouseX, mouseY, b[2], y + 10, b[3], 16));
+			settingCenters.put("party-accept:" + invite.party(), new int[] {b[0] + b[1] / 2, y + 18});
+			settingCenters.put("party-decline:" + invite.party(), new int[] {b[2] + b[3] / 2, y + 18});
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			int[] b = buttons(x, w);
+			if (Ui.inside(mouseX, mouseY, b[0], y + 10, b[1], 16)) {
+				HeldixMenuScreen.this.click();
+				report(Party.accept(invite.party()), "Du bist jetzt in der Party von " + invite.leaderName() + ".");
+				return true;
+			}
+			if (Ui.inside(mouseX, mouseY, b[2], y + 10, b[3], 16)) {
+				HeldixMenuScreen.this.click();
+				report(Party.decline(invite.party()), "Einladung abgelehnt");
+				return true;
+			}
+			return false;
+		}
+	}
+
+	/** Seite Freunde: die eigene Party in einer Zeile (Köpfe, Größe, Leiter); Klick öffnet die Seite Party */
+	private final class PartySummaryRow implements Row, Groupable {
+		@Override
+		public void grouped() {
+		}
+
+		@Override
+		public int height(int width) {
+			return 34;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			Party.State party = Party.party();
+			if (party == null) return;
+			boolean hover = Ui.inside(mouseX, mouseY, x, y, w, 34);
+			if (hover) Ui.rect(g, x + 3, y + 2, w - 6, 30, 7, Ui.SURFACE);
+			Ui.rect(g, x + 10, y + 8, 18, 18, 5, Ui.ACCENT_SOFT);
+			Ui.icon(g, "headphones", x + 14, y + 12, 10, Ui.ACCENT_TEXT);
+			int fx = x + w - 30;
+			int shown = Math.min(5, party.members().size());
+			for (int i = 0; i < shown; i++) {
+				Party.Member member = party.members().get(i);
+				FriendWidget.face(g, member.uuid(), member.name(), fx - (shown - 1 - i) * 13, y + 11, 12, member.online() ? 1f : 0.5f);
+			}
+			Party.Member leader = party.leaderMember();
+			int textW = w - 40 - shown * 13 - 30;
+			Ui.text(g, Ui.ellipsize("Party · " + party.members().size() + " von " + party.max(), textW, Ui.Font.LABEL), x + 36, y + 7, Ui.TEXT, Ui.Font.LABEL);
+			Party.Location target = Party.leaderTarget();
+			String detail = target != null && leader != null ? leader.name() + " ist " + (target.world() ? "in der " + target.shown() : "auf " + target.title()) + " · Beitreten auf der Seite Party"
+					: "Leiter: " + (leader != null ? leader.name() : "?") + (Party.unreadChat() > 0 ? " · " + Party.unreadChat() + " neue Nachrichten" : "");
+			Ui.text(g, Ui.ellipsize(detail, textW, Ui.Font.SMALL), x + 36, y + 20, target != null ? Ui.ACCENT_TEXT : Ui.MUTED, Ui.Font.SMALL);
+			Ui.icon(g, "chevron-right", x + w - 16, y + 13, 8, hover ? Ui.TEXT : Ui.FAINT);
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			HeldixMenuScreen.this.click();
+			go(Shell.Page.PARTY);
+			return true;
+		}
+	}
+
+	/** Mitglied der Party: Kopf, Name, Leiter, Ort; Leiter: Leitung übergeben, Entfernen; du selbst: Verlassen */
+	private final class PartyMemberRow implements Row, Groupable {
+		private final Party.Member member;
+		private final boolean lead;
+
+		PartyMemberRow(Party.Member member, boolean lead) {
+			this.member = member;
+			this.lead = lead;
+		}
+
+		@Override
+		public void grouped() {
+		}
+
+		@Override
+		public int height(int width) {
+			return 36;
+		}
+
+		private boolean self() {
+			return member.uuid().equals(minecraft.getUser().getProfileId());
+		}
+
+		/** Knöpfe rechts: {Beschriftung, x, Breite} */
+		private List<Object[]> buttons(int x, int w) {
+			List<String> labels = new ArrayList<>();
+			if (self()) labels.add("Verlassen");
+			else if (lead) {
+				labels.add("Leitung geben");
+				labels.add("Entfernen");
+			}
+			List<Object[]> result = new ArrayList<>();
+			int right = x + w - 10;
+			for (int i = labels.size() - 1; i >= 0; i--) {
+				int bw = Ui.width(labels.get(i), Ui.Font.SMALL) + 16;
+				right -= bw;
+				result.addFirst(new Object[] {labels.get(i), right, bw});
+				right -= 6;
+			}
+			return result;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			if (Ui.inside(mouseX, mouseY, x, y, w, 36)) Ui.rect(g, x + 3, y + 2, w - 6, 32, 7, Ui.SURFACE);
+			FriendWidget.face(g, member.uuid(), member.name(), x + 10, y + 8, 20, member.online() ? 1f : 0.45f);
+			if (member.online() && !member.away()) {
+				Ui.circle(g, x + 30, y + 28, 4, 0xFF161C28);
+				Ui.circle(g, x + 30, y + 28, 3, Ui.SUCCESS);
+			}
+			List<Object[]> buttons = buttons(x, w);
+			int left = buttons.isEmpty() ? x + w - 10 : (int) buttons.getFirst()[1];
+			int textW = left - x - 46;
+			Social.Friend friend = friendOf(member.uuid());
+			String name = self() ? member.name() + " (du)" : friend != null ? friend.shownName() : member.name();
+			name = Ui.ellipsize(name, textW - (member.leader() ? 40 : 0), Ui.Font.LABEL);
+			Ui.text(g, name, x + 40, y + 8, Ui.TEXT, Ui.Font.LABEL);
+			if (member.leader()) tag(g, "Leiter", x + 44 + Ui.width(name, Ui.Font.LABEL), y + 7, 0x33FACC15, 0xFFFACC15);
+			Ui.text(g, Ui.ellipsize(member.where(), textW, Ui.Font.SMALL), x + 40, y + 21, member.away() ? Ui.WARNING : Ui.MUTED, Ui.Font.SMALL);
+			for (Object[] b : buttons) {
+				int bx = (int) b[1];
+				int bw = (int) b[2];
+				pill(g, (String) b[0], bx, y + 10, bw, false, Ui.inside(mouseX, mouseY, bx, y + 10, bw, 16));
+				settingCenters.put("party-member:" + b[0] + ":" + member.name(), new int[] {bx + bw / 2, y + 18});
+			}
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			for (Object[] b : buttons(x, w)) {
+				if (!Ui.inside(mouseX, mouseY, (int) b[1], y + 10, (int) b[2], 16)) continue;
+				HeldixMenuScreen.this.click();
+				switch ((String) b[0]) {
+					case "Verlassen" -> report(Party.leave(), "Du hast die Party verlassen.");
+					case "Leitung geben" -> report(Party.promote(member.uuid()), member.name() + " leitet jetzt die Party.");
+					case "Entfernen" -> report(Party.kick(member.uuid()), member.name() + " ist nicht mehr in der Party.");
+					default -> {
+					}
+				}
+				return true;
+			}
+			return false;
+		}
+	}
+
+	/** Offene Einladung in die eigene Party; der Leiter kann sie zurückziehen */
+	private final class PartyPendingRow implements Row, Groupable {
+		private final Party.Pending pending;
+		private final boolean lead;
+
+		PartyPendingRow(Party.Pending pending, boolean lead) {
+			this.pending = pending;
+			this.lead = lead;
+		}
+
+		@Override
+		public void grouped() {
+		}
+
+		@Override
+		public int height(int width) {
+			return 32;
+		}
+
+		private int pillWidth() {
+			return Ui.width("Zurückziehen", Ui.Font.SMALL) + 16;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			FriendWidget.face(g, pending.uuid(), pending.name(), x + 12, y + 8, 16, 0.55f);
+			int pw = lead ? pillWidth() : 0;
+			int textW = w - 48 - pw - 10;
+			Ui.text(g, Ui.ellipsize(pending.name(), textW, Ui.Font.LABEL), x + 40, y + 6, Ui.MUTED, Ui.Font.LABEL);
+			String left = pending.expires() > 0 ? " · noch " + Math.max(1, (pending.expires() - System.currentTimeMillis()) / 60_000) + " Min." : "";
+			Ui.text(g, Ui.ellipsize("eingeladen, wartet auf Antwort" + left, textW, Ui.Font.SMALL), x + 40, y + 18, Ui.FAINT, Ui.Font.SMALL);
+			if (lead) {
+				int px = x + w - 10 - pw;
+				pill(g, "Zurückziehen", px, y + 8, pw, false, Ui.inside(mouseX, mouseY, px, y + 8, pw, 16));
+			}
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			if (!lead) return false;
+			int pw = pillWidth();
+			if (!Ui.inside(mouseX, mouseY, x + w - 10 - pw, y + 8, pw, 16)) return false;
+			HeldixMenuScreen.this.click();
+			report(Party.revoke(pending.uuid()), "Einladung an " + pending.name() + " zurückgezogen");
+			return true;
+		}
+	}
+
+	/** Freund, den man in die Party einladen kann (Seite Party) */
+	private final class PartyInviteFriendRow implements Row, Groupable {
+		private final Social.Friend friend;
+
+		PartyInviteFriendRow(Social.Friend friend) {
+			this.friend = friend;
+		}
+
+		@Override
+		public void grouped() {
+		}
+
+		@Override
+		public int height(int width) {
+			return 34;
+		}
+
+		private int pillWidth() {
+			return Ui.width("Einladen", Ui.Font.SMALL) + 28;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			if (Ui.inside(mouseX, mouseY, x, y, w, 34)) Ui.rect(g, x + 3, y + 2, w - 6, 30, 7, Ui.SURFACE);
+			avatar(g, friend, x + 10, y + 6);
+			int pw = pillWidth();
+			int textW = w - 40 - pw - 16;
+			friendName(g, friend, x + 38, y + 8, textW);
+			Ui.text(g, Ui.ellipsize(friend.activity(), textW, Ui.Font.SMALL), x + 38, y + 20, friend.online() ? Ui.SUCCESS : Ui.FAINT, Ui.Font.SMALL);
+			int px = x + w - 10 - pw;
+			boolean can = Party.canInvite(friend.uuid());
+			boolean over = can && Ui.inside(mouseX, mouseY, px, y + 9, pw, 16);
+			Ui.rect(g, px, y + 9, pw, 16, 8, !can ? Ui.SURFACE : over ? Ui.ACCENT_HOVER : Ui.ACCENT);
+			Ui.icon(g, "headphones", px + 7, y + 12.5f, 9, can ? 0xFFFFFFFF : Ui.FAINT);
+			Ui.text(g, "Einladen", px + 20, y + 13, can ? 0xFFFFFFFF : Ui.FAINT, Ui.Font.SMALL);
+			settingCenters.put("party-invite:" + friend.name(), new int[] {px + pw / 2, y + 17});
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			int pw = pillWidth();
+			if (!Party.canInvite(friend.uuid()) || !Ui.inside(mouseX, mouseY, x + w - 10 - pw, y + 9, pw, 16)) return false;
+			HeldixMenuScreen.this.click();
+			report(Party.invite(friend.uuid()), friend.name() + " ist in die Party eingeladen");
+			return true;
+		}
+	}
+
+	/** Nachricht im Party-Chat: Kopf, Name, Uhrzeit, Text (umbrochen) */
+	private final class PartyChatRow implements Row, Groupable {
+		private final Party.ChatMessage message;
+
+		PartyChatRow(Party.ChatMessage message) {
+			this.message = message;
+		}
+
+		@Override
+		public void grouped() {
+		}
+
+		private List<FormattedCharSequence> lines(int w) {
+			return Ui.wrap(message.text(), w - 52, Ui.Font.BODY);
+		}
+
+		@Override
+		public int height(int width) {
+			return 20 + lines(width).size() * 11;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			if (message.from() != null) FriendWidget.face(g, message.from(), message.name(), x + 12, y + 7, 14, 1f);
+			Ui.text(g, message.mine() ? message.name() + " (du)" : message.name(), x + 34, y + 6, message.mine() ? Ui.ACCENT_TEXT : Ui.TEXT, Ui.Font.LABEL);
+			Ui.textRight(g, clock(message.at()), x + w - 12, y + 7, Ui.FAINT, Ui.Font.SMALL);
+			int ly = y + 17;
+			for (FormattedCharSequence line : lines(w)) {
+				g.text(font, line, x + 34, ly, 0xFFD5DCE8, false);
+				ly += 11;
+			}
+		}
+	}
+
+	/** Vorschlag: Kopf, Name, warum (gemeinsame Freunde bzw. in der Nähe), „Anfrage senden“; aus der Nähe auch Ausblenden */
+	private final class SuggestionRow implements Row, Groupable {
+		private final UUID uuid;
+		private final String name;
+		private final String why;
+		private final boolean nearby;
+
+		SuggestionRow(UUID uuid, String name, String why, boolean nearby) {
+			this.uuid = uuid;
+			this.name = name;
+			this.why = why;
+			this.nearby = nearby;
+		}
+
+		@Override
+		public void grouped() {
+		}
+
+		@Override
+		public int height(int width) {
+			return 34;
+		}
+
+		private int pillWidth() {
+			return Ui.width("Anfrage senden", Ui.Font.SMALL) + 16;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			if (Ui.inside(mouseX, mouseY, x, y, w, 34)) Ui.rect(g, x + 3, y + 2, w - 6, 30, 7, Ui.SURFACE);
+			FriendWidget.face(g, uuid, name, x + 11, y + 8, 18, 1f);
+			int pw = pillWidth();
+			int px = x + w - 10 - pw - (nearby ? 24 : 0);
+			int textW = px - x - 46;
+			Ui.text(g, Ui.ellipsize(name, textW, Ui.Font.LABEL), x + 38, y + 7, Ui.TEXT, Ui.Font.LABEL);
+			Ui.text(g, Ui.ellipsize(why, textW, Ui.Font.SMALL), x + 38, y + 20, Ui.MUTED, Ui.Font.SMALL);
+			pill(g, "Anfrage senden", px, y + 9, pw, true, Ui.inside(mouseX, mouseY, px, y + 9, pw, 16));
+			settingCenters.put("suggestion:" + name, new int[] {px + pw / 2, y + 17});
+			if (nearby) {
+				boolean over = Ui.inside(mouseX, mouseY, x + w - 30, y, 26, 34);
+				Ui.icon(g, "close", x + w - 24, y + 11, 11, over ? Ui.TEXT : Ui.FAINT);
+				if (over) Ui.requestTooltip("Nicht mehr vorschlagen", mouseX, mouseY);
+			}
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			int pw = pillWidth();
+			int px = x + w - 10 - pw - (nearby ? 24 : 0);
+			if (Ui.inside(mouseX, mouseY, px, y + 9, pw, 16)) {
+				HeldixMenuScreen.this.click();
+				report(nearby ? Social.sendRequest(name) : Suggestions.request(uuid), "Anfrage an " + name + " gesendet");
+				return true;
+			}
+			if (nearby && Ui.inside(mouseX, mouseY, x + w - 30, y, 26, 34)) {
+				HeldixMenuScreen.this.click();
+				Suggestions.dismiss(uuid);
+				return true;
+			}
+			return false;
+		}
+	}
+
+	/** Kopf der Profilkarte: großer Kopf, Name, Abzeichen, Status; darunter die wichtigsten Aktionen */
+	private final class ProfileHero implements Row {
+		private final Social.Friend friend;
+
+		ProfileHero(Social.Friend friend) {
+			this.friend = friend;
+		}
+
+		@Override
+		public int height(int width) {
+			return 86;
+		}
+
+		@Override
+		public int gapAfter() {
+			return 10;
+		}
+
+		/** Knöpfe: {Beschriftung, Icon, x, Breite} */
+		private List<Object[]> actions(int x, int y) {
+			List<String[]> list = new ArrayList<>();
+			list.add(new String[] {"Nachricht", "chat"});
+			if (Party.available()) list.add(new String[] {Party.contains(friend.uuid()) ? "In der Party" : "In Party einladen", "headphones"});
+			if (joinable(friend)) list.add(new String[] {"Beitreten", "play"});
+			list.add(new String[] {friend.favorite() ? "Favorit" : "Als Favorit", "star"});
+			List<Object[]> result = new ArrayList<>();
+			int bx = x + 12;
+			for (String[] entry : list) {
+				int bw = Ui.width(entry[0], Ui.Font.SMALL) + 30;
+				result.add(new Object[] {entry[0], entry[1], bx, bw});
+				bx += bw + 6;
+			}
+			return result;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			Ui.rect(g, x, y, w, 86, 12, Ui.SURFACE);
+			Ui.outline(g, x, y, w, 86, 12, Ui.LINE);
+			FriendWidget.face(g, friend.uuid(), friend.name(), x + 12, y + 10, 36, friend.online() ? 1f : 0.6f);
+			if (friend.online()) {
+				Ui.circle(g, x + 48, y + 46, 5, 0xFF161C28);
+				Ui.circle(g, x + 48, y + 46, 4, friend.dnd() ? Ui.WARNING : Ui.SUCCESS);
+			}
+			int tx = x + 58;
+			int textW = w - 70;
+			Ui.text(g, Ui.ellipsize(friend.shownName(), textW - 30, Ui.Font.TITLE), tx, y + 10, Ui.TEXT, Ui.Font.TITLE);
+			int nx = tx + Ui.width(Ui.ellipsize(friend.shownName(), textW - 30, Ui.Font.TITLE), Ui.Font.TITLE) + 5;
+			Badge.Role role = friend.badge() != null ? friend.badge() : Badge.Role.PLAYER;
+			g.text(font, Badge.symbol(role), nx, y + 12, 0xFFFFFFFF, false);
+			if (Ui.inside(mouseX, mouseY, nx, y + 10, 10, 11)) Ui.requestTooltip(role.label() + " · " + role.group().label(), mouseX, mouseY);
+			String second = (friend.nickname() != null ? friend.name() + " · " : "") + friend.activity();
+			Ui.text(g, Ui.ellipsize(second, textW, Ui.Font.SMALL), tx, y + 25, friend.online() ? friend.dnd() ? Ui.WARNING : Ui.SUCCESS : Ui.FAINT, Ui.Font.SMALL);
+			if (friend.statusText() != null) {
+				Ui.text(g, Ui.ellipsize("„" + Messages.clean(friend.statusText()) + "“", textW, Ui.Font.BODY), tx, y + 37, Ui.MUTED, Ui.Font.BODY);
+			}
+			for (Object[] action : actions(x, y)) {
+				int bx = (int) action[2];
+				int bw = (int) action[3];
+				int by = y + 60;
+				boolean disabled = "In der Party".equals(action[0]) || ("In Party einladen".equals(action[0]) && !Party.canInvite(friend.uuid()));
+				boolean over = !disabled && Ui.inside(mouseX, mouseY, bx, by, bw, 18);
+				boolean primary = "Nachricht".equals(action[0]);
+				Ui.rect(g, bx, by, bw, 18, 9, disabled ? 0x0FFFFFFF : primary ? (over ? Ui.ACCENT_HOVER : Ui.ACCENT) : over ? Ui.SURFACE_STRONG : Ui.SURFACE_HOVER);
+				int color = disabled ? Ui.FAINT : primary ? 0xFFFFFFFF : Ui.TEXT;
+				Ui.icon(g, (String) action[1], bx + 8, by + 4.5f, 9, "star".equals(action[1]) && friend.favorite() ? 0xFFFACC15 : color);
+				Ui.text(g, (String) action[0], bx + 21, by + 5, color, Ui.Font.SMALL);
+				settingCenters.put("profile:" + action[0], new int[] {bx + bw / 2, by + 9});
+			}
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			for (Object[] action : actions(x, y)) {
+				if (!Ui.inside(mouseX, mouseY, (int) action[2], y + 60, (int) action[3], 18)) continue;
+				String label = (String) action[0];
+				HeldixMenuScreen.this.click();
+				switch (label) {
+					case "Nachricht" -> {
+						saveProfileDrafts();
+						minecraft.gui.setScreen(new HeldixMenuScreen(parent, friend.uuid(), friend.name()));
+					}
+					case "In Party einladen" -> {
+						if (Party.canInvite(friend.uuid())) report(Party.invite(friend.uuid()), friend.name() + " ist in die Party eingeladen");
+					}
+					case "Beitreten" -> {
+						if (minecraft.level == null || (friend.uuid().equals(confirmJoin) && System.currentTimeMillis() - confirmJoinAt < 4000)) joinFriend(friend);
+						else {
+							confirmJoin = friend.uuid();
+							confirmJoinAt = System.currentTimeMillis();
+							pageMessage("Nochmal „Beitreten“ klicken: Du verlässt deine Welt und gehst auf " + friend.server() + ".", true);
+						}
+					}
+					case "Favorit", "Als Favorit" -> Social.setFavorite(friend.uuid(), !friend.favorite()).exceptionally(e -> {
+						minecraft.execute(() -> pageMessage(errorText(e), false));
+						return null;
+					});
+					default -> {
+					}
+				}
+				return true;
+			}
+			return false;
+		}
+	}
+
+	/** Gemeinsamer Freund (Profilkarte): Klick öffnet dessen Profil */
+	private final class MutualRow implements Row, Groupable {
+		private final Social.Mutual mutual;
+
+		MutualRow(Social.Mutual mutual) {
+			this.mutual = mutual;
+		}
+
+		@Override
+		public void grouped() {
+		}
+
+		@Override
+		public int height(int width) {
+			return 28;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			boolean hover = Ui.inside(mouseX, mouseY, x, y, w, 28);
+			if (hover) Ui.rect(g, x + 3, y + 2, w - 6, 24, 7, Ui.SURFACE);
+			FriendWidget.face(g, mutual.uuid(), mutual.name(), x + 12, y + 7, 14, 1f);
+			Social.Friend friend = friendOf(mutual.uuid());
+			Ui.text(g, Ui.ellipsize(friend != null ? friend.shownName() : mutual.name(), w - 60, Ui.Font.LABEL), x + 34, y + 10, Ui.TEXT, Ui.Font.LABEL);
+			if (friend != null) Ui.icon(g, "chevron-right", x + w - 16, y + 10, 8, hover ? Ui.TEXT : Ui.FAINT);
+		}
+
+		@Override
+		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
+			if (friendOf(mutual.uuid()) == null) return false;
+			HeldixMenuScreen.this.click();
+			openProfile(mutual.uuid());
+			return true;
+		}
+	}
+
+	/** „<Name> schreibt …“ unter dem Verlauf (ab Dienst 1.12.0) */
+	private final class TypingRow implements Row {
+		@Override
+		public int height(int width) {
+			return 14;
+		}
+
+		@Override
+		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
+			Social.Friend friend = friendOf(openChat);
+			int dots = (int) (System.currentTimeMillis() / 350 % 3);
+			for (int i = 0; i < 3; i++) Ui.circle(g, x + HEAD_X + 6 + i * 5, y + 7, 1.6f, i == dots ? Ui.ACCENT_TEXT : Ui.FAINT);
+			Ui.text(g, (friend != null ? friend.shownName() : openChatName) + " schreibt …", x + HEAD_X + 24, y + 3, Ui.FAINT, Ui.Font.SMALL);
+		}
+	}
+
+	private static final int HEAD_X = 18;
 
 	/** Eingehende (Annehmen/Ablehnen) oder gesendete Anfrage (Zurückziehen) */
 	private final class RequestRow implements Row, Groupable {
@@ -4624,7 +5899,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			if (hover) Ui.rect(g, x + 3, y + 2, w - 6, 30, 7, Ui.SURFACE);
 			avatar(g, friend, x + 10, y + 7);
 			int textW = w - 46;
-			Ui.text(g, Ui.ellipsize(friend.name(), textW, Ui.Font.LABEL), x + 38, y + 8, Ui.TEXT, Ui.Font.LABEL);
+			friendName(g, friend, x + 38, y + 8, textW);
 			Ui.text(g, Ui.ellipsize(friend.activity(), textW, Ui.Font.SMALL), x + 38, y + 20, friend.online() ? Ui.SUCCESS : Ui.FAINT, Ui.Font.SMALL);
 		}
 
@@ -4670,7 +5945,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			int timeW = Ui.width(time, Ui.Font.SMALL);
 			int unread = conversation.unread();
 			int textW = w - 40 - Math.max(timeW, unread > 0 ? 20 : 0) - 16;
-			Ui.text(g, Ui.ellipsize(conversation.name(), textW, Ui.Font.LABEL), x + 40, y + 9, Ui.TEXT, Ui.Font.LABEL);
+			Ui.text(g, Ui.ellipsize(friend != null ? friend.shownName() : conversation.name(), textW, Ui.Font.LABEL), x + 40, y + 9, Ui.TEXT, Ui.Font.LABEL);
 			String preview = (conversation.last().mine() ? "Du: " : "") + Messages.clean(conversation.last().text());
 			Ui.text(g, Ui.ellipsize(preview, textW, Ui.Font.SMALL), x + 40, y + 22, unread > 0 ? Ui.TEXT : Ui.MUTED, Ui.Font.SMALL);
 			Ui.textRight(g, time, x + w - 12, y + 10, unread > 0 ? Ui.ACCENT_TEXT : Ui.FAINT, Ui.Font.SMALL);
@@ -4714,7 +5989,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			avatar(g, friend, x + 10, y + 6);
 			int pw = Ui.width("Schreiben", Ui.Font.SMALL) + 30;
 			int textW = w - 40 - pw - 16;
-			Ui.text(g, Ui.ellipsize(friend.name(), textW, Ui.Font.LABEL), x + 38, y + 8, Ui.TEXT, Ui.Font.LABEL);
+			friendName(g, friend, x + 38, y + 8, textW);
 			Ui.text(g, Ui.ellipsize(friend.activity(), textW, Ui.Font.SMALL), x + 38, y + 20, friend.online() ? Ui.SUCCESS : Ui.FAINT, Ui.Font.SMALL);
 			int px = x + w - 10 - pw;
 			Ui.rect(g, px, y + 9, pw, 16, 8, hover ? Ui.SURFACE_STRONG : Ui.SURFACE_HOVER);
@@ -4732,11 +6007,17 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	/**
 	 * Eine Nachricht als Sprechblase: eigene rechts in Blau, die des Freundes links mit seinem Kopf neben der letzten
-	 * Blase einer Gruppe. Uhrzeit nur an der letzten Blase einer Gruppe (sonst als Tooltip). Links lassen sich öffnen,
-	 * Rechtsklick kopiert den Text. Ausstehende oder fehlgeschlagene eigene Nachrichten erscheinen blass bzw. rot.
+	 * Blase einer Gruppe. Uhrzeit nur an der letzten Blase einer Gruppe (sonst als Tooltip). Links lassen sich öffnen.
+	 * Ab Dienst 1.12.0: Bezug einer Antwort oben in der Blase, Beitreten-Karte (Server, Welt, Einladung) unter dem Text,
+	 * Reaktionen darunter (Klick setzt bzw. entfernt die eigene); beim Darüberfahren daneben Antworten, Reagieren und
+	 * (eigene) Löschen. Rechtsklick öffnet ein Menü (Antworten, Reagieren, Kopieren, Löschen). Ausstehende oder
+	 * fehlgeschlagene eigene Nachrichten erscheinen blass bzw. rot.
 	 */
 	private final class Bubble implements Row {
 		private static final int HEAD = 14;
+		private static final int QUOTE_H = 22;
+		private static final int CARD_H = 34;
+		private static final int REACTIONS_H = 16;
 		private final long key;
 		private final String text;
 		private final long at;
@@ -4747,17 +6028,22 @@ public class HeldixMenuScreen extends ShellScreen {
 		private final boolean last;
 		/** null = gesendet; sonst die ausstehende/fehlgeschlagene Nachricht */
 		private final PendingMessage pending;
+		/** die Nachricht selbst (null bei ausstehenden) */
+		private final Messages.Message message;
+		private final Messages.Reply reply;
+		private final Messages.Card card;
 		private final String link;
 
 		Bubble(Messages.Message message, boolean continued, boolean last) {
-			this(message.id(), message.text(), message.at(), message.mine(), continued, last, null);
+			this(message.id(), message.text(), message.at(), message.mine(), continued, last, null, message, message.replyTo(), message.card());
 		}
 
 		Bubble(PendingMessage pending, boolean continued) {
-			this(-pending.localId, pending.text, pending.at, true, continued, true, pending);
+			this(-pending.localId, pending.text, pending.at, true, continued, true, pending, null, pending.replyPreview(), pending.card);
 		}
 
-		private Bubble(long key, String text, long at, boolean mine, boolean continued, boolean last, PendingMessage pending) {
+		private Bubble(long key, String text, long at, boolean mine, boolean continued, boolean last, PendingMessage pending, Messages.Message message,
+				Messages.Reply reply, Messages.Card card) {
 			this.key = key;
 			this.text = Messages.clean(text);
 			this.at = at;
@@ -4765,8 +6051,11 @@ public class HeldixMenuScreen extends ShellScreen {
 			this.continued = continued;
 			this.last = last;
 			this.pending = pending;
+			this.message = message;
+			this.reply = reply;
+			this.card = card;
 			java.util.regex.Matcher matcher = LINK.matcher(this.text);
-			this.link = matcher.find() ? matcher.group() : null;
+			this.link = card == null && matcher.find() ? matcher.group() : null;
 		}
 
 		/** Breite für Text: höchstens drei Viertel der Fläche, links Platz für den Kopf */
@@ -4788,12 +6077,19 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 
 		private int bubbleHeight(int w) {
-			return 8 + lines(w).size() * 11 + (footer() != null ? 10 : 0) + (footer() == null ? 2 : 0);
+			int h = 8 + lines(w).size() * 11 + (footer() != null ? 10 : 2);
+			if (reply != null) h += QUOTE_H;
+			if (card != null) h += CARD_H + 4;
+			return h;
+		}
+
+		private Map<UUID, String> reactions() {
+			return message == null ? Map.of() : message.reactions();
 		}
 
 		@Override
 		public int height(int width) {
-			return (continued ? 0 : 5) + bubbleHeight(width);
+			return (continued ? 0 : 5) + bubbleHeight(width) + (reactions().isEmpty() ? 0 : REACTIONS_H);
 		}
 
 		@Override
@@ -4807,6 +6103,8 @@ public class HeldixMenuScreen extends ShellScreen {
 			String footer = footer();
 			int textW = footer != null ? Ui.width(footer, Ui.Font.SMALL) : 0;
 			for (FormattedCharSequence line : lines) textW = Math.max(textW, font.width(line));
+			if (reply != null) textW = Math.max(textW, Math.min(maxText(w), Ui.width(replyText(), Ui.Font.SMALL) + 8));
+			if (card != null) textW = Math.max(textW, Math.min(maxText(w), 190));
 			int bw = textW + 18;
 			int bh = bubbleHeight(w);
 			int by = y + (continued ? 0 : 5);
@@ -4814,10 +6112,58 @@ public class HeldixMenuScreen extends ShellScreen {
 			return new int[] {bx, by, bw, bh};
 		}
 
+		/** Name und Anfang der Nachricht, auf die geantwortet wird */
+		private String replyName() {
+			if (reply.deleted()) return "Gelöschte Nachricht";
+			if (reply.from() != null && reply.from().equals(minecraft.getUser().getProfileId())) return "Du";
+			Social.Friend friend = reply.from() == null ? null : friendOf(reply.from());
+			return friend != null ? friend.shownName() : openChatName;
+		}
+
+		private String replyText() {
+			return reply.deleted() ? "Diese Nachricht gibt es nicht mehr" : reply.text();
+		}
+
+		/** Knöpfe beim Darüberfahren neben der Blase: {Aktion, x, y} */
+		private List<Object[]> hoverActions(int[] b) {
+			List<Object[]> list = new ArrayList<>();
+			if (message == null || !Social.friends2()) return list;
+			List<String> actions = new ArrayList<>(List.of("reply", "react"));
+			if (mine) actions.add("delete");
+			int ay = b[1] + Math.min(4, b[3] / 2 - 7);
+			for (int i = 0; i < actions.size(); i++) {
+				int ax = mine ? b[0] - 18 - i * 17 : b[0] + b[2] + 4 + i * 17;
+				list.add(new Object[] {actions.get(i), ax, ay});
+			}
+			return list;
+		}
+
+		/** Reaktionen unter der Blase: {ID, x, Breite, Anzahl} */
+		private List<Object[]> reactionChips(int[] b) {
+			Map<String, Integer> counts = new java.util.LinkedHashMap<>();
+			for (String id : Messages.REACTIONS) {
+				int n = 0;
+				for (String value : reactions().values()) if (value.equals(id)) n++;
+				if (n > 0) counts.put(id, n);
+			}
+			List<Object[]> chips = new ArrayList<>();
+			int total = 0;
+			for (Map.Entry<String, Integer> entry : counts.entrySet()) total += 22 + (entry.getValue() > 1 ? Ui.width(Integer.toString(entry.getValue()), Ui.Font.SMALL) + 2 : 0) + 3;
+			int cx = mine ? b[0] + b[2] - total + 3 : b[0];
+			for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+				int cw = 22 + (entry.getValue() > 1 ? Ui.width(Integer.toString(entry.getValue()), Ui.Font.SMALL) + 2 : 0);
+				chips.add(new Object[] {entry.getKey(), cx, cw, entry.getValue()});
+				cx += cw + 3;
+			}
+			return chips;
+		}
+
 		@Override
 		public void draw(GuiGraphicsExtractor g, int x, int y, int w, int mouseX, int mouseY) {
 			int[] b = box(x, y, w);
+			int rowH = height(w);
 			boolean hover = Ui.inside(mouseX, mouseY, b[0], b[1], b[2], b[3]);
+			boolean rowHover = mouseY >= y && mouseY < y + rowH && Ui.inside(mouseX, mouseY, x, y, w, rowH);
 			boolean failed = pending != null && pending.failed;
 			int fill;
 			if (failed) fill = (Ui.DANGER & 0xFFFFFF) | 0x2E000000;
@@ -4827,10 +6173,18 @@ public class HeldixMenuScreen extends ShellScreen {
 			if (failed) Ui.outline(g, b[0], b[1], b[2], b[3], 9, (Ui.DANGER & 0xFFFFFF) | 0x99000000);
 			int ly = b[1] + 6;
 			int color = mine && !failed ? 0xFFFFFFFF : Ui.TEXT;
+			// Bezug der Antwort: Strich, Name, Anfang der Nachricht
+			if (reply != null) {
+				Ui.rect(g, b[0] + 7, ly, 2, QUOTE_H - 4, 1, mine ? 0x99FFFFFF : Ui.ACCENT_LINE);
+				Ui.text(g, Ui.ellipsize(replyName(), b[2] - 26, Ui.Font.SMALL), b[0] + 13, ly + 1, mine ? 0xE6FFFFFF : Ui.ACCENT_TEXT, Ui.Font.SMALL);
+				Ui.text(g, Ui.ellipsize(replyText(), b[2] - 26, Ui.Font.SMALL), b[0] + 13, ly + 10, mine ? 0xB3FFFFFF : Ui.MUTED, Ui.Font.SMALL);
+				ly += QUOTE_H;
+			}
 			for (FormattedCharSequence line : lines(w)) {
 				g.text(font, line, b[0] + 9, ly, color, false);
 				ly += 11;
 			}
+			if (card != null) drawCard(g, b[0] + 6, ly + 2, b[2] - 12, mouseX, mouseY);
 			String footer = footer();
 			if (footer != null) {
 				int footerColor = failed ? Ui.DANGER : mine ? 0xC8FFFFFF : link != null ? Ui.ACCENT_TEXT : Ui.FAINT;
@@ -4838,21 +6192,144 @@ public class HeldixMenuScreen extends ShellScreen {
 			}
 			// Kopf des Freundes neben der letzten Blase seiner Gruppe
 			if (!mine && last && openChat != null) FriendWidget.face(g, openChat, openChatName, x + 2, b[1] + b[3] - HEAD, HEAD, 1f);
+			// Reaktionen unter der Blase
+			String own = message == null ? null : Messages.ownReaction(message);
+			for (Object[] chip : reactionChips(b)) {
+				int cx = (int) chip[1];
+				int cw = (int) chip[2];
+				int cy = b[1] + b[3] + 2;
+				boolean ownChip = chip[0].equals(own);
+				boolean over = Ui.inside(mouseX, mouseY, cx, cy, cw, 13);
+				Ui.rect(g, cx, cy, cw, 13, 6.5f, ownChip ? Ui.ACCENT_SOFT : over ? Ui.SURFACE_STRONG : Ui.SURFACE_HOVER);
+				if (ownChip) Ui.outline(g, cx, cy, cw, 13, 6.5f, Ui.ACCENT_LINE);
+				dev.heldixclient.ui.ReactionIcons.draw(g, (String) chip[0], cx + 4, cy + 1.5f, 10, 1f);
+				if ((int) chip[3] > 1) Ui.text(g, Integer.toString((int) chip[3]), cx + 16, cy + 3, Ui.TEXT, Ui.Font.SMALL);
+				if (over) Ui.requestTooltip(Messages.reactionLabel((String) chip[0]) + " · " + reactionNames((String) chip[0])
+						+ (ownChip ? " · Klick entfernt deine" : " · Klick: auch reagieren"), mouseX, mouseY);
+				settingCenters.put("reaction:" + key + ":" + chip[0], new int[] {cx + cw / 2, cy + 6});
+			}
+			// beim Darüberfahren: Antworten, Reagieren, Löschen
+			if (rowHover && !menu.isOpen()) {
+				boolean confirming = confirmDeleteMessage == key && System.currentTimeMillis() - confirmDeleteMessageAt < 4000;
+				for (Object[] action : hoverActions(b)) {
+					int ax = (int) action[1];
+					int ay = (int) action[2];
+					boolean over = Ui.inside(mouseX, mouseY, ax, ay, 15, 15);
+					String id = (String) action[0];
+					boolean danger = "delete".equals(id);
+					Ui.rect(g, ax, ay, 15, 15, 5, over ? (danger && confirming ? Ui.DANGER : Ui.SURFACE_STRONG) : Ui.SURFACE_HOVER);
+					String icon = switch (id) {
+						case "reply" -> "back";
+						case "react" -> "sparkles";
+						default -> "trash";
+					};
+					Ui.icon(g, icon, ax + 3, ay + 3, 9, danger ? (confirming ? 0xFFFFFFFF : Ui.DANGER) : over ? Ui.TEXT : Ui.MUTED);
+					if (over) Ui.requestTooltip(switch (id) {
+						case "reply" -> "Antworten";
+						case "react" -> "Reagieren";
+						default -> confirming ? "Nochmal klicken: für beide löschen" : "Löschen (für beide)";
+					}, mouseX, mouseY);
+				}
+			}
+			for (Object[] action : hoverActions(b)) settingCenters.put("bubble:" + action[0] + ":" + key, new int[] {(int) action[1] + 7, (int) action[2] + 7});
+			if (card != null) settingCenters.put("card:" + key, new int[] {b[0] + b[2] - 12 - cardButtonWidth() / 2, ly + 2 + CARD_H / 2});
 			if (hover) {
 				String when = java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy, HH:mm").format(java.time.Instant.ofEpochMilli(at).atZone(java.time.ZoneId.systemDefault()));
-				Ui.requestTooltip(failed && pending.error != null ? pending.error : when + (link != null ? " · Klick öffnet den Link" : "") + " · Rechtsklick kopiert", mouseX, mouseY);
+				Ui.requestTooltip(failed && pending.error != null ? pending.error : when + (link != null ? " · Klick öffnet den Link" : "")
+						+ (Social.friends2() ? " · Rechtsklick: Antworten, Reagieren …" : " · Rechtsklick kopiert"), mouseX, mouseY);
+			}
+		}
+
+		/** Namen derer, die so reagiert haben (für den Tooltip) */
+		private String reactionNames(String id) {
+			List<String> names = new ArrayList<>();
+			for (Map.Entry<UUID, String> entry : reactions().entrySet()) {
+				if (!entry.getValue().equals(id)) continue;
+				if (entry.getKey().equals(minecraft.getUser().getProfileId())) names.add("du");
+				else {
+					Social.Friend friend = friendOf(entry.getKey());
+					names.add(friend != null ? friend.shownName() : openChatName);
+				}
+			}
+			return String.join(", ", names);
+		}
+
+		private int cardButtonWidth() {
+			String label = cardButtonLabel();
+			return label == null ? 0 : Ui.width(label, Ui.Font.SMALL) + 16;
+		}
+
+		/** Knopf der Karte: „Beitreten“ bzw. „Annehmen“ (bei eigenen Karten keiner) */
+		private String cardButtonLabel() {
+			if (mine || card == null) return null;
+			return "invite".equals(card.kind()) ? "Annehmen" : "Beitreten";
+		}
+
+		/** Beitreten-Karte: Symbol, Titel, Art, Knopf */
+		private void drawCard(GuiGraphicsExtractor g, int cx, int cy, int cw, int mouseX, int mouseY) {
+			Ui.rect(g, cx, cy, cw, CARD_H, 7, mine ? 0x33000000 : 0x1AFFFFFF);
+			Ui.outline(g, cx, cy, cw, CARD_H, 7, mine ? 0x40FFFFFF : Ui.LINE);
+			String icon = switch (card.kind()) {
+				case "world" -> "lan";
+				case "invite" -> "user-plus";
+				default -> "server";
+			};
+			Ui.rect(g, cx + 6, cy + 7, 20, 20, 6, mine ? 0x33FFFFFF : Ui.ACCENT_SOFT);
+			Ui.icon(g, icon, cx + 11, cy + 12, 10, mine ? 0xFFFFFFFF : Ui.ACCENT_TEXT);
+			String button = cardButtonLabel();
+			int bw = cardButtonWidth();
+			int textW = cw - 40 - (button != null ? bw + 8 : 0);
+			Ui.text(g, Ui.ellipsize(card.shownTitle(), textW, Ui.Font.LABEL), cx + 32, cy + 7, mine ? 0xFFFFFFFF : Ui.TEXT, Ui.Font.LABEL);
+			String detail = card.kindLabel() + ("server".equals(card.kind()) && card.title() != null ? " · " + card.target() : "");
+			Ui.text(g, Ui.ellipsize(detail, textW, Ui.Font.SMALL), cx + 32, cy + 20, mine ? 0xC8FFFFFF : Ui.MUTED, Ui.Font.SMALL);
+			if (button != null) {
+				int bx = cx + cw - 6 - bw;
+				int by = cy + 9;
+				boolean confirming = confirmAddress != null && System.currentTimeMillis() - confirmAddressAt < 4000
+						&& (confirmAddress.equals("server:" + card.target()) || confirmAddress.equals("welt:" + card.target()));
+				String label = confirming ? "Sicher?" : button;
+				pill(g, label, bx, by, bw, true, Ui.inside(mouseX, mouseY, bx, by, bw, 16));
 			}
 		}
 
 		@Override
 		public boolean click(double mouseX, double mouseY, int x, int y, int w) {
 			int[] b = box(x, y, w);
+			// Knöpfe neben der Blase
+			for (Object[] action : hoverActions(b)) {
+				if (!Ui.inside(mouseX, mouseY, (int) action[1], (int) action[2], 15, 15)) continue;
+				HeldixMenuScreen.this.click();
+				switch ((String) action[0]) {
+					case "reply" -> startReply(message);
+					case "react" -> openReactionMenu(message, (int) mouseX, (int) mouseY);
+					default -> deleteMessage(message, key);
+				}
+				return true;
+			}
+			// Reaktionen: eigene entfernen bzw. dieselbe setzen
+			String own = message == null ? null : Messages.ownReaction(message);
+			for (Object[] chip : reactionChips(b)) {
+				if (!Ui.inside(mouseX, mouseY, (int) chip[1], b[1] + b[3] + 2, (int) chip[2], 13)) continue;
+				HeldixMenuScreen.this.click();
+				react(message, chip[0].equals(own) ? null : (String) chip[0]);
+				return true;
+			}
 			if (!Ui.inside(mouseX, mouseY, b[0], b[1], b[2], b[3])) return false;
 			if (pending != null && pending.failed) {
 				HeldixMenuScreen.this.click();
 				pendingMessages.remove(pending);
-				sendText(pending.text);
+				sendText(pending.text, pending.reply, pending.card);
 				return true;
+			}
+			// Karte: Beitreten bzw. Einladung annehmen
+			if (card != null && cardButtonLabel() != null) {
+				int bw = cardButtonWidth();
+				int cardY = b[1] + 6 + (reply != null ? QUOTE_H : 0) + lines(w).size() * 11 + 2;
+				if (Ui.inside(mouseX, mouseY, b[0] + b[2] - 12 - bw, cardY + 9, bw, 16)) {
+					HeldixMenuScreen.this.click();
+					useCard(card);
+					return true;
+				}
 			}
 			if (link != null) {
 				try {
@@ -4871,29 +6348,123 @@ public class HeldixMenuScreen extends ShellScreen {
 		public boolean secondaryClick(double mouseX, double mouseY, int x, int y, int w) {
 			int[] b = box(x, y, w);
 			if (!Ui.inside(mouseX, mouseY, b[0], b[1], b[2], b[3])) return false;
-			minecraft.keyboardHandler.setClipboard(text);
 			HeldixMenuScreen.this.click();
-			pageMessage("Nachricht kopiert", true);
+			if (message == null || !Social.friends2()) {
+				minecraft.keyboardHandler.setClipboard(text);
+				pageMessage("Nachricht kopiert", true);
+				return true;
+			}
+			openMessageMenu(message, text, (int) mouseX, (int) mouseY);
 			return true;
 		}
+	}
+
+	/** Antworten: Leiste über der Eingabe, Fokus ins Feld */
+	private void startReply(Messages.Message message) {
+		if (message == null) return;
+		replyTo = message;
+		if (chatInput != null) {
+			setFocused(chatInput);
+			chatInput.setFocused(true);
+		}
+	}
+
+	/** Eigene Nachricht löschen: zweiter Klick innerhalb von 4 Sekunden (für beide weg) */
+	private void deleteMessage(Messages.Message message, long key) {
+		if (message == null || !message.mine()) return;
+		if (confirmDeleteMessage != key || System.currentTimeMillis() - confirmDeleteMessageAt >= 4000) {
+			confirmDeleteMessage = key;
+			confirmDeleteMessageAt = System.currentTimeMillis();
+			return;
+		}
+		confirmDeleteMessage = 0;
+		if (replyTo != null && replyTo.id() == message.id()) replyTo = null;
+		Messages.delete(openChat, message.id()).whenComplete((ok, error) -> minecraft.execute(() -> {
+			if (error != null) pageMessage(errorText(error), false);
+		}));
+	}
+
+	/** Reaktion setzen bzw. entfernen (null) */
+	private void react(Messages.Message message, String reaction) {
+		if (message == null || openChat == null) return;
+		Messages.react(openChat, message.id(), reaction).whenComplete((ok, error) -> minecraft.execute(() -> {
+			if (error != null) pageMessage(errorText(error), false);
+		}));
+	}
+
+	/** Menü mit den 8 Reaktionen (die eigene mit Haken; nochmal wählen entfernt sie) */
+	private void openReactionMenu(Messages.Message message, int x, int y) {
+		menu.open(reactionItems(message), x, y, width, height);
+	}
+
+	private List<dev.heldixclient.ui.ContextMenu.Item> reactionItems(Messages.Message message) {
+		List<dev.heldixclient.ui.ContextMenu.Item> items = new ArrayList<>();
+		String own = Messages.ownReaction(message);
+		for (String id : Messages.REACTIONS) {
+			items.add(new dev.heldixclient.ui.ContextMenu.Radio(Messages.reactionLabel(id), () -> id.equals(Messages.ownReaction(message)), () -> {
+				react(message, id.equals(own) ? null : id);
+				menu.close();
+			}));
+		}
+		if (own != null) {
+			items.add(new dev.heldixclient.ui.ContextMenu.Separator());
+			items.add(new dev.heldixclient.ui.ContextMenu.Action("Reaktion entfernen", "close", () -> react(message, null)));
+		}
+		return items;
+	}
+
+	/** Rechtsklick auf eine Nachricht: Antworten, Reagieren, Kopieren, (eigene) Löschen */
+	private void openMessageMenu(Messages.Message message, String text, int x, int y) {
+		List<dev.heldixclient.ui.ContextMenu.Item> items = new ArrayList<>();
+		items.add(new dev.heldixclient.ui.ContextMenu.Action("Antworten", "back", () -> startReply(message)));
+		items.add(new dev.heldixclient.ui.ContextMenu.Submenu("Reagieren", "sparkles", () -> {
+			String own = Messages.ownReaction(message);
+			return own == null ? null : Messages.reactionLabel(own);
+		}, () -> reactionItems(message)));
+		items.add(new dev.heldixclient.ui.ContextMenu.Action("Text kopieren", "copy", () -> {
+			minecraft.keyboardHandler.setClipboard(text);
+			pageMessage("Nachricht kopiert", true);
+		}));
+		if (message.mine()) {
+			items.add(new dev.heldixclient.ui.ContextMenu.Separator());
+			items.add(new dev.heldixclient.ui.ContextMenu.Action("Für beide löschen", "trash", null, true, true, () -> {
+				confirmDeleteMessage = message.id();
+				confirmDeleteMessageAt = System.currentTimeMillis();
+				deleteMessage(message, message.id());
+			}));
+		}
+		menu.open(items, x, y, width, height);
 	}
 
 	/** https://… bzw. http://… in einer Nachricht */
 	private static final java.util.regex.Pattern LINK = java.util.regex.Pattern.compile("https?://[^\\s]+");
 
-	/** Eigene Nachricht, die gerade gesendet wird oder nicht ankam */
+	/** Eigene Nachricht, die gerade gesendet wird oder nicht ankam (mit Bezug und Karte) */
 	private static final class PendingMessage {
 		private static long next = 1;
 		final long localId = next++;
 		final UUID to;
 		final String text;
+		final long reply;
+		final Messages.Card card;
 		final long at = System.currentTimeMillis();
 		boolean failed;
 		String error;
 
-		PendingMessage(UUID to, String text) {
+		PendingMessage(UUID to, String text, long reply, Messages.Card card) {
 			this.to = to;
 			this.text = text;
+			this.reply = reply;
+			this.card = card;
+		}
+
+		/** Bezug für die Anzeige aus dem geladenen Verlauf */
+		Messages.Reply replyPreview() {
+			if (reply <= 0) return null;
+			Messages.Message original = Messages.find(to, reply);
+			if (original == null) return new Messages.Reply(reply, null, null);
+			String shown = Messages.clean(original.text());
+			return new Messages.Reply(reply, original.from(), shown.length() > 100 ? shown.substring(0, 100) + "…" : shown);
 		}
 	}
 
@@ -5220,7 +6791,8 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 
 		g.enableScissor(bodyX - 2, bodyY, bodyX + bodyW + 2, bodyY + bodyH);
-		boolean inBody = Ui.inside(mouseX, mouseY, bodyX, bodyY, bodyW, bodyH);
+		// offenes Rechtsklick-Menü: darunter nichts hervorheben
+		boolean inBody = Ui.inside(mouseX, mouseY, bodyX, bodyY, bodyW, bodyH) && !menu.isOpen();
 		collecting.clear();
 		collectingKeys.clear();
 		Ui.collectTargets(collecting);
@@ -5319,12 +6891,30 @@ public class HeldixMenuScreen extends ShellScreen {
 			if (label != null) Ui.text(g, label, b[0] + 10, b[1] + 6, 0xFFFFFFFF, Ui.Font.SMALL);
 			Ui.icon(g, "chevron-down", b[0] + b[2] - 16, b[1] + 5, 10, fresh ? 0xFFFFFFFF : Ui.TEXT);
 		}
+		// Antwort: Leiste mit dem Bezug über der Eingabe, × bricht ab
+		if (replyTo != null && chatInput != null) {
+			int[] r = replyBar();
+			Ui.rect(g, r[0], r[1], r[2], r[3], 6, Ui.SURFACE);
+			Ui.rect(g, r[0] + 4, r[1] + 3, 2, r[3] - 6, 1, Ui.ACCENT);
+			Social.Friend friend = friendOf(replyTo.from());
+			String who = replyTo.mine() ? "dich" : friend != null ? friend.shownName() : openChatName;
+			String label = "Antwort an " + who + ": " + Messages.clean(replyTo.text()).replaceAll("\\s+", " ");
+			Ui.text(g, Ui.ellipsize(label, r[2] - 34, Ui.Font.SMALL), r[0] + 11, r[1] + 4, Ui.MUTED, Ui.Font.SMALL);
+			boolean over = Ui.inside(mouseX, mouseY, r[0] + r[2] - 18, r[1], 18, r[3]);
+			Ui.icon(g, "close", r[0] + r[2] - 13, r[1] + 3, 9, over ? Ui.TEXT : Ui.FAINT);
+			if (over) Ui.requestTooltip("Antwort abbrechen", mouseX, mouseY);
+		}
 		// Zeichenzähler kurz vor der Grenze
 		if (chatText.length() >= Messages.MAX_LENGTH - 100 && chatInput != null) {
 			String counter = chatText.length() + "/" + Messages.MAX_LENGTH;
 			Ui.textRight(g, counter, chatInput.getX() + chatInput.getWidth() - 4, chatInput.getY() - 10,
 					chatText.length() >= Messages.MAX_LENGTH ? Ui.WARNING : Ui.FAINT, Ui.Font.SMALL);
 		}
+	}
+
+	/** {x, y, Breite, Höhe} der Leiste „Antwort an …“ über der Eingabe */
+	private int[] replyBar() {
+		return new int[] {chatX(), contentY + contentH - 20 - 18, chatW(), 15};
 	}
 
 	/** {x, y, Breite, Höhe} des Knopfs „nach unten“ */
@@ -5368,7 +6958,7 @@ public class HeldixMenuScreen extends ShellScreen {
 			if (iy + LIST_ITEM >= top && iy <= top + room) {
 				Social.Friend friend = friendOf(uuid);
 				Messages.Conversation conversation = byUuid.get(uuid);
-				String name = friend != null ? friend.name() : conversation != null ? conversation.name() : "?";
+				String name = friend != null ? friend.shownName() : conversation != null ? conversation.name() : "?";
 				boolean selected = uuid.equals(openChat);
 				boolean over = Ui.inside(mouseX, mouseY, x + 4, iy, w - 8, LIST_ITEM - 2) && mouseY >= top && mouseY < top + room;
 				if (selected) Ui.rect(g, x + 4, iy, w - 8, LIST_ITEM - 2, 7, Ui.ACCENT_SOFT);
@@ -5508,6 +7098,7 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		if (menu.isOpen()) return menu.mouseScrolled(mouseX, mouseY, scrollY);
 		if (chatSplit() && Ui.inside(mouseX, mouseY, contentX, contentY, chatListW(), contentH)) {
 			listScroll = Math.max(0, listScroll - scrollY * 20);
 			return true;
@@ -5521,7 +7112,86 @@ public class HeldixMenuScreen extends ShellScreen {
 	}
 
 	@Override
+	public void mouseMoved(double mouseX, double mouseY) {
+		if (menu.isOpen()) menu.mouseMoved(mouseX, mouseY);
+		super.mouseMoved(mouseX, mouseY);
+	}
+
+	/** Rechtsklick-Menü im Heldix-Design (über allem, auch über den Widgets) */
+	@Override
+	protected void drawOverlay(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
+		super.drawOverlay(g, mouseX, mouseY, delta);
+		menu.render(g, mouseX, mouseY);
+	}
+
+	/** Für den Autotest: Einträge des offenen Rechtsklick-Menüs (oberste Ebene), leer = keins offen */
+	public List<String> menuLabels() {
+		return menu.isOpen() ? menu.labels(0) : List.of();
+	}
+
+	/** Für den Autotest: Mitte eines Eintrags im offenen Rechtsklick-Menü (Ebene 0), null = nicht da */
+	public int[] menuEntryCenter(String label) {
+		return menu.isOpen() ? menu.rowCenter(0, label) : null;
+	}
+
+	/** Für den Autotest: Mitte eines Knopfs aus dem letzten Bild (z. B. "party-accept:<id>", "profile:Nachricht"), null = nicht zu sehen */
+	public int[] targetCenter(String key) {
+		return settingCenters.get(key);
+	}
+
+	/**
+	 * Für den Autotest: so scrollen, dass die Zeile dieses Spielers (Freund, Party-Mitglied, Einladen, Vorschlag) zu sehen
+	 * ist; die Knopf-Mitten stehen ab dem nächsten Bild in {@link #targetCenter}
+	 */
+	public void scrollToPlayer(String name) {
+		layout();
+		java.util.function.Predicate<Row> match = row -> switch (row) {
+			case FriendRow r -> r.friend.name().equals(name);
+			case PartyMemberRow r -> r.member.name().equals(name);
+			case PartyInviteFriendRow r -> r.friend.name().equals(name);
+			case SuggestionRow r -> r.name.equals(name);
+			default -> false;
+		};
+		int y = 0;
+		for (Row row : rows) {
+			int[] found = row.find(match, bodyW);
+			if (found != null) {
+				scroll = Math.clamp(y + found[1] - (bodyH - found[3]) / 2.0, 0, maxScroll());
+				return;
+			}
+			y += row.height(bodyW) + row.gapAfter();
+		}
+	}
+
+	/** Für den Autotest: offene Profilkarte (null = keine) */
+	public UUID openProfileId() {
+		return openProfile;
+	}
+
+	/** Für den Autotest: Rechtsklick-Menü eines Freundes öffnen (wie ein Rechtsklick auf seine Zeile) */
+	public boolean openFriendMenuFor(UUID friend) {
+		Social.Friend found = friendOf(friend);
+		if (found == null) return false;
+		openFriendMenu(found, width / 2 - 60, height / 3);
+		return true;
+	}
+
+	/** Für den Autotest: auf diese Nachricht antworten bzw. Leiste „Antwort an …“ offen? */
+	public void replyToMessage(long id) {
+		if (openChat != null) startReply(Messages.find(openChat, id));
+	}
+
+	public boolean replying() {
+		return replyTo != null;
+	}
+
+	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		// Rechtsklick-Menü offen: jeder Klick gehört ihm (daneben schließt es)
+		if (menu.isOpen()) {
+			menu.mouseClicked(event.x(), event.y());
+			return true;
+		}
 		// wartet eine Taste: Mausrad- und Seitentasten werden zur Belegung, Links- und Rechtsklick brechen ab
 		if (keyCapture != null && event.button() != InputConstants.MOUSE_BUTTON_LEFT && event.button() != InputConstants.MOUSE_BUTTON_RIGHT) {
 			bindKey(keyCapture, InputConstants.Type.MOUSE.getOrCreate(event.button()));
@@ -5552,7 +7222,8 @@ public class HeldixMenuScreen extends ShellScreen {
 		layout();
 		double mx = event.x();
 		double my = event.y();
-		if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT && openChat != null && Ui.inside(mx, my, bodyX, bodyY, bodyW, bodyH)) {
+		// Rechtsklick in den Inhalt: Zeile entscheidet (Nachricht: Menü bzw. kopieren, Freund: Aktionen)
+		if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT && Ui.inside(mx, my, bodyX, bodyY, bodyW, bodyH)) {
 			int ry = bodyY - (int) scroll;
 			for (Row row : rows) {
 				int h = row.height(bodyW);
@@ -5563,6 +7234,14 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 		if (event.button() != InputConstants.MOUSE_BUTTON_LEFT) return false;
 		if (openChat != null) {
+			if (replyTo != null) {
+				int[] r = replyBar();
+				if (Ui.inside(mx, my, r[0] + r[2] - 18, r[1], 18, r[3])) {
+					click();
+					replyTo = null;
+					return true;
+				}
+			}
 			if (chatSplit() && clickChatList(mx, my)) return true;
 			if (chatFromBottom > 30) {
 				int[] b = downButton();
@@ -5605,6 +7284,8 @@ public class HeldixMenuScreen extends ShellScreen {
 
 	@Override
 	public boolean keyPressed(KeyEvent event) {
+		// Rechtsklick-Menü offen: Pfeile, Enter, Esc gehören ihm
+		if (menu.isOpen() && menu.keyPressed(event.key())) return true;
 		// eine Taste wartet auf ihre neue Belegung: jeder Tastendruck gehört ihr (Esc bricht ab, Entf/Rücktaste = keine)
 		if (keyCapture != null) {
 			int key = event.key();
@@ -5625,6 +7306,15 @@ public class HeldixMenuScreen extends ShellScreen {
 		}
 		if (!typing && openChat != null && event.key() == InputConstants.KEY_BACKSPACE) {
 			closeChat();
+			return true;
+		}
+		// Esc beim Antworten: erst die Antwort abbrechen
+		if (openChat != null && replyTo != null && event.key() == InputConstants.KEY_ESCAPE) {
+			replyTo = null;
+			return true;
+		}
+		if (!typing && openProfile != null && event.key() == InputConstants.KEY_BACKSPACE) {
+			closeProfile();
 			return true;
 		}
 		if (!typing && openChat == null && !event.hasControlDown() && !event.hasAltDown() && contentKey(event)) return true;
@@ -5713,7 +7403,10 @@ public class HeldixMenuScreen extends ShellScreen {
 	public void removed() {
 		super.removed();
 		keyCapture = null;
+		menu.close();
 		if (openChat != null) Messages.setViewing(null);
+		if (page == Shell.Page.PARTY) Party.setViewingChat(false);
+		saveProfileDrafts();
 		if (page == Shell.Page.CAPE) Capes.trim();
 	}
 

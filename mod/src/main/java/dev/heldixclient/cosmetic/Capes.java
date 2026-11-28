@@ -78,9 +78,22 @@ public final class Capes {
 			return !glow.isEmpty();
 		}
 
-		/** nur für Team-Mitglieder wählbar (Katalog-Capes mit access: team) */
+		/** nur für Team-Mitglieder wählbar: Katalog-Capes mit access: team, eingebaute mit „team“: true in capes.json */
 		public boolean teamOnly() {
-			return catalog != null && catalog.teamOnly();
+			if (catalog != null) return catalog.teamOnly();
+			return !custom && teamCapes.contains(id);
+		}
+
+		/** Belohnung für Einladungen: nur wählbar, wenn freigeschaltet (Katalog-Capes mit access: unlock) */
+		public boolean unlockOnly() {
+			return catalog != null && catalog.unlockOnly();
+		}
+
+		/** Warum du es nicht tragen darfst (kurz, für Tooltips), null = du darfst */
+		public String lockReason() {
+			if (teamOnly() && !Cosmetics.team()) return "Nur für das HeldixClient-Team";
+			if (unlockOnly() && !Cosmetics.unlocked(id)) return Cosmetics.UNLOCK_HINT;
+			return null;
 		}
 	}
 
@@ -88,6 +101,8 @@ public final class Capes {
 	private static final Map<CosmeticCatalog.Item, Cape> CATALOG = new java.util.concurrent.ConcurrentHashMap<>();
 
 	private static List<Cape> builtin;
+	/** IDs der eingebauten Team-Capes (capes.json „team“: true, gesetzt zusammen mit builtin) */
+	private static volatile Set<String> teamCapes = Set.of();
 	private static List<Cape> custom;
 	private static int customCounter;
 	/** geladene eingebaute Capes (IDs) */
@@ -135,6 +150,7 @@ public final class Capes {
 	public static List<Cape> builtin() {
 		if (builtin != null) return builtin;
 		List<Cape> list = new ArrayList<>();
+		Set<String> team = new HashSet<>();
 		try (InputStream in = Minecraft.getInstance().getResourceManager().open(INDEX);
 				InputStreamReader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
 			JsonArray capes = JsonParser.parseReader(reader).getAsJsonObject().getAsJsonArray("capes");
@@ -143,6 +159,7 @@ public final class Capes {
 				String id = json.get("id").getAsString();
 				int count = Math.max(1, json.get("frames").getAsInt());
 				boolean glows = json.has("glow") && json.get("glow").getAsBoolean();
+				if (json.has("team") && json.get("team").getAsBoolean()) team.add(id);
 				List<Identifier> frames = new ArrayList<>();
 				List<Identifier> glow = new ArrayList<>();
 				for (int f = 0; f < count; f++) {
@@ -155,6 +172,7 @@ public final class Capes {
 		} catch (Exception e) {
 			HeldixClient.LOGGER.warn("Heldix-Capes nicht lesbar", e);
 		}
+		teamCapes = Set.copyOf(team);
 		builtin = List.copyOf(list);
 		return builtin;
 	}
@@ -227,9 +245,13 @@ public final class Capes {
 		for (Identifier id : cape.glow()) Minecraft.getInstance().getTextureManager().release(id);
 	}
 
-	/** Gewähltes Cape oder null (kein Heldix-Cape) */
+	/**
+	 * Gewähltes Cape oder null (kein Heldix-Cape). Ein Team-Cape gilt nur, solange der Heldix-Dienst die
+	 * Team-Mitgliedschaft bestätigt, eine Belohnung nur, solange sie freigeschaltet ist; die Einstellung bleibt dabei erhalten.
+	 */
 	public static Cape selected() {
-		return byId(HeldixConfig.get().cape);
+		Cape cape = byId(HeldixConfig.get().cape);
+		return cape != null && cape.lockReason() != null ? null : cape;
 	}
 
 	/** Was der eigene Spieler trägt: eine Vorschau der Addon-API, sonst das gewählte Cape */
@@ -341,7 +363,20 @@ public final class Capes {
 			return new Decoded(frames, glow);
 		}
 		List<NativeImage> frames = split(HeldixClient.id("textures/cape/" + cape.id() + ".png"), cape.frames().size(), 2);
+		// Elytra: Bilder ohne Flügelform (bemalte Vorderseite, sonst „zwei Rechtecke“) bekommen die normale Form – vor dem
+		// Ausbluten, damit die neuen durchsichtigen Pixel mitgefärbt werden; das Leuchtbild desselben Bildes ebenso
+		boolean[] shaped = new boolean[frames.size()];
+		for (int i = 0; i < frames.size(); i++) shaped[i] = ElytraForm.ensure(frames.get(i));
+		// gegen schwarze Ränder beim Filtern und in den Mipmaps – auch beim Leuchtbild: es wird mit normaler Alpha-Mischung
+		// gezeichnet (RenderTypes.eyes, TRANSLUCENT), die gefärbten durchsichtigen Pixel bleiben also unsichtbar
+		for (NativeImage frame : frames) CapeCloth.bleed(frame);
 		List<NativeImage> glow = cape.glows() ? split(HeldixClient.id("textures/cape/" + cape.id() + "_glow.png"), cape.glow().size(), 2) : List.of();
+		for (int i = 0; i < glow.size(); i++) {
+			// Basis geändert: Leuchtbild in dieselbe Form; sonst eigene Absicherung (Leuchtbild mit bemalter Vorderseite)
+			if (i < shaped.length && shaped[i]) ElytraForm.applyNormal(glow.get(i));
+			else ElytraForm.ensure(glow.get(i));
+		}
+		for (NativeImage frame : glow) CapeCloth.bleed(frame);
 		return new Decoded(frames, glow);
 	}
 
@@ -583,6 +618,9 @@ public final class Capes {
 				description = "Bild " + w + " × " + h + ", auf das Cape gelegt";
 			}
 			Identifier id = HeldixClient.id("cape/custom/" + (++customCounter));
+			// eigene Vorlagen mit bemalter Elytra-Vorderseite bekommen die normale Flügelform (sonst zwei Rechtecke)
+			ElytraForm.ensure(image);
+			CapeCloth.bleed(image);
 			Ui.registerMipmapped(id, image);
 			return new Cape("datei:" + fileName, base.replace('_', ' '), description, List.of(id), List.of(), 1, true, null);
 		} catch (Exception e) {
@@ -602,8 +640,9 @@ public final class Capes {
 	}
 
 	/**
-	 * Beliebiges Bild als Cape: auf der Außenseite (zugeschnitten, mittig) und auf beiden Elytra-Flügeln,
-	 * Ränder und Innenseite in einer dunklen Farbe aus dem Bild. Ausgabe 256 × 128 (vierfache Vorlage).
+	 * Beliebiges Bild als Cape: auf der Außenseite (zugeschnitten, mittig) und auf dem Elytra-Flügel (Rückseite, in der
+	 * normalen Flügelform, die Vorderseite bleibt wie bei Vanilla leer), Ränder und Innenseite in einer dunklen Farbe
+	 * aus dem Bild. Ausgabe 256 × 128 (vierfache Vorlage).
 	 */
 	private static NativeImage fromPicture(NativeImage source) {
 		int s = 4;
@@ -615,8 +654,8 @@ public final class Capes {
 		fill(image, 12 * s, s, 10 * s, 16 * s, lining);
 		fill(image, 22 * s, 0, 24 * s, 22 * s, edge);
 		cover(source, image, s, s, 10 * s, 16 * s);
-		cover(source, image, 24 * s, 2 * s, 10 * s, 20 * s);
 		cover(source, image, 36 * s, 2 * s, 10 * s, 20 * s);
+		ElytraForm.applyNormal(image);
 		return image;
 	}
 

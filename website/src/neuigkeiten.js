@@ -1,5 +1,6 @@
 // HeldixClient – Webseite: alle Neuigkeiten (/neuigkeiten) mit „Ältere laden“ und der Versionsverlauf des Launchers.
-// Neuigkeiten: GET /api/v1/news?limit=10&before=<id>; Versionen: GET /api/v1/launcher/versions.
+// Neuigkeiten: GET /api/v1/news?limit=10&before=<id>; Versionen stehen schon im HTML (aus launcher/release-notes.md),
+// GET /api/v1/launcher/versions ergänzt Daten und ältere Versionen.
 // Den Download-Knopf der neuesten Version steuert site.js (wie auf der Startseite).
 import { emptyState, formatDate, h } from './app-common.js';
 import { newsCard, publicGet } from './public-cards.js';
@@ -45,7 +46,7 @@ async function loadNews({ older = false } = {}) {
       more.textContent = 'Laden fehlgeschlagen – erneut versuchen';
       return;
     }
-    const retry = h('button', { type: 'button', class: 'button small ghost', onClick: () => loadNews() }, 'Erneut versuchen');
+    const retry = h('button', { type: 'button', class: 'btn btn--secondary btn--sm', onClick: () => loadNews() }, 'Erneut versuchen');
     archive.replaceChildren(h('div', { class: 'empty' }, h('p', { text: 'Die Neuigkeiten sind gerade nicht erreichbar. Bitte versuch es später noch einmal.' }), retry));
     more.hidden = true;
   } finally {
@@ -66,38 +67,37 @@ function versionDate(version) {
 
 function notesList(notes) {
   const list = (Array.isArray(notes) ? notes : []).filter((note) => typeof note === 'string' && note.trim());
-  if (!list.length) return h('p', { class: 'muted small', text: 'Kleinere Verbesserungen und Fehlerbehebungen.' });
+  if (!list.length) return h('p', { class: 'text-2 small', text: 'Kleinere Verbesserungen und Fehlerbehebungen.' });
   return h('ul', { class: 'release-notes' }, list.map((note) => h('li', { text: note })));
 }
 
+/**
+ * Versionsverlauf: Die Einträge setzt der Bau aus launcher/release-notes.md ein. Der Dienst ergänzt das Datum jeder
+ * veröffentlichten Version und ältere Versionen, die nicht mehr in release-notes.md stehen.
+ */
 async function loadVersions() {
-  const status = document.getElementById('release-status');
+  const list = document.getElementById('release-liste');
   try {
-    const data = await publicGet('/v1/launcher/versions?limit=20');
+    const data = await publicGet('/v1/launcher/versions?limit=30');
     const versions = (Array.isArray(data?.versions) ? data.versions : []).filter((entry) => entry && typeof entry.version === 'string');
-    if (!versions.length) {
-      status.textContent = 'Der Versionsverlauf beginnt mit der nächsten veröffentlichten Version.';
-      status.hidden = false;
-      return;
-    }
-    const [latest, ...older] = versions;
-    document.getElementById('release-version').textContent = latest.version;
-    const date = versionDate(latest);
-    const notes = document.getElementById('release-latest-notes');
-    notes.replaceChildren(date ? h('p', { class: 'release-date', text: `veröffentlicht am ${date}` }) : null, notesList(latest.notes));
-    document.getElementById('release-liste').replaceChildren(
-      ...older.map((entry) =>
+    const known = new Set([...document.querySelectorAll('[data-version]')].map((element) => element.dataset.version));
+    for (const entry of versions) {
+      const date = versionDate(entry);
+      const target = document.querySelector(`[data-version="${CSS.escape(entry.version)}"] [data-datum]`);
+      if (target && date) target.textContent = `veröffentlicht am ${date}`;
+      if (known.has(entry.version)) continue;
+      known.add(entry.version);
+      list.append(
         h(
           'li',
-          { class: 'release-item' },
-          h('div', { class: 'release-item-head' }, h('h3', { text: `Version ${entry.version}` }), h('span', { class: 'release-date', text: versionDate(entry) })),
+          { class: 'release-item', 'data-version': entry.version },
+          h('div', { class: 'release-item__head' }, h('h3', { class: 'h4', text: `Version ${entry.version}` }), h('span', { class: 'release-date', text: date })),
           notesList(entry.notes),
         ),
-      ),
-    );
+      );
+    }
   } catch {
-    status.textContent = 'Der Versionsverlauf ist gerade nicht erreichbar.';
-    status.hidden = false;
+    // Ohne Dienst bleibt der Verlauf aus dem Bau stehen – nur ohne Datum.
   }
 }
 

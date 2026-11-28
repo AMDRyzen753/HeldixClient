@@ -63,6 +63,7 @@ public class HeldixTitle {
 	private static final int REALMS = 0xFF8B5CF6;
 	private static final int SERVERS = 0xFF22D3EE;
 	private static final int WORLDS = 0xFF34D399;
+	private static final int HELDIX_WORLDS = 0xFF3B82F6;
 
 	private final Minecraft minecraft;
 	private final long openedAt = Shell.openedAt();
@@ -219,14 +220,16 @@ public class HeldixTitle {
 		widgets.add(new StartCard(l.columnX(), l.heroY(), l.columnW(), l.heroH(), StartCard.Style.HERO, "Weiterspielen", "play", Ui.ACCENT,
 				this::heroContent, this::continuePlaying));
 
-		// Einzelspieler, Mehrspieler, Realms
-		int tileW = (l.columnW() - 2 * GAP) / 3;
+		// Einzelspieler, Mehrspieler, Heldix-Welten, Realms
+		int tileW = (l.columnW() - 3 * GAP) / 4;
 		widgets.add(new StartCard(l.columnX(), l.tilesY(), tileW, l.tileH(), StartCard.Style.TILE, "Einzelspieler", "world", WORLDS,
 				() -> new StartCard.Content("Einzelspieler", worldCount < 0 ? "Lädt …" : count(worldCount, "Welt", "Welten"), true),
 				() -> minecraft.gui.setScreen(new WorldsScreen())));
 		widgets.add(new StartCard(l.columnX() + tileW + GAP, l.tilesY(), tileW, l.tileH(), StartCard.Style.TILE, "Mehrspieler", "server", SERVERS,
 				this::serversContent, () -> Shell.open(minecraft, Shell.Page.SERVERS, screen)));
-		widgets.add(new StartCard(l.columnX() + 2 * (tileW + GAP), l.tilesY(), l.columnW() - 2 * (tileW + GAP), l.tileH(), StartCard.Style.TILE,
+		widgets.add(new StartCard(l.columnX() + 2 * (tileW + GAP), l.tilesY(), tileW, l.tileH(), StartCard.Style.TILE, "Heldix-Welten", "lan", HELDIX_WORLDS,
+				this::heldixWorldsContent, () -> Shell.open(minecraft, Shell.Page.HELDIX_WORLDS, screen)));
+		widgets.add(new StartCard(l.columnX() + 3 * (tileW + GAP), l.tilesY(), l.columnW() - 3 * (tileW + GAP), l.tileH(), StartCard.Style.TILE,
 				"Realms", "realms", REALMS, () -> new StartCard.Content("Realms", "Welten von Mojang", true),
 				() -> minecraft.gui.setScreen(new RealmsMainScreen(screen))));
 
@@ -280,10 +283,16 @@ public class HeldixTitle {
 						() -> index < recent.size() ? recent.get(index) : null));
 			}
 			int friendRows = Math.clamp((l.friendsH() - PANEL_HEAD - 4) / (ROW_H + 2), 1, 3);
+			// Party (ab Heldix-Dienst 1.12.0): erste Zeile, solange es eine Party oder Einladung gibt; die Freunde rücken dann nach
+			boolean partyRow = friendRows >= 2;
+			if (partyRow) {
+				widgets.add(new PartyWidget(l.sideX() + 6, l.friendsY() + PANEL_HEAD, l.sideW() - 12, ROW_H,
+						() -> Shell.open(minecraft, Shell.Page.PARTY, screen)));
+			}
 			for (int i = 0; i < friendRows; i++) {
 				int index = i;
 				widgets.add(new FriendWidget(l.sideX() + 6, l.friendsY() + PANEL_HEAD + i * (ROW_H + 2), l.sideW() - 12, ROW_H,
-						() -> friendAt(index), () -> Shell.open(minecraft, Shell.Page.FRIENDS, screen)));
+						() -> friendAt(partyRow && PartyWidget.hasContent() ? index - 1 : index), () -> Shell.open(minecraft, Shell.Page.FRIENDS, screen)));
 			}
 			String all = "Alle";
 			int aw = ActionButton.widthFor(all, "chevron-right") - 4;
@@ -318,7 +327,7 @@ public class HeldixTitle {
 
 	/** Freund Nummer index für die Tafel: online zuerst (die Liste ist schon so sortiert) */
 	private static Social.Friend friendAt(int index) {
-		if (!Social.online()) return null;
+		if (!Social.online() || index < 0) return null;
 		List<Social.Friend> friends = Social.friends();
 		return index < friends.size() ? friends.get(index) : null;
 	}
@@ -351,6 +360,13 @@ public class HeldixTitle {
 		if (world.isLocked()) return new StartCard.Content(world.getLevelName(), "Gerade in einem anderen Fenster geöffnet", false);
 		return new StartCard.Content(world.getLevelName(), "Einzelspieler  ·  zuletzt " + ago(world.getLastPlayed()), true, null,
 				images.get("world:" + world.getLevelId()));
+	}
+
+	/** Heldix-Welten: Einladungen von Freunden zählen, sonst ein kurzer Hinweis */
+	private StartCard.Content heldixWorldsContent() {
+		int invites = dev.heldixclient.share.WorldInvites.recent().size();
+		if (invites > 0) return new StartCard.Content("Heldix-Welten", count(invites, "Einladung", "Einladungen"), true);
+		return new StartCard.Content("Heldix-Welten", Social.online() ? "Welten von Freunden" : "Mit Heldix-Dienst", true);
 	}
 
 	private StartCard.Content serversContent() {
@@ -407,7 +423,12 @@ public class HeldixTitle {
 
 	/** Logo, Profil, Begrüßung, Zuletzt gespielt, Tipp und Versionen; Karten und Knöpfe zeichnen sich als Widgets selbst. */
 	public void extractDecorations(GuiGraphicsExtractor g, Font font, int width, int height) {
-		for (AbstractWidget widget : widgets) widget.setAlpha(fade);
+		for (AbstractWidget widget : widgets) {
+			widget.setAlpha(fade);
+			// Party-Zeile nach Stand; Freunde-Zeilen blenden sich selbst aus, wenn es den Freund nicht (mehr) gibt
+			if (widget instanceof PartyWidget) widget.visible = PartyWidget.hasContent();
+			else if (widget instanceof FriendWidget) widget.visible = true;
+		}
 		Layout l = layout != null ? layout : layout(width, height);
 		int edge = l.edge();
 

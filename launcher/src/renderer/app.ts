@@ -1,4 +1,4 @@
-import type { AccountInfo, DiscordStatus, Friend, InstanceInfo, LogLine, QuickPlayList, QuickPlayTarget, ServerStatus, Settings, SkinInfo, SocialOverview, UpdateState } from '../shared/api';
+import type { AccountInfo, DiscordPreview, DiscordStatus, Friend, InstanceInfo, LauncherView, LogLine, NotificationTarget, PlayerBadge, QuickPlayList, QuickPlayTarget, ServerStatus, Settings, SkinInfo, SocialOverview, UpdateState } from '../shared/api';
 import {
   $,
   api,
@@ -26,10 +26,16 @@ import { showFigure, setFigureActive } from './figure.js';
 import { UI_ICONS } from './ui-icons.js';
 import { initInstances, launchInstance, openDetail, resetInstancesView, type DetailTab } from './instances.js';
 import { loadNews } from './news.js';
-import { activateFriends, initFriends, openFriendChat } from './friends.js';
-import { activateProfile, initProfile } from './profile.js';
+import { activateFriends, initFriends, openFriendChat, openInviteSection, openPartySection } from './friends.js';
+import { badgeIcon, badgeLabel } from './badges.js';
+import { activateProfile, initProfile, reloadCosmetics, showProfileCosmetic } from './profile.js';
+import { initInvites, openPendingInvite } from './invite.js';
 import { activateStore, initStore } from './store.js';
 import { initCrash, showCrash } from './crash.js';
+import { afterSetup, initSetup, restartSetup, setupOpen, startSetupIfNeeded } from './setup.js';
+import { initNotifications } from './notifications.js';
+import { initWorlds, joinWorldNow, openPendingWorld, openWorldDialog } from './world.js';
+import { hostedWorld, initWorldState, isWorldAddress, onWorldsChange, refreshWorlds, worldsOverview } from './worldstate.js';
 
 // Icons im HTML (<svg data-icon="…">) aus dem Heldix-Icon-Set füllen, Logos der Loader einsetzen
 hydrateIcons();
@@ -59,11 +65,86 @@ function showView(view: string): void {
   if (view === 'friends') activateFriends();
   if (view === 'profile') activateProfile();
   setFigureActive(view === 'home');
+  // Discord-Status im Launcher: „Stöbert im Addon-Store“, „Richtet Cosmetics ein“ …
+  if (!setupOpen()) api.setPresenceView(view as LauncherView);
 }
 initStore();
 initFriends();
-initProfile();
+/** Freunde → Einladen (aus Skins & Cosmetics und Benachrichtigungen) */
+function openInvites(): void {
+  showView('friends');
+  openInviteSection();
+}
+initProfile(openInvites);
 initCrash(showView);
+// Einladungslinks heldixclient://einladung/<code> und Neues bei den eigenen Einladungen
+initInvites({
+  showView,
+  openInvites,
+  openCosmetic: (id) => {
+    showView('profile');
+    void showProfileCosmetic(id);
+  },
+  reloadAccounts: () => loadAccounts(),
+});
+// Einrichtungs-Assistent beim ersten Start (setup.ts); danach Einladung und „Neu in …“
+initSetup({
+  reloadAccounts: () => loadAccounts(),
+  reloadInstances: () => reloadInstances(),
+  opened: () => {
+    setFigureActive(false);
+    api.setPresenceView('setup');
+  },
+  closed: () => {
+    setFigureActive(document.body.dataset.view === 'home');
+    api.setPresenceView((document.body.dataset.view ?? 'home') as LauncherView);
+    void openPendingInvite();
+    void openPendingWorld();
+    void showWhatsNew();
+  },
+});
+api.onInviteEvent((event) => {
+  if (event.kind === 'unlock') reloadCosmetics();
+});
+// Geteilte Welten: Links heldixclient://welt/<code>, Dialog „Welt von …“, offene Welten der Freunde
+initWorldState();
+initWorlds({ showView });
+// Glocke: Klick auf einen Eintrag führt dorthin
+initNotifications({ open: openNotificationTarget });
+function openNotificationTarget(target: NotificationTarget): void {
+  switch (target.view) {
+    case 'friends':
+      showView('friends');
+      if (target.uuid) openFriendChat(target.uuid);
+      break;
+    case 'invites':
+      openInvites();
+      break;
+    case 'cosmetics':
+      showView('profile');
+      if (target.id) void showProfileCosmetic(target.id);
+      break;
+    case 'store':
+      showView('store');
+      break;
+    case 'updates':
+      showView('settings');
+      document.querySelector<HTMLButtonElement>('#settings-nav [data-target="set-updates"]')?.click();
+      break;
+    case 'world':
+      if (target.code) openWorldDialog(target.code);
+      break;
+    case 'party':
+      showView('friends');
+      openPartySection();
+      break;
+  }
+}
+// Klick auf eine Benachrichtigung zur Party (Einladung)
+api.onPartyOpen(() => {
+  showView('friends');
+  openPartySection();
+});
 // Klick auf eine Benachrichtigung (neue Nachricht oder Anfrage)
 api.onSocialOpen((uuid) => {
   showView('friends');
@@ -74,9 +155,9 @@ api.onStoreOpen(() => showView('store'));
 document.querySelectorAll<HTMLButtonElement>('.nav-item').forEach((button) => {
   button.addEventListener('click', () => showView(button.dataset.view!));
 });
-// Strg+1 … Strg+7 (auf dem Mac ⌘): Seiten in der Reihenfolge der Seitenleiste
+// Strg+1 … Strg+7 (auf dem Mac ⌘): Seiten in der Reihenfolge der Seitenleiste (nicht hinter dem Einrichtungs-Assistenten)
 document.addEventListener('keydown', (event) => {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || setupOpen()) return;
   const index = Number(event.key) - 1;
   const items = [...document.querySelectorAll<HTMLButtonElement>('.nav-item')];
   if (Number.isInteger(index) && index >= 0 && index < items.length) {
@@ -255,6 +336,9 @@ let social: SocialOverview | null = null;
 /** Was ein Freund gerade macht */
 function activityText(friend: Friend): string {
   if (!friend.online) return 'Offline';
+  const world = hostedWorld(friend.uuid);
+  if (world) return `Teilt „${world.name}“ · ${world.players}/${world.maxPlayers}`;
+  if (isWorldAddress(friend.server)) return 'In einer geteilten Welt';
   switch (friend.activity) {
     case 'multiplayer': return friend.server ? `Auf ${friend.server}` : 'Mehrspieler';
     case 'singleplayer': return 'Einzelspieler';
@@ -366,9 +450,13 @@ function renderHomeFriends(): void {
       showView('friends');
       openFriendChat(friend.uuid);
     };
-    const canJoin = friend.activity === 'multiplayer' && !!friend.server && !busy;
-    const row = rowItem(playerHead(friend.uuid, friend.name), friend.name, activityText(friend), `Nachricht an ${friend.name}`, open,
-      canJoin ? { icon: ICONS.play, title: `Auf ${friend.server} mitspielen`, run: () => void joinFriend(friend) } : { icon: UI_ICONS.chat, title: 'Nachricht schreiben', run: open },
+    const world = hostedWorld(friend.uuid);
+    const inWorld = !world && isWorldAddress(friend.server);
+    const canJoin = !busy && (!!world || (friend.activity === 'multiplayer' && !!friend.server));
+    const name = friend.nickname || friend.name;
+    const joinTitle = world ? `In die Welt von ${name}` : inWorld ? `Zu ${name} in die geteilte Welt` : `Auf ${friend.server} mitspielen`;
+    const row = rowItem(playerHead(friend.uuid, friend.name), name, activityText(friend), `Nachricht an ${name}`, open,
+      canJoin ? { icon: ICONS.play, title: joinTitle, run: () => void (world ? joinWorldNow(world.code, friend.name) : joinFriend(friend)) } : { icon: UI_ICONS.chat, title: 'Nachricht schreiben', run: open },
       friend.unread > 0 ? h('span', { class: 'row-badge', title: 'Ungelesene Nachrichten', text: String(friend.unread) }) : null);
     row.querySelector('.row-meta')?.classList.add('online');
     list.append(row);
@@ -387,7 +475,7 @@ function renderHomeFriends(): void {
       showView('friends');
       openFriendChat(friend.uuid);
     };
-    const row = rowItem(playerHead(friend.uuid, friend.name), friend.name, 'Offline', `Nachricht an ${friend.name}`, open,
+    const row = rowItem(playerHead(friend.uuid, friend.name), friend.nickname || friend.name, 'Offline', `Nachricht an ${friend.nickname || friend.name}`, open,
       { icon: UI_ICONS.chat, title: 'Nachricht schreiben', run: open },
       friend.unread > 0 ? h('span', { class: 'row-badge', title: 'Ungelesene Nachrichten', text: String(friend.unread) }) : null);
     row.classList.add('offline');
@@ -395,6 +483,48 @@ function renderHomeFriends(): void {
   }
 }
 $('#home-friends-all').addEventListener('click', () => showView('friends'));
+
+// ---------- Startseite: offene Welten der Freunde (Welt teilen) ----------
+function renderHomeWorlds(): void {
+  const panel = $('#home-worlds-panel');
+  const list = $('#home-worlds');
+  const sub = $('#home-worlds-sub');
+  const overview = worldsOverview();
+  list.textContent = '';
+  // nur mit verbundenen Freunden und einem Dienst, der Welt teilen kann
+  if (!overview || overview.status === 'off' || overview.status === 'unsupported' || social?.status !== 'online') {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const busy = state.game.state === 'preparing' || state.game.state === 'running';
+  if (overview.friends.length === 0) {
+    if (overview.status === 'error') {
+      sub.textContent = 'Nicht erreichbar';
+      list.append(rowItem(placeholderIcon('warning'), 'Welten nicht geladen', 'Klicken, um es erneut zu versuchen', 'Erneut versuchen', () => void refreshWorlds()));
+      return;
+    }
+    sub.textContent = 'Gerade keine geöffnet';
+    list.append(h('div', { class: 'row-empty world-empty', id: 'home-worlds-empty' },
+      h('strong', { text: 'Noch hat niemand eine Welt geöffnet.' }),
+      h('span', { text: 'Teilt ein Freund seine Einzelspielerwelt, kannst du hier mit einem Klick beitreten – ganz ohne Server.' })));
+    return;
+  }
+  sub.textContent = overview.friends.length === 1 ? '1 Welt geöffnet' : `${overview.friends.length} Welten geöffnet`;
+  for (const world of overview.friends.slice(0, 4)) {
+    const meta = [world.host.name, `${world.players}/${world.maxPlayers} Spieler`, world.version ? `Minecraft ${world.version}` : null].filter(Boolean).join(' · ');
+    const row = rowItem(playerHead(world.host.uuid, world.host.name), world.name, meta, `Welt von ${world.host.name} ansehen`, () => openWorldDialog(world.code),
+      busy ? undefined : { icon: ICONS.play, title: 'Beitreten', run: () => void joinWorldNow(world.code, world.host.name) },
+      h('span', { class: 'row-badge world-live', title: 'Gerade geöffnet', text: 'Live' }));
+    row.querySelector('.row-meta')?.classList.add('online');
+    list.append(row);
+  }
+  if (overview.friends.length > 4) list.append(h('div', { class: 'row-empty', text: `und ${overview.friends.length - 4} weitere – unter Freunde` }));
+}
+onWorldsChange(() => {
+  renderHomeWorlds();
+  renderHomeFriends();
+});
 void api.getSocial().then((overview) => {
   social = overview;
   renderHomeFriends();
@@ -402,6 +532,9 @@ void api.getSocial().then((overview) => {
 api.onSocial((overview) => {
   social = overview;
   renderHomeFriends();
+  renderHomeWorlds();
+  // eigenes Abzeichen in der Kontokarte
+  if (String(ownBadge(state.accounts.find((a) => a.active))) !== shownBadge) renderAccounts();
 });
 
 // ---------- 3D-Figur ----------
@@ -602,6 +735,7 @@ function renderHome(): void {
   renderGreeting();
   renderStage();
   renderHomeFriends();
+  renderHomeWorlds();
 }
 
 // ---------- Avatare ----------
@@ -819,6 +953,8 @@ document.addEventListener('heldix:store-updates', (event) => {
 
 api.onGameState(async (game) => {
   state.game = game;
+  // „Update bereit – Jetzt neu starten“ erst, wenn kein Spiel läuft
+  renderUpdate();
   if (game.state === 'preparing') crashNotice = null;
   if (game.state === 'exited' && game.crash) crashNotice = game.crash;
   renderNotices();
@@ -866,7 +1002,7 @@ function renderDiscordChip(status: DiscordStatus): void {
 }
 $('#home-discord').addEventListener('click', () => {
   showView('settings');
-  $('#discord-toggle').closest('.card')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  document.querySelector<HTMLButtonElement>('#settings-nav [data-target="set-discord"]')?.click();
 });
 
 // ---------- Konten ----------
@@ -922,11 +1058,22 @@ async function removeAccountAsk(account: AccountInfo): Promise<void> {
   await loadAccounts();
 }
 
+/** eigenes Abzeichen beim Heldix-Dienst für das aktive Konto (undefined = nicht verbunden; null = normaler Spieler) */
+function ownBadge(active: AccountInfo | undefined): PlayerBadge | null | undefined {
+  if (!active || social?.status !== 'online' || !social.me) return undefined;
+  return social.me.uuid === active.uuid.replace(/-/g, '').toLowerCase() ? social.me.badge : undefined;
+}
+let shownBadge = '';
+
 function renderAccounts(): void {
   const active = state.accounts.find((a) => a.active);
+  const badge = ownBadge(active);
+  shownBadge = String(badge);
   renderAvatar($('#account-avatar'), active);
   $('#avatar-status').hidden = !active;
   $('#account-label').textContent = active?.name ?? 'Nicht angemeldet';
+  // Kontokarte in der Seitenleiste: eigenes Abzeichen (Team-Rolle, Community-Abzeichen) neben dem Namen
+  if (badge) $('#account-label').append(badgeIcon(badge, 14));
   $('#account-sub').textContent = active ? (active.via === 'launcher' ? 'Bitte neu anmelden' : active.type === 'microsoft' ? 'Microsoft-Konto' : 'Offline-Konto') : 'Konto hinzufügen';
 
   // Aktives Konto oben, groß
@@ -941,7 +1088,9 @@ function renderAccounts(): void {
       h('div', { class: 'account-current-text' },
         h('div', { class: 'account-current-name', text: active.name }),
         h('div', { class: 'account-current-sub' }, h('span', { class: 'dot' }),
-          h('span', { text: legacy ? 'Anmeldung läuft ab – bitte mit Microsoft neu anmelden' : active.type === 'microsoft' ? 'Microsoft-Konto · angemeldet' : 'Offline-Konto (Entwicklung)' }))),
+          h('span', { text: legacy ? 'Anmeldung läuft ab – bitte mit Microsoft neu anmelden' : active.type === 'microsoft' ? 'Microsoft-Konto · angemeldet' : 'Offline-Konto (Entwicklung)' })),
+        badge !== undefined ? h('div', { class: 'account-current-badge', id: 'account-badge', title: 'Dein Abzeichen beim Heldix-Dienst – so sehen dich andere im Spiel' },
+          badgeIcon(badge, 18), h('span', { text: badgeLabel(badge) })) : null),
       h('button', { class: 'ghost small', type: 'button', title: 'Dieses Konto aus dem Launcher entfernen', onclick: () => void removeAccountAsk(active) }, 'Abmelden'));
     renderAvatar(avatar, active);
   } else {
@@ -1070,6 +1219,7 @@ function renderSettings(): void {
   $<HTMLInputElement>('#res-width').value = String(s.resolution?.width ?? 1280);
   $<HTMLInputElement>('#res-height').value = String(s.resolution?.height ?? 720);
   $<HTMLInputElement>('#hide-toggle').checked = s.hideLauncherOnLaunch;
+  $<HTMLInputElement>('#tray-toggle').checked = s.closeToTray;
   $<HTMLInputElement>('#account-switch-toggle').checked = s.gameAccountSwitch;
   $<HTMLInputElement>('#java-path').value = s.javaPath;
   $<HTMLInputElement>('#jvm-args').value = s.jvmArgs;
@@ -1081,8 +1231,7 @@ function renderSettings(): void {
     : `${loader} · Minecraft-Dateien kommen direkt von Mojang.`;
   $<HTMLInputElement>('#discord-toggle').checked = s.discordPresence;
   $<HTMLInputElement>('#update-toggle').checked = s.autoUpdate;
-  $<HTMLInputElement>('#discord-server-toggle').checked = s.discordShowServer;
-  $('#discord-server-row').classList.toggle('disabled', !s.discordPresence);
+  renderDiscordSettings(s);
   $<HTMLInputElement>('#addon-notify-toggle').checked = s.addonUpdateNotifications;
   $<HTMLInputElement>('#addon-auto-toggle').checked = s.addonAutoUpdate;
   $<HTMLInputElement>('#social-toggle').checked = s.social;
@@ -1179,30 +1328,132 @@ function renderDiscordStatus(status: DiscordStatus): void {
   $('#discord-status-text').textContent = text;
   renderDiscordChip(status);
 }
+/** Schalter der Discord-Seite: welcher Schalter welche Einstellung */
+const DISCORD_SWITCHES: [string, keyof Settings][] = [
+  ['#discord-server-toggle', 'discordShowServer'],
+  ['#discord-details-toggle', 'discordShowDetails'],
+  ['#discord-worldname-toggle', 'discordShowWorldName'],
+  ['#discord-party-toggle', 'discordShowParty'],
+  ['#discord-voice-toggle', 'discordShowVoice'],
+  ['#discord-head-toggle', 'discordShowHead'],
+  ['#discord-invite-toggle', 'discordInviteButtons'],
+];
+
+function renderDiscordSettings(s: Settings): void {
+  $<HTMLInputElement>('#discord-toggle').checked = s.discordPresence;
+  for (const [selector, key] of DISCORD_SWITCHES) $<HTMLInputElement>(selector).checked = s[key] === true;
+  // „Nur Spielt HeldixClient“ zeigt keine Einzelheiten: Schalter dann ausgegraut
+  document.querySelectorAll<HTMLElement>('#discord-fields .toggle-row').forEach((row) => row.classList.toggle('disabled', s.discordMinimal));
+  document.querySelectorAll<HTMLButtonElement>('#discord-mode button').forEach((button) => {
+    button.classList.toggle('active', (button.dataset.mode === 'minimal') === s.discordMinimal);
+  });
+}
+
 $('#discord-toggle').addEventListener('change', (e) => save({ discordPresence: (e.target as HTMLInputElement).checked }));
-$('#discord-server-toggle').addEventListener('change', (e) => save({ discordShowServer: (e.target as HTMLInputElement).checked }));
+for (const [selector, key] of DISCORD_SWITCHES) {
+  $(selector).addEventListener('change', (e) => save({ [key]: (e.target as HTMLInputElement).checked } as Partial<Settings>));
+}
+document.querySelectorAll<HTMLButtonElement>('#discord-mode button').forEach((button) => {
+  button.addEventListener('click', async () => {
+    await save({ discordMinimal: button.dataset.mode === 'minimal' });
+    renderSettings();
+  });
+});
 api.onDiscordStatus(renderDiscordStatus);
 void api.getDiscordStatus().then(renderDiscordStatus);
 
+// ---------- Discord: Vorschau des Status ----------
+let discordPreview: DiscordPreview | null = null;
+
+/** „00:42 vergangen“ wie in Discord */
+function elapsed(since: number): string {
+  const total = Math.max(0, Math.floor((Date.now() - since) / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${hours ? `${hours}:${two(minutes)}` : two(minutes)}:${two(seconds)} vergangen`;
+}
+
+function previewImage(name: string | null, className: string, title: string | null): HTMLElement {
+  const img = h('img', { class: className, src: name ? `discord/${name}.png` : 'logo.svg', alt: '', draggable: 'false' });
+  if (title) img.title = title;
+  return img;
+}
+
+function renderDiscordPreview(preview: DiscordPreview | null = discordPreview): void {
+  discordPreview = preview;
+  const host = $('#discord-preview');
+  host.textContent = '';
+  if (!preview) {
+    host.append(h('div', { class: 'row-empty', text: 'Vorschau wird geladen …' }));
+    return;
+  }
+  const images = h('div', { class: 'dp-images' }, previewImage(preview.largeImage, 'dp-large', preview.largeText));
+  if (preview.smallImage === 'head') {
+    const active = state.accounts.find((a) => a.active);
+    const avatar = h('span', { class: 'avatar dp-small dp-head' });
+    if (preview.smallText) avatar.title = preview.smallText;
+    images.append(avatar);
+    renderAvatar(avatar, active);
+  } else if (preview.smallImage) images.append(previewImage(preview.smallImage, 'dp-small', preview.smallText));
+  const party = preview.party ? ` (${preview.party[0].toLocaleString('de-DE')} von ${preview.party[1].toLocaleString('de-DE')})` : '';
+  const text = h('div', { class: 'dp-text' },
+    h('strong', { text: 'HeldixClient' }),
+    preview.details ? h('span', { class: 'dp-line', id: 'discord-preview-details', text: preview.details }) : null,
+    preview.state || party ? h('span', { class: 'dp-line', id: 'discord-preview-state', text: `${preview.state ?? ''}${party}` }) : null,
+    preview.since ? h('span', { class: 'dp-time', 'data-since': String(preview.since), text: elapsed(preview.since) }) : null);
+  host.append(
+    h('div', { class: `dp-card${preview.enabled ? '' : ' off'}` },
+      h('div', { class: 'dp-label', text: 'Spielt' }),
+      h('div', { class: 'dp-body' }, images, text),
+      preview.buttons.length ? h('div', { class: 'dp-buttons' }, ...preview.buttons.map((label) => h('span', { class: 'dp-button', text: label }))) : null));
+  $('#discord-preview-hint').textContent = preview.enabled
+    ? 'So sieht dein Status gerade aus – er ändert sich mit dem, was du spielst.'
+    : 'Der Discord-Status ist aus. So würde er gerade aussehen.';
+}
+api.onDiscordPreview((preview) => renderDiscordPreview(preview));
+void api.getDiscordPreview().then((preview) => renderDiscordPreview(preview)).catch(() => undefined);
+window.setInterval(() => {
+  if (document.body.dataset.view !== 'settings') return;
+  document.querySelectorAll<HTMLElement>('#discord-preview .dp-time').forEach((el) => {
+    el.textContent = elapsed(Number(el.dataset.since));
+  });
+}, 1000);
+
 // ---------- Updates ----------
-function renderUpdate(u: UpdateState): void {
+// Windows: beim Start installiert der Launcher neue Versionen selbst (Startfenster, main/core/startup-update.ts). Im
+// laufenden Launcher lädt er sie im Hintergrund; ist eine bereit und läuft kein Spiel, zeigt die Seitenleiste
+// „Update bereit – Jetzt neu starten“ (sonst erst nach dem Spiel), beim Beenden wird sie ohnehin installiert.
+// Einstellung aus: nur „Update verfügbar – Jetzt installieren“. macOS: Download über heldixclient.com.
+let updateState: UpdateState | null = null;
+/** Version, zu der „Update bereit“ schon als Meldung kam (einmal je Version) */
+let updateToastFor: string | null = null;
+
+function renderUpdate(u: UpdateState = updateState!): void {
+  if (!u) return;
+  updateState = u;
+  const mac = api.platform === 'darwin';
+  const playing = state.game?.state === 'preparing' || state.game?.state === 'running';
   const percent = Math.round((u.progress ?? 0) * 100);
   const texts: Record<UpdateState['phase'], string> = {
     disabled: 'In diesem Build nicht verfügbar (Entwicklungsversion).',
     idle: `Version ${u.current} installiert.`,
     checking: 'Suche nach Updates …',
     current: `Version ${u.current} ist aktuell.`,
-    available: `Version ${u.version} ist da. Auf dem Mac lädst du sie über heldixclient.com.`,
+    available: mac ? `Version ${u.version} ist da. Auf dem Mac lädst du sie über heldixclient.com.` : `Version ${u.version} ist da. „Jetzt installieren“ lädt sie und startet den Launcher neu.`,
     downloading: `Lade Version ${u.version} … ${percent} %`,
-    ready: `Version ${u.version} ist bereit. Sie wird beim Beenden installiert oder sofort mit „Neu starten“.`,
+    ready: playing
+      ? `Version ${u.version} ist bereit. Nach dem Spiel kannst du neu starten – beim Beenden wird sie ohnehin installiert.`
+      : `Version ${u.version} ist bereit. „Jetzt neu starten“ installiert sie sofort, sonst beim Beenden.`,
     error: u.error ?? 'Update fehlgeschlagen.',
   };
   const status = $('#update-status');
   status.dataset.state = u.phase;
   $('#update-status-text').textContent = texts[u.phase];
   $<HTMLButtonElement>('#update-check').disabled = u.phase === 'disabled' || u.phase === 'checking' || u.phase === 'downloading' || u.phase === 'ready' || u.phase === 'available';
-  $('#update-install').hidden = u.phase !== 'ready' && u.phase !== 'available';
-  $('#update-install').lastChild!.textContent = u.phase === 'available' ? 'Herunterladen' : 'Neu starten und installieren';
+  $('#update-install').hidden = (u.phase !== 'ready' && u.phase !== 'available') || (playing && !mac);
+  $('#update-install').lastChild!.textContent = mac ? 'Herunterladen' : u.phase === 'available' ? 'Jetzt installieren' : 'Jetzt neu starten';
   const notes = $('#update-notes');
   const lines = u.phase === 'downloading' || u.phase === 'ready' || u.phase === 'available' ? u.notes ?? [] : [];
   notes.replaceChildren(...lines.map((note) => {
@@ -1212,16 +1463,22 @@ function renderUpdate(u: UpdateState): void {
   }));
   notes.hidden = lines.length === 0;
 
-  // Hinweis in der Seitenleiste nur, wenn eine neue Version kommt oder bereit ist
+  // Hinweis in der Seitenleiste: neue Version da, wird geladen oder bereit (bereit erst, wenn kein Spiel läuft)
   const card = $('#update-card');
-  card.hidden = u.phase !== 'downloading' && u.phase !== 'ready' && u.phase !== 'available';
-  $('#update-card-title').textContent = u.phase === 'ready' ? `Version ${u.version} bereit` : u.phase === 'available' ? `Version ${u.version} ist da` : `Update ${u.version ?? ''}`;
-  $('#update-card-sub').textContent = u.phase === 'ready' ? 'Neu starten zum Installieren' : u.phase === 'available' ? 'auf heldixclient.com laden' : `wird geladen … ${percent} %`;
+  card.hidden = (u.phase !== 'downloading' && u.phase !== 'ready' && u.phase !== 'available') || (u.phase === 'ready' && playing);
+  $('#update-card-title').textContent = u.phase === 'ready' ? 'Update bereit' : u.phase === 'available' ? 'Update verfügbar' : `Update ${u.version ?? ''}`;
+  $('#update-card-sub').textContent = u.phase === 'ready' ? `Version ${u.version}` : u.phase === 'available' ? (mac ? `${u.version} auf heldixclient.com` : `Version ${u.version}`) : `wird geladen … ${percent} %`;
   $('#update-bar').hidden = u.phase !== 'downloading';
   $('#update-bar-fill').style.width = `${percent}%`;
-  $('#update-card-install').hidden = u.phase !== 'ready' && u.phase !== 'available';
-  $('#update-card-install').textContent = u.phase === 'available' ? 'Herunterladen' : 'Neu starten';
-  card.dataset.label = u.phase === 'ready' ? `Version ${u.version} bereit: Neu starten` : `Update wird geladen (${percent} %)`;
+  $('#update-card-install').hidden = (u.phase !== 'ready' && u.phase !== 'available') || (playing && !mac);
+  $('#update-card-install').textContent = mac ? 'Herunterladen' : u.phase === 'available' ? 'Jetzt installieren' : 'Jetzt neu starten';
+  card.dataset.label = u.phase === 'ready' ? `Update ${u.version} bereit: Jetzt neu starten` : u.phase === 'available' ? `Update ${u.version} verfügbar` : `Update wird geladen (${percent} %)`;
+
+  // einmal je Version melden, sobald sie bereit ist und kein Spiel läuft (sonst nach dem Spiel)
+  if (u.phase === 'ready' && !playing && u.version && updateToastFor !== u.version) {
+    updateToastFor = u.version;
+    toast(`Update auf ${u.version} ist bereit – „Jetzt neu starten“ in der Seitenleiste installiert es.`, 'success');
+  }
 }
 
 async function installUpdate(): Promise<void> {
@@ -1235,6 +1492,44 @@ async function installUpdate(): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     toast(message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 'error');
   }
+}
+
+/** Hinweis „Update verfügbar“ beim Start (Einstellung „Updates automatisch“ aus bzw. macOS), einmal je Start */
+async function showUpdateNotice(): Promise<void> {
+  // nicht neben dem Einrichtungs-Assistenten, sondern danach
+  if (setupOpen()) {
+    afterSetup(() => void showUpdateNotice());
+    return;
+  }
+  const notice = await api.takeUpdateNotice().catch(() => null);
+  if (!notice?.version || document.getElementById('update-notice')) return;
+  const mac = api.platform === 'darwin';
+  const close = () => backdrop.remove();
+  const notes = notice.notes ?? [];
+  const backdrop = h('div', { class: 'modal-backdrop', onclick: (event: Event) => event.target === backdrop && close() },
+    h('div', { class: 'modal news-modal', id: 'update-notice', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'update-notice-title' },
+      h('div', { class: 'modal-head' },
+        h('div', {},
+          h('h3', { class: 'modal-title', id: 'update-notice-title', text: 'Update verfügbar' }),
+          h('p', { class: 'modal-sub', text: `HeldixClient ${notice.version}${notice.date ? ` · ${formatDate(notice.date)}` : ''} – du hast ${notice.current}.` })),
+        h('button', { class: 'icon-button', type: 'button', title: 'Schließen', 'aria-label': 'Schließen', onclick: close }, uiIcon('close'))),
+      notes.length ? h('div', { class: 'news-body whatsnew' }, h('ul', {}, ...notes.map((note) => h('li', { text: note })))) : null,
+      h('p', { class: 'hint', text: mac ? 'Auf dem Mac lädst du die neue Version über heldixclient.com.' : 'Der Launcher lädt die neue Version, installiert sie und startet neu.' }),
+      h('div', { class: 'button-row' },
+        h('button', { class: 'ghost', type: 'button', onclick: close }, 'Später'),
+        h('button', { class: 'primary', type: 'button', id: 'update-notice-install', onclick: (event: Event) => {
+          const button = event.currentTarget as HTMLButtonElement;
+          button.disabled = true;
+          button.textContent = mac ? 'Wird geöffnet …' : 'Wird geladen …';
+          void installUpdate().finally(() => {
+            if (mac) close();
+            else {
+              button.disabled = false;
+              button.textContent = 'Jetzt installieren';
+            }
+          });
+        } }, mac ? 'Herunterladen' : 'Jetzt installieren'))));
+  document.body.append(backdrop);
 }
 
 async function openWeb(button: HTMLButtonElement, target?: 'support'): Promise<void> {
@@ -1251,6 +1546,8 @@ async function openWeb(button: HTMLButtonElement, target?: 'support'): Promise<v
 }
 $('#open-support').addEventListener('click', (event) => void openWeb(event.currentTarget as HTMLButtonElement, 'support'));
 $('#open-versions').addEventListener('click', () => void api.openWebsite('neuigkeiten'));
+// Einstellungen → Über HeldixClient: den Einrichtungs-Assistenten noch einmal zeigen
+$('#setup-restart').addEventListener('click', () => void restartSetup());
 
 /** "Was ist neu" einmal nach einem Update */
 async function showWhatsNew(): Promise<void> {
@@ -1294,11 +1591,12 @@ $('#open-web-account').addEventListener('click', async (event) => {
 });
 
 $('#update-toggle').addEventListener('change', (e) => save({ autoUpdate: (e.target as HTMLInputElement).checked }));
-$('#update-check').addEventListener('click', () => void api.checkForUpdate().then(renderUpdate));
+$('#update-check').addEventListener('click', () => void api.checkForUpdate().then((u) => renderUpdate(u)));
 $('#update-install').addEventListener('click', () => void installUpdate());
 $('#update-card-install').addEventListener('click', () => void installUpdate());
-api.onUpdateState(renderUpdate);
-void api.getUpdateState().then(renderUpdate);
+api.onUpdateState((u) => renderUpdate(u));
+api.onUpdateNotice(() => void showUpdateNotice());
+void api.getUpdateState().then((u) => renderUpdate(u));
 
 async function save(patch: Partial<Settings>): Promise<void> {
   state.settings = await api.saveSettings(patch);
@@ -1321,6 +1619,7 @@ $('#resolution-toggle').addEventListener('change', async () => {
 for (const id of ['#res-width', '#res-height']) $(id).addEventListener('change', () => save({ resolution: readResolution() }));
 
 $('#hide-toggle').addEventListener('change', (e) => save({ hideLauncherOnLaunch: (e.target as HTMLInputElement).checked }));
+$('#tray-toggle').addEventListener('change', (e) => save({ closeToTray: (e.target as HTMLInputElement).checked }));
 $('#account-switch-toggle').addEventListener('change', (e) => save({ gameAccountSwitch: (e.target as HTMLInputElement).checked }));
 $('#java-path').addEventListener('change', (e) => save({ javaPath: (e.target as HTMLInputElement).value.trim() }));
 $('#jvm-args').addEventListener('change', (e) => save({ jvmArgs: (e.target as HTMLInputElement).value.trim() }));
@@ -1477,10 +1776,15 @@ async function init(): Promise<void> {
   [state.info, state.settings, state.game] = await Promise.all([api.appInfo(), api.getSettings(), api.getGameState()]);
   initInstances(showView);
   renderSettings();
+  // Discord-Status erst jetzt richtig (vorher fehlte appInfo: „eingerichtet“ oder nicht)
+  void api.getDiscordStatus().then(renderDiscordStatus).catch(() => undefined);
   await loadAccounts();
   await reloadInstances();
   void loadNews();
-  void showWhatsNew();
+  // erster Start: Einrichtungs-Assistent; „Neu in …“ und die Einladung kommen dann erst danach (hooks.closed)
+  if (!(await startSetupIfNeeded())) void showWhatsNew();
+  void showUpdateNotice();
+  renderUpdate();
   // echte Logos von Fabric und Minecraft (aus den Dateien im Datenordner); danach Kacheln neu zeichnen
   void api.loaderLogos().then((logos) => {
     state.logos = logos;

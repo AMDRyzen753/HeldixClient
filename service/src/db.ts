@@ -2,6 +2,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { isCommunityBadge, isTeamRole, TEAM_ROLES, type CommunityBadge, type TeamRole } from './roles';
+
+export type { CommunityBadge, TeamRole } from './roles';
 
 export interface UserRow {
   uuid: string;
@@ -16,7 +19,23 @@ export interface UserRow {
   messages: boolean;
   createdAt: number;
   lastSeen: number;
+  /** Freunde 2.0 (ab 1.12.0): Statustext ('' = keiner), „Nicht stören“ */
+  statusText: string;
+  dnd: boolean;
+  /** Freunde sehen „zuletzt online“ (nur mit presence) */
+  showLastOnline: boolean;
+  /** erscheint bei Freunden von Freunden in den Vorschlägen (Standard aus) */
+  suggestable: boolean;
+  /** bekommt selbst Vorschläge */
+  showSuggestions: boolean;
+  /** „Ist online“-Benachrichtigungen: alle Freunde, nur Favoriten oder keine (wertet der Client aus) */
+  onlineNotify: OnlineNotify;
+  /** Ende der letzten Verbindung aus dem Spiel (null = noch nie bzw. unbekannt) */
+  lastOnline: number | null;
 }
+
+export const ONLINE_NOTIFY = ['all', 'favorites', 'none'] as const;
+export type OnlineNotify = (typeof ONLINE_NOTIFY)[number];
 
 export interface RequestRow {
   uuid: string;
@@ -24,9 +43,35 @@ export interface RequestRow {
   at: number;
 }
 
-export interface FriendshipRow {
+export interface FriendshipRow extends FriendshipExtras {
   user: UserRow;
   since: number;
+}
+
+/** Eigene Angaben zu einem Freund (Favorit, Spitzname, Notiz), nur für den Besitzer der Zeile (ab 1.12.0). */
+export interface FriendshipExtras {
+  favorite: boolean;
+  nickname: string;
+  note: string;
+}
+
+/** Wer `friend` als Freund hat, mit seinen eigenen Angaben dazu (für Echtzeit-Nachrichten je Betrachter). */
+export interface FriendViewerRow extends FriendshipExtras {
+  uuid: string;
+  since: number;
+}
+
+export interface FriendshipPatch {
+  favorite?: boolean;
+  nickname?: string;
+  note?: string;
+}
+
+/** Vorschlag „Freunde von Freunden“ (nur Spieler mit `suggestable`). */
+export interface SuggestionRow {
+  uuid: string;
+  name: string;
+  mutual: number;
 }
 
 /** Slots der Cosmetics außer dem Cape (das steht in `UserRow.cape`). */
@@ -40,6 +85,12 @@ export interface SettingsPatch {
   presence?: boolean;
   showServer?: boolean;
   messages?: boolean;
+  statusText?: string;
+  dnd?: boolean;
+  showLastOnline?: boolean;
+  suggestable?: boolean;
+  showSuggestions?: boolean;
+  onlineNotify?: OnlineNotify;
 }
 
 export interface MessageRow {
@@ -50,6 +101,37 @@ export interface MessageRow {
   at: number;
   /** Vom Empfänger gelesen. */
   read: boolean;
+  /** Antwort auf diese Nachricht (ID; die Nachricht kann inzwischen gelöscht sein) */
+  replyTo: number | null;
+  /** Beitreten-Karte (ab 1.12.0) */
+  card: MessageCard | null;
+}
+
+export const CARD_KINDS = ['server', 'world', 'invite'] as const;
+export type CardKind = (typeof CARD_KINDS)[number];
+
+/** Beitreten-Karte an einer Nachricht: Server-Adresse, Welt-Code oder Einladungs-Code, dazu ein Titel. */
+export interface MessageCard {
+  kind: CardKind;
+  target: string;
+  title: string;
+}
+
+/** Eigene Reaktion auf eine Nachricht (Datenauskunft). */
+export interface ReactionRow {
+  message: number;
+  reaction: string;
+  at: number;
+}
+
+/** Community-Abzeichen eines Spielers. */
+export interface CommunityBadgeRow {
+  uuid: string;
+  name: string;
+  badge: CommunityBadge;
+  addedAt: number;
+  /** Name des Team-Mitglieds; null = über die Server-Konsole */
+  addedBy: string | null;
 }
 
 export interface ConversationRow {
@@ -115,8 +197,6 @@ export interface WebSessionRow {
   /** Zeitpunkt, zu dem in dieser Sitzung zuletzt ein 2FA-Code eingegeben wurde (0 = nie) */
   verifiedAt: number;
 }
-
-export type TeamRole = 'moderator' | 'admin';
 
 export interface TeamMemberRow {
   uuid: string;
@@ -339,6 +419,79 @@ export interface AuditRow {
 }
 
 export type NewAudit = Omit<AuditRow, 'id'>;
+
+/** Einladung (Link mit Code). */
+export interface InviteRow {
+  code: string;
+  inviter: string;
+  createdAt: number;
+  expiresAt: number;
+  /** normalisierte Server-Adresse oder null */
+  server: string | null;
+  /** Prüfwert der Voice-Gruppe (64 Hex-Zeichen) oder null */
+  voiceGroup: string | null;
+  /** wie oft die Einladung zu einer neuen Freundschaft oder einem neuen Spieler geführt hat */
+  accepted: number;
+}
+
+/** Neu über eine Einladung dazugekommen. */
+export interface ReferralRow {
+  invitee: string;
+  /** null: zählt für niemanden (Konto gelöscht oder blockiert) */
+  inviter: string | null;
+  code: string | null;
+  at: number;
+  playedMs: number;
+  confirmed: number | null;
+}
+
+export interface UnlockRow {
+  cosmetic: string;
+  reason: string;
+  at: number;
+}
+
+export type WorldAccess = 'invited' | 'friends' | 'open';
+export type WorldRole = 'visitor' | 'player' | 'operator';
+
+/** Geteilte Welt (Welt teilen, ab 1.12.0). */
+export interface WorldRow {
+  id: string;
+  owner: string;
+  code: string;
+  name: string;
+  access: WorldAccess;
+  maxPlayers: number;
+  defaultRole: WorldRole;
+  createdAt: number;
+  lastOnline: number | null;
+  version: string | null;
+}
+
+export interface WorldPatch {
+  name?: string;
+  access?: WorldAccess;
+  maxPlayers?: number;
+  defaultRole?: WorldRole;
+}
+
+export interface WorldMemberRow {
+  name: string;
+  uuid: string | null;
+  role: WorldRole;
+  addedAt: number;
+}
+
+/** Mitgliedschaft in der Welt eines anderen (Datenauskunft). */
+export interface WorldMembershipRow {
+  world: string;
+  worldName: string;
+  owner: string;
+  ownerName: string;
+  name: string;
+  role: WorldRole;
+  addedAt: number;
+}
 
 type Row = Record<string, unknown>;
 
@@ -695,13 +848,133 @@ ALTER TABLE addon_submissions ADD COLUMN loaders TEXT NOT NULL DEFAULT '[]';
 -- Bis hierher hochgeladene JARs brauchten einen entrypoint und nutzten damit nur die Heldix-API
 UPDATE addon_submissions SET access = 'api', loaders = '["heldix","fabric"]' WHERE addon_id IS NOT NULL;
 `,
+  // 9: Einladungen (Links mit Code), wer über wen neu dazukam (Belohnungen) und freigeschaltete Cosmetics
+  `
+-- Einladung eines Spielers; server und voice_group (Prüfwert der Gruppe) nur, wenn angegeben. accepted zählt, wie oft
+-- die Einladung zu einer neuen Freundschaft oder einem neuen Spieler geführt hat. Mit dem Konto gelöscht, abgelaufene
+-- beim Aufräumen.
+CREATE TABLE invites (
+  code TEXT PRIMARY KEY,
+  inviter TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  server TEXT,
+  voice_group TEXT,
+  accepted INTEGER NOT NULL DEFAULT 0
+) STRICT, WITHOUT ROWID;
+CREATE INDEX invites_inviter ON invites (inviter, created_at);
+CREATE INDEX invites_expires ON invites (expires_at);
+
+-- Neu über eine Einladung dazugekommen: höchstens einmal je Spieler. inviter NULL = zählt für niemanden (Konto des
+-- Einladenden gelöscht oder einer hat den anderen blockiert). played_ms: nur die Summe der Spielzeit bis zur
+-- Bestätigung (confirmed), danach zählt der Dienst nicht mehr.
+CREATE TABLE referrals (
+  invitee TEXT PRIMARY KEY REFERENCES users (uuid) ON DELETE CASCADE,
+  inviter TEXT REFERENCES users (uuid) ON DELETE SET NULL,
+  code TEXT,
+  at INTEGER NOT NULL,
+  played_ms INTEGER NOT NULL DEFAULT 0,
+  confirmed INTEGER
+) STRICT, WITHOUT ROWID;
+CREATE INDEX referrals_inviter ON referrals (inviter, confirmed);
+
+-- Freigeschaltete Cosmetics (access: unlock), auch wenn es das Cosmetic im Katalog (noch) nicht gibt
+CREATE TABLE unlocks (
+  uuid TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  cosmetic TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (uuid, cosmetic)
+) STRICT, WITHOUT ROWID;
+`,
+  // 10: Welt teilen – Welten mit fester Adresse (<code>.<Welt-Domain>) und ihre Mitglieder
+  `
+-- Welt eines Spielers (höchstens 10). code: 6 Zeichen aus dem Alphabet der Einladungen, bleibt für immer gleich.
+-- last_online: zuletzt geöffnet bzw. geschlossen; version: zuletzt gemeldete Minecraft-Version (für Webseite und
+-- Launcher, auch wenn die Welt gerade zu ist). Mit dem Konto gelöscht.
+CREATE TABLE worlds (
+  id TEXT PRIMARY KEY,
+  owner TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  access TEXT NOT NULL,
+  max_players INTEGER NOT NULL,
+  default_role TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_online INTEGER,
+  version TEXT
+) STRICT, WITHOUT ROWID;
+CREATE INDEX worlds_owner ON worlds (owner, created_at);
+
+-- Mitglieder (Minecraft-Namen, auch ohne HeldixClient). uuid nur, wenn bekannt (Heldix-Spieler mit diesem Namen oder
+-- über die Freundesliste eingeladen); löscht ein Spieler sein Konto, vergisst der Dienst nur die UUID.
+CREATE TABLE world_members (
+  world TEXT NOT NULL REFERENCES worlds (id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  name_lower TEXT NOT NULL,
+  uuid TEXT,
+  role TEXT NOT NULL,
+  added_at INTEGER NOT NULL,
+  PRIMARY KEY (world, name_lower)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX world_members_uuid ON world_members (uuid) WHERE uuid IS NOT NULL;
+CREATE INDEX world_members_name ON world_members (name_lower);
+`,
+  // 11: Freunde 2.0 (Statustext, „Nicht stören“, Schalter, zuletzt online, Favorit/Spitzname/Notiz je Freundschaft,
+  //     Antworten, Beitreten-Karten, Reaktionen) und Community-Abzeichen; neue Team-Rollen brauchen keine Änderung
+  `
+ALTER TABLE users ADD COLUMN status_text TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN dnd INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN show_last_online INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE users ADD COLUMN suggestable INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN show_suggestions INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE users ADD COLUMN online_notify TEXT NOT NULL DEFAULT 'all';
+-- Ende der letzten Verbindung aus dem Spiel; bis zur ersten neuen Trennung gilt die letzte bekannte Verbindung
+ALTER TABLE users ADD COLUMN last_online INTEGER;
+UPDATE users SET last_online = last_seen;
+
+-- Favorit, Spitzname und Notiz gehören dem Besitzer der Zeile (uuid) und gehen mit der Freundschaft
+ALTER TABLE friendships ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE friendships ADD COLUMN nickname TEXT NOT NULL DEFAULT '';
+ALTER TABLE friendships ADD COLUMN note TEXT NOT NULL DEFAULT '';
+CREATE INDEX friendships_friend ON friendships (friend);
+
+-- Antwort auf eine Nachricht (ID ohne Fremdschlüssel: die Nachricht kann gelöscht werden) und Beitreten-Karte als JSON
+ALTER TABLE messages ADD COLUMN reply_to INTEGER;
+ALTER TABLE messages ADD COLUMN card TEXT;
+
+-- Reaktionen: höchstens eine je Spieler und Nachricht, mit der Nachricht bzw. dem Konto gelöscht
+CREATE TABLE message_reactions (
+  message INTEGER NOT NULL REFERENCES messages (id) ON DELETE CASCADE,
+  uuid TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  reaction TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (message, uuid)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX message_reactions_uuid ON message_reactions (uuid);
+
+-- Community-Abzeichen (Partner, Creator, Botschafter): höchstens eines je Spieler, mit dem Konto gelöscht.
+-- added_by: Name des Team-Mitglieds ohne Fremdschlüssel (NULL = Server-Konsole)
+CREATE TABLE community_badges (
+  uuid TEXT PRIMARY KEY REFERENCES users (uuid) ON DELETE CASCADE,
+  badge TEXT NOT NULL,
+  added_at INTEGER NOT NULL,
+  added_by TEXT
+) STRICT, WITHOUT ROWID;
+
+-- Team-Rollen: admin und moderator bleiben, wie sie sind; Unbekanntes (nie vorgesehen) wird zu moderator
+UPDATE team SET role = 'moderator' WHERE role NOT IN ('admin', 'moderator');
+`,
 ];
 
 const SCHEMA_VERSION = MIGRATIONS.length;
 
 const USER_COLUMNS = `u.uuid, u.name, u.cape, u.visible, u.presence, u.show_server, u.messages, u.created_at, u.last_seen,
-  u.cosmetic_head, u.cosmetic_back, u.cosmetic_aura, u.cosmetic_companion`;
-const MESSAGE_COLUMNS = 'm.id, m.from_uuid, m.to_uuid, m.text, m.at, m.is_read';
+  u.cosmetic_head, u.cosmetic_back, u.cosmetic_aura, u.cosmetic_companion,
+  u.status_text, u.dnd, u.show_last_online, u.suggestable, u.show_suggestions, u.online_notify, u.last_online`;
+const MESSAGE_COLUMNS = 'm.id, m.from_uuid, m.to_uuid, m.text, m.at, m.is_read, m.reply_to, m.card';
+/** Rang der Team-Rollen in SQL (wie roleRank): Admin zuerst. */
+const ROLE_ORDER = `CASE t.role ${TEAM_ROLES.map((role, i) => `WHEN '${role}' THEN ${i}`).join(' ')} ELSE ${TEAM_ROLES.length} END`;
 const REPORT_COLUMNS = 'id, reporter, reporter_name, reported, reported_name, reason, note, messages, at, status, done_at, done_by';
 const BAN_COLUMNS = 'uuid, name, reason, at, by_name';
 const SESSION_COLUMNS = 'id, uuid, device, created_at, last_used_at, expires_at, verified_at';
@@ -717,6 +990,10 @@ const SUBMISSION_COLUMNS = `s.id, s.uuid, u.name AS submitter_name, s.status, s.
 const ADDON_REPORT_COLUMNS = 'id, addon, reporter, reporter_name, reason, note, at, status, done_at, done_by';
 const ADDON_VERSION_COLUMNS = 'id, version, manifest, signature, file, size, sha256, published_at, published_by';
 const COSMETIC_COLUMNS = 'id, slot, version, access, hidden, name, description, date, size, sha256, created_at, published_at, published_by';
+const INVITE_COLUMNS = 'code, inviter, created_at, expires_at, server, voice_group, accepted';
+const REFERRAL_COLUMNS = 'invitee, inviter, code, at, played_ms, confirmed';
+const WORLD_COLUMNS = 'id, owner, code, name, access, max_players, default_role, created_at, last_online, version';
+const WORLD_MEMBER_COLUMNS = 'name, uuid, role, added_at';
 /** Größer als jede vergebene Nachrichten-ID (für „von der neuesten an“). */
 const NEWEST = Number.MAX_SAFE_INTEGER;
 
@@ -747,7 +1024,27 @@ function toUser(row: Row): UserRow {
     messages: Number(row.messages) === 1,
     createdAt: Number(row.created_at),
     lastSeen: Number(row.last_seen),
+    statusText: String(row.status_text ?? ''),
+    dnd: Number(row.dnd) === 1,
+    showLastOnline: row.show_last_online === undefined || Number(row.show_last_online) === 1,
+    suggestable: Number(row.suggestable) === 1,
+    showSuggestions: row.show_suggestions === undefined || Number(row.show_suggestions) === 1,
+    onlineNotify: row.online_notify === 'favorites' || row.online_notify === 'none' ? row.online_notify : 'all',
+    lastOnline: row.last_online === null || row.last_online === undefined ? null : Number(row.last_online),
   };
+}
+
+function toExtras(row: Row): FriendshipExtras {
+  return { favorite: Number(row.favorite) === 1, nickname: String(row.nickname ?? ''), note: String(row.note ?? '') };
+}
+
+/** Karte aus der Spalte card (JSON); kaputt oder unbekannt: null. */
+function toCard(value: unknown): MessageCard | null {
+  const parsed = parseJson<Record<string, unknown> | null>(value, (p) => typeof p === 'object' && p !== null && !Array.isArray(p), null);
+  if (parsed === null) return null;
+  const { kind, target, title } = parsed;
+  if (!(CARD_KINDS as readonly unknown[]).includes(kind) || typeof target !== 'string' || typeof title !== 'string') return null;
+  return { kind: kind as CardKind, target, title };
 }
 
 const nullableNumber = (value: unknown) => (value === null || value === undefined ? null : Number(value));
@@ -769,7 +1066,8 @@ function toTeamMember(row: Row): TeamMemberRow {
   return {
     uuid: String(row.uuid),
     name: String(row.name),
-    role: row.role === 'admin' ? 'admin' : 'moderator',
+    // Unbekannte Werte (z. B. aus einer neueren Version) gelten als Tester: so wenige Rechte wie möglich.
+    role: isTeamRole(row.role) ? row.role : 'tester',
     addedAt: Number(row.added_at),
     addedBy: nullableString(row.added_by),
     totpSecret: nullableString(row.totp_secret),
@@ -995,6 +1293,8 @@ function toMessage(row: Row): MessageRow {
     text: String(row.text),
     at: Number(row.at),
     read: Number(row.is_read) === 1,
+    replyTo: row.reply_to === null || row.reply_to === undefined ? null : Number(row.reply_to),
+    card: toCard(row.card),
   };
 }
 
@@ -1017,6 +1317,56 @@ function toReport(row: Row): ReportRow {
 
 function toBan(row: Row): BanRow {
   return { uuid: String(row.uuid), name: String(row.name), reason: String(row.reason), at: Number(row.at), by: nullableString(row.by_name) };
+}
+
+function toWorldAccess(value: unknown): WorldAccess {
+  return value === 'friends' || value === 'open' ? value : 'invited';
+}
+
+function toWorldRole(value: unknown): WorldRole {
+  return value === 'visitor' || value === 'operator' ? value : 'player';
+}
+
+function toWorld(row: Row): WorldRow {
+  return {
+    id: String(row.id),
+    owner: String(row.owner),
+    code: String(row.code),
+    name: String(row.name),
+    access: toWorldAccess(row.access),
+    maxPlayers: Number(row.max_players),
+    defaultRole: toWorldRole(row.default_role),
+    createdAt: Number(row.created_at),
+    lastOnline: nullableNumber(row.last_online),
+    version: nullableString(row.version),
+  };
+}
+
+function toWorldMember(row: Row): WorldMemberRow {
+  return { name: String(row.name), uuid: nullableString(row.uuid), role: toWorldRole(row.role), addedAt: Number(row.added_at) };
+}
+
+function toInvite(row: Row): InviteRow {
+  return {
+    code: String(row.code),
+    inviter: String(row.inviter),
+    createdAt: Number(row.created_at),
+    expiresAt: Number(row.expires_at),
+    server: nullableString(row.server),
+    voiceGroup: nullableString(row.voice_group),
+    accepted: Number(row.accepted),
+  };
+}
+
+function toReferral(row: Row): ReferralRow {
+  return {
+    invitee: String(row.invitee),
+    inviter: nullableString(row.inviter),
+    code: nullableString(row.code),
+    at: Number(row.at),
+    playedMs: Number(row.played_ms),
+    confirmed: nullableNumber(row.confirmed),
+  };
 }
 
 function prepareStatements(db: DatabaseSync) {
@@ -1044,8 +1394,15 @@ function prepareStatements(db: DatabaseSync) {
         visible = coalesce(?, visible),
         presence = coalesce(?, presence),
         show_server = coalesce(?, show_server),
-        messages = coalesce(?, messages)
+        messages = coalesce(?, messages),
+        status_text = coalesce(?, status_text),
+        dnd = coalesce(?, dnd),
+        show_last_online = coalesce(?, show_last_online),
+        suggestable = coalesce(?, suggestable),
+        show_suggestions = coalesce(?, show_suggestions),
+        online_notify = coalesce(?, online_notify)
       WHERE uuid = ?`),
+    setLastOnline: db.prepare('UPDATE users SET last_online = ? WHERE uuid = ?'),
 
     insertToken: db.prepare('INSERT INTO tokens (hash, uuid, created_at, expires_at) VALUES (?, ?, ?, ?)'),
     findToken: db.prepare('SELECT uuid FROM tokens WHERE hash = ? AND expires_at > ?'),
@@ -1056,9 +1413,29 @@ function prepareStatements(db: DatabaseSync) {
     tokensOf: db.prepare('SELECT created_at, expires_at FROM tokens WHERE uuid = ? ORDER BY created_at'),
 
     listFriends: db.prepare(`
-      SELECT ${USER_COLUMNS}, f.since FROM friendships f JOIN users u ON u.uuid = f.friend
+      SELECT ${USER_COLUMNS}, f.since, f.favorite, f.nickname, f.note FROM friendships f JOIN users u ON u.uuid = f.friend
       WHERE f.uuid = ? ORDER BY u.name_lower`),
     listFriendIds: db.prepare('SELECT friend, since FROM friendships WHERE uuid = ?'),
+    // Wer den Spieler als Freund hat, mit seinen eigenen Angaben dazu
+    friendViewers: db.prepare('SELECT uuid, since, favorite, nickname, note FROM friendships WHERE friend = ?'),
+    friendship: db.prepare('SELECT since, favorite, nickname, note FROM friendships WHERE uuid = ? AND friend = ?'),
+    updateFriendship: db.prepare(`
+      UPDATE friendships SET favorite = coalesce(?, favorite), nickname = coalesce(?, nickname), note = coalesce(?, note)
+      WHERE uuid = ? AND friend = ?`),
+    // Gemeinsame Freunde von a und b
+    mutualFriends: db.prepare(`
+      SELECT u.uuid, u.name FROM friendships f1 JOIN friendships f2 ON f2.friend = f1.friend AND f2.uuid = ?
+      JOIN users u ON u.uuid = f1.friend WHERE f1.uuid = ? ORDER BY u.name_lower`),
+    // Freunde von Freunden, die in Vorschlägen erscheinen wollen; ohne Freunde, offene Anfragen und Blockierungen
+    suggestions: db.prepare(`
+      SELECT u.uuid, u.name, count(*) AS mutual FROM friendships f1
+      JOIN friendships f2 ON f2.uuid = f1.friend
+      JOIN users u ON u.uuid = f2.friend
+      WHERE f1.uuid = ? AND u.uuid <> ? AND u.suggestable = 1
+        AND NOT EXISTS (SELECT 1 FROM friendships x WHERE x.uuid = ? AND x.friend = u.uuid)
+        AND NOT EXISTS (SELECT 1 FROM requests r WHERE (r.from_uuid = ? AND r.to_uuid = u.uuid) OR (r.from_uuid = u.uuid AND r.to_uuid = ?))
+        AND NOT EXISTS (SELECT 1 FROM blocks b WHERE (b.blocker = ? AND b.blocked = u.uuid) OR (b.blocker = u.uuid AND b.blocked = ?))
+      GROUP BY u.uuid ORDER BY mutual DESC, u.name_lower LIMIT ?`),
     friendsSince: db.prepare('SELECT since FROM friendships WHERE uuid = ? AND friend = ?'),
     countFriends: db.prepare('SELECT count(*) AS n FROM friendships WHERE uuid = ?'),
     addFriendship: db.prepare('INSERT OR IGNORE INTO friendships (uuid, friend, since) VALUES (?, ?, ?)'),
@@ -1076,8 +1453,16 @@ function prepareStatements(db: DatabaseSync) {
     removeRequest: db.prepare('DELETE FROM requests WHERE from_uuid = ? AND to_uuid = ?'),
 
     // Nachrichten
-    insertMessage: db.prepare('INSERT INTO messages (conv, from_uuid, to_uuid, text, at) VALUES (?, ?, ?, ?, ?)'),
+    insertMessage: db.prepare('INSERT INTO messages (conv, from_uuid, to_uuid, text, at, reply_to, card) VALUES (?, ?, ?, ?, ?, ?, ?)'),
     getMessage: db.prepare(`SELECT ${MESSAGE_COLUMNS} FROM messages m WHERE m.id = ?`),
+    messagesIn: db.prepare(`SELECT ${MESSAGE_COLUMNS} FROM messages m WHERE m.id IN (SELECT value FROM json_each(?))`),
+    deleteOwnMessage: db.prepare('DELETE FROM messages WHERE id = ? AND from_uuid = ?'),
+    setReaction: db.prepare(`
+      INSERT INTO message_reactions (message, uuid, reaction, at) VALUES (?, ?, ?, ?)
+      ON CONFLICT (message, uuid) DO UPDATE SET reaction = excluded.reaction, at = excluded.at`),
+    deleteReaction: db.prepare('DELETE FROM message_reactions WHERE message = ? AND uuid = ?'),
+    reactionsIn: db.prepare('SELECT message, uuid, reaction FROM message_reactions WHERE message IN (SELECT value FROM json_each(?)) ORDER BY at'),
+    reactionsBy: db.prepare('SELECT message, reaction, at FROM message_reactions WHERE uuid = ? ORDER BY message'),
     // Alles ab der (keep+1)-neuesten Nachricht löschen
     trimConversation: db.prepare(`
       DELETE FROM messages WHERE conv = ? AND id <= (
@@ -1147,6 +1532,7 @@ function prepareStatements(db: DatabaseSync) {
       DELETE FROM web_sessions WHERE uuid = ? AND id NOT IN (
         SELECT id FROM web_sessions WHERE uuid = ? ORDER BY created_at DESC LIMIT ?)`),
     findWebSession: db.prepare(`SELECT ${SESSION_COLUMNS} FROM web_sessions WHERE hash = ? AND expires_at > ? AND last_used_at > ?`),
+    webSessionAlive: db.prepare('SELECT 1 AS x FROM web_sessions WHERE id = ? AND expires_at > ? AND last_used_at > ?'),
     touchWebSession: db.prepare('UPDATE web_sessions SET last_used_at = ? WHERE id = ?'),
     verifyWebSession: db.prepare('UPDATE web_sessions SET verified_at = ? WHERE id = ?'),
     unverifyWebSessionsOf: db.prepare('UPDATE web_sessions SET verified_at = 0 WHERE uuid = ?'),
@@ -1157,7 +1543,7 @@ function prepareStatements(db: DatabaseSync) {
 
     // Team
     getTeamMember: db.prepare(`SELECT ${TEAM_COLUMNS} FROM team t JOIN users u ON u.uuid = t.uuid WHERE t.uuid = ?`),
-    listTeam: db.prepare(`SELECT ${TEAM_COLUMNS} FROM team t JOIN users u ON u.uuid = t.uuid ORDER BY t.role, u.name_lower`),
+    listTeam: db.prepare(`SELECT ${TEAM_COLUMNS} FROM team t JOIN users u ON u.uuid = t.uuid ORDER BY ${ROLE_ORDER}, u.name_lower`),
     addTeamMember: db.prepare('INSERT INTO team (uuid, role, added_at, added_by) VALUES (?, ?, ?, ?)'),
     setTeamRole: db.prepare('UPDATE team SET role = ? WHERE uuid = ?'),
     removeTeamMember: db.prepare('DELETE FROM team WHERE uuid = ?'),
@@ -1169,10 +1555,26 @@ function prepareStatements(db: DatabaseSync) {
     setTeamProfile: db.prepare('UPDATE team SET public = coalesce(?, public), title = coalesce(?, title), about = coalesce(?, about) WHERE uuid = ?'),
     listPublicTeam: db.prepare(`
       SELECT ${TEAM_COLUMNS} FROM team t JOIN users u ON u.uuid = t.uuid WHERE t.public = 1
-      ORDER BY CASE t.role WHEN 'admin' THEN 0 ELSE 1 END, u.name_lower`),
+      ORDER BY ${ROLE_ORDER}, u.name_lower`),
     isPublicTeamMember: db.prepare('SELECT 1 AS x FROM team WHERE uuid = ? AND public = 1'),
     publicTeamUuids: db.prepare('SELECT uuid FROM team WHERE public = 1'),
     publicTeamRolesIn: db.prepare('SELECT uuid, role FROM team WHERE public = 1 AND uuid IN (SELECT value FROM json_each(?))'),
+
+    // Community-Abzeichen
+    getCommunityBadge: db.prepare(`
+      SELECT b.uuid, u.name, b.badge, b.added_at, b.added_by FROM community_badges b JOIN users u ON u.uuid = b.uuid WHERE b.uuid = ?`),
+    listCommunityBadges: db.prepare(`
+      SELECT b.uuid, u.name, b.badge, b.added_at, b.added_by FROM community_badges b JOIN users u ON u.uuid = b.uuid
+      ORDER BY b.badge, u.name_lower`),
+    setCommunityBadge: db.prepare(`
+      INSERT INTO community_badges (uuid, badge, added_at, added_by) VALUES (?, ?, ?, ?)
+      ON CONFLICT (uuid) DO UPDATE SET badge = excluded.badge, added_at = excluded.added_at, added_by = excluded.added_by`),
+    deleteCommunityBadge: db.prepare('DELETE FROM community_badges WHERE uuid = ?'),
+    communityBadgesIn: db.prepare('SELECT uuid, badge FROM community_badges WHERE uuid IN (SELECT value FROM json_each(?))'),
+
+    // Kennzahlen für die Übersicht des Teams
+    countOpenReports: db.prepare("SELECT count(*) AS n FROM reports WHERE status = 'open'"),
+    countWaitingTickets: db.prepare("SELECT count(*) AS n FROM tickets WHERE status = 'open'"),
 
     // Support
     insertTicket: db.prepare(`
@@ -1354,7 +1756,77 @@ function prepareStatements(db: DatabaseSync) {
     deleteWebCodesOf: db.prepare('DELETE FROM web_codes WHERE uuid = ?'),
     deleteWebSessionsOf: db.prepare('DELETE FROM web_sessions WHERE uuid = ?'),
     deleteReportsBy: db.prepare('DELETE FROM reports WHERE reporter = ?'),
+    // Wer über den Spieler dazukam, zählt danach für niemanden (inviter per Fremdschlüssel NULL); den Code vergessen.
+    forgetReferralCode: db.prepare('UPDATE referrals SET code = NULL WHERE inviter = ?'),
+    // In Welten anderer bleibt der Name (deren Liste), die Verbindung zum Konto fällt weg.
+    forgetWorldMemberUuid: db.prepare('UPDATE world_members SET uuid = NULL WHERE uuid = ?'),
     deleteUser: db.prepare('DELETE FROM users WHERE uuid = ?'),
+
+    // Einladungen
+    insertInvite: db.prepare(`INSERT INTO invites (${INVITE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, 0)`),
+    getInvite: db.prepare(`SELECT ${INVITE_COLUMNS} FROM invites WHERE code = ?`),
+    // Gleicher Einladender, Server und Gruppe (IS vergleicht auch NULL), die am längsten gültige zuerst
+    reusableInvite: db.prepare(`
+      SELECT ${INVITE_COLUMNS} FROM invites WHERE inviter = ? AND server IS ? AND voice_group IS ? AND expires_at > ?
+      ORDER BY expires_at DESC LIMIT 1`),
+    openInvitesOf: db.prepare(`SELECT ${INVITE_COLUMNS} FROM invites WHERE inviter = ? AND expires_at > ? ORDER BY created_at DESC, code`),
+    allInvitesOf: db.prepare(`SELECT ${INVITE_COLUMNS} FROM invites WHERE inviter = ? ORDER BY created_at DESC, code`),
+    deleteInvite: db.prepare('DELETE FROM invites WHERE code = ? AND inviter = ?'),
+    deleteInviteByCode: db.prepare('DELETE FROM invites WHERE code = ?'),
+    deleteExpiredInvites: db.prepare('DELETE FROM invites WHERE expires_at <= ?'),
+    countAccept: db.prepare('UPDATE invites SET accepted = accepted + 1 WHERE code = ?'),
+    getReferral: db.prepare(`SELECT ${REFERRAL_COLUMNS} FROM referrals WHERE invitee = ?`),
+    insertReferral: db.prepare('INSERT OR IGNORE INTO referrals (invitee, inviter, code, at) VALUES (?, ?, ?, ?)'),
+    pendingPlayTime: db.prepare('SELECT played_ms FROM referrals WHERE invitee = ? AND confirmed IS NULL AND inviter IS NOT NULL'),
+    addPlayTime: db.prepare(`
+      UPDATE referrals SET played_ms = played_ms + ? WHERE invitee = ? AND confirmed IS NULL AND inviter IS NOT NULL
+      RETURNING played_ms`),
+    confirmReferral: db.prepare('UPDATE referrals SET confirmed = ? WHERE invitee = ? AND confirmed IS NULL AND inviter IS NOT NULL'),
+    referralCounts: db.prepare('SELECT count(*) AS invited, count(confirmed) AS confirmed FROM referrals WHERE inviter = ?'),
+    referralsBy: db.prepare('SELECT at, confirmed FROM referrals WHERE inviter = ? ORDER BY at'),
+    addUnlock: db.prepare('INSERT OR IGNORE INTO unlocks (uuid, cosmetic, reason, at) VALUES (?, ?, ?, ?)'),
+    hasUnlock: db.prepare('SELECT 1 AS x FROM unlocks WHERE uuid = ? AND cosmetic = ?'),
+    unlocksOf: db.prepare('SELECT cosmetic, reason, at FROM unlocks WHERE uuid = ? ORDER BY at, cosmetic'),
+    unlocksIn: db.prepare('SELECT uuid, cosmetic FROM unlocks WHERE uuid IN (SELECT value FROM json_each(?))'),
+
+    // Welt teilen
+    insertWorld: db.prepare(`INSERT INTO worlds (${WORLD_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`),
+    getWorld: db.prepare(`SELECT ${WORLD_COLUMNS} FROM worlds WHERE id = ?`),
+    getWorldByCode: db.prepare(`SELECT ${WORLD_COLUMNS} FROM worlds WHERE code = ?`),
+    worldsOf: db.prepare(`SELECT ${WORLD_COLUMNS} FROM worlds WHERE owner = ? ORDER BY created_at, id`),
+    countWorlds: db.prepare('SELECT count(*) AS n FROM worlds WHERE owner = ?'),
+    updateWorld: db.prepare(`
+      UPDATE worlds SET name = coalesce(?, name), access = coalesce(?, access), max_players = coalesce(?, max_players),
+        default_role = coalesce(?, default_role) WHERE id = ?`),
+    setWorldOnline: db.prepare('UPDATE worlds SET last_online = ?, version = coalesce(?, version) WHERE id = ?'),
+    deleteWorld: db.prepare('DELETE FROM worlds WHERE id = ? AND owner = ?'),
+    worldMembers: db.prepare(`SELECT ${WORLD_MEMBER_COLUMNS} FROM world_members WHERE world = ? ORDER BY name_lower`),
+    getWorldMember: db.prepare(`SELECT ${WORLD_MEMBER_COLUMNS} FROM world_members WHERE world = ? AND name_lower = ?`),
+    countWorldMembers: db.prepare('SELECT count(*) AS n FROM world_members WHERE world = ?'),
+    // Neu: mit Rolle und UUID; vorhanden: Rolle und (wenn jetzt bekannt) UUID ändern, Schreibweise des Namens übernehmen
+    putWorldMember: db.prepare(`
+      INSERT INTO world_members (world, name, name_lower, uuid, role, added_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (world, name_lower) DO UPDATE SET name = excluded.name, role = excluded.role,
+        uuid = coalesce(excluded.uuid, uuid)`),
+    // Einladen: nur neu anlegen, eine vorhandene Rolle bleibt
+    addWorldMember: db.prepare(`
+      INSERT INTO world_members (world, name, name_lower, uuid, role, added_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (world, name_lower) DO UPDATE SET uuid = coalesce(excluded.uuid, uuid)`),
+    deleteWorldMember: db.prepare('DELETE FROM world_members WHERE world = ? AND name_lower = ?'),
+    // Zugang im Relay (nur der Name aus Login Start): Name auf der Liste, oder ein Mitglied mit UUID heißt jetzt so
+    worldMemberNamed: db.prepare(`
+      SELECT 1 AS x FROM world_members m WHERE m.world = ? AND (m.name_lower = ?
+        OR (m.uuid IS NOT NULL AND EXISTS (SELECT 1 FROM users u WHERE u.uuid = m.uuid AND u.name_lower = ?))) LIMIT 1`),
+    // Welten, in denen ein Spieler Mitglied ist: über die UUID, ohne UUID über den Namen
+    worldIdsWithMember: db.prepare(`
+      SELECT DISTINCT world FROM world_members WHERE uuid = ? OR (uuid IS NULL AND name_lower = ?)`),
+    worldMembershipsOf: db.prepare(`
+      SELECT w.id AS world, w.name AS world_name, w.owner, u.name AS owner_name, m.name, m.role, m.added_at
+      FROM world_members m JOIN worlds w ON w.id = m.world JOIN users u ON u.uuid = w.owner
+      WHERE w.owner <> ? AND (m.uuid = ? OR (m.uuid IS NULL AND m.name_lower = ?)) ORDER BY m.added_at, w.id`),
+    // Freund des Besitzers, der gerade so heißt (Zugang „Freunde“)
+    friendNamed: db.prepare(`
+      SELECT 1 AS x FROM friendships f JOIN users u ON u.uuid = f.friend WHERE f.uuid = ? AND u.name_lower = ? LIMIT 1`),
   };
 }
 
@@ -1458,8 +1930,22 @@ export class Store {
       bool(patch.presence),
       bool(patch.showServer),
       bool(patch.messages),
+      patch.statusText ?? null,
+      bool(patch.dnd),
+      bool(patch.showLastOnline),
+      bool(patch.suggestable),
+      bool(patch.showSuggestions),
+      patch.onlineNotify ?? null,
       uuid,
     );
+  }
+
+  /** Ende der letzten Verbindung aus dem Spiel merken („zuletzt online“). */
+  setLastOnline(uuids: readonly string[], now: number): void {
+    if (uuids.length === 0) return;
+    this.transaction(() => {
+      for (const uuid of uuids) this.sql.setLastOnline.run(now, uuid);
+    });
   }
 
   /** Spieler, deren Name mit `prefix` beginnt (ohne Groß-/Kleinschreibung), zuletzt gesehen zuerst. */
@@ -1508,7 +1994,10 @@ export class Store {
     this.sql.forgetTicketAuthor.run(uuid);
     // Eigene Addons bleiben veröffentlicht (signiert), die ID bleibt vergeben, aber ohne UUID als Besitzer.
     this.sql.forgetAddonOwner.run(DELETED_OWNER, uuid);
-    // Bewertungen und Einreichungen gehen mit dem Konto (Fremdschlüssel).
+    this.sql.forgetReferralCode.run(uuid);
+    this.sql.forgetWorldMemberUuid.run(uuid);
+    // Bewertungen, Einreichungen, Einladungen, Freischaltungen, wie der Spieler selbst eingeladen wurde und seine Welten
+    // (mit Mitgliedern) gehen mit dem Konto (Fremdschlüssel); wer über ihn dazukam, zählt danach für niemanden mehr.
     this.sql.deleteUser.run(uuid);
     return others.filter((other) => other !== uuid);
   }
@@ -1539,7 +2028,38 @@ export class Store {
   // ---------- Freunde ----------
 
   listFriends(uuid: string): FriendshipRow[] {
-    return (this.sql.listFriends.all(uuid) as Row[]).map((row) => ({ user: toUser(row), since: Number(row.since) }));
+    return (this.sql.listFriends.all(uuid) as Row[]).map((row) => ({ user: toUser(row), since: Number(row.since), ...toExtras(row) }));
+  }
+
+  /** Alle, die `friend` als Freund haben, mit ihren eigenen Angaben zu ihm. */
+  friendViewers(friend: string): FriendViewerRow[] {
+    return (this.sql.friendViewers.all(friend) as Row[]).map((row) => ({ uuid: String(row.uuid), since: Number(row.since), ...toExtras(row) }));
+  }
+
+  /** Die Freundschaft aus Sicht von `owner` (seit wann, eigene Angaben) oder undefined. */
+  friendship(owner: string, friend: string): (FriendshipExtras & { since: number }) | undefined {
+    const row = this.sql.friendship.get(owner, friend) as Row | undefined;
+    return row ? { since: Number(row.since), ...toExtras(row) } : undefined;
+  }
+
+  /** Eigene Angaben zu einem Freund ändern (nur die Zeile von `owner`). false, wenn es die Freundschaft nicht gibt. */
+  updateFriendship(owner: string, friend: string, patch: FriendshipPatch): boolean {
+    const favorite = patch.favorite === undefined ? null : patch.favorite ? 1 : 0;
+    return Number(this.sql.updateFriendship.run(favorite, patch.nickname ?? null, patch.note ?? null, owner, friend).changes) > 0;
+  }
+
+  /** Gemeinsame Freunde von a und b, nach Namen sortiert. */
+  mutualFriends(a: string, b: string): { uuid: string; name: string }[] {
+    return (this.sql.mutualFriends.all(b, a) as Row[]).map((row) => ({ uuid: String(row.uuid), name: String(row.name) }));
+  }
+
+  /** Vorschläge „Freunde von Freunden“ für `uuid` (nur Spieler mit `suggestable`), meiste gemeinsame zuerst. */
+  suggestions(uuid: string, limit: number): SuggestionRow[] {
+    return (this.sql.suggestions.all(uuid, uuid, uuid, uuid, uuid, uuid, uuid, limit) as Row[]).map((row) => ({
+      uuid: String(row.uuid),
+      name: String(row.name),
+      mutual: Number(row.mutual),
+    }));
   }
 
   listFriendIds(uuid: string): { uuid: string; since: number }[] {
@@ -1604,13 +2124,74 @@ export class Store {
   // ---------- Nachrichten ----------
 
   /** Speichert eine Nachricht und behält höchstens `keep` Nachrichten pro Unterhaltung (die neuesten). */
-  insertMessage(from: string, to: string, text: string, now: number, keep: number): MessageRow {
+  insertMessage(
+    from: string,
+    to: string,
+    text: string,
+    now: number,
+    keep: number,
+    extra: { replyTo?: number | null; card?: MessageCard | null } = {},
+  ): MessageRow {
     return this.transaction(() => {
       const conv = conversationKey(from, to);
-      const id = Number(this.sql.insertMessage.run(conv, from, to, text, now).lastInsertRowid);
+      const card = extra.card ? JSON.stringify({ kind: extra.card.kind, target: extra.card.target, title: extra.card.title }) : null;
+      const id = Number(this.sql.insertMessage.run(conv, from, to, text, now, extra.replyTo ?? null, card).lastInsertRowid);
       this.sql.trimConversation.run(conv, conv, keep);
       return toMessage(this.sql.getMessage.get(id) as Row);
     });
+  }
+
+  getMessage(id: number): MessageRow | undefined {
+    const row = this.sql.getMessage.get(id) as Row | undefined;
+    return row ? toMessage(row) : undefined;
+  }
+
+  /** Mehrere Nachrichten nach ID (fehlende fallen weg). */
+  messagesByIds(ids: readonly number[]): Map<number, MessageRow> {
+    const map = new Map<number, MessageRow>();
+    if (ids.length === 0) return map;
+    for (const row of this.sql.messagesIn.all(JSON.stringify([...new Set(ids)])) as Row[]) {
+      const message = toMessage(row);
+      map.set(message.id, message);
+    }
+    return map;
+  }
+
+  /** Eigene Nachricht löschen (für beide; Reaktionen gehen mit). false, wenn sie nicht von `from` ist oder fehlt. */
+  deleteOwnMessage(id: number, from: string): boolean {
+    const removed = Number(this.sql.deleteOwnMessage.run(id, from).changes) > 0;
+    if (removed) this.checkpoint();
+    return removed;
+  }
+
+  /** Reaktion setzen oder ersetzen (eine je Spieler und Nachricht). */
+  setReaction(message: number, uuid: string, reaction: string, now: number): void {
+    this.sql.setReaction.run(message, uuid, reaction, now);
+  }
+
+  deleteReaction(message: number, uuid: string): boolean {
+    return Number(this.sql.deleteReaction.run(message, uuid).changes) > 0;
+  }
+
+  /** Reaktionen je Nachricht: UUID → Reaktion. */
+  reactionsFor(ids: readonly number[]): Map<number, Record<string, string>> {
+    const map = new Map<number, Record<string, string>>();
+    if (ids.length === 0) return map;
+    for (const row of this.sql.reactionsIn.all(JSON.stringify([...new Set(ids)])) as Row[]) {
+      const id = Number(row.message);
+      let entry = map.get(id);
+      if (!entry) {
+        entry = {};
+        map.set(id, entry);
+      }
+      entry[String(row.uuid)] = String(row.reaction);
+    }
+    return map;
+  }
+
+  /** Eigene Reaktionen (Datenauskunft). */
+  reactionsBy(uuid: string): ReactionRow[] {
+    return (this.sql.reactionsBy.all(uuid) as Row[]).map((row) => ({ message: Number(row.message), reaction: String(row.reaction), at: Number(row.at) }));
   }
 
   /**
@@ -1826,6 +2407,11 @@ export class Store {
     return row ? toSession(row) : undefined;
   }
 
+  /** Gibt es die Sitzung mit dieser ID noch (nicht abgelaufen, nach `idleCutoff` benutzt)? */
+  webSessionAlive(id: string, now: number, idleCutoff: number): boolean {
+    return this.sql.webSessionAlive.get(id, now, idleCutoff) !== undefined;
+  }
+
   touchWebSession(id: string, now: number): void {
     this.sql.touchWebSession.run(now, id);
   }
@@ -1999,7 +2585,60 @@ export class Store {
   /** Rollen der Team-Mitglieder unter `uuids`, die auf der öffentlichen Teamseite stehen (`public`); andere fehlen. */
   publicTeamRolesIn(uuids: string[]): Map<string, TeamRole> {
     if (uuids.length === 0) return new Map();
-    return new Map((this.sql.publicTeamRolesIn.all(JSON.stringify(uuids)) as Row[]).map((row) => [String(row.uuid), String(row.role) as TeamRole]));
+    const map = new Map<string, TeamRole>();
+    for (const row of this.sql.publicTeamRolesIn.all(JSON.stringify(uuids)) as Row[]) {
+      map.set(String(row.uuid), isTeamRole(row.role) ? row.role : 'tester');
+    }
+    return map;
+  }
+
+  // ---------- Community-Abzeichen ----------
+
+  private toBadge(row: Row): CommunityBadgeRow | undefined {
+    if (!isCommunityBadge(row.badge)) return undefined;
+    return { uuid: String(row.uuid), name: String(row.name), badge: row.badge, addedAt: Number(row.added_at), addedBy: nullableString(row.added_by) };
+  }
+
+  getCommunityBadge(uuid: string): CommunityBadgeRow | undefined {
+    const row = this.sql.getCommunityBadge.get(uuid) as Row | undefined;
+    return row ? this.toBadge(row) : undefined;
+  }
+
+  listCommunityBadges(): CommunityBadgeRow[] {
+    return (this.sql.listCommunityBadges.all() as Row[]).map((row) => this.toBadge(row)).filter((b): b is CommunityBadgeRow => b !== undefined);
+  }
+
+  /** Abzeichen vergeben oder ersetzen. Liefert, was vorher war (null = keins). */
+  setCommunityBadge(uuid: string, badge: CommunityBadge, now: number, by: string | null): CommunityBadge | null {
+    return this.transaction(() => {
+      const before = this.getCommunityBadge(uuid)?.badge ?? null;
+      this.sql.setCommunityBadge.run(uuid, badge, now, by);
+      return before;
+    });
+  }
+
+  deleteCommunityBadge(uuid: string): boolean {
+    return Number(this.sql.deleteCommunityBadge.run(uuid).changes) > 0;
+  }
+
+  /** Community-Abzeichen mehrerer Spieler (Nachschlagen, Freundesliste). */
+  communityBadgesIn(uuids: readonly string[]): Map<string, CommunityBadge> {
+    const map = new Map<string, CommunityBadge>();
+    if (uuids.length === 0) return map;
+    for (const row of this.sql.communityBadgesIn.all(JSON.stringify(uuids)) as Row[]) {
+      if (isCommunityBadge(row.badge)) map.set(String(row.uuid), row.badge);
+    }
+    return map;
+  }
+
+  /** Offene Meldungen (für die Übersicht des Teams). */
+  countOpenReports(): number {
+    return Number((this.sql.countOpenReports.get() as Row).n);
+  }
+
+  /** Support-Anfragen, die auf eine Antwort des Teams warten (Status open). */
+  countWaitingTickets(): number {
+    return Number((this.sql.countWaitingTickets.get() as Row).n);
   }
 
   // ---------- Support ----------
@@ -2492,5 +3131,230 @@ export class Store {
   teamMembersIn(uuids: string[]): Set<string> {
     if (uuids.length === 0) return new Set();
     return new Set((this.sql.teamMembersIn.all(JSON.stringify(uuids)) as Row[]).map((row) => String(row.uuid)));
+  }
+
+  // ---------- Einladungen ----------
+
+  /** Neue Einladung (Code muss frei sein). */
+  insertInvite(invite: Omit<InviteRow, 'accepted'>): void {
+    this.sql.insertInvite.run(invite.code, invite.inviter, invite.createdAt, invite.expiresAt, invite.server, invite.voiceGroup);
+  }
+
+  /** Einladung zum Code (auch abgelaufene, die noch nicht aufgeräumt sind). */
+  getInvite(code: string): InviteRow | undefined {
+    const row = this.sql.getInvite.get(code) as Row | undefined;
+    return row ? toInvite(row) : undefined;
+  }
+
+  /** Offene Einladung mit genau diesem Server und dieser Gruppe, die noch bis mindestens `validUntil` gilt. */
+  reusableInvite(inviter: string, server: string | null, voiceGroup: string | null, validUntil: number): InviteRow | undefined {
+    const row = this.sql.reusableInvite.get(inviter, server, voiceGroup, validUntil) as Row | undefined;
+    return row ? toInvite(row) : undefined;
+  }
+
+  /** Offene Einladungen eines Spielers, neueste zuerst. */
+  openInvitesOf(inviter: string, now: number): InviteRow[] {
+    return (this.sql.openInvitesOf.all(inviter, now) as Row[]).map(toInvite);
+  }
+
+  /** Alle gespeicherten Einladungen eines Spielers (Datenauskunft). */
+  allInvitesOf(inviter: string): InviteRow[] {
+    return (this.sql.allInvitesOf.all(inviter) as Row[]).map(toInvite);
+  }
+
+  /** Widerrufen: nur die eigene. true, wenn es sie gab. */
+  deleteInvite(code: string, inviter: string): boolean {
+    return Number(this.sql.deleteInvite.run(code, inviter).changes) > 0;
+  }
+
+  /**
+   * Höchstens `keep` offene Einladungen je Spieler: Darüber fallen die ältesten ohne Annahmen weg (gibt es keine
+   * solche mehr, die ältesten überhaupt). Liefert die gelöschten Codes.
+   */
+  trimInvites(inviter: string, now: number, keep: number): string[] {
+    return this.transaction(() => {
+      const open = this.openInvitesOf(inviter, now).reverse();
+      const removed: string[] = [];
+      while (open.length > keep) {
+        const index = Math.max(0, open.findIndex((invite) => invite.accepted === 0));
+        const [oldest] = open.splice(index, 1);
+        this.sql.deleteInviteByCode.run(oldest!.code);
+        removed.push(oldest!.code);
+      }
+      return removed;
+    });
+  }
+
+  deleteExpiredInvites(now: number): number {
+    return Number(this.sql.deleteExpiredInvites.run(now).changes);
+  }
+
+  /** Die Einladung hat zu einer neuen Freundschaft oder einem neuen Spieler geführt. */
+  countInviteAccept(code: string): void {
+    this.sql.countAccept.run(code);
+  }
+
+  getReferral(invitee: string): ReferralRow | undefined {
+    const row = this.sql.getReferral.get(invitee) as Row | undefined;
+    return row ? toReferral(row) : undefined;
+  }
+
+  /** Neu über eine Einladung dazugekommen (höchstens einmal je Spieler). true, wenn eingetragen. */
+  insertReferral(invitee: string, inviter: string | null, code: string | null, at: number): boolean {
+    return Number(this.sql.insertReferral.run(invitee, inviter, code, at).changes) > 0;
+  }
+
+  /** Bisher gezählte Spielzeit, wenn die Bestätigung noch offen ist und sie für jemanden zählt; sonst undefined. */
+  pendingPlayTime(invitee: string): number | undefined {
+    const row = this.sql.pendingPlayTime.get(invitee) as Row | undefined;
+    return row ? Number(row.played_ms) : undefined;
+  }
+
+  /** Spielzeit dazuzählen (nur bei offener Bestätigung). Liefert die neue Summe oder undefined. */
+  addPlayTime(invitee: string, ms: number): number | undefined {
+    const row = this.sql.addPlayTime.get(Math.max(0, Math.round(ms)), invitee) as Row | undefined;
+    return row ? Number(row.played_ms) : undefined;
+  }
+
+  /** Bestätigen (nur einmal). true, wenn es jetzt bestätigt wurde. */
+  confirmReferral(invitee: string, now: number): boolean {
+    return Number(this.sql.confirmReferral.run(now, invitee).changes) > 0;
+  }
+
+  /** Über den Spieler neu dazugekommen und davon bestätigt. */
+  referralCounts(inviter: string): { invited: number; confirmed: number } {
+    const row = this.sql.referralCounts.get(inviter) as Row;
+    return { invited: Number(row.invited), confirmed: Number(row.confirmed) };
+  }
+
+  /** Datenauskunft des Einladenden: nur Zeitpunkte, nicht wer. */
+  referralsBy(inviter: string): { at: number; confirmed: number | null }[] {
+    return (this.sql.referralsBy.all(inviter) as Row[]).map((row) => ({ at: Number(row.at), confirmed: nullableNumber(row.confirmed) }));
+  }
+
+  // ---------- Freischaltungen ----------
+
+  /** Freischalten; true, wenn es neu ist. */
+  addUnlock(uuid: string, cosmetic: string, reason: string, at: number): boolean {
+    return Number(this.sql.addUnlock.run(uuid, cosmetic, reason, at).changes) > 0;
+  }
+
+  hasUnlock(uuid: string, cosmetic: string): boolean {
+    return this.sql.hasUnlock.get(uuid, cosmetic) !== undefined;
+  }
+
+  unlocksOf(uuid: string): UnlockRow[] {
+    return (this.sql.unlocksOf.all(uuid) as Row[]).map((row) => ({ cosmetic: String(row.cosmetic), reason: String(row.reason), at: Number(row.at) }));
+  }
+
+  // ---------- Welt teilen ----------
+
+  insertWorld(world: Omit<WorldRow, 'lastOnline' | 'version'>): void {
+    this.sql.insertWorld.run(world.id, world.owner, world.code, world.name, world.access, world.maxPlayers, world.defaultRole, world.createdAt);
+  }
+
+  getWorld(id: string): WorldRow | undefined {
+    const row = this.sql.getWorld.get(id) as Row | undefined;
+    return row ? toWorld(row) : undefined;
+  }
+
+  getWorldByCode(code: string): WorldRow | undefined {
+    const row = this.sql.getWorldByCode.get(code) as Row | undefined;
+    return row ? toWorld(row) : undefined;
+  }
+
+  /** Welten eines Spielers, älteste zuerst. */
+  worldsOf(owner: string): WorldRow[] {
+    return (this.sql.worldsOf.all(owner) as Row[]).map(toWorld);
+  }
+
+  countWorlds(owner: string): number {
+    return Number((this.sql.countWorlds.get(owner) as Row).n);
+  }
+
+  updateWorld(id: string, patch: WorldPatch): void {
+    this.sql.updateWorld.run(patch.name ?? null, patch.access ?? null, patch.maxPlayers ?? null, patch.defaultRole ?? null, id);
+  }
+
+  /** Geöffnet bzw. geschlossen: Zeitpunkt merken, beim Öffnen auch die Minecraft-Version. */
+  setWorldOnline(id: string, now: number, version: string | null): void {
+    this.sql.setWorldOnline.run(now, version, id);
+  }
+
+  /** Eigene Welt löschen (mit Mitgliedern). true, wenn es sie gab. */
+  deleteWorld(id: string, owner: string): boolean {
+    return Number(this.sql.deleteWorld.run(id, owner).changes) > 0;
+  }
+
+  worldMembers(world: string): WorldMemberRow[] {
+    return (this.sql.worldMembers.all(world) as Row[]).map(toWorldMember);
+  }
+
+  getWorldMember(world: string, name: string): WorldMemberRow | undefined {
+    const row = this.sql.getWorldMember.get(world, name.toLowerCase()) as Row | undefined;
+    return row ? toWorldMember(row) : undefined;
+  }
+
+  countWorldMembers(world: string): number {
+    return Number((this.sql.countWorldMembers.get(world) as Row).n);
+  }
+
+  /** Mitglied anlegen oder Rolle ändern (UUID nur setzen, wenn bekannt). */
+  putWorldMember(world: string, name: string, uuid: string | null, role: WorldRole, now: number): void {
+    this.sql.putWorldMember.run(world, name, name.toLowerCase(), uuid, role, now);
+  }
+
+  /** Mitglied anlegen, wenn es noch keins ist (eine vorhandene Rolle bleibt). */
+  addWorldMember(world: string, name: string, uuid: string | null, role: WorldRole, now: number): void {
+    this.sql.addWorldMember.run(world, name, name.toLowerCase(), uuid, role, now);
+  }
+
+  deleteWorldMember(world: string, name: string): boolean {
+    return Number(this.sql.deleteWorldMember.run(world, name.toLowerCase()).changes) > 0;
+  }
+
+  /** Steht ein Spieler dieses Namens auf der Liste (auch über die UUID eines inzwischen umbenannten Mitglieds)? */
+  isWorldMemberNamed(world: string, name: string): boolean {
+    const lower = name.toLowerCase();
+    return this.sql.worldMemberNamed.get(world, lower, lower) !== undefined;
+  }
+
+  /** IDs der Welten, in denen der Spieler Mitglied ist. */
+  worldIdsWithMember(uuid: string, name: string): string[] {
+    return (this.sql.worldIdsWithMember.all(uuid, name.toLowerCase()) as Row[]).map((row) => String(row.world));
+  }
+
+  /** Mitgliedschaften in Welten anderer (Datenauskunft). */
+  worldMembershipsOf(uuid: string, name: string): WorldMembershipRow[] {
+    return (this.sql.worldMembershipsOf.all(uuid, uuid, name.toLowerCase()) as Row[]).map((row) => ({
+      world: String(row.world),
+      worldName: String(row.world_name),
+      owner: String(row.owner),
+      ownerName: String(row.owner_name),
+      name: String(row.name),
+      role: toWorldRole(row.role),
+      addedAt: Number(row.added_at),
+    }));
+  }
+
+  /** Hat `owner` einen Freund, der gerade so heißt? */
+  hasFriendNamed(owner: string, name: string): boolean {
+    return this.sql.friendNamed.get(owner, name.toLowerCase()) !== undefined;
+  }
+
+  /** Freischaltungen mehrerer Spieler auf einmal (Nachschlagen). */
+  unlocksIn(uuids: string[]): Map<string, Set<string>> {
+    const map = new Map<string, Set<string>>();
+    if (uuids.length === 0) return map;
+    for (const row of this.sql.unlocksIn.all(JSON.stringify(uuids)) as Row[]) {
+      const uuid = String(row.uuid);
+      let set = map.get(uuid);
+      if (!set) {
+        set = new Set();
+        map.set(uuid, set);
+      }
+      set.add(String(row.cosmetic));
+    }
+    return map;
   }
 }

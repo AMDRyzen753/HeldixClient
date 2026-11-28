@@ -1,42 +1,62 @@
-<!--seite {"titel": "Für Entwickler", "beschreibung": "Eigene Addons für HeldixClient: mit der Heldix-API (Module, HUD-Elemente, Tasten, Einstellungen, gedroppte Items) oder mit Eingriffen in Minecraft über den Heldix Loader."}-->
+<!--seite {"titel":"Für Entwickler","beschreibung":"Eigene Heldix-Addons entwickeln: stabile Java-API für Module, HUD, Tasten, Einstellungen, Voice und Karten – oder direkt mit dem Heldix Loader in Minecraft eingreifen. Einreichen, prüfen lassen, im Store veröffentlichen."}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="entwickler">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap dev-page">
-  <div class="page-hero">
-    <span class="eyebrow">Für Entwickler</span>
-    <h1>Erweitere <span class="gradient">HeldixClient</span></h1>
-    <p class="lead">Mit Heldix-Addons baust du eigene Module, HUD-Elemente, Tasten und Einstellungen – stabil über Minecraft-Updates hinweg. Reicht die API nicht, darf ein Addon auch direkt in Minecraft eingreifen.</p>
-  </div>
-
-  <div class="dev-compare">
-    <div class="glass panel-pad">
-      <span class="badge">{{icon:addons}}</span>
-      <h2>Weg 1: Heldix-API</h2>
-      <p>Eine stabile Java-API: Module, HUD, Tasten, Einstellungen, Befehle, gedroppte Items. Das Addon läuft auch nach Minecraft-Updates weiter, in Heldix- und Fabric-Instanzen.</p>
+<main id="inhalt" class="dev-page">
+  <section class="page-hero" aria-labelledby="seite-titel">
+    <div class="container">
+      <div class="page-hero__inner">
+        <span class="eyebrow">{{icon:code}}Für Entwickler</span>
+        <h1 class="h1" id="seite-titel">Erweitere <span class="text-gradient">HeldixClient.</span></h1>
+        <p class="lead">Mit Heldix-Addons baust du eigene Module, HUD-Elemente, Tasten und Einstellungen – stabil über Minecraft-Updates hinweg. Reicht die API nicht, darf ein Addon auch direkt in Minecraft eingreifen.</p>
+        <div class="page-hero__actions">
+          <a class="btn btn--primary" href="/entwickler/addons">{{icon:play}}Erstes Addon bauen</a>
+          <a class="btn btn--secondary" href="/konto#reiter=addons">{{icon:upload}}Addon einreichen</a>
+        </div>
+      </div>
     </div>
-    <div class="glass panel-pad">
-      <span class="badge">{{icon:code}}</span>
-      <h2>Weg 2: Eingriff in Minecraft</h2>
-      <p>Mit dem Heldix Loader: eigener Startpunkt und Transformer am Spielcode. Mächtiger, aber an die Minecraft-Version gebunden – im Store mit „Greift in Minecraft ein“.</p>
-    </div>
-  </div>
+  </section>
 
-  <div class="dev-grid">
+  <section class="section section--tight" aria-labelledby="wege-titel">
+    <div class="container">
+      <h2 class="sr-only" id="wege-titel">Zwei Wege</h2>
+      <div class="dev-compare">
+        <article class="card card--accent">
+          <span class="icon-tile icon-tile--lg">{{icon:addons}}</span>
+          <h3 class="h3">Weg 1: Heldix-API</h3>
+          <p class="card__text">Eine stabile Java-API: Module, HUD, Tasten, Einstellungen, Befehle, Spieler und Voice, Karten von oben, gedroppte Items. Das Addon läuft auch nach Minecraft-Updates weiter, in Heldix- und Fabric-Instanzen.</p>
+          <a class="link-arrow" href="/entwickler/addon-api">Zur Addon-API{{icon:chevron-right}}</a>
+        </article>
+        <article class="card">
+          <span class="icon-tile icon-tile--lg icon-tile--reward">{{icon:code}}</span>
+          <h3 class="h3">Weg 2: Eingriff in Minecraft</h3>
+          <p class="card__text">Mit dem Heldix Loader: eigener Startpunkt und Transformer am Spielcode. Mächtiger, aber an die Minecraft-Version gebunden – im Store mit „Greift in Minecraft ein“ gekennzeichnet.</p>
+          <a class="link-arrow" href="/entwickler/heldix-mods">Heldix-Mods{{icon:chevron-right}}</a>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight" aria-labelledby="seiten-titel">
+    <div class="container">
+      <h2 class="h3 page-section-title" id="seiten-titel">Alle Seiten für Entwickler</h2>
+      <div class="dev-grid">
 {{ENTWICKLER_KARTEN_HTML}}
-  </div>
+      </div>
 
-  <aside class="support-box big-support">
-    {{icon:chat}}
-    <div><h2>Fragen oder ein Addon für den Store?</h2><p>Fragen, die API-Datei und das Beispielprojekt bekommst du über eine <a href="/konto#ziel=support">Support-Anfrage</a>. Fertige Addons reichst du im Konto unter „Meine Addons“ ein – das Team prüft und signiert sie, bevor sie in den <a href="/addons">Addon-Store</a> kommen. <a href="/entwickler/addons#addon-einreichen">So geht's</a>.</p></div>
-    <a class="button" href="/konto#ziel=addons">Addon einreichen</a>
-  </aside>
+      <aside class="support-box">
+        <span class="icon-tile icon-tile--lg">{{icon:chat}}</span>
+        <div><h2>Fragen oder ein Addon für den Store?</h2><p>Fragen, die API-Datei und das Beispielprojekt bekommst du über eine <a href="/konto#reiter=support">Support-Anfrage</a>. Fertige Addons reichst du im Konto unter „Meine Addons“ ein – das Team prüft und signiert sie, bevor sie in den <a href="/addons">Addon-Store</a> kommen. <a href="/entwickler/addons#addon-einreichen">So geht's</a>.</p></div>
+        <a class="btn btn--primary" href="/konto#reiter=addons">{{icon:upload}}Addon einreichen</a>
+      </aside>
+    </div>
+  </section>
 </main>
 
 {{include:footer.html}}

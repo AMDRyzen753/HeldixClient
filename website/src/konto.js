@@ -1,29 +1,36 @@
 // HeldixClient – Webseite: Konto-Bereich (/konto). Anmeldung per Einmal-Link aus Launcher oder Spiel (#code=…) oder
-// mit dem Minecraft-Konto (anmelden.js: Knopf zum Dienst, zurück mit #code=… oder #fehler=<code>),
-// danach Übersicht und Glocke (konto-uebersicht.js), Cape & Cosmetics (konto-cosmetics.js), Freunde, Nachrichten,
-// Support, Meine Addons (konto-addons.js), Privatsphäre, Sicherheit und Meine Daten über die Cookie-Sitzung beim
-// Heldix-Dienst. Rahmen mit Seitenleiste (auch zum Team-Bereich): app-shell.js.
+// mit dem Minecraft-Konto (anmelden.js: Knopf zum Dienst, zurück mit #code=… oder #fehler=<code>), danach:
+//
+//   Übersicht (Dashboard) und Glocke ........ konto-uebersicht.js
+//   Freunde, Profilkarte, Vorschläge ......... konto-freunde.js
+//   Nachrichten (Antworten, Reaktionen …) .... konto-chat.js
+//   Party und Party-Chat ..................... konto-party.js
+//   Freunde einladen ......................... konto-einladungen.js
+//   Profil, Privatsphäre, Benachrichtigungen . konto-einstellungen.js
+//   Cape & Cosmetics, Figur der Übersicht .... konto-cosmetics.js
+//   Meine Welten ............................. konto-welten.js
+//   Meine Addons ............................. konto-addons.js
+//   Support, Blockierte, Meldungen, Sicherheit, Daten: hier
+//
+// Echtzeit über /api/v1/ws mit dem Web-Cookie (konto-live.js); klappt das nicht, fragt die Seite alle 15 Sekunden nach.
+// Rahmen mit Seitenleiste, unterer Leiste (Handy) und Link zum Team-Bereich: app-shell.js.
 // Ein Ziel im Link (#code=…&ziel=support) öffnet nach der Anmeldung den passenden Bereich, ziel=team die Seite /team;
 // ohne Anmeldung genügen #reiter=support (oder ältere Links wie #support und #ziel=support). Weitere Werte in der
-// Adresse: #reiter=nachrichten&mit=<uuid> öffnet den Chat, #reiter=support&anfrage=<id> die Anfrage.
-//
-// Nachfragen (nur solange die Seite sichtbar ist): Freunde und Unterhaltungen alle 10 s, Support alle 15 s, eigene
-// Addons alle 15 s im Reiter „Meine Addons“ und sonst höchstens jede Minute (für Übersicht und Glocke).
+// Adresse: #reiter=nachrichten&mit=<uuid> öffnet den Chat, #reiter=support&anfrage=<id> die Anfrage,
+// #reiter=freunde&teil=einladen (alt) führt zu „Freunde einladen“. Kommt die Anmeldung von einer Einladung (/einladung
+// merkt sich den Code im sessionStorage des Tabs), geht es danach dorthin zurück.
 import {
   $,
   ApiError,
-  activity,
   api,
   avatar,
   bindCounter,
   busy,
   confirmAction,
-  dayLabel,
   emptyState,
   flashSaved,
   formatDate,
   formatDateTime,
-  formatTime,
   h,
   icon,
   isPlayerName,
@@ -32,11 +39,8 @@ import {
   poller,
   reasonLabel,
   relativeTime,
-  REPORT_REASONS,
   rerender,
-  ROLE_LABELS,
   setSkinSource,
-  shortWhen,
   showError,
   textBlocks,
   timeEl,
@@ -45,35 +49,37 @@ import {
 } from './app-common.js';
 import { loginErrorText, minecraftLoginAvailable, setupMinecraftLogin } from './anmelden.js';
 import { createShell, parseShellHash, sectionHref, shellIcon } from './app-shell.js';
+import { markInviteLoginError, pendingInvite, rewardInfo } from './einladung-common.js';
 import { initMyAddons } from './konto-addons.js';
+import { initChat } from './konto-chat.js';
 import { initCosmetics } from './konto-cosmetics.js';
+import { initInvites } from './konto-einladungen.js';
+import { initSettings } from './konto-einstellungen.js';
+import { initFriends } from './konto-freunde.js';
+import { createLive } from './konto-live.js';
+import { initParty } from './konto-party.js';
 import { initOverview } from './konto-uebersicht.js';
+import { initWorlds } from './konto-welten.js';
+import { badgeLabel, roleIcon, roleLabel } from './rollen.js';
 import { attachmentList, normalizeAttachments } from './support-attachments.js';
 
 // Alle Spielerbilder auf dieser Seite: Minecraft-Köpfe über die Cookie-Sitzung (sonst Initialen).
 setSkinSource('auth');
 
-const SETTINGS = [
-  ['visible', 'Für andere erkennbar', 'Andere HeldixClient-Spieler sehen das Heldix-Symbol vor deinem Namen und dein Cape.'],
-  ['presence', 'Online-Status für Freunde', 'Freunde sehen, ob du online bist und ob du im Menü oder im Spiel bist.'],
-  ['showServer', 'Server für Freunde sichtbar', 'Freunde sehen, auf welchem öffentlichen Server du spielst, und können beitreten.'],
-  ['messages', 'Nachrichten von Freunden', 'Freunde können dir Nachrichten schicken.'],
-];
-
-const POLL_MS = 10_000;
-const PAGE_SIZE = 50;
-const MAX_MESSAGE = 500;
-const MAX_NOTE = 300;
-
 const state = {
   me: null,
-  friends: null, // { friends, incoming, outgoing }
-  conversations: null, // [{ uuid, name, last, unread }]
-  chat: null, // { uuid, name, messages, more, loadingOlder }
   sessions: null,
   support: { tickets: null, ticket: null },
   ended: false,
 };
+
+/**
+ * Gemeinsamer Stand aller Bereiche (die Module lesen und schreiben ihn, Änderungen melden sie mit emit()).
+ * friends: { friends, incoming, outgoing, unread } · conversations: [Conversation] · party: { party, invites, chat }
+ * worlds: { available, mine, friends, domain } · invites: Stand aus GET /v1/invites
+ */
+const store = { me: null, friends: null, conversations: null, party: null, worlds: null, invites: null };
+const listeners = new Map();
 
 /** Bereich, wenn die Adresse keinen nennt. */
 const DEFAULT_SECTION = 'uebersicht';
@@ -88,10 +94,16 @@ let shell = null;
 let myAddons = null;
 let overview = null;
 let cosmetics = null;
-const refresher = poller(refreshLive, POLL_MS);
+let invites = null;
+let friends = null;
+let chat = null;
+let party = null;
+let worlds = null;
+let settings = null;
+let live = null;
 const supportRefresher = poller(() => refreshSupport(), 15_000);
-/** Ziele aus dem Einmal-Link (#code=…&ziel=…), siehe Spezifikation 2 §6. */
-const TARGETS = new Set(['uebersicht', 'profil', 'freunde', 'nachrichten', 'privatsphaere', 'sicherheit', 'daten', 'support', 'addons', 'team']);
+/** Ziele aus dem Einmal-Link (#code=…&ziel=…). */
+const TARGETS = new Set(['uebersicht', 'profil', 'freunde', 'nachrichten', 'party', 'einladen', 'welten', 'privatsphaere', 'benachrichtigungen', 'sicherheit', 'daten', 'support', 'addons', 'team']);
 
 // ---------------------------------------------------------------------------------------------------------
 // Anfragen mit Sitzung: 401 heißt abgemeldet (abgelaufen, anderswo beendet oder Daten gelöscht)
@@ -109,13 +121,48 @@ async function call(method, path, body) {
 function sessionEnded(message) {
   if (state.ended) return;
   state.ended = true;
-  refresher.stop();
+  live?.stop();
   supportRefresher.stop();
   myAddons?.stop();
   cosmetics?.stop();
+  invites?.stop();
   overview?.reset();
+  for (const module of [friends, chat, party, worlds]) module?.reset();
+  Object.assign(store, { me: null, friends: null, conversations: null, party: null, worlds: null, invites: null });
   for (const dialog of document.querySelectorAll('dialog.modal')) dialog.remove();
   showGuest(message);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Gemeinsamer Stand und Ereignisse
+// ---------------------------------------------------------------------------------------------------------
+
+function on(name, listener) {
+  if (!listeners.has(name)) listeners.set(name, new Set());
+  listeners.get(name).add(listener);
+}
+
+function emit(name, detail) {
+  for (const listener of listeners.get(name) ?? []) {
+    try {
+      listener(detail);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+}
+
+/** Zähler, Fenstertitel und Übersicht nach jeder Änderung an Freunden, Nachrichten, Party oder Welten. */
+function updateBadges() {
+  const incoming = store.friends?.incoming.length ?? 0;
+  const unread = (store.conversations ?? []).reduce((sum, conversation) => sum + (conversation.unread || 0), 0);
+  shell.setBadge('freunde', incoming, { label: incoming === 1 ? '1 offene Anfrage' : `${incoming} offene Anfragen` });
+  shell.setBadge('nachrichten', unread, { label: `${unread} ungelesen` });
+  document.title = `${unread ? `(${unread}) ` : ''}Konto – HeldixClient`;
+}
+
+function pushOverview() {
+  overview.update({ me: state.me, friends: store.friends, conversations: store.conversations, tickets: state.support.tickets, party: store.party, partyAvailable: party?.available(), worlds: store.worlds, invites: store.invites });
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -124,6 +171,7 @@ function sessionEnded(message) {
 
 function showView(id) {
   for (const view of ['konto-laden', 'konto-fehler', 'konto-gast', 'konto-app']) $(`#${view}`).hidden = view !== id;
+  document.body.classList.toggle('bereich--angemeldet', id === 'konto-app');
   if (id !== 'konto-app') shell.closeAll();
 }
 
@@ -154,11 +202,24 @@ async function start() {
     // Einmal-Code, Ziel und Fehler sofort aus der Adresszeile (und damit aus Verlauf und Lesezeichen) entfernen.
     history.replaceState(null, '', location.pathname + location.search);
   }
+  // Anmeldung kam von einer Einladung (/einladung merkt sich den Code in diesem Tab): danach dorthin zurück
+  const invite = code !== null || params.has('fehler') ? pendingInvite() : null;
   // Zurück von der Anmeldung mit dem Minecraft-Konto, aber nicht geklappt: Text zum Code (nie der Code selbst)
-  if (params.has('fehler')) notice = loginErrorText(params.get('fehler'));
+  if (params.has('fehler')) {
+    if (invite) {
+      markInviteLoginError(params.get('fehler'));
+      location.replace(`/einladung#${invite.code}`);
+      return;
+    }
+    notice = loginErrorText(params.get('fehler'));
+  }
   if (code !== null) {
     try {
       const me = await api('POST', '/v1/web/session', { code });
+      if (invite?.accept) {
+        location.replace(`/einladung#${invite.code}`);
+        return;
+      }
       if (target === 'team') {
         location.replace('/team');
         return;
@@ -168,6 +229,11 @@ async function start() {
       return;
     } catch (error) {
       if (error.status === 0 || error.status >= 500) return showUnavailable(error);
+      if (invite) {
+        markInviteLoginError('abgelaufen');
+        location.replace(`/einladung#${invite.code}`);
+        return;
+      }
       notice = error.message;
     }
   }
@@ -183,49 +249,67 @@ async function start() {
     if (error.status === 401) {
       const hint = target === 'support' ? 'Für eine Support-Anfrage meldest du dich zuerst an – ohne Passwort, über den Launcher oder im Spiel (siehe unten). Danach öffnet sich der Bereich Support.' : target ? 'Melde dich zuerst an – ohne Passwort, über den Launcher oder im Spiel (siehe unten).' : null;
       showGuest(notice ?? hint, target);
-    }
-    else showUnavailable(error);
+    } else showUnavailable(error);
   }
 }
 
 function showApp(me, target = null) {
   state.me = me;
+  store.me = me;
   state.ended = false;
   state.sessions = null;
   renderHeader();
-  renderSettings();
+  settings.render();
   overview.setUser(me);
   cosmetics.setUser(me);
+  invites.setUser(me);
   renderTwoFactor();
   showView('konto-app');
   const address = parseShellHash();
-  const wanted = target ?? address.section;
-  shell.select(shell.has(wanted) ? wanted : DEFAULT_SECTION, { params: target ? null : address.extra });
-  refreshFriends().catch(showError);
-  refreshConversations().catch(() => {});
+  let wanted = target ?? address.section;
+  let extra = target ? null : address.extra;
+  // Alter Link: Freunde → „Freunde einladen“ ist jetzt ein eigener Bereich
+  if (wanted === 'freunde' && extra?.teil === 'einladen') {
+    wanted = 'einladen';
+    extra = null;
+  }
+  shell.select(shell.has(wanted) ? wanted : DEFAULT_SECTION, { params: extra });
+  friends.refresh().catch(showError);
+  chat.refreshConversations().catch(() => {});
+  party.refresh().catch(() => {});
+  worlds.refresh().catch(() => {});
   if (wanted !== 'support') refreshSupportList().catch(() => {});
   if (wanted !== 'addons') myAddons.refreshInBackground().catch(() => {});
   if (wanted !== 'sicherheit') loadSessions().catch(() => {});
-  refresher.start();
+  live.start();
   supportRefresher.start();
 }
 
-/** Kopfzeile und Seitenleiste: eigener Spieler, Rolle (Team-Gruppe nur mit Rolle), Ablauf der Sitzung. */
+/** Seitenleiste: eigener Spieler, Status bzw. Abzeichen, Rolle (Team nur mit Rolle), Ablauf der Sitzung. */
 function renderHeader() {
   const { me } = state;
   shell.setUser(me);
-  shell.setMeta(['Angemeldet beim Heldix-Dienst', me.expiresAt ? `Sitzung gültig bis spätestens ${formatDate(me.expiresAt)}` : null]);
+  renderSideStatus();
+  shell.setMeta([me.role ? h('span', { class: 'rolle-name' }, roleIcon(me.role), roleLabel(me.role)) : null, me.badge && !me.role ? `Abzeichen: ${badgeLabel(me.badge)}` : null, 'Angemeldet beim Heldix-Dienst', me.expiresAt ? `Sitzung gültig bis spätestens ${formatDate(me.expiresAt)}` : null]);
+}
+
+/** Zeile unter dem Namen: „Nicht stören“, Statustext oder Verbindung (Echtzeit). */
+function renderSideStatus() {
+  const me = state.me;
+  if (!me) return;
+  if (me.dnd) shell.setStatus([shellIcon('moon'), 'Nicht stören'], 'dnd');
+  else if (me.statusText) shell.setStatus(`„${me.statusText}“`);
+  else if (live?.status() === 'live') shell.setStatus('Live verbunden', 'online');
+  else shell.setStatus(me.role ? roleLabel(me.role) : 'Angemeldet');
 }
 
 /** Bereich gewechselt. params: weitere Werte aus der Adresse oder einem Eintrag der Glocke (mit, anfrage). */
 function onTab(name, { params = null } = {}) {
-  if (name === 'freunde') refreshFriends().catch(showError);
-  if (name === 'nachrichten') {
-    const uuid = typeof params?.mit === 'string' && /^[0-9a-f]{32}$/.test(params.mit) ? params.mit : null;
-    if (uuid && state.chat?.uuid !== uuid) openChat(uuid);
-    else if (state.chat) markRead(state.chat.uuid);
-    refreshConversations().catch(showError);
-  }
+  friends.onTab(name);
+  chat.onTab(name, params);
+  party.onTab(name);
+  worlds.onTab(name);
+  invites.onTab(name, params);
   if (name === 'privatsphaere') {
     loadBlocks().catch(showError);
     loadReports().catch(showError);
@@ -249,20 +333,55 @@ async function refreshMe() {
   const me = await call('GET', '/v1/web/me');
   if (state.ended || !me) return;
   const roleChanged = me.role !== state.me.role;
-  state.me = { ...state.me, ...me };
+  applyMe(me);
   if (roleChanged) renderHeader();
   renderTwoFactor();
-  overview.update({ me: state.me });
 }
 
-/** Alle 10 Sekunden (solange sichtbar): Freunde, Unterhaltungen und der offene Chat. */
-async function refreshLive() {
+/** Abgleich per HTTP (Rückfall ohne WebSocket alle 15 s, sonst jede Minute und nach dem Verbinden). */
+async function pollAll() {
   if (state.ended) return;
-  await Promise.all([refreshFriends(), refreshConversations(), shell.current() === 'nachrichten' && state.chat ? refreshChat() : null]);
+  await Promise.all([friends.refresh(), chat.refreshConversations(), shell.current() === 'nachrichten' ? chat.refreshChat() : null, party.refresh()]);
+}
+
+/** Nachricht über den WebSocket an das passende Modul. */
+function onLiveEvent(message) {
+  if (state.ended) return;
+  if (friends.handleEvent(message) || chat.handleEvent(message) || party.handleEvent(message) || worlds.handleEvent(message)) return;
+  switch (message.type) {
+    case 'support':
+      toast(`Das Team hat geantwortet: ${message.subject ?? 'Support-Anfrage'}`);
+      refreshSupport().catch(() => {});
+      break;
+    case 'addon-review':
+      myAddons.refreshInBackground().catch(() => {});
+      break;
+    case 'unlock':
+      toast(`Freigeschaltet: ${rewardInfo(message.cosmetic).name}! Du findest es unter Profil & Cosmetics.`, 'success');
+      cosmetics.setUser(state.me);
+      invites.setUser(state.me);
+      break;
+    case 'invite':
+      if (message.name) toast(message.event === 'confirmed' ? `${message.name} ist bestätigt – das zählt für deine Belohnungen.` : `${message.name} hat deine Einladung angenommen.`, 'success');
+      invites.setUser(state.me);
+      break;
+    default:
+      break;
+  }
+}
+
+function onLiveState(status) {
+  const chip = $('#freunde-live');
+  if (chip) {
+    chip.hidden = status !== 'live';
+    chip.title = 'Freunde, Nachrichten und Party kommen sofort an.';
+  }
+  document.body.dataset.echtzeit = status;
+  renderSideStatus();
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// Profil: Einstellungen (Cape und Cosmetics: konto-cosmetics.js)
+// Profil speichern (Einstellungen, Statustext, „Nicht stören“, Cape)
 // ---------------------------------------------------------------------------------------------------------
 
 // Änderungen nacheinander speichern, damit schnelle Klicks in der richtigen Reihenfolge ankommen.
@@ -274,630 +393,37 @@ function enqueue(task) {
   return saving;
 }
 
-/** Profil geändert (z. B. Cape): Hinweise, Übersicht. */
+/** Profil geändert (z. B. Cape, Statustext): alle Ansichten. */
 function applyMe(patch) {
   state.me = { ...state.me, ...patch };
-  updateProfileHints();
-  overview.update({ me: state.me });
-}
-
-async function saveSettings(patch, savedElement, savedText) {
-  try {
-    const me = await call('PUT', '/v1/me', patch);
-    applyMe(me ?? {});
-    flashSaved(savedElement, savedText);
-    return true;
-  } catch (error) {
-    showError(error);
-    // Den Stand des Dienstes zeigen, also den alten Wert.
-    if (!state.ended) {
-      cosmetics.render();
-      renderSettings();
-    }
-    return false;
-  }
-}
-
-function renderSettings() {
-  rerender($('#einstellungen'), undefined, () =>
-    SETTINGS.map(([key, label, description]) => {
-      const descriptionId = `einstellung-${key}`;
-      const input = h('input', { type: 'checkbox', class: 'switch', role: 'switch', name: key, 'aria-describedby': descriptionId, dataset: { focusKey: `setting:${key}` } });
-      input.checked = state.me[key] !== false;
-      return h('label', { class: 'switch-row' }, h('span', { class: 'switch-text' }, h('strong', { text: label }), h('small', { id: descriptionId, text: description })), input);
-    }),
-  );
-  updateProfileHints();
-}
-
-/** Hinweise, die von mehreren Einstellungen abhängen. */
-function updateProfileHints() {
-  $('#cape-unsichtbar').hidden = state.me.visible !== false || !(state.me.cape || cosmetics?.wearsSomething());
-  const serverRow = $('#einstellungen [name="showServer"]')?.closest('.switch-row');
-  if (serverRow) serverRow.classList.toggle('dim', state.me.presence === false);
-}
-
-function onSettingChange(event) {
-  const input = event.target;
-  if (!input.classList.contains('switch')) return;
-  const patch = { [input.name]: input.checked };
-  enqueue(() => saveSettings(patch, $('#einstellungen-gespeichert')));
-}
-
-// ---------------------------------------------------------------------------------------------------------
-// Freunde
-// ---------------------------------------------------------------------------------------------------------
-
-async function refreshFriends() {
-  const data = await call('GET', '/v1/friends');
-  state.friends = {
-    friends: Array.isArray(data?.friends) ? data.friends : [],
-    incoming: Array.isArray(data?.incoming) ? data.incoming : [],
-    outgoing: Array.isArray(data?.outgoing) ? data.outgoing : [],
-  };
-  renderFriends();
-  renderConversations();
-  updateBadges();
-}
-
-/** Stand für Übersicht und Glocke. */
-function pushOverview() {
-  overview.update({ me: state.me, friends: state.friends, conversations: state.conversations, tickets: state.support.tickets });
-}
-
-function friendByUuid(uuid) {
-  return state.friends?.friends.find((friend) => friend.uuid === uuid) ?? null;
-}
-
-function renderFriends() {
-  const { friends, incoming, outgoing } = state.friends;
-  $('#anfragen-karte').hidden = !incoming.length && !outgoing.length;
-  rerender($('#anfragen'), JSON.stringify([incoming, outgoing]), () => {
-    const parts = [];
-    if (incoming.length) {
-      parts.push(h('h3', { class: 'list-title', text: `An dich (${incoming.length})` }));
-      parts.push(
-        h(
-          'ul',
-          { class: 'rows' },
-          incoming.map((request) =>
-            h(
-              'li',
-              { class: 'row' },
-              avatar(request.name, request.uuid),
-              h('div', { class: 'row-main' }, h('div', { class: 'row-title', text: request.name }), h('div', { class: 'row-sub', text: `möchte mit dir befreundet sein · ${relativeTime(request.at)}` })),
-              h(
-                'div',
-                { class: 'row-actions' },
-                h('button', { type: 'button', class: 'button tiny', dataset: { focusKey: `${request.uuid}:accept` }, onClick: (event) => acceptRequest(event.currentTarget, request) }, icon('check'), 'Annehmen'),
-                h('button', { type: 'button', class: 'button tiny ghost', dataset: { focusKey: `${request.uuid}:decline` }, onClick: (event) => removeRequest(event.currentTarget, request, 'abgelehnt') }, 'Ablehnen'),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    if (outgoing.length) {
-      parts.push(h('h3', { class: 'list-title', text: `Von dir (${outgoing.length})` }));
-      parts.push(
-        h(
-          'ul',
-          { class: 'rows' },
-          outgoing.map((request) =>
-            h(
-              'li',
-              { class: 'row' },
-              avatar(request.name, request.uuid),
-              h('div', { class: 'row-main' }, h('div', { class: 'row-title', text: request.name }), h('div', { class: 'row-sub', text: `Anfrage gesendet ${relativeTime(request.at)}` })),
-              h(
-                'div',
-                { class: 'row-actions' },
-                h('button', { type: 'button', class: 'button tiny ghost', dataset: { focusKey: `${request.uuid}:withdraw` }, onClick: (event) => removeRequest(event.currentTarget, request, 'zurückgezogen') }, 'Zurückziehen'),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    return parts;
-  });
-
-  $('#freunde-anzahl').textContent = friends.length ? `(${friends.length})` : '';
-  const sorted = [...friends].sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }));
-  rerender($('#freunde'), JSON.stringify(sorted), () => {
-    if (!sorted.length) return emptyState('Noch keine Freunde. Schick oben eine Anfrage mit dem Spielernamen.', 'friends');
-    return h(
-      'ul',
-      { class: 'rows' },
-      sorted.map((friend) =>
-        h(
-          'li',
-          { class: 'row' },
-          avatar(friend.name, friend.uuid, { online: Boolean(friend.online) }),
-          h(
-            'div',
-            { class: 'row-main' },
-            h('div', { class: 'row-title', text: friend.name }),
-            h('div', { class: `row-sub${friend.online ? ' online' : ''}`, text: activity(friend) }),
-            friend.since ? h('div', { class: 'row-meta', text: `Freunde seit ${formatDate(friend.since)}` }) : null,
-          ),
-          h(
-            'div',
-            { class: 'row-actions' },
-            h('button', { type: 'button', class: 'button tiny ghost', dataset: { focusKey: `${friend.uuid}:chat` }, onClick: () => openChatFromFriends(friend.uuid) }, icon('chat'), 'Nachricht'),
-            h(
-              'button',
-              { type: 'button', class: 'button tiny ghost quiet-danger', 'aria-label': `${friend.name} entfernen`, dataset: { focusKey: `${friend.uuid}:remove` }, onClick: () => removeFriend(friend) },
-              icon('trash'),
-              h('span', { class: 'label', text: 'Entfernen' }),
-            ),
-          ),
-        ),
-      ),
-    );
-  });
-}
-
-async function onFriendSubmit(event) {
-  event.preventDefault();
-  const input = $('#freund-name');
-  const error = $('#freund-fehler');
-  const name = input.value.trim();
-  error.hidden = true;
-  if (!isPlayerName(name)) {
-    error.textContent = 'Ein Spielername hat 1 bis 16 Zeichen: Buchstaben, Ziffern und _.';
-    error.hidden = false;
-    input.focus();
-    return;
-  }
-  const button = event.currentTarget.querySelector('button[type="submit"]');
-  try {
-    const data = await busy(button, () => call('POST', '/v1/friends/requests', { name }));
-    state.friends = { friends: data.friends ?? [], incoming: data.incoming ?? [], outgoing: data.outgoing ?? [] };
-    renderFriends();
-    updateBadges();
-    input.value = '';
-    const friend = state.friends.friends.find((entry) => entry.name.toLowerCase() === name.toLowerCase());
-    toast(friend ? `Ihr seid jetzt Freunde: ${friend.name} hatte dir schon eine Anfrage geschickt.` : `Anfrage an ${name} gesendet.`, 'success');
-  } catch (problem) {
-    if (problem.status === 401) return;
-    error.textContent = problem.message;
-    error.hidden = false;
-    input.focus();
-  }
-}
-
-async function acceptRequest(button, request) {
-  try {
-    const data = await busy(button, () => call('POST', `/v1/friends/requests/${request.uuid}/accept`));
-    applyFriends(data);
-    toast(`Du bist jetzt mit ${request.name} befreundet.`, 'success');
-  } catch (error) {
-    showError(error);
-  }
-}
-
-async function removeRequest(button, request, verb) {
-  try {
-    const data = await busy(button, () => call('DELETE', `/v1/friends/requests/${request.uuid}`));
-    applyFriends(data);
-    toast(`Anfrage ${verb === 'abgelehnt' ? 'von' : 'an'} ${request.name} ${verb}.`);
-  } catch (error) {
-    showError(error);
-  }
-}
-
-async function removeFriend(friend) {
-  const ok = await confirmAction({
-    title: `${friend.name} entfernen?`,
-    text: `Ihr seht euch nicht mehr in der Freundesliste, und eure Nachrichten werden gelöscht. ${friend.name} erfährt es nicht ausdrücklich, sieht dich aber nicht mehr als Freund.`,
-    confirmLabel: 'Entfernen',
-    danger: true,
-    onConfirm: async () => applyFriends(await call('DELETE', `/v1/friends/${friend.uuid}`)),
-  });
-  if (!ok) return;
-  if (state.chat?.uuid === friend.uuid) closeChat();
-  refreshConversations().catch(() => {});
-  toast(`${friend.name} ist nicht mehr in deiner Freundesliste.`);
-}
-
-function applyFriends(data) {
-  if (!data) return;
-  state.friends = { friends: data.friends ?? [], incoming: data.incoming ?? [], outgoing: data.outgoing ?? [] };
-  renderFriends();
-  renderConversations();
-  updateBadges();
-}
-
-function updateBadges() {
-  const incoming = state.friends?.incoming.length ?? 0;
-  const unread = (state.conversations ?? []).reduce((sum, conversation) => sum + (conversation.unread || 0), 0);
-  shell.setBadge('freunde', incoming, { label: incoming === 1 ? '1 offene Anfrage' : `${incoming} offene Anfragen` });
-  shell.setBadge('nachrichten', unread, { label: `${unread} ungelesen` });
-  document.title = `${unread ? `(${unread}) ` : ''}Konto – HeldixClient`;
+  store.me = state.me;
+  renderSideStatus();
+  emit('me');
   pushOverview();
 }
 
-// ---------------------------------------------------------------------------------------------------------
-// Nachrichten
-// ---------------------------------------------------------------------------------------------------------
-
-async function refreshConversations() {
-  const data = await call('GET', '/v1/messages');
-  state.conversations = Array.isArray(data?.conversations) ? data.conversations : [];
-  // Offener Chat: neue Nachrichten gelten als gelesen, sobald man hinsieht.
-  if (state.chat && shell.current() === 'nachrichten' && document.visibilityState === 'visible') {
-    const open = state.conversations.find((conversation) => conversation.uuid === state.chat.uuid);
-    if (open && open.unread) markRead(open.uuid);
-  }
-  renderConversations();
-  updateBadges();
-}
-
-function renderConversations() {
-  const list = $('#unterhaltungen');
-  if (!state.conversations || !state.friends) {
-    if (!list.firstChild) list.replaceChildren(loadingState());
-    return;
-  }
-  const conversations = state.conversations;
-  const withChat = new Set(conversations.map((conversation) => conversation.uuid));
-  const others = state.friends.friends.filter((friend) => !withChat.has(friend.uuid)).sort((a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }));
-  const openUuid = state.chat?.uuid ?? '';
-  const signature = JSON.stringify([conversations, others.map((friend) => [friend.uuid, friend.name, friend.online]), openUuid]);
-  rerender(list, signature, () => {
-    if (!conversations.length && !others.length) {
-      return emptyState('Noch keine Freunde – Nachrichten gehen nur an Freunde.', 'chat');
+/** PUT /v1/me mit Teil des Profils (ohne Warteschlange); true bei Erfolg. options.onError(problem): eigener Hinweis. */
+async function putMe(patch, savedElement, savedText, { onError } = {}) {
+    try {
+      const me = await call('PUT', '/v1/me', patch);
+      applyMe(me ?? patch);
+      flashSaved(savedElement, savedText);
+      return true;
+    } catch (error) {
+      if (onError && error.status !== 401) onError(error);
+      else showError(error);
+      // Den Stand des Dienstes zeigen, also den alten Wert.
+      if (!state.ended) {
+        cosmetics.render();
+        settings.render();
+      }
+      return false;
     }
-    const parts = [];
-    if (conversations.length) {
-      parts.push(
-        h(
-          'ul',
-          { class: 'conv-items', 'aria-label': 'Unterhaltungen' },
-          conversations.map((conversation) => {
-            const friend = friendByUuid(conversation.uuid);
-            const mine = conversation.last && conversation.last.from === state.me.uuid;
-            const preview = conversation.last ? `${mine ? 'Du: ' : ''}${conversation.last.text}` : '';
-            return h(
-              'li',
-              null,
-              h(
-                'button',
-                {
-                  type: 'button',
-                  class: `conv${conversation.unread ? ' unread' : ''}`,
-                  'aria-current': conversation.uuid === openUuid ? 'true' : undefined,
-                  dataset: { focusKey: `conv:${conversation.uuid}` },
-                  onClick: () => openChat(conversation.uuid),
-                },
-                avatar(conversation.name, conversation.uuid, { online: friend ? Boolean(friend.online) : null }),
-                h(
-                  'span',
-                  { class: 'conv-main' },
-                  h('span', { class: 'conv-top' }, h('span', { class: 'conv-name', text: conversation.name }), h('span', { class: 'conv-time', text: shortWhen(conversation.last?.at) })),
-                  h(
-                    'span',
-                    { class: 'conv-bottom' },
-                    h('span', { class: 'conv-preview', text: preview }),
-                    conversation.unread ? h('span', { class: 'unread-badge', text: String(conversation.unread), 'aria-label': `${conversation.unread} ungelesen` }) : null,
-                  ),
-                ),
-              ),
-            );
-          }),
-        ),
-      );
-    }
-    if (others.length) {
-      parts.push(h('p', { class: 'conv-section', text: conversations.length ? 'Weitere Freunde' : 'Freunde' }));
-      parts.push(
-        h(
-          'ul',
-          { class: 'conv-items', 'aria-label': 'Weitere Freunde' },
-          others.map((friend) =>
-            h(
-              'li',
-              null,
-              h(
-                'button',
-                { type: 'button', class: 'conv', 'aria-current': friend.uuid === openUuid ? 'true' : undefined, dataset: { focusKey: `conv:${friend.uuid}` }, onClick: () => openChat(friend.uuid) },
-                avatar(friend.name, friend.uuid, { online: Boolean(friend.online) }),
-                h('span', { class: 'conv-main' }, h('span', { class: 'conv-top' }, h('span', { class: 'conv-name', text: friend.name })), h('span', { class: 'conv-bottom' }, h('span', { class: 'conv-preview muted', text: 'Unterhaltung beginnen' }))),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    return parts;
-  });
-  if (state.chat) renderChatHead();
 }
 
-function openChatFromFriends(uuid) {
-  shell.select('nachrichten');
-  openChat(uuid);
-}
-
-async function openChat(uuid) {
-  const friend = friendByUuid(uuid);
-  const conversation = state.conversations?.find((entry) => entry.uuid === uuid);
-  const name = friend?.name ?? conversation?.name ?? 'Freund';
-  state.chat = { uuid, name, messages: [], more: false, loadingOlder: false, loaded: false };
-  $('#chat').classList.add('chat-open');
-  $('#chat-leer').hidden = true;
-  $('#chat-aktiv').hidden = false;
-  $('#chat-fehler').hidden = true;
-  renderChatHead();
-  renderConversations();
-  $('#chat-verlauf').replaceChildren(loadingState('Nachrichten werden geladen …'));
-  // Auf dem Handy nicht gleich die Tastatur öffnen (sie würde den Verlauf verdecken).
-  if (window.matchMedia('(min-width: 761px)').matches) {
-    $('#chat-text').focus();
-  } else {
-    $('#chat-verlauf').focus({ preventScroll: true });
-    $('#chat').scrollIntoView({ block: 'start' });
-  }
-  try {
-    const data = await call('GET', `/v1/messages/${uuid}?limit=${PAGE_SIZE}`);
-    if (state.chat?.uuid !== uuid) return;
-    state.chat.messages = Array.isArray(data?.messages) ? data.messages : [];
-    state.chat.more = Boolean(data?.more);
-    state.chat.loaded = true;
-    renderMessages('bottom');
-    markRead(uuid);
-  } catch (error) {
-    if (state.chat?.uuid !== uuid) return;
-    if (error.status === 404) {
-      closeChat();
-      toast(error.message, 'error');
-      refreshFriends().catch(() => {});
-      return;
-    }
-    $('#chat-verlauf').replaceChildren(emptyState(error.message, 'warning'));
-  }
-}
-
-function closeChat() {
-  state.chat = null;
-  $('#chat').classList.remove('chat-open');
-  $('#chat-leer').hidden = false;
-  $('#chat-aktiv').hidden = true;
-  renderConversations();
-}
-
-function renderChatHead() {
-  const { chat } = state;
-  if (!chat) return;
-  const friend = friendByUuid(chat.uuid);
-  $('#chat-avatar').replaceChildren(avatar(chat.name, chat.uuid, { online: friend ? Boolean(friend.online) : null }));
-  $('#chat-name').textContent = chat.name;
-  const status = $('#chat-status');
-  status.textContent = friend ? activity(friend) : '';
-  status.classList.toggle('online', Boolean(friend?.online));
-}
-
-function messageNode(message, showTime) {
-  const mine = message.from === state.me.uuid;
-  return h(
-    'div',
-    { class: `msg ${mine ? 'mine' : 'theirs'}${showTime ? '' : ' grouped'}`, dataset: { id: String(message.id) } },
-    h('span', { class: 'visually-hidden', text: mine ? 'Du: ' : `${state.chat.name}: ` }),
-    h('div', { class: 'bubble', text: message.text }),
-    showTime ? timeEl(message.at, formatTime(message.at)) : null,
-  );
-}
-
-function renderMessages(scroll) {
-  const box = $('#chat-verlauf');
-  const { chat } = state;
-  const previousHeight = box.scrollHeight;
-  const previousTop = box.scrollTop;
-  const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
-  const nodes = [];
-  if (chat.more) {
-    nodes.push(
-      h(
-        'div',
-        { class: 'older' },
-        h('button', { type: 'button', class: 'button tiny ghost', id: 'chat-aeltere', disabled: chat.loadingOlder || undefined, onClick: loadOlder }, chat.loadingOlder ? 'Wird geladen …' : 'Ältere Nachrichten laden'),
-      ),
-    );
-  }
-  if (!chat.messages.length) {
-    nodes.push(h('div', { class: 'chat-start' }, h('p', { text: `Noch keine Nachrichten mit ${chat.name}. Schreib die erste!` })));
-  }
-  let lastDay = null;
-  chat.messages.forEach((message, index) => {
-    const day = dayLabel(message.at);
-    if (day !== lastDay) {
-      nodes.push(h('div', { class: 'day-sep', role: 'separator', text: day }));
-      lastDay = day;
-    }
-    const next = chat.messages[index + 1];
-    const showTime = !next || next.from !== message.from || next.at - message.at > 5 * 60 * 1000 || dayLabel(next.at) !== day;
-    nodes.push(messageNode(message, showTime));
-  });
-  box.replaceChildren(...nodes);
-  if (scroll === 'bottom' || (scroll === 'auto' && nearBottom)) box.scrollTop = box.scrollHeight;
-  else if (scroll === 'keep-older') box.scrollTop = box.scrollHeight - previousHeight + previousTop;
-  else box.scrollTop = previousTop;
-}
-
-async function loadOlder() {
-  const { chat } = state;
-  if (!chat || chat.loadingOlder || !chat.messages.length) return;
-  const uuid = chat.uuid;
-  chat.loadingOlder = true;
-  renderMessages('keep');
-  try {
-    const data = await call('GET', `/v1/messages/${uuid}?before=${chat.messages[0].id}&limit=${PAGE_SIZE}`);
-    if (state.chat?.uuid !== uuid) return;
-    const known = new Set(chat.messages.map((message) => message.id));
-    chat.messages = [...(data.messages ?? []).filter((message) => !known.has(message.id)), ...chat.messages];
-    chat.more = Boolean(data.more);
-  } catch (error) {
-    showError(error);
-  } finally {
-    if (state.chat?.uuid === uuid) {
-      chat.loadingOlder = false;
-      renderMessages('keep-older');
-      const older = $('#chat-aeltere');
-      if (older) older.focus();
-      else $('#chat-verlauf').focus();
-    }
-  }
-}
-
-/** Beim Nachfragen nur neue Nachrichten anhängen (die neueste Seite holen und abgleichen). */
-async function refreshChat() {
-  const { chat } = state;
-  if (!chat || !chat.loaded) return;
-  const uuid = chat.uuid;
-  let data;
-  try {
-    data = await call('GET', `/v1/messages/${uuid}?limit=${PAGE_SIZE}`);
-  } catch (error) {
-    if (error.status === 404 && state.chat?.uuid === uuid) {
-      closeChat();
-      toast(error.message, 'error');
-    }
-    return;
-  }
-  if (state.chat?.uuid !== uuid) return;
-  const latest = Array.isArray(data?.messages) ? data.messages : [];
-  const lastId = chat.messages.length ? chat.messages[chat.messages.length - 1].id : 0;
-  const fresh = latest.filter((message) => message.id > lastId);
-  // Nachrichten, die es nicht mehr gibt (z. B. nach 30 Tagen gelöscht), aus der Ansicht nehmen.
-  const oldestLatest = latest.length ? latest[0].id : Infinity;
-  const stillThere = new Set(latest.map((message) => message.id));
-  const kept = chat.messages.filter((message) => message.id < oldestLatest || stillThere.has(message.id));
-  if (!fresh.length && kept.length === chat.messages.length) return;
-  chat.messages = [...kept, ...fresh];
-  if (!chat.messages.length) chat.more = Boolean(data.more);
-  renderMessages('auto');
-}
-
-const readPending = new Set();
-async function markRead(uuid) {
-  const conversation = state.conversations?.find((entry) => entry.uuid === uuid);
-  if (!conversation || !conversation.unread || readPending.has(uuid)) return;
-  readPending.add(uuid);
-  try {
-    await call('POST', `/v1/messages/${uuid}/read`);
-    conversation.unread = 0;
-    // Inzwischen neu geladen (älterer Stand vom Dienst): auch dort als gelesen führen.
-    for (const entry of state.conversations ?? []) if (entry.uuid === uuid) entry.unread = 0;
-    renderConversations();
-    updateBadges();
-  } catch {
-    // Beim nächsten Nachfragen erneut.
-  } finally {
-    readPending.delete(uuid);
-  }
-}
-
-async function onSend(event) {
-  event.preventDefault();
-  const { chat } = state;
-  if (!chat) return;
-  const input = $('#chat-text');
-  const error = $('#chat-fehler');
-  const text = input.value.replace(/[\r\n]+/g, ' ').trim();
-  error.hidden = true;
-  if (!text) return;
-  if ([...text].length > MAX_MESSAGE) {
-    error.textContent = `Die Nachricht ist zu lang (höchstens ${MAX_MESSAGE} Zeichen).`;
-    error.hidden = false;
-    return;
-  }
-  const uuid = chat.uuid;
-  const button = $('#chat-senden');
-  input.readOnly = true;
-  try {
-    const data = await busy(button, () => call('POST', `/v1/messages/${uuid}`, { text }));
-    if (state.chat?.uuid === uuid && data?.message && !chat.messages.some((message) => message.id === data.message.id)) {
-      chat.messages.push(data.message);
-      renderMessages('bottom');
-    }
-    input.value = '';
-    input.dispatchEvent(new Event('input'));
-    refreshConversations().catch(() => {});
-  } catch (problem) {
-    if (problem.status !== 401) {
-      error.textContent = problem.message;
-      error.hidden = false;
-    }
-  } finally {
-    input.readOnly = false;
-    input.focus();
-  }
-}
-
-async function reportPlayer() {
-  const { chat } = state;
-  if (!chat) return;
-  const name = chat.name;
-  const uuid = chat.uuid;
-  const groupName = uid('grund');
-  const noteId = uid('notiz');
-  const counter = h('span', { class: 'counter', text: `0/${MAX_NOTE}` });
-  const note = h('input', { class: 'input', id: noteId, maxlength: String(MAX_NOTE), autocomplete: 'off', placeholder: 'Was ist passiert?' });
-  note.addEventListener('input', () => {
-    counter.textContent = `${[...note.value].length}/${MAX_NOTE}`;
-  });
-  const reasons = h(
-    'fieldset',
-    { class: 'choices' },
-    h('legend', { text: 'Grund' }),
-    REPORT_REASONS.map(([id, label]) => h('label', { class: 'choice' }, h('input', { type: 'radio', name: groupName, value: id }), h('span', { text: label }))),
-  );
-  const ok = await openDialog({
-    title: `${name} melden`,
-    body: [
-      h('p', { text: `Melde ${name}, wenn er dich belästigt, spammt oder gegen die Regeln verstößt.` }),
-      reasons,
-      h('div', { class: 'field' }, h('span', { class: 'field-row' }, h('label', { for: noteId, text: 'Hinweis (freiwillig)' }), counter), note),
-      h(
-        'p',
-        { class: 'info-box small' },
-        icon('info'),
-        h('span', { text: `Mit der Meldung gehen die letzten 20 Nachrichten eures Chats an den Betreiber des Heldix-Dienstes und sein Team, damit sie den Fall prüfen können. ${name} erfährt nicht, wer ihn gemeldet hat.` }),
-      ),
-    ],
-    confirmLabel: 'Meldung senden',
-    canConfirm: () => Boolean(reasons.querySelector('input:checked')),
-    focus: 'input[type="radio"]',
-    onConfirm: async () => {
-      const reason = reasons.querySelector('input:checked')?.value;
-      const text = note.value.replace(/[\r\n]+/g, ' ').trim();
-      await call('POST', '/v1/reports', { uuid, reason, ...(text ? { note: text } : {}) });
-    },
-  });
-  if (ok) toast(`Danke! Deine Meldung zu ${name} ist beim Team. Du kannst ${name} zusätzlich blockieren.`, 'success');
-}
-
-async function blockPlayer(target) {
-  const friend = friendByUuid(target.uuid);
-  const ok = await confirmAction({
-    title: `${target.name} blockieren?`,
-    text: [
-      friend
-        ? `Eure Freundschaft endet, eure Nachrichten werden gelöscht, und ${target.name} kann dir keine Anfragen mehr schicken.`
-        : `${target.name} kann dir keine Anfragen mehr schicken.`,
-      `${target.name} erfährt nicht, dass du blockiert hast. Freigeben kannst du später unter Privatsphäre.`,
-    ],
-    confirmLabel: 'Blockieren',
-    danger: true,
-    onConfirm: () => call('POST', '/v1/blocks', target.uuid ? { uuid: target.uuid } : { name: target.name }),
-  });
-  if (!ok) return false;
-  if (state.chat && state.chat.uuid === target.uuid) closeChat();
-  toast(`${target.name} ist blockiert.`, 'success');
-  refreshFriends().catch(() => {});
-  refreshConversations().catch(() => {});
-  return true;
+/** Wie putMe, aber in der Reihe der Speichervorgänge (Schalter, Statustext). */
+function saveMe(patch, savedElement, savedText, options) {
+  return enqueue(() => putMe(patch, savedElement, savedText, options));
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -1192,7 +718,7 @@ function renderBlocks(blocked) {
           h(
             'div',
             { class: 'row-actions' },
-            h('button', { type: 'button', class: 'button tiny ghost', dataset: { focusKey: `${entry.uuid}:unblock` }, onClick: (event) => unblock(event.currentTarget, entry) }, 'Freigeben'),
+            h('button', { type: 'button', class: 'btn btn--secondary btn--sm', dataset: { focusKey: `${entry.uuid}:unblock` }, onClick: (event) => unblock(event.currentTarget, entry) }, 'Freigeben'),
           ),
         ),
       ),
@@ -1223,9 +749,9 @@ async function onBlockSubmit(event) {
     input.focus();
     return;
   }
-  const friend = state.friends?.friends.find((entry) => entry.name.toLowerCase() === name.toLowerCase());
+  const friend = store.friends?.friends.find((entry) => entry.name.toLowerCase() === name.toLowerCase());
   try {
-    const blocked = await blockPlayer(friend ? { uuid: friend.uuid, name: friend.name } : { name });
+    const blocked = await friends.blockPlayer(friend ? { uuid: friend.uuid, name: friend.name } : { name });
     if (!blocked) return;
     input.value = '';
     await loadBlocks();
@@ -1440,7 +966,7 @@ function renderTwoFactor() {
   const status = $('#zweifaktor-status');
   status.className = `chip ${twoFactor.enabled ? 'success' : 'warning'}`;
   status.textContent = twoFactor.enabled ? 'Eingerichtet' : 'Nicht eingerichtet';
-  const role = ROLE_LABELS[me.role] ?? me.role;
+  const role = roleLabel(me.role);
   const check = (ok, text) => h('li', { class: ok ? 'ok' : 'todo' }, icon(ok ? 'check' : 'warning'), h('span', { text }));
   $('#zweifaktor-liste').replaceChildren(
     check(true, `Du bist im Team als ${role}.`),
@@ -1451,18 +977,23 @@ function renderTwoFactor() {
   if (!twoFactor.enabled) actions.push(h('a', { class: 'button small', href: '/team', id: 'zweifaktor-einrichten' }, icon('lock'), 'Jetzt einrichten'));
   else if (!twoFactor.verified) actions.push(h('a', { class: 'button small', href: '/team', id: 'zweifaktor-bestaetigen' }, icon('lock'), 'Code eingeben'));
   else actions.push(h('a', { class: 'button small ghost', href: sectionHref('team', 'uebersicht'), id: 'zweifaktor-team' }, icon('shield'), 'Zum Team-Bereich'));
-  if (twoFactor.enabled && me.role === 'admin') actions.push(h('a', { class: 'button small ghost', href: sectionHref('team', 'team'), id: 'zweifaktor-verwalten' }, icon('friends'), 'Mitglieder und 2FA verwalten'));
+  if (twoFactor.enabled && (me.permissions ?? []).includes('team.manage')) actions.push(h('a', { class: 'button small ghost', href: sectionHref('team', 'team'), id: 'zweifaktor-verwalten' }, icon('friends'), 'Mitglieder und 2FA verwalten'));
   $('#zweifaktor-aktionen').replaceChildren(...actions);
   $('#zweifaktor-hilfe').textContent = twoFactor.enabled
     ? 'Neues Handy oder App verloren? Ein Admin kann deine Zwei-Faktor-Anmeldung zurücksetzen (Team → Team). Danach richtest du sie im Team-Bereich neu ein.'
     : 'Du brauchst eine Authenticator-App (z. B. Aegis, 2FAS, Google oder Microsoft Authenticator). Der Team-Bereich zeigt dir den Schlüssel und fragt einmal nach einem Code.';
 }
 
-async function logout() {
+async function logout(button) {
+  // Echtzeit zuerst beenden: der Dienst schließt die Verbindung beim Abmelden ohnehin (4008)
+  live.stop();
   try {
-    await busy($('#konto-abmelden'), () => api('POST', '/v1/web/logout'));
+    await busy(button ?? $('#konto-abmelden'), () => api('POST', '/v1/web/logout'));
   } catch (error) {
-    if (error.status !== 401) return showError(error);
+    if (error.status !== 401) {
+      live.start();
+      return showError(error);
+    }
   }
   sessionEnded('Du hast dich abgemeldet.');
 }
@@ -1474,7 +1005,7 @@ async function deleteEverything() {
   const ok = await openDialog({
     title: 'Wirklich alle Daten löschen?',
     body: [
-      h('p', { text: 'Das lässt sich nicht rückgängig machen. Freundschaften, Nachrichten und Einstellungen sind danach weg, und du wirst überall abgemeldet.' }),
+      h('p', { text: 'Das lässt sich nicht rückgängig machen. Freundschaften, Nachrichten, Welten und Einstellungen sind danach weg, und du wirst überall abgemeldet.' }),
       h('div', { class: 'field' }, h('label', { for: inputId }, 'Gib zur Bestätigung deinen Spielernamen ', h('strong', { text: name }), ' ein:'), input),
     ],
     confirmLabel: 'Endgültig löschen',
@@ -1493,22 +1024,44 @@ async function deleteEverything() {
 
 function init() {
   shell = createShell({ root: $('#konto-app'), page: 'konto', defaultSection: DEFAULT_SECTION, onSelect: onTab, onSignOut: logout });
-  shell.mountOverview($('#uebersicht-kacheln'));
-  const goTo = (section, then) => {
-    shell.select(section, { history: 'push', scroll: true, source: 'user' });
-    $('#shell-titel').focus({ preventScroll: true });
-    if (then) requestAnimationFrame(then);
-  };
-  overview = initOverview({
+  // Gemeinsamer Zugang der Module zu Stand, Anfragen und zueinander
+  const ctx = {
+    call,
     shell,
-    actions: {
-      freund: () => goTo('freunde', () => $('#freund-name').focus()),
-      nachricht: () => goTo('nachrichten', () => $('#unterhaltungen .conv')?.focus()),
-      cosmetics: () => goTo('profil'),
-      support: () => goTo('support', () => (!$('#support-neu').disabled ? openSupportForm() : $('#support-limit').scrollIntoView({ block: 'nearest' }))),
-      addon: () => goTo('addons', () => myAddons.openWizard()),
+    store,
+    on,
+    emit,
+    hint: (...args) => settings?.hint(...args) ?? false,
+    saveMe,
+    features: () => ({ extras: Boolean(state.me && ('dnd' in state.me || 'statusText' in state.me)) }),
+    worldDomain: () => store.worlds?.domain ?? null,
+    worldName: (address) => [...(store.worlds?.mine ?? []), ...(store.worlds?.friends ?? [])].find((world) => world.address === address)?.name ?? null,
+    cosmeticName: (id) => cosmetics?.nameById(id) ?? null,
+    wearsSomething: () => cosmetics?.wearsSomething() ?? false,
+    openChat: (uuid) => chat.openChat(uuid),
+    openProfile: (uuid) => friends.openProfile(uuid),
+    refreshFriends: () => friends.refresh().catch(() => {}),
+    canInviteToParty: (uuid) => party?.canInvite(uuid) ?? false,
+    inviteToParty: (friend, button) => party.invite(friend, button),
+    blockPlayer: (target) => friends.blockPlayer(target),
+    reportPlayer: (target) => friends.reportPlayer(target),
+    get live() {
+      return live;
     },
+  };
+  settings = initSettings(ctx);
+  friends = initFriends(ctx);
+  chat = initChat(ctx);
+  party = initParty(ctx);
+  worlds = initWorlds(ctx);
+  live = createLive({
+    call,
+    poll: pollAll,
+    onEvent: onLiveEvent,
+    onState: onLiveState,
+    onSignedOut: () => sessionEnded('Du wurdest abgemeldet (auf einem anderen Gerät, abgelaufen oder die Sitzung wurde beendet).'),
   });
+  overview = initOverview({ shell, onStatus: () => settings.focusStatus(), worldDomain: ctx.worldDomain, openChat: ctx.openChat });
   myAddons = initMyAddons({
     call,
     onUnauthorized: () => sessionEnded('Deine Anmeldung ist abgelaufen oder wurde beendet. Melde dich über den Launcher oder im Spiel erneut an.'),
@@ -1519,30 +1072,33 @@ function init() {
     enqueue,
     getMe: () => state.me,
     applyMe,
-    saveCape: (cape, savedText) => saveSettings({ cape }, $('#cape-gespeichert'), savedText),
+    saveCape: (cape, savedText) => putMe({ cape }, $('#cape-gespeichert'), savedText),
     onLook: (look) => {
       overview.update({ look });
-      updateProfileHints();
+      settings.render();
     },
   });
-  $('#konto-erneut').addEventListener('click', start);
-  $('#einstellungen').addEventListener('change', onSettingChange);
-  $('#freund-form').addEventListener('submit', onFriendSubmit);
-  $('#chat-form').addEventListener('submit', onSend);
-  $('#chat-zurueck').addEventListener('click', () => {
-    const uuid = state.chat?.uuid;
-    closeChat();
-    const item = uuid && $$focusKey(`conv:${uuid}`);
-    if (item) item.focus();
+  invites = initInvites({
+    call,
+    isCurrent: () => shell.current() === 'einladen',
+    onChange: (data) => {
+      store.invites = data ? { ...data, rewards: data.rewards.map((reward) => ({ ...reward, name: rewardInfo(reward.cosmetic).name, unlocked: reward.unlocked === true || data.unlocked.includes(reward.cosmetic) })) } : null;
+      pushOverview();
+    },
   });
-  $('#chat-melden').addEventListener('click', reportPlayer);
-  $('#chat-blockieren').addEventListener('click', () => state.chat && blockPlayer({ uuid: state.chat.uuid, name: state.chat.name }));
+  // Jede Änderung am gemeinsamen Stand: Zähler und Übersicht
+  for (const name of ['friends', 'conversations', 'party', 'worlds']) {
+    on(name, () => {
+      updateBadges();
+      pushOverview();
+    });
+  }
+  $('#konto-erneut').addEventListener('click', start);
   $('#block-form').addEventListener('submit', onBlockSubmit);
   $('#export').addEventListener('click', exportData);
   $('#sitzungen-andere').addEventListener('click', endOtherSessions);
-  $('#sitzungen-andere .sec-logout-icon').replaceWith(shellIcon('logout'));
+  $('#sitzungen-andere .sec-logout-icon')?.replaceWith(shellIcon('logout'));
   $('#loeschen').addEventListener('click', deleteEverything);
-  bindCounter($('#chat-text'), $('#chat-zaehler'), MAX_MESSAGE);
   $('#support-neu').addEventListener('click', openSupportForm);
   $('#support-abbrechen').addEventListener('click', supportBack);
   for (const back of document.querySelectorAll('[data-support-back]')) back.addEventListener('click', supportBack);
@@ -1562,12 +1118,10 @@ function init() {
   // Neuer Einmal-Link, während die Seite offen ist: neu anmelden. Bereiche (#reiter=…) wechselt die Shell selbst.
   window.addEventListener('hashchange', () => {
     if (/(^|&)(code|ziel|fehler)=/.test(location.hash.slice(1))) start();
+    // Alter Link #reiter=freunde&teil=einladen
+    else if (/(^|&)teil=einladen(&|$)/.test(location.hash.slice(1)) && !$('#konto-app').hidden) shell.select('einladen', { history: 'replace' });
   });
   start();
-}
-
-function $$focusKey(key) {
-  return [...document.querySelectorAll('[data-focus-key]')].find((element) => element.dataset.focusKey === key) ?? null;
 }
 
 init();

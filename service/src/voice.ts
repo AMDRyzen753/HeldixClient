@@ -1,9 +1,11 @@
 // Voice Chat: verteilt Sprache an HeldixClient-Spieler in der Nähe (gleicher Server, gleiche Dimension)
-// und an die eigene Gruppe (gleicher Server, jede Dimension, jede Entfernung).
-// Der Dienst speichert und protokolliert dabei nichts: keine Sprache, keine Positionen, keine Räume, keine Gruppen, keinen Status.
+// und an die eigene Gruppe (gleicher Server, jede Dimension, jede Entfernung). Ab 1.11.0 auch an Teilnehmer im Browser:
+// Gäste mit einer Einladung und angemeldete Spieler auf der Webseite, beide nur in der Gruppe der Einladung.
+// Der Dienst speichert und protokolliert dabei nichts: keine Sprache, keine Positionen, keine Räume, keine Gruppen, keinen
+// Status, keine Namen von Gästen.
 import { WebSocket, type RawData } from 'ws';
 import type { Store } from './db';
-import { normalizeServer } from './validate';
+import { isInviteCode, normalizeServer } from './validate';
 
 export interface VoiceOptions {
   /** Reichweite in Blöcken (8–128). */
@@ -13,6 +15,26 @@ export interface VoiceOptions {
   /** Uhr für Positionen und Begrenzungen (nur Tests stellen sie). */
   now: () => number;
   log: (line: string) => void;
+  /** Gruppe einer offenen Einladung mit Voice (`<server> <prüfwert>`) oder null (unbekannt, abgelaufen, widerrufen). */
+  inviteGroup?: (code: string) => string | null;
+  /** Ein Gast wurde aus der Gruppe entfernt (`kick`): Seine Sitzung gilt danach nicht mehr. */
+  onGuestRemoved?: (id: string) => void;
+}
+
+/** Gast im Browser: Name und Einladung aus der Gast-Sitzung (nur im Arbeitsspeicher). */
+export interface VoiceGuest {
+  name: string;
+  /** Code der Einladung, mit der die Sitzung angelegt wurde */
+  invite: string;
+  /** Ablauf der Sitzung (ms, Uhr des Rechners) */
+  expiresAt: number;
+}
+
+/** Wie eine Verbindung angemeldet ist (Spiel mit Bearer-Token: nichts davon). */
+export interface VoiceAttachOptions {
+  /** über die Webseite (Gast oder angemeldeter Spieler mit Cookie) */
+  browser?: boolean;
+  guest?: VoiceGuest;
 }
 
 type Mode = 'all' | 'friends';
@@ -26,12 +48,19 @@ interface Position {
 
 interface Connection {
   ws: WebSocket;
+  /** UUID des Spielers oder ID des Gasts (32 Hex-Zeichen) */
   uuid: string;
-  /** UUID als 16 Byte für die weitergeleiteten Rahmen */
+  /** UUID bzw. Gast-ID als 16 Byte für die weitergeleiteten Rahmen */
   id: Buffer;
   room: string | null;
-  /** Gruppe: Server und Prüfwert aus Gruppenname und Passwort; nur zusammen mit einem Raum. */
+  /** Gruppe: Server und Prüfwert aus Gruppenname und Passwort; im Spiel zusammen mit einem Raum, im Browser ohne. */
   group: string | null;
+  /** Einladung, über die die Verbindung in ihrer Gruppe ist (`join` mit `invite`), sonst null */
+  invite: string | null;
+  /** über die Webseite verbunden (Gast oder angemeldeter Spieler) */
+  browser: boolean;
+  /** Gast ohne Konto, sonst null */
+  guest: VoiceGuest | null;
   mode: Mode;
   pos: Position | null;
   /** Eigener Status; bleibt an der Verbindung, auch über Raum- und Gruppenwechsel und `leave` hinweg. */
@@ -39,6 +68,8 @@ interface Connection {
   deafened: boolean;
   idleTimer?: NodeJS.Timeout;
   killTimer?: NodeJS.Timeout;
+  /** Ablauf der Gast-Sitzung (4005) */
+  expireTimer?: NodeJS.Timeout;
   textWindow: number;
   texts: number;
   frameWindow: number;
@@ -50,10 +81,17 @@ interface Connection {
 export const VOICE_PROTOCOL = 1;
 /** Höchstgröße der Opus-Nutzdaten eines Rahmens. */
 export const VOICE_MAX_FRAME = 1024;
-/** Was der Dienst über die Grundfunktionen hinaus kann (steht in `ready`); das Rahmen-Format bleibt Version 1. */
-export const VOICE_FEATURES: readonly string[] = ['state', 'groups'];
-/** Höchstens so viele Mitglieder hat eine Gruppe. */
+/**
+ * Was der Dienst über die Grundfunktionen hinaus kann (steht in `ready`); das Rahmen-Format bleibt Version 1.
+ * `guests` (ab 1.11.0): Teilnehmer im Browser, Einladungen mit Gruppe, `join` mit `invite` und `kick`.
+ */
+export const VOICE_FEATURES: readonly string[] = ['state', 'groups', 'guests'];
+/** Höchstens so viele Mitglieder hat eine Gruppe (Gäste zählen mit). */
 export const VOICE_MAX_GROUP = 16;
+/** Höchstens so viele Gäste gleichzeitig je Einladung. */
+export const VOICE_MAX_GUESTS = 4;
+/** Unterprotokoll für Verbindungen aus dem Browser (Gäste schicken dazu `gast.<token>`). */
+export const VOICE_SUBPROTOCOL = 'heldix-voice';
 /** Kopf eines Rahmens vom Client: Version, Flags, Folgenummer (2 Byte). */
 const HEADER = 4;
 /** Kopf eines weitergeleiteten Rahmens: dazu die UUID des Sprechers (16 Byte). */
@@ -82,6 +120,14 @@ const MAX_BUFFERED = 1024 * 1024;
 const DIMENSION_RE = /^[a-z0-9_.-]{1,32}:[a-z0-9_./-]{1,64}$/;
 /** Gruppe: SHA-256 (hex) aus Gruppenname und Passwort, vom Client berechnet. Name und Passwort sieht der Dienst nie. */
 const GROUP_RE = /^[0-9a-f]{64}$/;
+/** UUID eines Spielers oder ID eines Gasts (für `kick`). */
+const ID_RE = /^[0-9a-f]{32}$/;
+
+/** Schließcodes für Teilnehmer im Browser (ab 1.11.0). */
+export const CLOSE_KICKED = 4004;
+export const CLOSE_EXPIRED = 4005;
+export const CLOSE_INVITE = 4006;
+export const CLOSE_FULL = 4007;
 
 function isMode(value: unknown): value is Mode {
   return value === 'all' || value === 'friends';
@@ -117,7 +163,7 @@ function exit(sets: Map<string, Set<Connection>>, key: string, conn: Connection,
 }
 
 export class Voice {
-  /** Höchstens eine Verbindung pro Spieler. */
+  /** Höchstens eine Verbindung pro Spieler bzw. Gast. */
   private readonly connections = new Map<string, Connection>();
   /** Raum (Server und Dimension) → Verbindungen darin; leere Räume werden gelöscht. */
   private readonly rooms = new Map<string, Set<Connection>>();
@@ -133,20 +179,46 @@ export class Voice {
     this.rangeSquared = options.range * options.range;
   }
 
-  /** Spieler mit offener Voice-Verbindung (für /v1/status). */
+  /** Offene Voice-Verbindungen (für /v1/status; Gäste und Browser zählen mit). */
   connectedCount(): number {
     return this.connections.size;
   }
 
-  /** Neue, bereits angemeldete Verbindung übernehmen. Eine ältere des Spielers wird geschlossen (4002). */
-  attach(ws: WebSocket, uuid: string): void {
+  /** Hat dieser Spieler bzw. Gast gerade eine Voice-Verbindung? */
+  isConnected(uuid: string): boolean {
+    return this.connections.has(uuid);
+  }
+
+  /** Verbundene Gäste einer Einladung (höchstens VOICE_MAX_GUESTS). */
+  guestCount(invite: string, except?: string): number {
+    let count = 0;
+    for (const conn of this.connections.values()) if (conn.guest?.invite === invite && conn.uuid !== except) count++;
+    return count;
+  }
+
+  /** Für die öffentliche Ansicht einer Einladung: wie viele Nicht-Gäste in der Gruppe sind, dazu die Gäste der Einladung. */
+  inviteInfo(invite: string, group: string): { members: number; guests: number } {
+    let members = 0;
+    for (const conn of this.groups.get(group) ?? []) if (conn.guest === null) members++;
+    return { members, guests: this.guestCount(invite) };
+  }
+
+  /**
+   * Neue, bereits angemeldete Verbindung übernehmen. Eine ältere desselben Spielers bzw. Gasts wird geschlossen (4002).
+   * Hat die Einladung eines Gasts schon VOICE_MAX_GUESTS verbundene Gäste, wird die neue sofort geschlossen (4007).
+   */
+  attach(ws: WebSocket, uuid: string, extra: VoiceAttachOptions = {}): void {
     const now = this.options.now();
+    const guest = extra.guest ?? null;
     const conn: Connection = {
       ws,
       uuid,
       id: Buffer.from(uuid, 'hex'),
       room: null,
       group: null,
+      invite: null,
+      browser: extra.browser === true || guest !== null,
+      guest,
       mode: 'all',
       pos: null,
       muted: false,
@@ -167,10 +239,25 @@ export class Voice {
     });
     ws.on('close', () => this.onClose(conn));
 
+    if (guest !== null && this.guestCount(guest.invite, uuid) >= VOICE_MAX_GUESTS) {
+      this.closeSocket(conn, CLOSE_FULL, 'Voll');
+      return;
+    }
     const old = this.connections.get(uuid);
     if (old) this.drop(old, 4002, 'Neue Verbindung');
     this.connections.set(uuid, conn);
     this.resetIdle(conn);
+    if (guest !== null) {
+      const left = guest.expiresAt - Date.now();
+      if (left <= 0) {
+        this.drop(conn, CLOSE_EXPIRED, 'Sitzung abgelaufen');
+        return;
+      }
+      conn.expireTimer = setTimeout(() => {
+        if (this.connections.get(conn.uuid) === conn) this.drop(conn, CLOSE_EXPIRED, 'Sitzung abgelaufen');
+      }, left);
+      conn.expireTimer.unref();
+    }
     this.sendTo(conn, {
       type: 'ready',
       range: this.options.range,
@@ -185,6 +272,20 @@ export class Voice {
   disconnectUser(uuid: string, code: number, reason: string): void {
     const conn = this.connections.get(uuid);
     if (conn) this.drop(conn, code, reason);
+  }
+
+  /**
+   * Einladung widerrufen, gelöscht oder ungültig: Gäste dieser Einladung werden getrennt (4004 „Aus der Gruppe entfernt“),
+   * angemeldete Teilnehmer, die über sie in der Gruppe sind, bekommen `invite: invalid` und werden getrennt (4006).
+   */
+  disconnectInvite(invite: string): void {
+    for (const conn of [...this.connections.values()]) {
+      if (conn.guest?.invite === invite) {
+        this.drop(conn, CLOSE_KICKED, 'Aus der Gruppe entfernt');
+      } else if (conn.invite === invite) {
+        this.inviteInvalid(conn);
+      }
+    }
   }
 
   /** Alle Verbindungen sofort trennen (beim Herunterfahren). */
@@ -203,10 +304,20 @@ export class Voice {
   private drop(conn: Connection, code: number, reason: string): void {
     if (this.connections.get(conn.uuid) === conn) this.connections.delete(conn.uuid);
     this.leave(conn);
+    this.closeSocket(conn, code, reason);
+  }
+
+  private closeSocket(conn: Connection, code: number, reason: string): void {
     this.clearTimers(conn);
     conn.ws.close(code, reason);
     conn.killTimer = setTimeout(() => conn.ws.terminate(), Math.min(2000, this.options.idleTimeoutMs));
     conn.killTimer.unref();
+  }
+
+  /** Einladung (nicht mehr) gültig: Bescheid geben und trennen (4006). */
+  private inviteInvalid(conn: Connection): void {
+    this.sendTo(conn, { type: 'invite', status: 'invalid' });
+    this.drop(conn, CLOSE_INVITE, 'Einladung ungültig');
   }
 
   private onMessage(conn: Connection, data: RawData, isBinary: boolean): void {
@@ -217,7 +328,7 @@ export class Voice {
       if (isBinary) this.onFrame(conn, toBuffer(data));
       else this.onText(conn, data);
     } catch (err) {
-      // Nur der Fehler, nie Inhalte (keine Sprache, keine Positionen, keine Räume, keine Gruppen).
+      // Nur der Fehler, nie Inhalte (keine Sprache, keine Positionen, keine Räume, keine Gruppen, keine Namen).
       this.options.log(`Fehler im Voice Chat: ${(err as Error)?.message ?? String(err)}`);
     }
   }
@@ -242,14 +353,25 @@ export class Voice {
     switch (input.type) {
       case 'ping':
         // Konto inzwischen gesperrt oder gelöscht (z. B. über heldix-dienst-admin): beim nächsten Lebenszeichen trennen.
-        if (!this.store.getUser(conn.uuid)) {
+        if (conn.guest === null && !this.store.getUser(conn.uuid)) {
           const banned = this.store.getBan(conn.uuid) !== undefined;
           this.drop(conn, banned ? 4003 : 4001, banned ? 'Gesperrt' : 'Konto gelöscht');
+          return;
+        }
+        // Über eine Einladung in der Gruppe: Gilt sie noch (abgelaufen, gelöscht)?
+        if (conn.invite !== null && this.options.inviteGroup?.(conn.invite) == null) {
+          this.inviteInvalid(conn);
           return;
         }
         this.sendTo(conn, { type: 'pong' });
         return;
       case 'join': {
+        if (Object.hasOwn(input, 'invite')) {
+          this.joinInvite(conn, input.invite);
+          return;
+        }
+        // Im Browser gibt es keine Räume (keine Welt, keine Position): nur `join` mit `invite`.
+        if (conn.browser) return;
         const server = normalizeServer(input.server);
         const { dimension } = input;
         if (server === null || typeof dimension !== 'string' || !DIMENSION_RE.test(dimension)) return;
@@ -265,10 +387,12 @@ export class Voice {
           group = `${server} ${input.group}`;
         }
         conn.mode = mode;
+        conn.invite = null;
         this.join(conn, `${server} ${dimension}`, group);
         return;
       }
       case 'pos': {
+        if (conn.browser) return;
         const { x, y, z } = input;
         if (!isCoordinate(x) || !isCoordinate(y) || !isCoordinate(z)) return;
         conn.pos = { x, y, z, at: now };
@@ -280,8 +404,12 @@ export class Voice {
       case 'state':
         this.setState(conn, input.muted, input.deafened, now);
         return;
+      case 'kick':
+        this.kick(conn, input.uuid);
+        return;
       case 'leave':
-        if (conn.room === null) return;
+        if (conn.room === null && conn.group === null) return;
+        conn.invite = null;
         this.leave(conn);
         this.sendPeersTo(conn);
         return;
@@ -290,11 +418,37 @@ export class Voice {
   }
 
   /**
-   * Raum betreten oder wechseln und Gruppe betreten, wechseln oder verlassen (`group` null: keine Gruppe).
-   * Raum und Gruppe sind unabhängig: Beim Dimensionswechsel bleibt die Gruppe, im selben Raum wechselt nur die Gruppe.
-   * Beim Raumwechsel gilt die alte Position nicht mehr (andere Dimension, anderer Server).
+   * `join` mit `invite` (Browser, ab 1.11.0): nur die Gruppe der Einladung, kein Raum. Gäste nur mit der Einladung ihrer
+   * Sitzung. Ungültig, abgelaufen oder widerrufen: `{ type: 'invite', status: 'invalid' }` und Schließen (4006).
    */
-  private join(conn: Connection, room: string, group: string | null): void {
+  private joinInvite(conn: Connection, code: unknown): void {
+    const group = isInviteCode(code) && (conn.guest === null || conn.guest.invite === code) ? (this.options.inviteGroup?.(code) ?? null) : null;
+    if (group === null) {
+      this.inviteInvalid(conn);
+      return;
+    }
+    conn.invite = code as string;
+    this.join(conn, null, group);
+  }
+
+  /**
+   * `kick` (ab 1.11.0): Ein Nicht-Gast entfernt einen Gast aus seiner Gruppe. Der Gast wird getrennt (4004), seine Sitzung
+   * gilt nicht mehr. Alles andere (kein Gast, andere Gruppe, selbst ein Gast) wird ignoriert.
+   */
+  private kick(conn: Connection, target: unknown): void {
+    if (conn.guest !== null || conn.group === null || typeof target !== 'string' || !ID_RE.test(target)) return;
+    const other = this.connections.get(target);
+    if (!other || other.guest === null || other.group !== conn.group) return;
+    this.options.onGuestRemoved?.(other.uuid);
+    this.drop(other, CLOSE_KICKED, 'Aus der Gruppe entfernt');
+  }
+
+  /**
+   * Raum betreten oder wechseln (`room` null: kein Raum, im Browser) und Gruppe betreten, wechseln oder verlassen
+   * (`group` null: keine Gruppe). Raum und Gruppe sind unabhängig: Beim Dimensionswechsel bleibt die Gruppe, im selben
+   * Raum wechselt nur die Gruppe. Beim Raumwechsel gilt die alte Position nicht mehr (andere Dimension, anderer Server).
+   */
+  private join(conn: Connection, room: string | null, group: string | null): void {
     if (conn.room === room && conn.group === group) {
       // Nichts geändert: nur die aktuelle Liste an den Spieler selbst.
       this.sendPeersTo(conn);
@@ -304,8 +458,10 @@ export class Voice {
     const notify = new Set<Connection>();
     if (conn.room !== room) {
       this.leaveRoom(conn, notify);
-      for (const other of enter(this.rooms, room, conn)) notify.add(other);
-      conn.room = room;
+      if (room !== null) {
+        for (const other of enter(this.rooms, room, conn)) notify.add(other);
+        conn.room = room;
+      }
     }
     let full = false;
     if (conn.group !== group) {
@@ -350,7 +506,8 @@ export class Voice {
 
   /**
    * Vollständige Liste für einen Spieler: die anderen im Raum (höchstens 100, unabhängig von der Entfernung),
-   * die anderen in der Gruppe (jede Dimension) und wer davon gerade stumm ist bzw. den Ton aus hat.
+   * die anderen in der Gruppe (jede Dimension, auch im Browser), wer davon gerade stumm ist bzw. den Ton aus hat, und
+   * (ab 1.11.0) wer davon Gast (mit Namen) bzw. im Browser ist.
    */
   private sendPeersTo(conn: Connection): void {
     const uuids: string[] = [];
@@ -376,11 +533,15 @@ export class Voice {
     }
     const muted: string[] = [];
     const deafened: string[] = [];
+    const guests: Record<string, string> = {};
+    const browser: string[] = [];
     for (const other of listed) {
       if (other.muted) muted.push(other.uuid);
       if (other.deafened) deafened.push(other.uuid);
+      if (other.guest !== null) guests[other.uuid] = other.guest.name;
+      if (other.browser) browser.push(other.uuid);
     }
-    this.sendTo(conn, { type: 'peers', uuids, group, muted, deafened });
+    this.sendTo(conn, { type: 'peers', uuids, group, muted, deafened, guests, browser });
   }
 
   /** Eigener Status „Mikrofon stumm“ / „Ton aus“: Bei einer Änderung bekommt ihn jeder im selben Raum oder in derselben Gruppe. */
@@ -416,10 +577,12 @@ export class Voice {
     }
     if (++conn.frames > FRAME_LIMIT) return;
     if (frame.length <= HEADER || frame.length > HEADER + VOICE_MAX_FRAME || frame[0] !== VOICE_PROTOCOL) return;
-    if (conn.room === null) return;
+    // Ohne Raum und ohne Gruppe hört niemand zu (im Browser gibt es nur die Gruppe).
+    if (conn.room === null && conn.group === null) return;
 
     let out: Buffer | null = null;
-    // (a) Eigene Gruppe: jede Dimension, jede Entfernung, ohne Positionen und ohne „Nur Freunde“; Blockieren gilt.
+    // (a) Eigene Gruppe: jede Dimension, jede Entfernung, auch im Browser, ohne Positionen und ohne „Nur Freunde“;
+    // Blockieren gilt (zwischen Spielern mit Konto).
     const group = conn.group === null ? undefined : this.groups.get(conn.group);
     if (group) {
       for (const other of group) {
@@ -430,6 +593,7 @@ export class Voice {
     }
 
     // (b) In der Nähe: gleicher Raum, beide mit frischer Position, in Reichweite.
+    if (conn.room === null) return;
     const from = this.freshPosition(conn, now);
     if (!from) return;
     const members = this.rooms.get(conn.room);
@@ -456,7 +620,7 @@ export class Voice {
     return listener.ws.readyState === WebSocket.OPEN && listener.ws.bufferedAmount <= MAX_BUFFERED_FRAMES && !listener.deafened;
   }
 
-  /** Weitergeleiteter Rahmen: `[Version][Flags][Folgenummer][UUID des Sprechers, 16 Byte][Opus]`. */
+  /** Weitergeleiteter Rahmen: `[Version][Flags][Folgenummer][UUID bzw. Gast-ID des Sprechers, 16 Byte][Opus]`. */
   private forwarded(conn: Connection, frame: Buffer): Buffer {
     const out = Buffer.allocUnsafe(OUT_HEADER + frame.length - HEADER);
     out[0] = VOICE_PROTOCOL;
@@ -474,8 +638,9 @@ export class Voice {
     return pos && now - pos.at <= POSITION_MAX_AGE_MS ? pos : null;
   }
 
-  /** Einer der beiden hat den anderen blockiert. */
+  /** Einer der beiden hat den anderen blockiert. Gäste haben kein Konto und lassen sich nicht blockieren. */
   private blocked(a: Connection, b: Connection): boolean {
+    if (a.guest !== null || b.guest !== null) return false;
     return this.store.isBlocked(a.uuid, b.uuid) || this.store.isBlocked(b.uuid, a.uuid);
   }
 
@@ -507,6 +672,7 @@ export class Voice {
   private clearTimers(conn: Connection): void {
     if (conn.idleTimer) clearTimeout(conn.idleTimer);
     if (conn.killTimer) clearTimeout(conn.killTimer);
+    if (conn.expireTimer) clearTimeout(conn.expireTimer);
   }
 
   private sendTo(conn: Connection, message: unknown): void {

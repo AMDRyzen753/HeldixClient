@@ -1,22 +1,35 @@
-// Heldix-Cosmetics (Format 1): signierter Umschlag und strenge Prüfung des Manifests.
+// Heldix-Cosmetics (Format 1 und 2): signierter Umschlag und strenge Prüfung des Manifests.
 //
 // Ein Cosmetic ist reine Daten (Modell, Textur, Partikel), kein Code. Das Team signiert es mit dem Update-Schlüssel:
 // Ed25519 über die UTF-8-Bytes von "heldix-cosmetic\n" + Manifest-Text (Domänentrennung zu Addons und Launcher-Updates).
 // Dienst, Spiel, Launcher und Webseite prüfen dieselben Regeln. Deshalb ist diese Datei eigenständig: keine anderen
-// Module, kein Node-Buffer, nur Standard-JavaScript (atob). Launcher und Webseite können sie übernehmen, das Spiel baut
-// sie in Java nach. Die Signatur prüft der Aufrufer selbst (cosmeticSignedText liefert den signierten Text).
-// Alle Grenzen stehen in COSMETIC_LIMITS; docs/dienst.md beschreibt sie.
+// Module, kein Node-Buffer, nur Standard-JavaScript (atob, btoa). Launcher und Webseite können sie übernehmen, das Spiel
+// baut sie in Java nach. Die Signatur prüft der Aufrufer selbst (cosmeticSignedText liefert den signierten Text).
+//
+// Format 1: Quader-Modelle mit einfachen Animationen (flap, sway, spin, bob), Partikel-Auren, Capes.
+// Format 2 (ab Launcher 0.13.8, Dienst 1.12.0): Dreiecks-Mesh mit Knochen und Keyframe-Animationen, Zustände,
+//   Partikel an Knochen, Leucht-Streifen. Zahlenlisten stehen als Base64 kleiner Ganzzahlen im Manifest (siehe
+//   checkFormat2 und die Dekodier-Hilfen decodeCosmeticMesh / decodeCosmeticTrack).
+// Ältere Clients kennen nur Format 1 und verwerfen Format-2-Einträge einzeln.
+// Alle Grenzen stehen in COSMETIC_LIMITS (Format 1) und COSMETIC_LIMITS_2 (Format 2); docs/dienst.md beschreibt sie.
 
 /** Steht vor dem Manifest-Text, wenn signiert wird. */
 export const COSMETIC_SIGNATURE_PREFIX = 'heldix-cosmetic\n';
 export const COSMETIC_TYPE = 'heldix-cosmetic';
 export const COSMETIC_FORMAT = 1;
+/** Meshes mit Keyframe-Animationen */
+export const COSMETIC_FORMAT_2 = 2;
+export const COSMETIC_FORMATS = [COSMETIC_FORMAT, COSMETIC_FORMAT_2] as const;
+export type CosmeticFormat = (typeof COSMETIC_FORMATS)[number];
 
 export const COSMETIC_SLOTS = ['head', 'back', 'aura', 'companion', 'cape'] as const;
 export type CosmeticSlot = (typeof COSMETIC_SLOTS)[number];
 /** Slots mit Modell (und damit mit Animationen). */
 export const MODEL_SLOTS: readonly CosmeticSlot[] = ['head', 'back', 'companion'];
-export const COSMETIC_ACCESS = ['all', 'team'] as const;
+/** Slots, die Format 2 kennt (kein Cape). */
+export const MESH_SLOTS = ['head', 'back', 'aura', 'companion'] as const;
+export type MeshSlot = (typeof MESH_SLOTS)[number];
+export const COSMETIC_ACCESS = ['all', 'team', 'unlock'] as const;
 export type CosmeticAccess = (typeof COSMETIC_ACCESS)[number];
 export const ANIMATION_TYPES = ['flap', 'sway', 'spin', 'bob'] as const;
 export type AnimationType = (typeof ANIMATION_TYPES)[number];
@@ -34,7 +47,21 @@ export const SIGNATURE_RE = /^[A-Za-z0-9+/]{85}[AQgw]==$/;
 export const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
 
 /** IDs der eingebauten Capes (wie DEFAULT_CAPES im Dienst): Ein Cosmetic darf keine davon tragen. */
-export const BUILTIN_CAPE_IDS: readonly string[] = ['heldix', 'mitternacht', 'aurora', 'glut', 'kristall', 'neon', 'sakura', 'gewitter', 'galaxie'];
+export const BUILTIN_CAPE_IDS: readonly string[] = [
+  'heldix',
+  'mitternacht',
+  'aurora',
+  'glut',
+  'kristall',
+  'neon',
+  'sakura',
+  'gewitter',
+  'galaxie',
+  'matrix',
+  'matrix_rot',
+  'matrix_tuerkis',
+  'sakura_orange',
+];
 
 /** Alle Grenzen von Format 1 (Byte-Angaben: 1 KB = 1024 Byte). */
 export const COSMETIC_LIMITS = Object.freeze({
@@ -47,16 +74,24 @@ export const COSMETIC_LIMITS = Object.freeze({
   versionMax: 2_147_483_647,
   nameMax: 40,
   descriptionMax: 300,
-  /** head, back, aura, companion: Breite und Höhe je 8–256, Vielfache von 8 */
+  /** head, back, aura, companion: Breite und Höhe je 8–512, Vielfache von 8 */
   textureMin: 8,
-  textureMax: 256,
+  textureMax: 512,
   textureStep: 8,
   /** cape: 64, 128 oder 256 breit, je Bild halb so hoch wie breit, Bilder untereinander */
   capeWidths: Object.freeze([64, 128, 256]) as readonly number[],
   capeFramesMax: 32,
   capeFpsMax: 20,
-  bonesMax: 32,
+  bonesMax: 64,
   cubesMax: 128,
+  /**
+   * Auflösungen der Textur eines Modells: Das PNG ist model.textureSize mal 1, 2 oder 4 (gleich in beiden Richtungen).
+   * UV und Box-UV zählen in Texeln von textureSize.
+   */
+  textureScales: Object.freeze([1, 2, 4]) as readonly number[],
+  /** model.scale (freiwillig, fehlt: 1): Größe des ganzen Modells um den Anker */
+  modelScaleMin: 0.25,
+  modelScaleMax: 1.5,
   cubeEdgeMax: 32,
   /** Koordinaten, Pivots und Würfel (mit inflate) in [-48, 48] Pixel um den Anker */
   coordMax: 48,
@@ -83,6 +118,126 @@ export const COSMETIC_LIMITS = Object.freeze({
   scaleMax: 1.5,
 });
 
+/**
+ * Alle Grenzen von Format 2 (Byte-Angaben: 1 KB = 1024 Byte). Ganzzahlen in den Base64-Listen: Positionen und move
+ * in 1/32 Pixel (Int16), Normalen × 127 (Int8), UV ÷ 65535 (Uint16), Quaternionen × 32767 (Int16), scale ÷ 1000
+ * (Uint16), Gewichte ÷ 255 (Uint8).
+ */
+export const COSMETIC_LIMITS_2 = Object.freeze({
+  /** Manifest-Text (UTF-8) */
+  manifestBytes: 512 * 1024,
+  /** Umschlag `{ manifest, signature }` als JSON (wie ausgeliefert) */
+  envelopeBytes: 544 * 1024,
+  /** je PNG (texture, glow), dekodiert */
+  pngBytes: 64 * 1024,
+  /** texture: Breite und Höhe je eine Zweierpotenz von 16 bis 512 */
+  textureMin: 16,
+  textureMax: 512,
+  verticesMax: 16384,
+  trianglesMax: 16384,
+  bonesMax: 96,
+  boneNameMax: 32,
+  /** pivot und tail der Knochen: je Achse von -1024 bis 1024 Pixel */
+  coordMax: 1024,
+  /** attach.origin (Begleiter): je Achse von -64 bis 64 Pixel */
+  originMax: 64,
+  animationsMax: 16,
+  fpsMax: 60,
+  framesMax: 1200,
+  emissiveFramesMax: 16,
+  frametimeTicksMax: 20,
+  pulsePeriodMin: 0.1,
+  pulsePeriodMax: 20,
+  blendSecondsMax: 1,
+  particlesMax: 16,
+  perSecondMin: 0.1,
+  perSecondMax: 20,
+  /** Länge eines Quaternions (÷ 32767) darf so weit von 1 abweichen */
+  quaternionTolerance: 0.01,
+  positionUnit: 32,
+  normalUnit: 127,
+  uvUnit: 65535,
+  rotationUnit: 32767,
+  scaleUnit: 1000,
+  weightUnit: 255,
+  /** Einflüsse je Vertex bei weicher Haut (mesh.joints, mesh.weights) */
+  influences: 4,
+});
+
+/** Größte Grenzen über alle Formate: für Anfragekörper und Downloads, bevor das Format bekannt ist. */
+export const COSMETIC_MAX_MANIFEST_BYTES = Math.max(COSMETIC_LIMITS.manifestBytes, COSMETIC_LIMITS_2.manifestBytes);
+export const COSMETIC_MAX_ENVELOPE_BYTES = Math.max(COSMETIC_LIMITS.envelopeBytes, COSMETIC_LIMITS_2.envelopeBytes);
+
+/** Spielerzustände in `states` (Format 2); `idle` ist Pflicht. */
+export const COSMETIC_STATES = [
+  'idle',
+  'walk',
+  'sneak',
+  'sit_or_ride',
+  'swim',
+  'sprint',
+  'elytra',
+  'jump',
+  'fall',
+  'creative_fly',
+  'start_flying',
+  'land',
+  'hurt',
+  'emote',
+  'celebrate',
+  'afk',
+  'sleep',
+  'enable',
+  'disable',
+  'summon',
+] as const;
+export type CosmeticState = (typeof COSMETIC_STATES)[number];
+
+/** Minecraft-Partikel (ohne „minecraft:“; im Manifest mit oder ohne) für Format 2. Alle ohne Parameter außer dust. */
+export const COSMETIC_PARTICLE_IDS = [
+  'flame',
+  'small_flame',
+  'soul_fire_flame',
+  'smoke',
+  'end_rod',
+  'electric_spark',
+  'dust',
+  'heart',
+  'note',
+  'happy_villager',
+  'cloud',
+  'poof',
+  'snowflake',
+  'spore_blossom_air',
+  'crit',
+  'enchant',
+  'portal',
+  'witch',
+  'glow',
+  'falling_water',
+  'dripping_water',
+  'firework',
+  'cherry_leaves',
+  'ash',
+  'white_ash',
+  'soul',
+  'sculk_soul',
+  'lava',
+  'falling_spore_blossom',
+  'wax_on',
+  'wax_off',
+  'bubble_pop',
+  'composter',
+  'totem_of_undying',
+  'reverse_portal',
+] as const;
+export type CosmeticParticleId = (typeof COSMETIC_PARTICLE_IDS)[number];
+export const PARTICLE_ANCHORS = ['pivot', 'tail'] as const;
+export const ATTACH_SIDES = ['left', 'right'] as const;
+/** Knochen in Format 2: 1–32 Zeichen aus A–Z, a–z, 0–9, _, . und - (Blender-Namen wie „wing.L“). */
+export const MESH_BONE_NAME_RE = /^[A-Za-z0-9_.-]{1,32}$/;
+export const ANIMATION_NAME_RE = /^[A-Za-z0-9_]{1,24}$/;
+
 export type Vec3 = [number, number, number];
 
 export interface CosmeticCube {
@@ -103,7 +258,10 @@ export interface CosmeticBone {
 }
 
 export interface CosmeticModel {
+  /** Größe der Textur in Texeln (UV-Raum); das PNG ist 1-, 2- oder 4-mal so groß */
   textureSize: [number, number];
+  /** Größe des ganzen Modells um den Anker (Ursprung), über den Bone-Matrizen; fehlt es, 1 */
+  scale: number;
   bones: CosmeticBone[];
 }
 
@@ -172,6 +330,115 @@ export interface CosmeticEnvelope {
   signature: string;
 }
 
+// ---------- Format 2 ----------
+
+/** Leucht-Streifen: `frames` Bilder untereinander, je `frametimeTicks` Ticks lang, mit Puls. */
+export interface CosmeticEmissive {
+  frames: number;
+  frametimeTicks: number;
+  /** Intensität = min + (max − min) · (0,5 + 0,5 · sin(2π · t / period)), t in Sekunden */
+  pulse: { period: number; min: number; max: number };
+}
+
+/** Das Mesh wie im Manifest (Base64); dekodiert mit decodeCosmeticMesh. */
+export interface CosmeticMesh {
+  vertexCount: number;
+  triangleCount: number;
+  /** Int16LE × 3N, 1/32 Pixel */
+  positions: string;
+  /** Int8 × 3N, × 127 */
+  normals: string;
+  /** Uint16LE × 2N, ÷ 65535, v = 0 oben */
+  uvs: string;
+  /** Uint8 × N: ein Knochen je Vertex (bei weicher Haut der mit dem größten Gewicht) */
+  bones: string;
+  /** Uint16LE × 3T */
+  triangles: string;
+  /** weiche Haut (freiwillig, nur mit weights): Uint8 × 4N Knochen */
+  joints: string | null;
+  /** weiche Haut (freiwillig, nur mit joints): Uint8 × 4N Gewichte, Summe je Vertex 255 */
+  weights: string | null;
+}
+
+export interface CosmeticMeshBone {
+  name: string;
+  /** Index des Eltern-Knochens (kleiner als der eigene) oder -1 */
+  parent: number;
+  pivot: Vec3;
+  tail: Vec3;
+}
+
+/** Keys einer Spur (Base64) und ihre Anzahl. */
+export interface CosmeticKeys {
+  /** Uint16LE: Frame-Nummern, erste 0, streng aufsteigend, < frames */
+  keys: string;
+  /** rot: Int16LE × 4 je Key (x, y, z, w × 32767); move: Int16LE × 3 (1/32 Pixel); scale: Uint16LE × 1 (÷ 1000) */
+  values: string;
+  count: number;
+}
+
+export interface CosmeticTrack {
+  bone: number;
+  rot: CosmeticKeys | null;
+  move: CosmeticKeys | null;
+  scale: CosmeticKeys | null;
+}
+
+export interface CosmeticClip {
+  fps: number;
+  frames: number;
+  loop: boolean;
+  tracks: CosmeticTrack[];
+}
+
+/** Zustand → Animation (idle Pflicht) und die Überblendzeit in Sekunden. */
+export type CosmeticStates = { blendSeconds: number; idle: string } & { [K in CosmeticState]?: string };
+
+export interface CosmeticMeshParticle {
+  bone: number;
+  at: (typeof PARTICLE_ANCHORS)[number];
+  /** Minecraft-ID ohne „minecraft:“ */
+  particle: CosmeticParticleId;
+  perSecond: number;
+  /** nur bei dust (sonst null) */
+  color: string | null;
+  /** nur in diesen Animationen; null = immer */
+  states: string[] | null;
+}
+
+/** Begleiter: Ursprung im Body-Raum (Pixel); Positionen, pivot und tail zählen relativ dazu. */
+export interface CosmeticAttach {
+  origin: Vec3;
+  side: (typeof ATTACH_SIDES)[number];
+}
+
+/** Das geprüfte Manifest von Format 2 (Zahlenlisten weiter als Base64, siehe decodeCosmeticMesh/decodeCosmeticTrack). */
+export interface CosmeticManifest2 {
+  type: typeof COSMETIC_TYPE;
+  format: typeof COSMETIC_FORMAT_2;
+  id: string;
+  version: number;
+  slot: MeshSlot;
+  name: string;
+  description: string;
+  access: CosmeticAccess;
+  date: string;
+  texture: string;
+  image: CosmeticImage;
+  glow: string | null;
+  emissive: CosmeticEmissive | null;
+  mesh: CosmeticMesh;
+  bones: CosmeticMeshBone[];
+  animations: Record<string, CosmeticClip>;
+  states: CosmeticStates;
+  particles: CosmeticMeshParticle[];
+  /** nur beim Slot companion (Standard: Ursprung 0, links), sonst null */
+  attach: CosmeticAttach | null;
+}
+
+/** Ein geprüftes Manifest beliebigen Formats (an `format` unterscheiden). */
+export type AnyCosmeticManifest = CosmeticManifest | CosmeticManifest2;
+
 const MANIFEST_KEYS = [
   'type',
   'format',
@@ -189,6 +456,26 @@ const MANIFEST_KEYS = [
   'particles',
   'cape',
   'companion',
+];
+const MANIFEST_KEYS_2 = [
+  'type',
+  'format',
+  'id',
+  'version',
+  'slot',
+  'name',
+  'description',
+  'access',
+  'date',
+  'texture',
+  'glow',
+  'emissive',
+  'mesh',
+  'bones',
+  'animations',
+  'states',
+  'particles',
+  'attach',
 ];
 /** Steuerzeichen (auch Zeilenumbrüche), Zeilen-/Absatztrenner, Schreibrichtung, einzelne Ersatzzeichen. */
 const FORBIDDEN_TEXT_RE = /[\p{Cc}\p{Cs}\u2028\u2029\u202A-\u202E\u2066-\u2069]/u;
@@ -327,6 +614,127 @@ export function decodeBase64(text: string): Uint8Array | null {
   return bytes;
 }
 
+// ---------- Zahlenlisten (Format 2): Base64 ↔ typisierte Listen, little-endian ----------
+
+/** Bytes als Standard-Base64 (mit „=“ am Ende). */
+export function encodeBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+function int16Bytes(values: ArrayLike<number>): Uint8Array {
+  const bytes = new Uint8Array(values.length * 2);
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i]! & 0xffff;
+    bytes[i * 2] = v & 0xff;
+    bytes[i * 2 + 1] = v >> 8;
+  }
+  return bytes;
+}
+
+/** Uint8-Werte (0–255) als Base64. */
+export const encodeUint8 = (values: ArrayLike<number>): string => encodeBase64(Uint8Array.from(values as ArrayLike<number>));
+/** Int8-Werte (−128–127) als Base64. */
+export const encodeInt8 = (values: ArrayLike<number>): string => encodeBase64(new Uint8Array(Int8Array.from(values as ArrayLike<number>).buffer));
+/** Int16-Werte als Base64 (little-endian). */
+export const encodeInt16LE = (values: ArrayLike<number>): string => encodeBase64(int16Bytes(values));
+/** Uint16-Werte als Base64 (little-endian). */
+export const encodeUint16LE = (values: ArrayLike<number>): string => encodeBase64(int16Bytes(values));
+
+/** Base64 → Uint8; null bei ungültigem Base64. */
+export const decodeUint8 = (text: string): Uint8Array | null => decodeBase64(text);
+
+/** Base64 → Int8; null bei ungültigem Base64. */
+export function decodeInt8(text: string): Int8Array | null {
+  const bytes = decodeBase64(text);
+  return bytes === null ? null : new Int8Array(bytes.buffer, bytes.byteOffset, bytes.length);
+}
+
+/** Base64 → Uint16 (little-endian); null bei ungültigem Base64 oder ungerader Byte-Zahl. */
+export function decodeUint16LE(text: string): Uint16Array | null {
+  const bytes = decodeBase64(text);
+  if (bytes === null || bytes.length % 2 !== 0) return null;
+  const out = new Uint16Array(bytes.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = bytes[i * 2]! | (bytes[i * 2 + 1]! << 8);
+  return out;
+}
+
+/** Base64 → Int16 (little-endian); null bei ungültigem Base64 oder ungerader Byte-Zahl. */
+export function decodeInt16LE(text: string): Int16Array | null {
+  const words = decodeUint16LE(text);
+  return words === null ? null : new Int16Array(words.buffer);
+}
+
+/** Das Mesh eines geprüften Manifests (Format 2) als Ganzzahl-Listen in den Einheiten von COSMETIC_LIMITS_2. */
+export interface CosmeticMeshData {
+  vertexCount: number;
+  triangleCount: number;
+  /** × 3, 1/32 Pixel */
+  positions: Int16Array;
+  /** × 3, ÷ 127 */
+  normals: Int8Array;
+  /** × 2, ÷ 65535 */
+  uvs: Uint16Array;
+  /** × 1 */
+  bones: Uint8Array;
+  /** × 3 */
+  triangles: Uint16Array;
+  /** × 4 oder null (starr) */
+  joints: Uint8Array | null;
+  /** × 4, Summe 255, oder null (starr) */
+  weights: Uint8Array | null;
+}
+
+/** Dekodiert das (geprüfte) Mesh; wirft, wenn es nicht geprüft war. */
+export function decodeCosmeticMesh(mesh: CosmeticMesh): CosmeticMeshData {
+  const need = <T>(value: T | null): T => {
+    if (value === null) throw new Error('Das Mesh ist nicht geprüft (ungültiges Base64)');
+    return value;
+  };
+  return {
+    vertexCount: mesh.vertexCount,
+    triangleCount: mesh.triangleCount,
+    positions: need(decodeInt16LE(mesh.positions)),
+    normals: need(decodeInt8(mesh.normals)),
+    uvs: need(decodeUint16LE(mesh.uvs)),
+    bones: need(decodeUint8(mesh.bones)),
+    triangles: need(decodeUint16LE(mesh.triangles)),
+    joints: mesh.joints === null ? null : need(decodeUint8(mesh.joints)),
+    weights: mesh.weights === null ? null : need(decodeUint8(mesh.weights)),
+  };
+}
+
+/** Eine Spur als Ganzzahl-Listen (keys = Frame-Nummern). */
+export interface CosmeticTrackData {
+  bone: number;
+  rot: { keys: Uint16Array; values: Int16Array } | null;
+  move: { keys: Uint16Array; values: Int16Array } | null;
+  scale: { keys: Uint16Array; values: Uint16Array } | null;
+}
+
+/** Dekodiert eine (geprüfte) Spur; wirft, wenn sie nicht geprüft war. */
+export function decodeCosmeticTrack(track: CosmeticTrack): CosmeticTrackData {
+  const keys = (k: CosmeticKeys) => {
+    const value = decodeUint16LE(k.keys);
+    if (value === null) throw new Error('Die Spur ist nicht geprüft (ungültiges Base64)');
+    return value;
+  };
+  const signed = (k: CosmeticKeys | null) => {
+    if (k === null) return null;
+    const values = decodeInt16LE(k.values);
+    if (values === null) throw new Error('Die Spur ist nicht geprüft (ungültiges Base64)');
+    return { keys: keys(k), values };
+  };
+  let scale: CosmeticTrackData['scale'] = null;
+  if (track.scale !== null) {
+    const values = decodeUint16LE(track.scale.values);
+    if (values === null) throw new Error('Die Spur ist nicht geprüft (ungültiges Base64)');
+    scale = { keys: keys(track.scale), values };
+  }
+  return { bone: track.bone, rot: signed(track.rot), move: signed(track.move), scale };
+}
+
 // ---------- Prüfung ----------
 
 /** Ein Problem im Manifest (nur innerhalb dieser Datei; nach außen kommt der Text). */
@@ -344,10 +752,10 @@ function object(value: unknown, path: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/** Nur bekannte Felder (Format 1 kennt keine Zusatzfelder). */
-function onlyKeys(o: Record<string, unknown>, path: string, allowed: readonly string[]): void {
+/** Nur bekannte Felder (kein Format kennt Zusatzfelder). */
+function onlyKeys(o: Record<string, unknown>, path: string, allowed: readonly string[], format: CosmeticFormat = COSMETIC_FORMAT): void {
   for (const key of Object.keys(o)) {
-    if (!allowed.includes(key)) fail(`${q(sub(path, key))} ist kein bekanntes Feld (Format ${COSMETIC_FORMAT})`);
+    if (!allowed.includes(key)) fail(`${q(sub(path, key))} ist kein bekanntes Feld (Format ${format})`);
   }
 }
 
@@ -429,14 +837,14 @@ export function isIsoDate(value: unknown): value is string {
 }
 
 /** PNG als data-URL: Präfix, strenges Base64, höchstens 64 KB, gültiger Aufbau. */
-function png(value: unknown, path: string): CosmeticImage {
+function png(value: unknown, path: string, maxBytes = COSMETIC_LIMITS.pngBytes): CosmeticImage {
   if (typeof value !== 'string' || !value.startsWith(PNG_DATA_URL_PREFIX)) fail(`${q(path)} muss eine data-URL „${PNG_DATA_URL_PREFIX}…“ sein`);
   const base64 = value.slice(PNG_DATA_URL_PREFIX.length);
-  const tooLarge = `${q(path)} ist zu groß (höchstens ${COSMETIC_LIMITS.pngBytes / 1024} KB als PNG)`;
-  if (base64.length > Math.ceil(COSMETIC_LIMITS.pngBytes / 3) * 4) fail(tooLarge);
+  const tooLarge = `${q(path)} ist zu groß (höchstens ${maxBytes / 1024} KB als PNG)`;
+  if (base64.length > Math.ceil(maxBytes / 3) * 4) fail(tooLarge);
   const bytes = decodeBase64(base64);
   if (bytes === null) fail(`${q(path)} enthält kein gültiges Base64`);
-  if (bytes.length > COSMETIC_LIMITS.pngBytes) fail(tooLarge);
+  if (bytes.length > maxBytes) fail(tooLarge);
   const info = readPng(bytes);
   if (typeof info === 'string') fail(`${q(path)} ${info}`);
   return { width: info.width, height: info.height, bytes: bytes.length };
@@ -482,7 +890,7 @@ function checkCompanion(value: unknown): CosmeticCompanion {
   };
 }
 
-/** Würfel: Box-UV wie bei Minecraft, Fläche (2d+2w) × (d+h) ab `uv`, muss in die Textur passen. */
+/** Würfel: Box-UV wie bei Minecraft, Fläche (2d+2w) × (d+h) ab `uv`, muss in die Textur passen (in Texeln von textureSize). */
 function checkCube(value: unknown, path: string, texture: [number, number]): CosmeticCube {
   const L = COSMETIC_LIMITS;
   const o = object(value, path);
@@ -519,12 +927,21 @@ function checkCube(value: unknown, path: string, texture: [number, number]): Cos
 function checkModel(value: unknown, image: CosmeticImage): CosmeticModel {
   const L = COSMETIC_LIMITS;
   const o = object(value, 'model');
-  onlyKeys(o, 'model', ['textureSize', 'bones']);
-  const textureSize = required(o, 'textureSize', 'model');
-  if (!Array.isArray(textureSize) || textureSize.length !== 2 || textureSize[0] !== image.width || textureSize[1] !== image.height) {
-    fail(`„model.textureSize“ muss genau die Größe der Textur sein ([${image.width}, ${image.height}])`);
+  onlyKeys(o, 'model', ['textureSize', 'scale', 'bones']);
+  // textureSize = Größe in Texeln (UV-Raum); das PNG hat die 1-, 2- oder 4-fache Auflösung davon
+  const rawSize = required(o, 'textureSize', 'model');
+  const size = Array.isArray(rawSize) && rawSize.length === 2 ? rawSize : null;
+  const k = size === null ? undefined : L.textureScales.find((f) => size[0] === image.width / f && size[1] === image.height / f);
+  if (k === undefined) {
+    const sizes = L.textureScales.map((f) => `[${image.width / f}, ${image.height / f}]`);
+    const scales = L.textureScales.map(String);
+    fail(
+      `„model.textureSize“ muss die Größe der Textur in Texeln sein (${sizes.slice(0, -1).join(', ')} oder ${sizes[sizes.length - 1]}: ` +
+        `Textur in ${scales.slice(0, -1).join('-, ')}- oder ${scales[scales.length - 1]}-facher Auflösung)`,
+    );
   }
-  const texture: [number, number] = [image.width, image.height];
+  const texture: [number, number] = [image.width / k, image.height / k];
+  const scale = has(o, 'scale') ? number(o.scale, 'model.scale', L.modelScaleMin, L.modelScaleMax) : 1;
   const rawBones = required(o, 'bones', 'model');
   if (!Array.isArray(rawBones) || rawBones.length < 1 || rawBones.length > L.bonesMax) fail(`„model.bones“ muss eine Liste mit 1 bis ${L.bonesMax} Bones sein`);
   const names = new Set<string>();
@@ -555,7 +972,7 @@ function checkModel(value: unknown, image: CosmeticImage): CosmeticModel {
     bones.push({ name, parent, pivot, rotation, cubes });
   });
   if (cubeCount === 0) fail('„model“ braucht mindestens einen Würfel');
-  return { textureSize: texture, bones };
+  return { textureSize: texture, scale, bones };
 }
 
 function checkAnimations(value: unknown, model: CosmeticModel): CosmeticAnimation[] {
@@ -581,7 +998,7 @@ function checkAnimations(value: unknown, model: CosmeticModel): CosmeticAnimatio
 }
 
 /**
- * Größe der Textur je Slot. head, back, companion, aura: 8–256 in Schritten von 8. cape: 64, 128 oder 256 breit, jedes
+ * Größe der Textur je Slot. head, back, companion, aura: 8–512 in Schritten von 8. cape: 64, 128 oder 256 breit, jedes
  * Bild halb so hoch wie breit (wie die Vorlage eines Minecraft-Capes, 64 × 32), alle Bilder untereinander.
  */
 function checkTextureSize(slot: CosmeticSlot, image: CosmeticImage, cape: CosmeticCape | null, particles: CosmeticParticles | null): void {
@@ -607,35 +1024,43 @@ function checkTextureSize(slot: CosmeticSlot, image: CosmeticImage, cape: Cosmet
 }
 
 /**
- * Prüft den Inhalt eines Cosmetic-Manifests (das geparste JSON) nach Format 1. Liefert das Manifest mit Standardwerten
- * für fehlende freiwillige Felder oder einen deutschen Hinweis, was nicht stimmt (der erste Fehler).
+ * Prüft den Inhalt eines Cosmetic-Manifests (das geparste JSON) nach Format 1 oder 2 (je nach `format`). Liefert das
+ * Manifest mit Standardwerten für fehlende freiwillige Felder oder einen deutschen Hinweis, was nicht stimmt (der
+ * erste Fehler). Die Größe des Manifest-Texts prüft parseCosmeticManifest.
  */
-export function checkCosmeticManifest(value: unknown): CosmeticManifest | string {
+export function checkCosmeticManifest(value: unknown): AnyCosmeticManifest | string {
   try {
-    return check(value);
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) fail('Das Manifest ist kein JSON-Objekt');
+    const m = value as Record<string, unknown>;
+    if (m.type !== COSMETIC_TYPE) fail(`„type“ muss „${COSMETIC_TYPE}“ sein`);
+    if (m.format === COSMETIC_FORMAT_2) return checkFormat2(m);
+    if (m.format !== COSMETIC_FORMAT) fail(`„format“ muss ${COSMETIC_FORMATS.join(' oder ')} sein`);
+    return check(m);
   } catch (err) {
     if (err instanceof Problem) return err.message;
     throw err;
   }
 }
 
-function check(value: unknown): CosmeticManifest {
+/** Kopf beider Formate: id, version, slot, name, description, access, date. */
+function checkHead<S extends CosmeticSlot>(m: Record<string, unknown>, slots: readonly S[]) {
   const L = COSMETIC_LIMITS;
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) fail('Das Manifest ist kein JSON-Objekt');
-  const m = value as Record<string, unknown>;
-  if (m.type !== COSMETIC_TYPE) fail(`„type“ muss „${COSMETIC_TYPE}“ sein`);
-  if (m.format !== COSMETIC_FORMAT) fail(`„format“ muss ${COSMETIC_FORMAT} sein`);
-  onlyKeys(m, '', MANIFEST_KEYS);
   const id = m.id;
   if (typeof id !== 'string' || !COSMETIC_ID_RE.test(id)) fail('„id“ ist ungültig (1–32 Zeichen aus a–z, 0–9 und -, ohne - am Anfang oder Ende)');
   if (BUILTIN_CAPE_IDS.includes(id)) fail(`„id“ darf nicht die ID eines eingebauten Capes sein (${BUILTIN_CAPE_IDS.join(', ')})`);
   const version = integer(m.version, 'version', 1, L.versionMax);
-  const slot = oneOf(m.slot, 'slot', COSMETIC_SLOTS);
+  const slot = oneOf(m.slot, 'slot', slots);
   const name = text(m.name, 'name', 1, L.nameMax);
   const description = text(m.description, 'description', 0, L.descriptionMax);
   const access = oneOf(m.access, 'access', COSMETIC_ACCESS);
   if (!isIsoDate(m.date)) fail('„date“ ist kein gültiges Datum nach ISO 8601 (z. B. 2026-11-26T12:00:00.000Z)');
-  const date = m.date;
+  return { id, version, slot, name, description, access, date: m.date };
+}
+
+/** Format 1 (type und format sind schon geprüft). */
+function check(m: Record<string, unknown>): CosmeticManifest {
+  onlyKeys(m, '', MANIFEST_KEYS);
+  const { id, version, slot, name, description, access, date } = checkHead(m, COSMETIC_SLOTS);
 
   if (!has(m, 'texture')) fail('„texture“ fehlt');
   const image = png(m.texture, 'texture');
@@ -689,33 +1114,378 @@ function check(value: unknown): CosmeticManifest {
   };
 }
 
-/** Manifest-Text lesen und prüfen (der Text muss vorher mit seiner Signatur geprüft sein). */
-export function parseCosmeticManifest(manifest: string): CosmeticManifest | string {
+// ---------- Format 2: Mesh mit Keyframe-Animationen ----------
+
+const isPowerOfTwo = (v: number) => v > 0 && (v & (v - 1)) === 0;
+const u16 = (bytes: Uint8Array, i: number) => bytes[i * 2]! | (bytes[i * 2 + 1]! << 8);
+const s16 = (bytes: Uint8Array, i: number) => (u16(bytes, i) << 16) >> 16;
+
+/** Base64 mit genau `count` Werten zu je `size` Byte (Länge passend, strenges Base64); liefert die Bytes. */
+function packed(value: unknown, path: string, count: number, size: 1 | 2, what: string): Uint8Array {
+  const bytes = count * size;
+  const chars = Math.ceil(bytes / 3) * 4;
+  if (typeof value !== 'string') fail(`${q(path)} fehlt oder ist kein Text (Base64)`);
+  if (value.length !== chars) fail(`${q(path)} muss genau ${count} ${what} als Base64 enthalten (${chars} Zeichen, nicht ${value.length})`);
+  const decoded = decodeBase64(value);
+  if (decoded === null || decoded.length !== bytes) fail(`${q(path)} enthält kein gültiges Base64 (erwartet ${bytes} Byte)`);
+  return decoded;
+}
+
+function checkEmissive(value: unknown): CosmeticEmissive {
+  const L = COSMETIC_LIMITS_2;
+  const o = object(value, 'emissive');
+  onlyKeys(o, 'emissive', ['frames', 'frametimeTicks', 'pulse'], COSMETIC_FORMAT_2);
+  const frames = integer(required(o, 'frames', 'emissive'), 'emissive.frames', 1, L.emissiveFramesMax);
+  const frametimeTicks = integer(required(o, 'frametimeTicks', 'emissive'), 'emissive.frametimeTicks', 1, L.frametimeTicksMax);
+  const p = object(required(o, 'pulse', 'emissive'), 'emissive.pulse');
+  onlyKeys(p, 'emissive.pulse', ['period', 'min', 'max'], COSMETIC_FORMAT_2);
+  const period = number(required(p, 'period', 'emissive.pulse'), 'emissive.pulse.period', L.pulsePeriodMin, L.pulsePeriodMax);
+  const min = number(required(p, 'min', 'emissive.pulse'), 'emissive.pulse.min', 0, 1);
+  const max = number(required(p, 'max', 'emissive.pulse'), 'emissive.pulse.max', 0, 1);
+  if (min > max) fail('„emissive.pulse.min“ darf nicht größer sein als „emissive.pulse.max“');
+  return { frames, frametimeTicks, pulse: { period, min, max } };
+}
+
+/** Knochen: Eltern zuerst (parent -1 oder ein kleinerer Index), Namen eindeutig. */
+function checkMeshBones(value: unknown): CosmeticMeshBone[] {
+  const L = COSMETIC_LIMITS_2;
+  if (!Array.isArray(value) || value.length < 1 || value.length > L.bonesMax) fail(`„bones“ muss eine Liste mit 1 bis ${L.bonesMax} Knochen sein`);
+  const names = new Set<string>();
+  return value.map((raw, i) => {
+    const path = `bones[${i}]`;
+    const b = object(raw, path);
+    onlyKeys(b, path, ['name', 'parent', 'pivot', 'tail'], COSMETIC_FORMAT_2);
+    const name = required(b, 'name', path);
+    if (typeof name !== 'string' || !MESH_BONE_NAME_RE.test(name)) {
+      fail(`${q(sub(path, 'name'))} ist ungültig (1–${L.boneNameMax} Zeichen aus A–Z, a–z, 0–9, _, . und -)`);
+    }
+    if (names.has(name)) fail(`${q(sub(path, 'name'))}: Den Knochen „${name}“ gibt es schon`);
+    names.add(name);
+    const parent = required(b, 'parent', path);
+    if (typeof parent !== 'number' || !Number.isInteger(parent) || parent < -1 || parent >= i) {
+      fail(
+        i === 0
+          ? `${q(sub(path, 'parent'))} muss -1 sein (der erste Knochen hat keinen Eltern-Knochen)`
+          : `${q(sub(path, 'parent'))} muss -1 (kein Eltern-Knochen) oder der Index eines Knochens davor sein (0 bis ${i - 1})`,
+      );
+    }
+    const pivot = vec3(required(b, 'pivot', path), sub(path, 'pivot'), around(L.coordMax));
+    const tail = vec3(required(b, 'tail', path), sub(path, 'tail'), around(L.coordMax));
+    return { name, parent, pivot, tail };
+  });
+}
+
+const MESH_KEYS = ['vertexCount', 'triangleCount', 'positions', 'normals', 'uvs', 'bones', 'triangles', 'joints', 'weights'];
+
+/** Mesh: Längen passend zu N und T, Indizes < N, Knochen gültig; weiche Haut (joints/weights) freiwillig. */
+function checkMesh(value: unknown, boneCount: number): CosmeticMesh {
+  const L = COSMETIC_LIMITS_2;
+  const o = object(value, 'mesh');
+  onlyKeys(o, 'mesh', MESH_KEYS, COSMETIC_FORMAT_2);
+  const n = integer(required(o, 'vertexCount', 'mesh'), 'mesh.vertexCount', 1, L.verticesMax);
+  const t = integer(required(o, 'triangleCount', 'mesh'), 'mesh.triangleCount', 1, L.trianglesMax);
+  packed(required(o, 'positions', 'mesh'), 'mesh.positions', 3 * n, 2, `Int16-Werte (3 je Vertex, ${n} Vertices)`);
+  packed(required(o, 'normals', 'mesh'), 'mesh.normals', 3 * n, 1, `Int8-Werte (3 je Vertex, ${n} Vertices)`);
+  packed(required(o, 'uvs', 'mesh'), 'mesh.uvs', 2 * n, 2, `Uint16-Werte (2 je Vertex, ${n} Vertices)`);
+  const bones = packed(required(o, 'bones', 'mesh'), 'mesh.bones', n, 1, 'Knochen-Indizes (Uint8, 1 je Vertex)');
+  for (let v = 0; v < n; v++) {
+    if (bones[v]! >= boneCount) fail(`„mesh.bones“: Vertex ${v} nennt den Knochen ${bones[v]}, es gibt nur ${boneCount} (0 bis ${boneCount - 1})`);
+  }
+  const triangles = packed(required(o, 'triangles', 'mesh'), 'mesh.triangles', 3 * t, 2, `Vertex-Indizes (Uint16, 3 je Dreieck, ${t} Dreiecke)`);
+  for (let i = 0; i < 3 * t; i++) {
+    const index = u16(triangles, i);
+    if (index >= n) fail(`„mesh.triangles“: Dreieck ${Math.floor(i / 3)} nennt den Vertex ${index}, es gibt nur ${n} (0 bis ${n - 1})`);
+  }
+  let joints: string | null = null;
+  let weights: string | null = null;
+  if (has(o, 'joints') !== has(o, 'weights')) {
+    fail(has(o, 'joints') ? '„mesh.weights“ fehlt (Pflicht mit „mesh.joints“)' : '„mesh.joints“ fehlt (Pflicht mit „mesh.weights“)');
+  }
+  if (has(o, 'joints')) {
+    const k = L.influences;
+    const j = packed(o.joints, 'mesh.joints', k * n, 1, `Knochen-Indizes (Uint8, ${k} je Vertex)`);
+    const w = packed(o.weights, 'mesh.weights', k * n, 1, `Gewichte (Uint8, ${k} je Vertex)`);
+    for (let v = 0; v < n; v++) {
+      let sum = 0;
+      let max = 0;
+      for (let i = v * k; i < v * k + k; i++) {
+        if (j[i]! >= boneCount) fail(`„mesh.joints“: Vertex ${v} nennt den Knochen ${j[i]}, es gibt nur ${boneCount} (0 bis ${boneCount - 1})`);
+        sum += w[i]!;
+        max = Math.max(max, w[i]!);
+      }
+      if (sum !== L.weightUnit) fail(`„mesh.weights“: Die Gewichte von Vertex ${v} ergeben ${sum} statt ${L.weightUnit}`);
+      let main = false;
+      for (let i = v * k; i < v * k + k; i++) if (j[i] === bones[v] && w[i] === max) main = true;
+      if (!main) fail(`„mesh.bones“: Vertex ${v} muss den Knochen mit dem größten Gewicht aus „mesh.joints“ nennen`);
+    }
+    joints = o.joints as string;
+    weights = o.weights as string;
+  }
+  return {
+    vertexCount: n,
+    triangleCount: t,
+    positions: o.positions as string,
+    normals: o.normals as string,
+    uvs: o.uvs as string,
+    bones: o.bones as string,
+    triangles: o.triangles as string,
+    joints,
+    weights,
+  };
+}
+
+const KEY_VALUES = { rot: 4, move: 3, scale: 1 } as const;
+const KEY_WHAT = { rot: 'Int16-Werte (x, y, z, w je Key)', move: 'Int16-Werte (x, y, z je Key)', scale: 'Uint16-Werte (einer je Key)' } as const;
+
+/** Keys einer Spur: Frame-Nummern (erste 0, streng aufsteigend, < frames) und passend viele Werte. */
+function checkKeys(value: unknown, path: string, frames: number, kind: keyof typeof KEY_VALUES): CosmeticKeys {
+  const L = COSMETIC_LIMITS_2;
+  const o = object(value, path);
+  onlyKeys(o, path, ['keys', 'values'], COSMETIC_FORMAT_2);
+  const keysPath = sub(path, 'keys');
+  const rawKeys = required(o, 'keys', path);
+  const keyBytes = typeof rawKeys === 'string' ? decodeBase64(rawKeys) : null;
+  if (keyBytes === null || keyBytes.length % 2 !== 0) fail(`${q(keysPath)} muss Frame-Nummern (Uint16) als Base64 enthalten, mindestens eine`);
+  const count = keyBytes.length / 2;
+  let previous = -1;
+  for (let i = 0; i < count; i++) {
+    const frame = u16(keyBytes, i);
+    if (i === 0 && frame !== 0) fail(`${q(keysPath)} muss mit Frame 0 beginnen (ist ${frame})`);
+    if (frame <= previous) fail(`${q(keysPath)} muss streng aufsteigen (Key ${i}: Frame ${frame} nach ${previous})`);
+    if (frame >= frames) fail(`${q(keysPath)}: Frame ${frame} liegt nicht in der Animation (0 bis ${frames - 1})`);
+    previous = frame;
+  }
+  const per = KEY_VALUES[kind];
+  const values = packed(required(o, 'values', path), sub(path, 'values'), per * count, 2, KEY_WHAT[kind]);
+  if (kind === 'rot') {
+    for (let i = 0; i < count; i++) {
+      let square = 0;
+      for (let c = 0; c < 4; c++) square += (s16(values, i * 4 + c) / L.rotationUnit) ** 2;
+      const length = Math.sqrt(square);
+      if (Math.abs(length - 1) > L.quaternionTolerance) {
+        fail(
+          `${q(sub(path, 'values'))}: Das Quaternion von Key ${i} hat die Länge ${length.toFixed(3)} ` +
+            `(erlaubt ${1 - L.quaternionTolerance} bis ${1 + L.quaternionTolerance})`,
+        );
+      }
+    }
+  }
+  return { keys: rawKeys as string, values: o.values as string, count };
+}
+
+/** Animationen nach Namen: fps, frames, loop und höchstens eine Spur je Knochen. */
+function checkClips(value: unknown, boneCount: number): Record<string, CosmeticClip> {
+  const L = COSMETIC_LIMITS_2;
+  const o = object(value, 'animations');
+  const names = Object.keys(o);
+  if (names.length < 1 || names.length > L.animationsMax) fail(`„animations“ muss 1 bis ${L.animationsMax} Animationen enthalten`);
+  const clips: Record<string, CosmeticClip> = {};
+  for (const name of names) {
+    const path = `animations.${name}`;
+    if (!ANIMATION_NAME_RE.test(name)) fail(`${q(path)}: Der Name ist ungültig (1–24 Zeichen aus A–Z, a–z, 0–9 und _)`);
+    const a = object(o[name], path);
+    onlyKeys(a, path, ['fps', 'frames', 'loop', 'tracks'], COSMETIC_FORMAT_2);
+    const fps = integer(required(a, 'fps', path), sub(path, 'fps'), 1, L.fpsMax);
+    const frames = integer(required(a, 'frames', path), sub(path, 'frames'), 1, L.framesMax);
+    const loop = boolean(required(a, 'loop', path), sub(path, 'loop'));
+    const rawTracks = required(a, 'tracks', path);
+    if (!Array.isArray(rawTracks) || rawTracks.length > boneCount) {
+      fail(`${q(sub(path, 'tracks'))} muss eine Liste mit höchstens ${boneCount} Spuren sein (eine je Knochen)`);
+    }
+    const seen = new Set<number>();
+    const tracks = rawTracks.map((raw, i): CosmeticTrack => {
+      const tp = `${path}.tracks[${i}]`;
+      const tr = object(raw, tp);
+      onlyKeys(tr, tp, ['bone', 'rot', 'move', 'scale'], COSMETIC_FORMAT_2);
+      const bone = integer(required(tr, 'bone', tp), sub(tp, 'bone'), 0, boneCount - 1);
+      if (seen.has(bone)) fail(`${q(sub(tp, 'bone'))}: Für den Knochen ${bone} gibt es in dieser Animation schon eine Spur`);
+      seen.add(bone);
+      if (!has(tr, 'rot') && !has(tr, 'move') && !has(tr, 'scale')) fail(`${q(tp)} braucht mindestens eins von „rot“, „move“ und „scale“`);
+      return {
+        bone,
+        rot: has(tr, 'rot') ? checkKeys(tr.rot, sub(tp, 'rot'), frames, 'rot') : null,
+        move: has(tr, 'move') ? checkKeys(tr.move, sub(tp, 'move'), frames, 'move') : null,
+        scale: has(tr, 'scale') ? checkKeys(tr.scale, sub(tp, 'scale'), frames, 'scale') : null,
+      };
+    });
+    // defineProperty: Auch ein Name wie „__proto__“ wird ein eigenes Feld.
+    Object.defineProperty(clips, name, { value: { fps, frames, loop, tracks }, enumerable: true, writable: true, configurable: true });
+  }
+  return clips;
+}
+
+const animationList = (clips: Record<string, CosmeticClip>) => Object.keys(clips).join(', ');
+
+/** Zustände: idle Pflicht, jeder Wert eine vorhandene Animation, dazu blendSeconds. */
+function checkStates(value: unknown, clips: Record<string, CosmeticClip>): CosmeticStates {
+  const L = COSMETIC_LIMITS_2;
+  const o = object(value, 'states');
+  onlyKeys(o, 'states', [...COSMETIC_STATES, 'blendSeconds'], COSMETIC_FORMAT_2);
+  const blendSeconds = number(required(o, 'blendSeconds', 'states'), 'states.blendSeconds', 0, L.blendSecondsMax);
+  const states: Record<string, string | number> = { blendSeconds };
+  for (const key of COSMETIC_STATES) {
+    if (!has(o, key)) {
+      if (key === 'idle') fail('„states.idle“ fehlt');
+      continue;
+    }
+    const name = o[key];
+    if (typeof name !== 'string' || !Object.hasOwn(clips, name)) fail(`„states.${key}“ muss der Name einer Animation sein (${animationList(clips)})`);
+    states[key] = name;
+  }
+  return states as CosmeticStates;
+}
+
+/** Partikel an Knochen: erlaubte IDs, perSecond, color nur bei dust, states = Animationen. */
+function checkMeshParticles(value: unknown, boneCount: number, clips: Record<string, CosmeticClip>): CosmeticMeshParticle[] {
+  const L = COSMETIC_LIMITS_2;
+  if (!Array.isArray(value) || value.length > L.particlesMax) fail(`„particles“ muss eine Liste mit höchstens ${L.particlesMax} Einträgen sein`);
+  return value.map((raw, i) => {
+    const path = `particles[${i}]`;
+    const p = object(raw, path);
+    onlyKeys(p, path, ['bone', 'at', 'particle', 'perSecond', 'color', 'states'], COSMETIC_FORMAT_2);
+    const bone = integer(required(p, 'bone', path), sub(path, 'bone'), 0, boneCount - 1);
+    const at = oneOf(required(p, 'at', path), sub(path, 'at'), PARTICLE_ANCHORS);
+    const given = required(p, 'particle', path);
+    const id = typeof given === 'string' && given.startsWith('minecraft:') ? given.slice('minecraft:'.length) : given;
+    if (typeof id !== 'string' || !(COSMETIC_PARTICLE_IDS as readonly string[]).includes(id)) {
+      fail(`${q(sub(path, 'particle'))} ist kein erlaubter Partikel (${COSMETIC_PARTICLE_IDS.join(', ')}; mit oder ohne „minecraft:“)`);
+    }
+    const perSecond = number(required(p, 'perSecond', path), sub(path, 'perSecond'), L.perSecondMin, L.perSecondMax);
+    let color: string | null = null;
+    if (has(p, 'color')) {
+      if (id !== 'dust') fail(`${q(sub(path, 'color'))} gibt es nur beim Partikel dust`);
+      if (typeof p.color !== 'string' || !COLOR_RE.test(p.color)) fail(`${q(sub(path, 'color'))} muss eine Farbe wie #ffcc00 sein`);
+      color = p.color;
+    }
+    let states: string[] | null = null;
+    if (has(p, 'states')) {
+      const list = p.states;
+      if (!Array.isArray(list) || list.length < 1 || list.length > L.animationsMax) {
+        fail(`${q(sub(path, 'states'))} muss eine Liste mit 1 bis ${L.animationsMax} Animationen sein`);
+      }
+      list.forEach((name, j) => {
+        const at = `${path}.states[${j}]`;
+        if (typeof name !== 'string' || !Object.hasOwn(clips, name)) fail(`${q(at)} muss der Name einer Animation sein (${animationList(clips)})`);
+        if (list.indexOf(name) !== j) fail(`${q(at)}: „${name}“ steht doppelt in der Liste`);
+      });
+      states = [...(list as string[])];
+    }
+    return { bone, at, particle: id as CosmeticParticleId, perSecond, color, states };
+  });
+}
+
+function checkAttach(value: unknown): CosmeticAttach {
+  const L = COSMETIC_LIMITS_2;
+  const o = object(value, 'attach');
+  onlyKeys(o, 'attach', ['origin', 'side'], COSMETIC_FORMAT_2);
+  return {
+    origin: has(o, 'origin') ? vec3(o.origin, 'attach.origin', around(L.originMax)) : [0, 0, 0],
+    side: has(o, 'side') ? oneOf(o.side, 'attach.side', ATTACH_SIDES) : 'left',
+  };
+}
+
+/** Format 2 (type und format sind schon geprüft). */
+function checkFormat2(m: Record<string, unknown>): CosmeticManifest2 {
+  const L = COSMETIC_LIMITS_2;
+  onlyKeys(m, '', MANIFEST_KEYS_2, COSMETIC_FORMAT_2);
+  const { id, version, slot, name, description, access, date } = checkHead(m, MESH_SLOTS);
+
+  if (!has(m, 'texture')) fail('„texture“ fehlt');
+  const image = png(m.texture, 'texture', L.pngBytes);
+  const fits = (v: number) => isPowerOfTwo(v) && v >= L.textureMin && v <= L.textureMax;
+  if (!fits(image.width) || !fits(image.height)) {
+    fail(`„texture“ muss je eine Zweierpotenz von ${L.textureMin} bis ${L.textureMax} Pixel breit und hoch sein (ist ${image.width} × ${image.height})`);
+  }
+  let emissive: CosmeticEmissive | null = null;
+  let glow: string | null = null;
+  if (has(m, 'glow') !== has(m, 'emissive')) fail(has(m, 'glow') ? '„emissive“ fehlt (Pflicht mit „glow“)' : '„glow“ fehlt (Pflicht mit „emissive“)');
+  if (has(m, 'emissive')) {
+    emissive = checkEmissive(m.emissive);
+    const glowImage = png(m.glow, 'glow', L.pngBytes);
+    const height = image.height * emissive.frames;
+    if (glowImage.width !== image.width || glowImage.height !== height) {
+      fail(
+        `„glow“ muss ${image.width} × ${height} Pixel groß sein (so breit wie „texture“, ${emissive.frames} Bilder zu je ${image.height} Pixel ` +
+          `untereinander; ist ${glowImage.width} × ${glowImage.height})`,
+      );
+    }
+    glow = m.glow as string;
+  }
+
+  const bones = checkMeshBones(required(m, 'bones', ''));
+  const mesh = checkMesh(required(m, 'mesh', ''), bones.length);
+  const animations = checkClips(required(m, 'animations', ''), bones.length);
+  const states = checkStates(required(m, 'states', ''), animations);
+  const particles = has(m, 'particles') ? checkMeshParticles(m.particles, bones.length, animations) : [];
+  if (slot !== 'companion' && has(m, 'attach')) fail(`„attach“ gibt es nur beim Slot companion (nicht beim Slot ${slot})`);
+  const attach = slot === 'companion' ? checkAttach(has(m, 'attach') ? m.attach : {}) : null;
+
+  return {
+    type: COSMETIC_TYPE,
+    format: COSMETIC_FORMAT_2,
+    id,
+    version,
+    slot,
+    name,
+    description,
+    access,
+    date,
+    texture: m.texture as string,
+    image,
+    glow,
+    emissive,
+    mesh,
+    bones,
+    animations,
+    states,
+    particles,
+    attach,
+  };
+}
+
+// ---------- Text und Umschlag ----------
+
+/** Länge des Umschlags, wie der Dienst ihn ausliefert, zu einem Manifest-Text (die Signatur hat immer 88 Zeichen). */
+export function cosmeticEnvelopeLength(manifest: string): number {
+  return utf8Length(cosmeticEnvelopeText({ manifest, signature: 'A'.repeat(88) }));
+}
+
+/**
+ * Manifest-Text lesen und prüfen (der Text muss vorher mit seiner Signatur geprüft sein). Hier kommt auch die
+ * Größengrenze des Formats dazu: Format 1 höchstens 160 KB Manifest bzw. 192 KB Umschlag, Format 2 512 KB bzw. 544 KB.
+ */
+export function parseCosmeticManifest(manifest: string): AnyCosmeticManifest | string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(manifest);
   } catch {
     return '„manifest“ ist kein gültiges JSON';
   }
+  const format = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>).format : undefined;
+  if (format === COSMETIC_FORMAT || format === COSMETIC_FORMAT_2) {
+    const L = format === COSMETIC_FORMAT ? COSMETIC_LIMITS : COSMETIC_LIMITS_2;
+    if (utf8Length(manifest) > L.manifestBytes) return `„manifest“ ist zu groß (höchstens ${L.manifestBytes / 1024} KB bei Format ${format})`;
+    if (cosmeticEnvelopeLength(manifest) > L.envelopeBytes) return `Der Umschlag ist zu groß (höchstens ${L.envelopeBytes / 1024} KB bei Format ${format})`;
+  }
   return checkCosmeticManifest(parsed);
 }
 
 /**
  * Prüft die Form eines Umschlags `{ manifest, signature }` (ohne Kryptografie): beide als Text, Manifest höchstens
- * 160 KB (UTF-8) ohne einzelne Ersatzzeichen, Signatur als kanonisches Base64 von 64 Byte, der Umschlag wie
- * ausgeliefert höchstens 192 KB. Zusatzfelder im Umschlag werden ignoriert.
+ * 512 KB (UTF-8, größte Grenze aller Formate) ohne einzelne Ersatzzeichen, Signatur als kanonisches Base64 von 64 Byte,
+ * der Umschlag wie ausgeliefert höchstens 544 KB. Die engere Grenze von Format 1 (160 KB / 192 KB) prüft
+ * parseCosmeticManifest, sobald das Format bekannt ist. Zusatzfelder im Umschlag werden ignoriert.
  */
 export function checkCosmeticEnvelope(value: unknown): CosmeticEnvelope | string {
-  const L = COSMETIC_LIMITS;
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'Der Umschlag ist kein JSON-Objekt';
   const { manifest, signature } = value as Record<string, unknown>;
   if (typeof manifest !== 'string' || manifest === '') return '„manifest“ fehlt oder ist kein Text';
   if (typeof signature !== 'string' || signature === '') return '„signature“ fehlt oder ist kein Text';
   if (LONE_SURROGATE_RE.test(manifest)) return '„manifest“ enthält ungültige Zeichen';
-  if (utf8Length(manifest) > L.manifestBytes) return `„manifest“ ist zu groß (höchstens ${L.manifestBytes / 1024} KB)`;
+  if (utf8Length(manifest) > COSMETIC_MAX_MANIFEST_BYTES) return `„manifest“ ist zu groß (höchstens ${COSMETIC_MAX_MANIFEST_BYTES / 1024} KB)`;
   if (!SIGNATURE_RE.test(signature)) return '„signature“ muss eine Ed25519-Signatur als Base64 sein (88 Zeichen)';
-  if (utf8Length(cosmeticEnvelopeText({ manifest, signature })) > L.envelopeBytes) {
-    return `Der Umschlag ist zu groß (höchstens ${L.envelopeBytes / 1024} KB)`;
+  if (utf8Length(cosmeticEnvelopeText({ manifest, signature })) > COSMETIC_MAX_ENVELOPE_BYTES) {
+    return `Der Umschlag ist zu groß (höchstens ${COSMETIC_MAX_ENVELOPE_BYTES / 1024} KB)`;
   }
   return { manifest, signature };
 }

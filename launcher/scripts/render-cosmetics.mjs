@@ -1228,6 +1228,81 @@ function pixelRain(k) {
   return { outer, glow, lining, edge: hex('#1e2a5a'), top: hex('#2a3a7a'), bottom: hex('#1e2a5a'), trim: palette('#ffffff', '#a6ccff', '#3b82f6', '#2a3a7a') };
 }
 
+/**
+ * Freundesband (Belohnung für Einladungen): zwei Bänder in Heldix-Türkis und Gold winden sich als Doppelspirale über
+ * einen Nachthimmel; das vordere Band ist breiter und heller, die Windung wandert in 24 Bildern einmal nach unten.
+ */
+function friendshipBand() {
+  const night = ['#1a1f4a', '#161a40', '#121536', '#0e102b', '#0a0b20'].map(hex);
+  const ribbonA = ['#e0fbff', '#9ff3ff', '#67e8f9', '#22b8e0', '#1d6fd8', '#173f8f'].map(hex); // Türkis
+  const ribbonB = ['#fff6c4', '#ffe58a', '#ffd75a', '#f0ae27', '#c27616', '#7a470c'].map(hex); // Gold
+  const star = [hex('#ffffff'), hex('#c9d6ff'), hex('#8090d0')];
+  const STARS = [[1.6, 2.2, 0], [8.3, 1.4, 5], [5.2, 4.1, 11], [2.4, 8.6, 17], [8.8, 7.4, 3], [1.5, 13.4, 9], [8.1, 12.6, 20], [5.6, 15.2, 14]];
+  /** Mittellinie (Texel) und Tiefe (-1 hinten … 1 vorne) beider Bänder an Höhe y */
+  const strands = (y, w, h, t) => {
+    const phase = TAU * (y / h * 1.25 - t);
+    const swing = w * 0.27;
+    return [
+      { x: w / 2 + swing * Math.sin(phase), depth: Math.cos(phase), tones: ribbonA },
+      { x: w / 2 - swing * Math.sin(phase), depth: -Math.cos(phase), tones: ribbonB },
+    ];
+  };
+  /** Band an (x, y): Ton und ob es leuchtet, sonst null; das vordere Band deckt das hintere */
+  const ribbonAt = (x, y, w, h, t, ix, iy) => {
+    const pair = strands(y, w, h, t).sort((a, b) => b.depth - a.depth);
+    for (const s of pair) {
+      const half = 0.95 + 0.45 * (s.depth + 1) / 2; // vorne breiter
+      const d = Math.abs(x - s.x);
+      if (d > half) continue;
+      const across = d / half; // 0 Mitte … 1 Rand
+      const light = 0.55 - 0.45 * s.depth; // vorne heller (kleiner Index)
+      if (across > 0.78) return { color: s.tones[Math.min(5, Math.round(3 + 2 * light))], glow: false };
+      const value = Math.min(1, Math.max(0, light * 0.8 + across * 0.35));
+      // feine Querstreifen wie gewebt, wandern mit
+      const weave = (((y * 2.2 - t * 6) % 1) + 1) % 1 < 0.18 && s.depth > -0.2;
+      return { color: weave ? s.tones[Math.max(0, Math.round(value * 4) - 1)] : ramp(s.tones.slice(0, 5), value, ix, iy), glow: s.depth > 0.25 && across < 0.5 };
+    }
+    return null;
+  };
+  const outer = ({ x, y, ix, iy, w, h, t, frame }) => {
+    const r = ribbonAt(x, y, w, h, t, ix, iy);
+    if (r) return r.color;
+    for (const [sx, sy, offset] of STARS) {
+      const tw = (frame + offset) % 12; // funkelt zweimal je Schleife
+      const d = Math.hypot(x - sx * (w / 10), y - sy * (h / 16));
+      if (d < 0.32) return tw < 3 ? star[0] : tw < 7 ? star[1] : star[2];
+      if (tw < 2 && d < 0.75 && (Math.abs(x - sx * (w / 10)) < 0.2 || Math.abs(y - sy * (h / 16)) < 0.2)) return star[1];
+    }
+    return ramp(night, 0.25 + 0.6 * (y / h) + 0.1 * Math.sin(x * 0.9 + y * 0.4), ix, iy);
+  };
+  const glow = ({ x, y, ix, iy, w, h, t }) => {
+    const r = ribbonAt(x, y, w, h, t, ix, iy);
+    return r?.glow ? r.color : null;
+  };
+  const lining = ({ x, y, ix, iy, h }) => ramp([hex('#141836'), hex('#10132c'), hex('#0c0e22')], 0.3 + 0.4 * (y / h) + 0.15 * Math.sin(x + y * 0.7), ix, iy);
+  return { outer, glow, lining, edge: hex('#141836'), top: hex('#67e8f9'), bottom: hex('#ffd75a'), trim: palette('#fff6c4', '#ffe58a', '#f0ae27', '#c27616') };
+}
+
+/** Freundesfunken: ein türkiser und ein goldener Funke kreisen umeinander (8 × 8 je Bild, 4 Bilder) */
+function friendSparkFrames() {
+  const frames = [];
+  for (let f = 0; f < 4; f++) {
+    const grid = Array.from({ length: 8 }, () => Array(8).fill('.'));
+    const a = (f / 4) * TAU + Math.PI / 4;
+    const put = (x, y, ch) => {
+      if (x >= 0 && x < 8 && y >= 0 && y < 8 && (grid[y][x] === '.' || ch === ch.toUpperCase())) grid[y][x] = ch;
+    };
+    for (const [ang, lo, hi] of [[a, 't', 'T'], [a + Math.PI, 'g', 'G']]) {
+      const cx = Math.round(3.5 + 2 * Math.cos(ang));
+      const cy = Math.round(3.5 + 2 * Math.sin(ang));
+      put(cx, cy, hi);
+      for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) put(cx + ox, cy + oy, lo);
+    }
+    frames.push(grid.map((row) => row.join('')));
+  }
+  return frames;
+}
+
 function cape(design, k) {
   const img = new Img(64 * k, 32 * k * CAPE_FRAMES);
   const glow = new Img(64 * k, 32 * k * CAPE_FRAMES);
@@ -1325,6 +1400,20 @@ const COSMETICS = [
   {
     id: 'pixelregen', slot: 'cape', name: 'Pixelregen', description: 'Leuchtender Regen aus bunten Pixeln auf dunklem Grund',
     build: () => ({ ...bestCape((k) => pixelRain(k)), cape: { frames: CAPE_FRAMES, fps: 12 } }),
+  },
+  // Belohnungen für Einladungen (access: unlock – der Dienst schaltet sie frei, siehe docs/dienst.md)
+  {
+    id: 'freundesfunken', slot: 'aura', name: 'Freundesfunken', access: 'unlock',
+    description: 'Ein türkiser und ein goldener Funke kreisen um dich – Belohnung für Einladungen',
+    build: () => ({
+      texture: sprites(friendSparkFrames(), { T: hex('#e0fbff'), t: hex('#67e8f9'), G: hex('#fff6c4'), g: hex('#ffd75a') }),
+      particles: { frames: 4, rate: 5, lifetime: 30, size: 0.2, motion: 'orbit', radius: 0.75, color: '#ffffff', fullbright: true },
+    }),
+  },
+  {
+    id: 'freundesband', slot: 'cape', name: 'Freundesband', access: 'unlock',
+    description: 'Zwei Bänder in Türkis und Gold winden sich über den Nachthimmel – ab drei eingeladenen Freunden',
+    build: () => ({ ...bestCape(() => friendshipBand()), cape: { frames: CAPE_FRAMES, fps: 12 } }),
   },
 ];
 

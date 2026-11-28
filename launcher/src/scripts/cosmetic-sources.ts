@@ -3,25 +3,29 @@
 //
 //   cosmetics/<id>/cosmetic.json  Manifest ohne type, date, texture und glow
 //   cosmetics/<id>/texture.png    Pflicht
-//   cosmetics/<id>/glow.png       optional (Leuchtebene, gleiche Größe)
+//   cosmetics/<id>/glow.png       optional (Format 1: Leuchtebene, gleiche Größe; Format 2: Leucht-Streifen mit
+//                                 emissive.frames Bildern untereinander)
+// Format 2 (Mesh mit Keyframes) steht mit "format": 2 in cosmetic.json; solche Quellen erzeugt
+// scripts/import-blender-cosmetics.mjs (npm run blender-import) aus den Blender-Exporten.
 
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseCosmeticManifestText, pngDataUrl } from '../main/core/cosmetics';
-import { COSMETIC_FORMAT, COSMETIC_ID_RE, COSMETIC_TYPE, type CosmeticManifest } from '../main/core/cosmetics-format';
+import { COSMETIC_FORMAT, COSMETIC_FORMAT_2, COSMETIC_ID_RE, COSMETIC_TYPE, type AnyCosmeticManifest } from '../main/core/cosmetics-format';
 
 /** cosmetics/ im Repo-Wurzelordner (dist/scripts → launcher → Repo) */
 export const COSMETICS_DIR = path.resolve(__dirname, '..', '..', '..', 'cosmetics');
 
 /** Felder, die das Bauen setzt und die deshalb nicht in cosmetic.json stehen dürfen */
 const GENERATED = ['type', 'date', 'texture', 'glow'];
-/** Reihenfolge der Felder im fertigen Manifest */
+/** Reihenfolge der Felder im fertigen Manifest (je Format; Format 1 unverändert, damit gleiche Quellen gleiche Texte geben) */
 const ORDER = ['type', 'format', 'id', 'version', 'slot', 'name', 'description', 'access', 'date', 'texture', 'glow', 'model', 'animations', 'particles', 'cape', 'companion'];
+const ORDER_2 = ['type', 'format', 'id', 'version', 'slot', 'name', 'description', 'access', 'date', 'texture', 'glow', 'emissive', 'bones', 'mesh', 'animations', 'states', 'particles', 'attach'];
 
 export interface BuiltCosmetic {
   id: string;
-  manifest: CosmeticManifest;
+  manifest: AnyCosmeticManifest;
   /** Manifest-Text, genau so wird er signiert */
   text: string;
   texture: Buffer;
@@ -65,10 +69,10 @@ export async function buildCosmetic(id: string, date: string, dir = COSMETICS_DI
   const full: Record<string, unknown> = { ...fields, type: COSMETIC_TYPE, format: fields.format ?? COSMETIC_FORMAT, date, texture: pngDataUrl(texture) };
   if (glow) full.glow = pngDataUrl(glow);
   const ordered: Record<string, unknown> = {};
-  for (const key of ORDER) if (full[key] !== undefined) ordered[key] = full[key];
+  for (const key of full.format === COSMETIC_FORMAT_2 ? ORDER_2 : ORDER) if (full[key] !== undefined) ordered[key] = full[key];
   for (const key of Object.keys(full)) if (!(key in ordered)) ordered[key] = full[key]; // unbekannte Felder meldet die Prüfung
   const text = JSON.stringify(ordered);
-  let manifest: CosmeticManifest;
+  let manifest: AnyCosmeticManifest;
   try {
     manifest = parseCosmeticManifestText(text);
   } catch (error) {

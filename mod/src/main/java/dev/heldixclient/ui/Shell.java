@@ -52,6 +52,8 @@ public final class Shell {
 		START("Start", "home", Section.PLAY),
 		WORLDS("Einzelspieler", "world", Section.PLAY),
 		SERVERS("Mehrspieler", "server", Section.PLAY),
+		/** geteilte Welten von Freunden und eigene (ab Heldix-Dienst 1.12.0) */
+		HELDIX_WORLDS("Heldix-Welten", "lan", Section.PLAY),
 		REALMS("Realms", "realms", Section.PLAY),
 		OVERVIEW("Übersicht", "home", Section.HELDIX),
 		MODULES("Module", "modules", Section.HELDIX),
@@ -63,6 +65,8 @@ public final class Shell {
 		CAPE("Cape", "cape", Section.PROFILE),
 		COSMETICS("Cosmetics", "sparkles", Section.PROFILE),
 		FRIENDS("Freunde", "friends", Section.PROFILE),
+		/** Party mit Freunden: Mitglieder, Einladungen, Folgen, Party-Chat (ab Heldix-Dienst 1.12.0) */
+		PARTY("Party", "headphones", FRIENDS),
 		MESSAGES("Nachrichten", "chat", FRIENDS),
 		REQUESTS("Anfragen", "user-plus", FRIENDS),
 		PRIVACY("Privatsphäre", "shield", FRIENDS),
@@ -126,7 +130,7 @@ public final class Shell {
 		public boolean visible(boolean inGame) {
 			return switch (this) {
 				case RESUME, PAUSE -> inGame;
-				case START, WORLDS, SERVERS, REALMS, QUIT -> !inGame;
+				case START, WORLDS, SERVERS, HELDIX_WORLDS, REALMS, QUIT -> !inGame;
 				case ACCOUNTS -> accountsVisible();
 				default -> true;
 			};
@@ -382,7 +386,9 @@ public final class Shell {
 		}
 		if (!Social.online()) return null;
 		int count = switch (page) {
-			case FRIENDS -> Social.incoming().size() + dev.heldixclient.social.Messages.unreadTotal();
+			case FRIENDS -> Social.incoming().size() + dev.heldixclient.social.Messages.unreadTotal() + dev.heldixclient.social.Party.invites().size()
+					+ dev.heldixclient.social.Party.unreadChat();
+			case PARTY -> dev.heldixclient.social.Party.invites().size() + dev.heldixclient.social.Party.unreadChat();
 			case REQUESTS -> Social.incoming().size();
 			case MESSAGES -> dev.heldixclient.social.Messages.unreadTotal();
 			default -> 0;
@@ -478,8 +484,9 @@ public final class Shell {
 			case START -> minecraft.gui.setScreen(new TitleScreen());
 			case WORLDS -> minecraft.gui.setScreen(new WorldsScreen());
 			case SERVERS -> minecraft.gui.setScreen(minecraft.options.skipMultiplayerWarning ? new ServersScreen() : new SafetyScreen(from));
+			case HELDIX_WORLDS -> minecraft.gui.setScreen(new dev.heldixclient.screen.HeldixWorldsScreen());
 			case REALMS -> minecraft.gui.setScreen(new RealmsMainScreen(from));
-			case OVERVIEW, MODULES, CAPE, COSMETICS, FRIENDS, MESSAGES, REQUESTS, PRIVACY, ACCOUNTS, WAYPOINTS, SHADER, PERFORMANCE, ADDONS, STORE, SETTINGS, INFO ->
+			case OVERVIEW, MODULES, CAPE, COSMETICS, FRIENDS, PARTY, MESSAGES, REQUESTS, PRIVACY, ACCOUNTS, WAYPOINTS, SHADER, PERFORMANCE, ADDONS, STORE, SETTINGS, INFO ->
 					minecraft.gui.setScreen(new HeldixMenuScreen(back, page));
 			case HUD -> minecraft.gui.setScreen(new HudEditorScreen(from));
 			case OPTIONS -> minecraft.gui.setScreen(new OptionsScreen(from, minecraft.options));

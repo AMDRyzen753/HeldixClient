@@ -1,47 +1,68 @@
-<!--seite {"titel":"Neuigkeiten und Versionen","beschreibung":"Alle Neuigkeiten zu HeldixClient und der Versionsverlauf des Launchers."}-->
+<!--seite {"titel":"Neuigkeiten und Versionen","beschreibung":"Neuigkeiten des HeldixClient-Teams und der Versionsverlauf des Launchers: was in jeder Version neu ist."}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
 <script type="module" src="/neuigkeiten.js"></script>
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="neuigkeiten">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap public-page">
-  <div class="page-head">
-    <span class="eyebrow">Neuigkeiten</span>
-    <h1>Was sich bei HeldixClient tut</h1>
-    <p class="lead">Ankündigungen des Teams, Wartungen und neue Versionen – die neuesten zuerst.</p>
-    <p class="page-jump"><a href="#versionen">Zum Versionsverlauf{{icon:chevron-down}}</a></p>
-  </div>
-
-  <div class="news-archive" id="archiv" aria-live="polite" aria-busy="true">
-    <div class="loading-inline" role="status"><span class="spinner" aria-hidden="true"></span><span>Wird geladen …</span></div>
-  </div>
-  <p class="section-more"><button class="button ghost small" type="button" id="archiv-mehr" hidden>Ältere Neuigkeiten laden</button></p>
-  <noscript><p class="notice">Die Neuigkeiten brauchen JavaScript.</p></noscript>
-
-  <section id="versionen" aria-labelledby="versionen-titel">
-    <div class="section-head">
-      <span class="eyebrow">Launcher</span>
-      <h2 id="versionen-titel">Versionsverlauf</h2>
-      <p>Der Launcher aktualisiert sich selbst. Hier steht, was in jeder Version neu ist.</p>
-    </div>
-    <div class="release-latest card main">
-      <div class="release-latest-head">
-        <div>
-          <p class="release-label">Aktuelle Version</p>
-          <p class="release-version" id="release-version">{{VERSION}}</p>
-          <p class="meta" id="download-meta">Für Windows und Mac</p>
+<main id="inhalt">
+  <section class="page-hero" aria-labelledby="seite-titel">
+    <div class="container">
+      <div class="page-hero__inner">
+        <span class="eyebrow">{{icon:news}}Neuigkeiten</span>
+        <h1 class="h1" id="seite-titel">Was sich bei <span class="text-gradient">HeldixClient</span> tut</h1>
+        <p class="lead">Neue Versionen, Ankündigungen und Wartungen – die neuesten zuerst.</p>
+        <div class="page-hero__actions">
+          <a class="btn btn--secondary" href="#versionen">{{icon:sparkles}}Versionsverlauf</a>
+          <a class="btn btn--secondary" href="#archiv-titel">{{icon:news}}Ankündigungen</a>
         </div>
-        <a class="button" id="download-button" href="/download">{{icon:download}}Zum Download</a>
       </div>
-      <div id="release-latest-notes"></div>
     </div>
-    <ol class="release-list" id="release-liste" aria-label="Frühere Versionen"></ol>
-    <p class="muted center" id="release-status" hidden></p>
+  </section>
+
+  <!-- Versionsverlauf (aus launcher/release-notes.md, beim Bau) -->
+  <section class="section section--tight" id="versionen" aria-labelledby="versionen-titel">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">{{icon:download}}Launcher</span>
+        <h2 class="h2" id="versionen-titel">Versionsverlauf</h2>
+        <p class="lead">Unter Windows aktualisiert sich der Launcher beim Start selbst, auf dem Mac lädst du neue Versionen auf der Download-Seite.</p>
+      </div>
+      <article class="card card--accent release-latest" data-version="{{VERSION}}">
+        <div class="release-latest__head">
+          <div>
+            <p class="eyebrow">Aktuelle Version</p>
+            <p class="release-version" id="release-version">{{VERSION}}</p>
+            <p class="release-date" id="release-datum" data-datum></p>
+          </div>
+          <a class="btn btn--primary" id="download-button" href="/download" data-download>{{icon:download}}<span data-download-label>{{t:download.knopf}}</span></a>
+        </div>
+        <div id="release-latest-notes">{{VERSION_NEU_HTML}}</div>
+      </article>
+      <ol class="release-list" id="release-liste" aria-label="Frühere Versionen">
+{{VERSIONEN_HTML}}
+      </ol>
+      <p class="text-3 small center" id="release-status" hidden></p>
+    </div>
+  </section>
+
+  <!-- Ankündigungen des Teams (vom Heldix-Dienst) -->
+  <section class="section section--raised" aria-labelledby="archiv-titel">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">{{icon:news}}Vom Team</span>
+        <h2 class="h2" id="archiv-titel">Ankündigungen</h2>
+      </div>
+      <div class="news-archive" id="archiv" aria-live="polite" aria-busy="true">
+        <div class="loading-inline" role="status"><span class="spinner" aria-hidden="true"></span><span>Wird geladen …</span></div>
+      </div>
+      <p class="center"><button class="btn btn--secondary btn--sm" type="button" id="archiv-mehr" hidden>Ältere Neuigkeiten laden</button></p>
+      <noscript><p class="notice">Die Ankündigungen brauchen JavaScript.</p></noscript>
+    </div>
   </section>
 </main>
 

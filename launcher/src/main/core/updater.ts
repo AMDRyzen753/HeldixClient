@@ -5,6 +5,9 @@
 // (update-public-key.ts) und nimmt nur Manifeste mit gültiger Signatur und höherer Version an. Danach lädt sie
 // den Installer von <Dienst>/v1/launcher/download/<Datei>, prüft Größe und SHA-512 und startet ihn auf Wunsch
 // still (/S). Ein übernommener Server kann so keine fremde .exe unterschieben und keine alte Version zurückspielen.
+//
+// Wann geprüft, geladen und installiert wird (beim Start, alle 30 Minuten, beim Beenden), entscheidet main.ts mit den
+// Funktionen aus core/startup-update.ts.
 
 import { spawn } from 'node:child_process';
 import { createHash, createPublicKey, verify } from 'node:crypto';
@@ -59,9 +62,26 @@ export interface UpdaterOptions {
 const VERSION_RE = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.]+))?$/;
 const FILE_RE = /^HeldixClient-Setup-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.exe$/;
 const MAX_SIZE = 1024 * 1024 * 1024;
-/** nach dem Start, dann alle sechs Stunden */
-const FIRST_CHECK_MS = 20_000;
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/** im laufenden Launcher alle 30 Minuten */
+export const CHECK_INTERVAL_MS = 30 * 60 * 1000;
+/** Zeitgrenze für GET /v1/launcher/latest, wenn der Aufrufer keine eigene nennt */
+const MANIFEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Argumente für den electron-builder-NSIS-Installer (templates/nsis in app-builder-lib): /S = still, --updated = Update
+ * (überspringt die Seiten, behält Verknüpfungen und das Installationsverzeichnis aus InstallLocation in der Registry),
+ * --force-run = den Launcher danach starten (wirkt nur zusammen mit /S). Kein /D=…: das Verzeichnis kommt aus der Registry.
+ */
+export function installerArgs(restart: boolean): string[] {
+  return restart ? ['/S', '--updated', '--force-run'] : ['/S', '--updated'];
+}
+
+export interface CheckOptions {
+  /** Zeitgrenze für die Abfrage des Manifests (ms), z. B. kurz beim Start */
+  timeoutMs?: number;
+  /** false = neue Version nur melden (Phase "available"), nicht laden */
+  download?: boolean;
+}
 
 /** Vergleicht zwei Versionen (1.2.3 bzw. 1.2.3-beta.1); Vorabversionen zählen weniger als die fertige */
 export function compareVersions(a: string, b: string): number {
@@ -115,6 +135,7 @@ export class Updater {
   onState: (state: UpdateState) => void = () => {};
   private manifest: UpdateManifest | null = null;
   private running: Promise<UpdateState> | null = null;
+  private loading: Promise<UpdateState> | null = null;
   private timer: NodeJS.Timeout | null = null;
 
   constructor(private readonly options: UpdaterOptions) {
@@ -135,62 +156,106 @@ export class Updater {
     this.onState(this.state);
   }
 
-  /** Regelmäßig prüfen und im Hintergrund laden; {@code auto} = false: nur auf Knopfdruck */
-  start(auto: () => boolean): void {
+  /**
+   * Regelmäßig prüfen: alle 30 Minuten, die erste Prüfung nach {@code firstDelayMs} (Standard: nach 30 Minuten, weil
+   * main.ts beim Start schon geprüft hat). {@code auto} = true: eine neue Version gleich im Hintergrund laden,
+   * false: nur melden (Phase "available").
+   */
+  start(auto: () => boolean, firstDelayMs = CHECK_INTERVAL_MS): void {
     if (!this.enabled() || this.timer) return;
     const tick = () => {
-      if (auto()) this.check().catch(() => undefined);
+      this.check({ download: auto() }).catch(() => undefined);
     };
-    setTimeout(tick, FIRST_CHECK_MS).unref();
+    if (firstDelayMs < CHECK_INTERVAL_MS) setTimeout(tick, Math.max(0, firstDelayMs)).unref();
     this.timer = setInterval(tick, CHECK_INTERVAL_MS);
     this.timer.unref();
   }
 
-  /** Nach einem Update fragen und es gleich laden. Mehrfache Aufrufe teilen sich eine Prüfung. */
-  check(): Promise<UpdateState> {
+  /**
+   * Nach einem Update fragen und es (wenn erlaubt) gleich laden. Mehrfache Aufrufe teilen sich eine Prüfung. Ist eine
+   * Version schon geladen und geprüft (ready), bleibt es dabei.
+   */
+  check(options: CheckOptions = {}): Promise<UpdateState> {
     if (!this.enabled()) return Promise.resolve(this.state);
-    if (this.state.phase === 'ready' || this.state.phase === 'available') return Promise.resolve(this.state);
-    this.running ??= this.run().finally(() => {
+    if (this.state.phase === 'ready') return Promise.resolve(this.state);
+    this.running ??= this.run(options).finally(() => {
       this.running = null;
     });
     return this.running;
+  }
+
+  /**
+   * Installer der gefundenen Version laden und prüfen (available → downloading → ready). Ein schon geladener, geprüfter
+   * Installer im Update-Ordner wird wiederverwendet. Mehrfache Aufrufe teilen sich einen Download.
+   */
+  download(): Promise<UpdateState> {
+    if (!this.enabled() || this.state.phase === 'ready' || !this.manifest || this.options.downloadInstaller === false) return Promise.resolve(this.state);
+    this.loading ??= this.fetchInstaller(this.manifest).finally(() => {
+      this.loading = null;
+    });
+    return this.loading;
+  }
+
+  /** Manifest der gefundenen Version (für die Hinweise „Neu in …“ nach dem Update), sonst null */
+  found(): UpdateManifest | null {
+    return this.manifest;
   }
 
   private base(): string {
     return this.options.baseUrl.replace(/\/+$/, '');
   }
 
-  private async run(): Promise<UpdateState> {
-    this.set({ phase: 'checking', error: undefined });
+  private async run(options: CheckOptions): Promise<UpdateState> {
+    // eine schon gemeldete Version bleibt während der erneuten Prüfung sichtbar (kein Flackern im Hinweis) und auch,
+    // wenn der Server gerade nicht antwortet
+    const known = this.state.phase === 'available' && this.manifest !== null;
+    if (!known) this.set({ phase: 'checking', error: undefined });
+    let manifest: UpdateManifest | null;
     try {
-      const response = await fetch(`${this.base()}/v1/launcher/latest`, { signal: AbortSignal.timeout(15_000), cache: 'no-store' });
-      if (response.status === 404) {
-        this.set({ phase: 'current', checkedAt: Date.now() });
-        return this.state;
-      }
-      if (!response.ok) throw new Error(`Update-Server antwortet mit ${response.status}`);
-      const body = (await response.json()) as { manifest?: unknown; signature?: unknown };
-      if (typeof body.manifest !== 'string' || typeof body.signature !== 'string') throw new Error('Antwort des Update-Servers ist unvollständig.');
-      const manifest = verifyManifest(body.manifest, body.signature, this.options.publicKey!);
-      if (compareVersions(manifest.version, this.options.currentVersion) <= 0) {
-        this.set({ phase: 'current', checkedAt: Date.now() });
-        return this.state;
-      }
-      this.log(`Neue Version ${manifest.version} gefunden`);
-      this.manifest = manifest;
-      if (this.options.downloadInstaller === false) {
-        this.set({ phase: 'available', version: manifest.version, notes: manifest.notes, date: manifest.date, checkedAt: Date.now() });
-        return this.state;
-      }
-      this.set({ phase: 'downloading', version: manifest.version, notes: manifest.notes, date: manifest.date, progress: 0, checkedAt: Date.now() });
-      await this.download(manifest);
-      this.set({ phase: 'ready', progress: 1 });
-      this.log(`Version ${manifest.version} geladen und geprüft`);
+      manifest = await this.fetchManifest(options.timeoutMs ?? MANIFEST_TIMEOUT_MS);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.log(`Fehler: ${message}`);
-      this.set({ phase: 'error', error: friendly(message), checkedAt: Date.now() });
+      if (!known) return this.fail(error);
+      this.log(`Fehler: ${error instanceof Error ? error.message : String(error)}`);
+      manifest = this.manifest;
     }
+    if (!manifest || compareVersions(manifest.version, this.options.currentVersion) <= 0) {
+      this.manifest = null;
+      this.set({ phase: 'current', version: undefined, notes: undefined, date: undefined, progress: undefined, error: undefined, checkedAt: Date.now() });
+      return this.state;
+    }
+    if (this.manifest?.version !== manifest.version) this.log(`Neue Version ${manifest.version} gefunden`);
+    this.manifest = manifest;
+    this.set({ phase: 'available', version: manifest.version, notes: manifest.notes, date: manifest.date, progress: undefined, error: undefined, checkedAt: Date.now() });
+    if (options.download === false || this.options.downloadInstaller === false) return this.state;
+    return this.download();
+  }
+
+  /** GET /v1/launcher/latest mit Zeitgrenze; null = nichts veröffentlicht (404). Wirft bei Fehlern und falscher Signatur. */
+  private async fetchManifest(timeoutMs: number): Promise<UpdateManifest | null> {
+    const response = await fetch(`${this.base()}/v1/launcher/latest`, { signal: AbortSignal.timeout(timeoutMs), cache: 'no-store' });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`Update-Server antwortet mit ${response.status}`);
+    const body = (await response.json()) as { manifest?: unknown; signature?: unknown };
+    if (typeof body.manifest !== 'string' || typeof body.signature !== 'string') throw new Error('Antwort des Update-Servers ist unvollständig.');
+    return verifyManifest(body.manifest, body.signature, this.options.publicKey!);
+  }
+
+  private async fetchInstaller(manifest: UpdateManifest): Promise<UpdateState> {
+    this.set({ phase: 'downloading', version: manifest.version, notes: manifest.notes, date: manifest.date, progress: 0, error: undefined });
+    try {
+      const reused = await this.downloadFile(manifest);
+      this.set({ phase: 'ready', progress: 1 });
+      this.log(reused ? `Version ${manifest.version} lag schon geprüft im Update-Ordner` : `Version ${manifest.version} geladen und geprüft`);
+    } catch (error) {
+      return this.fail(error);
+    }
+    return this.state;
+  }
+
+  private fail(error: unknown): UpdateState {
+    const message = error instanceof Error ? error.message : String(error);
+    this.log(`Fehler: ${message}`);
+    this.set({ phase: 'error', error: friendly(message), checkedAt: Date.now() });
     return this.state;
   }
 
@@ -199,7 +264,8 @@ export class Updater {
     return this.state.phase === 'ready' && this.manifest ? path.join(this.options.dir, this.manifest.file) : null;
   }
 
-  private async download(manifest: UpdateManifest): Promise<void> {
+  /** Lädt und prüft den Installer; true = lag schon vollständig und geprüft im Update-Ordner (wiederverwendet) */
+  private async downloadFile(manifest: UpdateManifest): Promise<boolean> {
     const dir = this.options.dir;
     await mkdir(dir, { recursive: true });
     // alte Installer aufräumen
@@ -210,7 +276,7 @@ export class Updater {
     // schon vollständig da (z. B. vor dem letzten Neustart geladen)?
     if (existsSync(target)) {
       const info = await stat(target);
-      if (info.size === manifest.size && (await sha512File(target)) === manifest.sha512) return;
+      if (info.size === manifest.size && (await sha512File(target)) === manifest.sha512) return true;
       await rm(target, { force: true });
     }
     const part = `${target}.part`;
@@ -246,26 +312,36 @@ export class Updater {
       await rm(part, { force: true }).catch(() => undefined);
       throw error;
     }
+    return false;
   }
 
   /**
-   * Startet den geprüften Installer still. {@code restart} = Launcher danach wieder öffnen.
-   * Der Aufrufer beendet danach die App. false = kein Update bereit.
+   * Startet den geprüften Installer still (installerArgs). {@code restart} = Launcher danach wieder öffnen.
+   * Der Aufrufer beendet danach sofort die App. false = kein Update bereit oder der Installer ließ sich nicht starten.
    */
   async install(restart: boolean): Promise<boolean> {
     const installer = this.installerPath();
     if (!installer || !this.manifest || process.platform !== 'win32') return false;
     // unmittelbar vor dem Start noch einmal prüfen (die Datei lag eine Weile im Datenordner)
-    if ((await sha512File(installer)) !== this.manifest.sha512) {
-      await rm(installer, { force: true });
+    if ((await sha512File(installer).catch(() => '')) !== this.manifest.sha512) {
+      await rm(installer, { force: true }).catch(() => undefined);
       this.set({ phase: 'error', error: 'Der geladene Installer wurde verändert und ist gelöscht. Bitte erneut suchen.' });
       return false;
     }
-    const args = ['/S', '--updated'];
-    if (restart) args.push('--force-run');
+    const args = installerArgs(restart);
     this.log(`Starte Installer ${path.basename(installer)} ${args.join(' ')}`);
-    spawn(installer, args, { detached: true, stdio: 'ignore' }).unref();
-    return true;
+    const child = spawn(installer, args, { detached: true, stdio: 'ignore' });
+    // erst zurückmelden, wenn der Prozess wirklich läuft (sonst startet der Launcher normal und versucht es später)
+    const started = await new Promise<boolean>((resolve) => {
+      child.once('spawn', () => resolve(true));
+      child.once('error', (error) => {
+        this.log(`Installer ließ sich nicht starten: ${error.message}`);
+        resolve(false);
+      });
+    });
+    child.unref();
+    if (!started) this.set({ phase: 'error', error: 'Der Installer ließ sich nicht starten. Später erneut versuchen.' });
+    return started;
   }
 }
 

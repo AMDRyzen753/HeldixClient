@@ -21,8 +21,13 @@ public interface HeldixApi {
 	 * ({@link #playerMarkers()}) und Sprachkanal über den Heldix-Dienst ({@link #voice()}).
 	 * Version 7: Symbole über dem Kopf ({@link PlayerMarkers#showAbove}), Status und Gruppen im Sprachkanal
 	 * ({@link VoiceChannel#setState}, {@link VoiceChannel#setGroup}) und Spielernamen ({@link #playerName}).
+	 * Version 8: Oberfläche der Welt für Karten ({@link #worldMap()}), selbst gefüllte Bilder im HUD
+	 * ({@link #createImage}) und Wegpunkte lesen ({@link #waypoints()}).
+	 * Version 9: Gäste und Browser-Teilnehmer im Sprachkanal ({@link VoiceChannel#isGuest}, {@link VoiceChannel#inBrowser},
+	 * {@link VoiceChannel#removeGuest}), Browser-Link für die Voice-Gruppe ({@link VoiceChannel#createBrowserLink}) und
+	 * Text in die Zwischenablage ({@link #copyToClipboard}).
 	 */
-	int API_VERSION = 7;
+	int API_VERSION = 9;
 
 	/** Informationen über das eigene Addon (aus heldix.addon.json). */
 	AddonInfo addon();
@@ -206,8 +211,47 @@ public interface HeldixApi {
 	/**
 	 * Name eines Spielers auf dem aktuellen Server (aus der Tab-Liste) oder aus deiner Freundesliste, z. B. für Mitglieder
 	 * einer Voice-Gruppe, die gerade nicht in deiner Nähe sind. Ohne Treffer leer. Nur im Haupt-Thread aufrufen.
+	 * Ab API 9 auch der Name eines Gasts im Sprachkanal ({@link VoiceChannel#isGuest}).
 	 *
 	 * @since 7
 	 */
 	Optional<String> playerName(java.util.UUID player);
+
+	// --- ab API 8 ---------------------------------------------------------------------------
+
+	/**
+	 * Die Oberfläche der geladenen Welt von oben (Farbe, Höhe, Wasser) – für Minimaps und Karten. Nur im Haupt-Thread.
+	 *
+	 * @since 8
+	 */
+	WorldMap worldMap();
+
+	/**
+	 * Neues Bild, dessen Pixel du selbst setzt, zum Zeichnen im HUD ({@link HudCanvas#image(HudImage, float, float, float, float)}).
+	 * Wird beim Abschalten des Addons freigegeben.
+	 *
+	 * @param width  1 bis 512 Pixel
+	 * @param height 1 bis 512 Pixel
+	 * @since 8
+	 */
+	HudImage createImage(int width, int height);
+
+	/**
+	 * Die Wegpunkte des Spielers in der aktuellen Welt (alle Dimensionen, nur sichtbare), zum Lesen. Ohne Welt leer. Nur im
+	 * Haupt-Thread.
+	 *
+	 * @since 8
+	 */
+	java.util.List<WaypointInfo> waypoints();
+
+	// --- ab API 9 ---------------------------------------------------------------------------
+
+	/**
+	 * Text in die Zwischenablage legen, z. B. einen Link aus {@link VoiceChannel#createBrowserLink}. Nur auf Wunsch des
+	 * Spielers (Knopf, Taste, Befehl, Callback davon) und nur im Haupt-Thread aufrufen. Höchstens 2000 Zeichen; Steuerzeichen
+	 * außer Zeilenumbruch und Tab werden entfernt.
+	 *
+	 * @since 9
+	 */
+	void copyToClipboard(String text);
 }

@@ -1,0 +1,10 @@
+{
+	"_hinweis": "Angaben für den Addon-Store (nicht in der JAR). Name, Version, Kurzbeschreibung, Autoren und API kommen aus src/main/resources/heldix.addon.json.",
+	"icon": "user",
+	"kategorie": "sonstiges",
+	"plattformen": [],
+	"beschreibung": "Ein Rad mit Emotes für deine Spielfigur: Sitzen, Winken, Verbeugen und „Krallen zeigen“.\n\n- Taste J halten, Richtung wählen, loslassen (Taste frei belegbar)\n- Rein optisch: am Spiel ändert sich nichts\n\nNur für dich sichtbar: Andere Spieler sehen die Emotes nicht. Greift direkt in Minecraft ein und läuft deshalb nur mit Minecraft 26.3.",
+	"hinweise": [
+		"Neu im Store: Emote-Rad"
+	]
+}

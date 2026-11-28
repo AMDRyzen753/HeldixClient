@@ -20,10 +20,13 @@ import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -37,7 +40,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Position (im Haupt-Thread), schickt Sprach-Rahmen der Addons und verteilt empfangene an ihre Listener (Netzwerk-Thread).
  * Die Sprache selbst (Aufnahme, Opus, Abspielen) macht das Addon. Ab Dienst 1.9.0 (features "state", "groups") kommen
  * der eigene Status (stumm, Ton aus) und Gruppen dazu: Für eine Gruppe geht nur ein SHA-256 aus Name und Passwort an den
- * Dienst.
+ * Dienst. Ab Dienst 1.11.0 (feature "guests") sind auch Gäste und Spieler im Browser in der Gruppe ({@code guests} und
+ * {@code browser} in "peers", ohne Position), Gäste lassen sich entfernen ("kick"), und für die Gruppe gibt es einen
+ * Browser-Link (Einladung mit Gruppe über {@code POST /v1/invites}; den Prüfwert der Gruppe kennt nur der Client).
+ * Ab Dienst 1.12.0 Party-Voice: Ohne eigene Gruppe nimmt der Kanal den Gruppen-Prüfwert der Party ({@code party.voice},
+ * nur solange ein anderes Mitglied am selben Ort ist); wird er null oder verlässt man die Party, geht ein "join" ohne Gruppe raus.
  */
 public final class VoiceLink {
 	public enum Status {
@@ -83,6 +90,9 @@ public final class VoiceLink {
 	private static volatile Set<UUID> groupMembers = Set.of();
 	private static final Set<UUID> PEER_MUTED = ConcurrentHashMap.newKeySet();
 	private static final Set<UUID> PEER_DEAFENED = ConcurrentHashMap.newKeySet();
+	/** Gäste unter den gelisteten (ID → Name) und wer über die Webseite dabei ist (ab Dienst 1.11.0) */
+	private static volatile Map<UUID, String> guests = Map.of();
+	private static volatile Set<UUID> browser = Set.of();
 	/** eigener Status und Gruppe (von einem Addon gesetzt) */
 	private static volatile boolean selfMuted;
 	private static volatile boolean selfDeafened;
@@ -90,14 +100,17 @@ public final class VoiceLink {
 	private static volatile String groupName;
 	private static volatile String groupKey;
 	private static volatile boolean groupFull;
+	/** die gemeldete Gruppe ist die der Party (ab Dienst 1.12.0) */
+	private static volatile boolean partyGroupActive;
 	private static volatile int generation;
 	private static volatile long retryAt;
 	private static int failures;
 
-	/** zuletzt gemeldeter Raum und Position (Haupt-Thread) */
+	/** zuletzt gemeldeter Raum und Position (Haupt-Thread); Server und Gruppe auch für den Browser-Link */
 	private static String joinedRoom;
 	private static boolean joinedFriendsOnly;
-	private static String joinedGroup;
+	private static volatile String joinedServer;
+	private static volatile String joinedGroup;
 	private static boolean sentMuted;
 	private static boolean sentDeafened;
 	private static boolean stateSent;
@@ -172,8 +185,19 @@ public final class VoiceLink {
 		return groupName;
 	}
 
+	/** Mitglieder der Gruppe, in der man gerade ist (eigene Gruppe oder die der Party) */
 	public static Set<UUID> groupMembers() {
-		return groupKey == null ? Set.of() : groupMembers;
+		return groupKey == null && !partyGroupActive ? Set.of() : groupMembers;
+	}
+
+	/** Ist man gerade in der Voice-Gruppe der Party (keine eigene Gruppe gesetzt)? */
+	public static boolean inPartyGroup() {
+		return partyGroupActive && status == Status.CONNECTED;
+	}
+
+	/** Nur für automatische Tests: Prüfwert der Gruppe, die zuletzt mit "join" an den Dienst ging (null = keine) */
+	public static String joinedGroup() {
+		return joinedGroup;
 	}
 
 	public static boolean groupsAvailable() {
@@ -186,6 +210,63 @@ public final class VoiceLink {
 		if (!features.contains("groups")) return "Der Heldix-Dienst kann noch keine Gruppen";
 		if (groupFull) return "Gruppe ist voll (höchstens " + maxGroup + ")";
 		return null;
+	}
+
+	// --- Gäste und Browser-Teilnehmer (Dienst 1.11.0, feature "guests") -------------------------
+
+	/** Kann der Dienst Gäste, Browser-Teilnehmer und Browser-Links? (false, solange nicht verbunden) */
+	public static boolean guestsAvailable() {
+		return status == Status.CONNECTED && features.contains("guests");
+	}
+
+	public static boolean isGuest(UUID participant) {
+		return participant != null && guests.containsKey(participant);
+	}
+
+	/** über die Webseite dabei (Gast oder angemeldeter Spieler im Browser)? */
+	public static boolean inBrowser(UUID participant) {
+		return participant != null && (browser.contains(participant) || guests.containsKey(participant));
+	}
+
+	/** Name eines Gasts (vom Dienst geprüft), sonst null */
+	public static String guestName(UUID participant) {
+		return participant == null ? null : guests.get(participant);
+	}
+
+	/** Gäste unter den gelisteten Teilnehmern (ID → Name) */
+	public static Map<UUID, String> guests() {
+		return guests;
+	}
+
+	/** Gast aus der Gruppe entfernen ("kick"); false, wenn es kein Gast der Gruppe ist oder der Dienst das nicht kann */
+	public static boolean removeGuest(UUID guest) {
+		if (!guestsAvailable() || !isGuest(guest)) return false;
+		JsonObject kick = new JsonObject();
+		kick.addProperty("type", "kick");
+		kick.addProperty("uuid", Social.compact(guest));
+		sendText(kick);
+		return true;
+	}
+
+	/** Warum es gerade keinen Browser-Link für die Gruppe gibt (deutsch), null = es geht */
+	public static String browserLinkProblem() {
+		if (status != Status.CONNECTED) return status == Status.OFF ? "Voice Chat ist aus – schalte ihn zuerst ein" : statusText;
+		if (!ready && System.currentTimeMillis() - connectedAt < 5000) return "Voice Chat verbindet gerade – versuch es gleich noch einmal";
+		if (!features.contains("guests")) return "Der Heldix-Dienst kann noch keine Gäste im Browser (ab Dienst 1.11.0)";
+		if (groupKey == null) return "Du bist in keiner Voice-Gruppe – trag zuerst eine Gruppe ein";
+		if (groupFull) return "Gruppe ist voll (höchstens " + maxGroup + ")";
+		if (joinedServer == null || !groupKey.equals(joinedGroup)) return "Die Gruppe wird gerade betreten – versuch es gleich noch einmal";
+		return null;
+	}
+
+	/**
+	 * Browser-Link für die aktuelle Gruppe auf dem aktuellen Server (Einladung mit Gruppe, 24 Stunden). Schlägt mit einer
+	 * deutschen Meldung fehl ({@link Social.ServiceException}), wenn es gerade nicht geht.
+	 */
+	public static CompletableFuture<Social.Invite> createBrowserLink() {
+		String problem = browserLinkProblem();
+		if (problem != null) return CompletableFuture.failedFuture(new Social.ServiceException(problem));
+		return Social.createInvite(joinedServer, joinedGroup);
 	}
 
 	public static boolean isActive(String owner) {
@@ -270,7 +351,9 @@ public final class VoiceLink {
 		LocalPlayer player = mc.player;
 		String room = room(mc);
 		boolean friendsOnly = !FRIENDS_ONLY.isEmpty();
-		String group = features.contains("groups") ? groupKey : null;
+		// eigene Gruppe hat Vorrang; sonst die Gruppe der Party (Prüfwert vom Dienst, nur mit Mitgliedern am selben Ort)
+		String group = !features.contains("groups") ? null : groupKey != null ? groupKey : dev.heldixclient.social.Party.voiceGroup(serverAddress(mc));
+		partyGroupActive = group != null && groupKey == null;
 		if (!room.equals(joinedRoom) || friendsOnly != joinedFriendsOnly || !Objects.equals(group, joinedGroup)) {
 			JsonObject join = new JsonObject();
 			join.addProperty("type", "join");
@@ -283,6 +366,7 @@ public final class VoiceLink {
 				if (group == null) groupMembers = Set.of();
 			}
 			sendText(join);
+			joinedServer = serverAddress(mc);
 			joinedRoom = room;
 			joinedFriendsOnly = friendsOnly;
 			joinedGroup = group;
@@ -328,21 +412,26 @@ public final class VoiceLink {
 		if (Social.state() == Social.State.OFFLINE_ACCOUNT) return "Nur mit Microsoft-Konto";
 		if (!Social.online()) return "Keine Verbindung zum Heldix-Dienst";
 		if (mc.level == null || mc.player == null) return "Nur in einer Welt";
-		if (serverAddress(mc) == null) return "Nur auf Servern";
+		if (serverAddress(mc) == null) return "Nur auf Servern und in geteilten Welten";
 		return null;
 	}
 
 	/**
-	 * Adresse des Servers (klein geschrieben, wie für die Anwesenheit); im Einzelspieler null – außer im Autotest, der mit
-	 * -Dheldixclient.voice.testServer=… einen Raum für die eigene Welt vorgibt.
+	 * Adresse des Servers (klein geschrieben, wie für die Anwesenheit); im Einzelspieler null – außer die Welt ist geteilt
+	 * (dann die Weltadresse: Gastgeber und Mitspieler sind im selben Raum) oder im Autotest, der mit
+	 * -Dheldixclient.voice.testServer=… einen Raum für die eigene Welt vorgibt. Heldix-Welten ohne den Standard-Port.
 	 */
 	private static String serverAddress(Minecraft mc) {
 		if (mc.isLocalServer()) {
+			String shared = dev.heldixclient.share.WorldShare.voiceServer();
+			if (shared != null) return shared;
 			String test = System.getProperty("heldixclient.voice.testServer", "").trim();
 			return test.isEmpty() ? null : test.toLowerCase(Locale.ROOT);
 		}
 		ServerData server = mc.getCurrentServer();
-		return server == null ? null : server.ip.trim().toLowerCase(Locale.ROOT);
+		if (server == null) return null;
+		if (dev.heldixclient.share.WorldShare.isWorldAddress(server.ip)) return dev.heldixclient.share.WorldShare.normalizeAddress(server.ip);
+		return server.ip.trim().toLowerCase(Locale.ROOT);
 	}
 
 	private static String room(Minecraft mc) {
@@ -356,6 +445,7 @@ public final class VoiceLink {
 		status = Status.CONNECTING;
 		statusText = "Verbinde …";
 		joinedRoom = null;
+		joinedServer = null;
 		joinedGroup = null;
 		stateSent = false;
 		ready = false;
@@ -406,7 +496,9 @@ public final class VoiceLink {
 		SENDING.set(false);
 		clearRoom();
 		joinedRoom = null;
+		joinedServer = null;
 		joinedGroup = null;
+		partyGroupActive = false;
 		stateSent = false;
 		ready = false;
 		status = newStatus;
@@ -419,6 +511,8 @@ public final class VoiceLink {
 		groupMembers = Set.of();
 		PEER_MUTED.clear();
 		PEER_DEAFENED.clear();
+		guests = Map.of();
+		browser = Set.of();
 	}
 
 	// ======================================================================================
@@ -508,7 +602,7 @@ public final class VoiceLink {
 				clearRoom();
 				ready = false;
 				status = Status.UNAVAILABLE;
-				statusText = statusCode == 4002 ? "In einem anderen Spiel verbunden" : "Verbindung getrennt – neuer Versuch gleich";
+				statusText = statusCode == 4002 ? "In einem anderen Spiel oder im Browser verbunden" : "Verbindung getrennt – neuer Versuch gleich";
 				retryAt = System.currentTimeMillis() + (statusCode == 4002 ? 60_000 : 5_000);
 				HeldixClient.LOGGER.info("Voice Chat: Verbindung getrennt ({})", statusCode);
 			}
@@ -549,6 +643,9 @@ public final class VoiceLink {
 				PEER_MUTED.addAll(muted);
 				PEER_DEAFENED.retainAll(deafened);
 				PEER_DEAFENED.addAll(deafened);
+				// ab Dienst 1.11.0: Gäste (mit Namen) und wer über die Webseite dabei ist; ältere Dienste schicken beides nicht
+				guests = guestNames(json);
+				browser = Set.copyOf(uuids(json, "browser"));
 				statusText = set.isEmpty() ? "Verbunden – noch niemand hier" : set.size() == 1 ? "Verbunden – 1 Spieler hier" : "Verbunden – " + set.size() + " Spieler hier";
 			}
 			case "state" -> {
@@ -570,6 +667,21 @@ public final class VoiceLink {
 			default -> {
 			}
 		}
+	}
+
+	/** "guests": { "<32 hex>": "<Name>" } – Namen ohne Steuerzeichen und §, höchstens 24 Zeichen */
+	private static Map<UUID, String> guestNames(JsonObject json) {
+		if (!json.has("guests") || !json.get("guests").isJsonObject()) return Map.of();
+		Map<UUID, String> map = new HashMap<>();
+		for (Map.Entry<String, JsonElement> entry : json.getAsJsonObject("guests").entrySet()) {
+			UUID id = Social.uuid(entry.getKey());
+			if (id == null || !entry.getValue().isJsonPrimitive()) continue;
+			String name = entry.getValue().getAsString().replaceAll("[\\p{Cc}\\p{Cf}§]", "").strip();
+			if (name.length() > 24) name = name.substring(0, 24);
+			map.put(id, name.isEmpty() ? "Gast" : name);
+			if (map.size() >= 64) break;
+		}
+		return Map.copyOf(map);
 	}
 
 	private static Set<UUID> uuids(JsonObject json, String field) {

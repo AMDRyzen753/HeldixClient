@@ -1,0 +1,33 @@
+Prüfbericht: Mochi (Tuxedo) (mochi-tuxedo), Slot companion, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  companions/Mochi/Mochi.cosmetic.json  211,8 KB  sha256 6a29159560f86500288741331b8871a87893c55b436eb809281ad4a6a1552a35
+  companions/Mochi/textures/Mochi_tuxedo_albedo.png  2,1 KB  sha256 22c85dc17f15608755ec283dfcd60527bd0c9405ccc2c52ce111e16002dd16dd
+  companions/Mochi/textures/Mochi_emissive_anim.png  6,5 KB  sha256 d2d9ffe4d6cb380bfcc84b6d8a06aa4ec9bd959b74c5d8f9666cff72451708d4
+
+Größe:
+  vorher: 220,4 KB (JSON 211,8 KB + Texturen)
+  nachher: Manifest 52,9 KB von höchstens 512,0 KB, Umschlag etwa 54,5 KB von 544,0 KB
+
+Mesh:
+  696 Vertices, 348 Dreiecke, 13 Knochen, größte Rundung der Positionen 0,0154 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+  Begleiter: Ursprung attach.origin = [6.8125, -0.0625, 0] px (Positionen relativ dazu), Seite links
+
+Animationen (7), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 96 Frames bei 24 fps, Schleife, 12 Spuren, 328 Keys
+  Fly: 24 Frames bei 24 fps, Schleife, 11 Spuren, 128 Keys
+  Emote: 120 Frames bei 24 fps, Schleife, 13 Spuren, 553 Keys
+  Sleep: 96 Frames bei 24 fps, Schleife, 10 Spuren, 60 Keys
+  Startle: 17 Frames bei 24 fps, einmalig, 12 Spuren, 205 Keys
+  Spawn: 29 Frames bei 24 fps, einmalig, 11 Spuren, 281 Keys
+  Celebrate: 37 Frames bei 24 fps, einmalig, 12 Spuren, 430 Keys
+  zusammen 1985 Keys statt 6464 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1492°, move 0,0198 px, scale 0,0000
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,0542 px (Startle, Frame 15, Vertex 386)
+
+Zustände: 14 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,3 s
+Partikel: 4 Vorschläge → 4 Einträge (.L-Knochen auch für .R)
+Leuchten: 8 Bilder, 4 Ticks je Bild, Puls 3 s zwischen 0,7 und 1
+Texturen: texture.png 128 × 128 (2,1 KB) = Mochi_tuxedo_albedo.png; glow.png 128 × 1024 (2,0 KB) = Mochi_emissive_anim.png mit 2 umgefärbten Leuchtpixeln (Augen der Fellfarbe, aus Mochi_tuxedo_emissive.png)

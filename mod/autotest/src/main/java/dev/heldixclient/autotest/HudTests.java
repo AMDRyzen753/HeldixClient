@@ -77,7 +77,10 @@ final class HudTests {
 		t.run(mc -> {
 			for (HudModule module : ModuleManager.hud()) {
 				module.resetLayout();
-				module.setEnabled(true);
+				// alle Elemente an – außer der Minimap (eigene Tests in MinimapTests): Mit ihr (oben rechts, fast 100 × 110)
+				// wäre der kleine Testbildschirm (427 × 240) so voll, dass sie die Trank-Effekte und die Werkzeugleiste des
+				// HUD-Editors verdeckt
+				module.setEnabled(!module.id().equals("minimap:minimap"));
 			}
 			HeldixConfig.save();
 		});
@@ -520,7 +523,7 @@ final class HudTests {
 		t.run(mc -> {
 			for (HudModule m : ModuleManager.hud()) {
 				m.resetLayout();
-				m.setEnabled(true);
+				m.setEnabled(!m.id().equals("minimap:minimap"));
 			}
 			HeldixConfig.save();
 		});
@@ -715,7 +718,7 @@ final class HudTests {
 		t.run(mc -> {
 			for (HudModule m : ModuleManager.hud()) {
 				m.resetLayout();
-				m.setEnabled(true);
+				m.setEnabled(!m.id().equals("minimap:minimap"));
 			}
 			HudInteraction.clearLastAction();
 		});
@@ -875,11 +878,11 @@ final class HudTests {
 		// Taste „HUD bedienen“ (ohne Standardtaste): Maus frei, ohne Chat
 		t.check("Taste „HUD bedienen“ hat keine Standardbelegung", t.compute(mc -> HeldixClient.hudKey.getDefaultKey().equals(InputConstants.UNKNOWN)));
 		t.run(mc -> {
-			HeldixClient.hudKey.setKey(InputConstants.Type.KEYBOARD.getOrCreate(InputConstants.KEY_J));
+			HeldixClient.hudKey.setKey(InputConstants.Type.KEYBOARD.getOrCreate(InputConstants.KEY_Y));
 			KeyMapping.resetMapping();
 			HudInteraction.clearLastAction();
 		});
-		t.pressKey(InputConstants.KEY_J);
+		t.pressKey(InputConstants.KEY_Y);
 		t.waitTicks(3);
 		t.check("Kurz drücken öffnet „HUD bedienen“ (Maus frei, kein Chat)", t.compute(mc -> mc.gui.screen() instanceof HudInteractScreen && !mc.mouseHandler.isMouseGrabbed()));
 		cc = center(t, coordinates);
@@ -893,15 +896,15 @@ final class HudTests {
 		int[] emptySpot = {screen(t)[0] / 2, screen(t)[1] / 2};
 		t.click(emptySpot[0], emptySpot[1]);
 		t.check("Klick daneben bleibt im HUD-Modus", t.compute(mc -> mc.gui.screen() instanceof HudInteractScreen && !mc.player.isSwinging()));
-		t.pressKey(InputConstants.KEY_J);
+		t.pressKey(InputConstants.KEY_Y);
 		t.waitTicks(2);
 		t.check("Nochmal drücken beendet „HUD bedienen“", t.compute(mc -> mc.gui.screen() == null));
 		// gedrückt halten: endet beim Loslassen
-		t.run(mc -> mc.keyboardHandler.keyPress(mc.getWindow().handle(), InputConstants.PRESS, new KeyEvent(InputConstants.KEY_J, 0, 0)));
+		t.run(mc -> mc.keyboardHandler.keyPress(mc.getWindow().handle(), InputConstants.PRESS, new KeyEvent(InputConstants.KEY_Y, 0, 0)));
 		t.waitTicks(3);
 		t.check("Halten öffnet „HUD bedienen“", t.compute(mc -> mc.gui.screen() instanceof HudInteractScreen));
 		t.waitTicks(10);
-		t.run(mc -> mc.keyboardHandler.keyPress(mc.getWindow().handle(), InputConstants.RELEASE, new KeyEvent(InputConstants.KEY_J, 0, 0)));
+		t.run(mc -> mc.keyboardHandler.keyPress(mc.getWindow().handle(), InputConstants.RELEASE, new KeyEvent(InputConstants.KEY_Y, 0, 0)));
 		t.waitTicks(2);
 		t.check("Loslassen nach dem Halten beendet es", t.compute(mc -> mc.gui.screen() == null));
 		t.run(mc -> {
@@ -990,8 +993,10 @@ final class HudTests {
 		int[] feld = hotspotCenter(t, module, "feld");
 		t.moveMouse(feld[0], feld[1]);
 		t.waitTicks(3);
-		t.check("Tooltip aus dem Bereich (zwei Zeilen) und Hand", t.compute(mc -> HudInteraction.lastTooltip()).equals(List.of("Testfeld", "zweite Zeile"))
-				&& "HAND".equals(t.compute(mc -> HudInteraction.lastCursor())));
+		// Unter Last kommt der neue Tooltip manchmal erst ein paar Bilder später an.
+		t.waitSoft(mc -> HudInteraction.lastTooltip().equals(List.of("Testfeld", "zweite Zeile")) && "HAND".equals(HudInteraction.lastCursor()), 3);
+		t.check("Tooltip aus dem Bereich (zwei Zeilen) und Hand (" + t.compute(mc -> HudInteraction.lastTooltip()) + ", " + t.compute(mc -> HudInteraction.lastCursor()) + ")",
+				t.compute(mc -> HudInteraction.lastTooltip()).equals(List.of("Testfeld", "zweite Zeile")) && "HAND".equals(t.compute(mc -> HudInteraction.lastCursor())));
 		t.screenshot("heldix-hud-12-api-hover");
 		t.click(feld[0], feld[1]);
 		t.check("onClick mit Bereich, lokaler Stelle und Taste", clicks.size() == 1 && "feld".equals(clicks.getFirst().hotspot()) && clicks.getFirst().button() == HudClick.LEFT

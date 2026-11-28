@@ -276,4 +276,22 @@ public interface HudCanvas {
 	 * @since 5
 	 */
 	boolean iconButton(String id, String icon, float x, float y, float size, int color, String tooltip);
+
+	// --- ab API 8 ---------------------------------------------------------------------------
+
+	/**
+	 * Ein selbst gefülltes Bild ({@link HeldixApi#createImage}) auf diese Fläche zeichnen (ohne Glätten: Pixel bleiben
+	 * scharf). Geänderte Pixel werden vorher hochgeladen.
+	 *
+	 * @since 8
+	 */
+	void image(HudImage image, float x, float y, float width, float height);
+
+	/**
+	 * Echte Bildschirm-Pixel je GUI-Pixel beim Zeichnen dieses Elements (GUI-Skalierung mal HUD-Größe). Damit lässt sich
+	 * ein {@link HudImage} so groß anlegen, dass es scharf aussieht.
+	 *
+	 * @since 8
+	 */
+	float pixelScale();
 }

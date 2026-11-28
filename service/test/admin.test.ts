@@ -6,7 +6,7 @@ import path from 'node:path';
 import { describe, test } from 'node:test';
 import { runAdmin } from '../src/admin';
 import { Store } from '../src/db';
-import { api, befriend, devPlayer, randomUuid, startFakeMojang, startService, type FakeMojang, type TestService } from './helpers';
+import { api, befriend, devPlayer, randomUuid, startFakeMojang, startService, type FakeMojang, type TestService, ME_DEFAULTS } from './helpers';
 
 const BANNED = 'Dieses Konto ist für den Heldix-Dienst gesperrt.';
 
@@ -191,7 +191,7 @@ describe('Verwaltung: Sperren', () => {
       const back = await mojangLogin(service, mojang, 'Stoerer', uuid);
       assert.equal(back.status, 200);
       const me = await api(service.url, 'GET', '/v1/me', { token: back.body.token });
-      assert.deepEqual(me.body, { uuid, name: 'Stoerer', cape: '', visible: true, presence: true, showServer: true, messages: true });
+      assert.deepEqual(me.body, { uuid, name: 'Stoerer', cape: '', visible: true, presence: true, showServer: true, messages: true, ...ME_DEFAULTS });
       assert.equal(admin(service, 'entsperren', 'Stoerer').code, 1);
     } finally {
       await service.close();
@@ -264,7 +264,7 @@ describe('Verwaltung: Team', () => {
 
       res = admin(service, 'team-liste');
       assert.match(res.out, /^2 Team-Mitglieder:/);
-      assert.match(res.out, /admin {6}Chefin \([0-9a-f]{32}\) · seit .* \(von CLI\) · 2FA nicht eingerichtet/);
+      assert.match(res.out, /admin {11}Chefin \([0-9a-f]{32}\) · seit .* \(von CLI\) · 2FA nicht eingerichtet/);
 
       assert.equal(admin(service, 'team-2fa-reset', 'Chefin').code, 0);
       assert.equal(admin(service, 'team-2fa-reset', 'GibtEsNicht').code, 1);

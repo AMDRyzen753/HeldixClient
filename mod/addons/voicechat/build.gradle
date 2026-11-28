@@ -1,10 +1,10 @@
-// Voice Chat: Sprache in der Nähe mit anderen HeldixClient-Spielern, über den Heldix-Dienst (Heldix-API 7).
+// Voice Chat: Sprache in der Nähe mit anderen HeldixClient-Spielern, über den Heldix-Dienst (Heldix-API 9, Gäste im Browser).
 // Opus kommt aus Concentus (reines Java, BSD-Lizenz) und wird mit in die JAR gepackt.
 plugins {
 	id 'java'
 }
 
-version = '1.1.0'
+version = '1.2.0'
 
 base {
 	archivesName = 'heldix-addon-voicechat'

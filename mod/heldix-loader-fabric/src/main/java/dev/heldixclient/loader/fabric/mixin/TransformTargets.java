@@ -40,6 +40,9 @@ import org.spongepowered.asm.mixin.Mixin;
 		Targets.CONNECT_SCREEN,
 		Targets.ITEM_ENTITY_RENDERER,
 		Targets.ITEM_ENTITY_RENDER_STATE,
+		Targets.PLAYER_LIST,
+		Targets.INTEGRATED_SERVER,
+		Targets.INTEGRATED_PLAYER_LIST,
 }, priority = 100000)
 public abstract class TransformTargets {
 }

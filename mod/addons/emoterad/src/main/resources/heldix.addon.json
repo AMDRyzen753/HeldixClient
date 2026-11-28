@@ -1,0 +1,19 @@
+{
+	"id": "emoterad",
+	"name": "Emote-Rad",
+	"version": "${version}",
+	"description": "Emote-Rad mit Sitzen, Winken, Verbeugen und Krallen zeigen: Taste J halten, Richtung wählen, loslassen. Nur für dich sichtbar.",
+	"authors": [
+		"HeldixClient"
+	],
+	"entrypoint": "dev.heldixclient.addons.emoterad.test.EmoteRadAddon",
+	"api": 2,
+	"clientEntrypoint": "dev.heldixclient.addons.emoterad.test.Start",
+	"minecraft": [
+		"26.3"
+	],
+	"loaders": [
+		"heldix",
+		"fabric"
+	]
+}

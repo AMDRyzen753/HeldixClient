@@ -438,6 +438,22 @@ final class AddonCanvas implements HudCanvas {
 		return hover;
 	}
 
+	// --- API 8 ------------------------------------------------------------------------------
+
+	@Override
+	public void image(dev.heldixclient.api.HudImage image, float x, float y, float width, float height) {
+		if (!(image instanceof AddonImages.Image own) || width <= 0 || height <= 0) return;
+		Identifier id = own.prepare();
+		if (id == null) return;
+		Ui.texture(g, id, originX + x, originY + y, width, height, own.width(), own.height());
+		grow(x + width, y + height);
+	}
+
+	@Override
+	public float pixelScale() {
+		return Ui.scale() * Math.max(0.1f, style().scale());
+	}
+
 	private static List<String> lines(String tooltip) {
 		if (tooltip == null || tooltip.isBlank()) return List.of();
 		return List.of(tooltip.split("\n"));

@@ -3,30 +3,32 @@
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="artikel">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap article-page">
-  <nav class="breadcrumb" aria-label="Brotkrümel"><a href="{{BEREICH_URL}}">{{BEREICH}}</a><span aria-hidden="true">/</span>{{KATEGORIE_HTML}}</nav>
-  <div class="article-layout">
-    <article class="article">
-      <header class="article-head">
-        <h1>{{ARTIKEL_TITEL}}</h1>
-        <p class="lead">{{ARTIKEL_BESCHREIBUNG}}</p>
-      </header>
-      <div class="prose">
+<main id="inhalt" class="article-page">
+  <div class="container section section--tight">
+    <div class="article-layout">
+      <article class="article">
+        <header class="article-head">
+          <nav class="breadcrumb" aria-label="Brotkrümel"><a href="{{BEREICH_URL}}">{{BEREICH}}</a><span aria-hidden="true">/</span>{{KATEGORIE_HTML}}</nav>
+          <h1>{{ARTIKEL_TITEL}}</h1>
+          <p class="lead">{{ARTIKEL_BESCHREIBUNG}}</p>
+        </header>
+        <div class="prose">
 {{ARTIKEL_HTML}}
-      </div>
-      {{SUPPORT_HTML}}
-    </article>
-    <aside class="article-side">
-      {{ARTIKEL_TOC_HTML}}
-      <a class="side-link" href="{{BEREICH_URL}}">{{icon:chevron-left}}Alle Themen</a>
-    </aside>
+        </div>
+        {{SUPPORT_HTML}}
+      </article>
+      <aside class="article-side">
+        {{ARTIKEL_TOC_HTML}}
+        <a class="side-link" href="{{BEREICH_URL}}">{{icon:chevron-left}}Alle Themen</a>
+      </aside>
+    </div>
+    {{VERWANDT_HTML}}
   </div>
-  {{VERWANDT_HTML}}
 </main>
 
 {{include:footer.html}}

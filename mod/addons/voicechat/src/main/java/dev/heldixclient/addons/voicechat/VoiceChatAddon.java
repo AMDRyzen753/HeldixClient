@@ -37,10 +37,11 @@ import java.util.function.Supplier;
 
 /**
  * Voice Chat für HeldixClient: Sprache mit HeldixClient-Spielern in der Nähe, auf jedem Server, über den Sprachkanal des
- * Heldix-Dienstes (Heldix-API 7, {@link HeldixApi#voice()}). Push-to-Talk (Standard V) oder Sprachaktivierung, Lautstärke
+ * Heldix-Dienstes (Heldix-API 9, {@link HeldixApi#voice()}). Push-to-Talk (Standard V) oder Sprachaktivierung, Lautstärke
  * nach Abstand, Richtung in Stereo, Rauschfilter und Signaltöne, Gruppen über den ganzen Server, Symbole über dem Kopf
  * (spricht, stumm, Ton aus), eine HUD-Anzeige mit Köpfen der Sprecher, Stummschalten und Lautstärke je Spieler im
- * Spielermenü (Mausrad-Klick auf einen Spieler). Opus kommt aus Concentus (reines Java).
+ * Spielermenü (Mausrad-Klick auf einen Spieler). Ab 1.2.0 mit Browser-Link für die Gruppe: Gäste ohne HeldixClient reden auf
+ * der Webseite mit, sind in der Anzeige gekennzeichnet und lassen sich entfernen. Opus kommt aus Concentus (reines Java).
  */
 public final class VoiceChatAddon implements HeldixAddon {
 	static final int SPEAKING = HeldixColors.SUCCESS;
@@ -49,6 +50,12 @@ public final class VoiceChatAddon implements HeldixAddon {
 	private static final int MARKER_MS = 300;
 	/** so lange nach dem letzten Tippen im Feld „Gruppe“ warten, bevor die Gruppe wechselt */
 	private static final long GROUP_DEBOUNCE_MS = 1500;
+	/** Knopf im Gruppen-Bereich des Untermenüs (ab 1.2.0) */
+	static final String BROWSER_LINK = "Browser-Link für die Gruppe";
+	static final String BROWSER_LINK_BUTTON = "Browser-Link kopieren";
+	/** Kennzeichen in der Anzeige: Gast ohne HeldixClient, Spieler im Browser */
+	static final String GUEST_TAG = "Gast";
+	static final String BROWSER_TAG = "Browser";
 	private static final List<Mixer.Info> MICROPHONES = new ArrayList<>();
 
 	private HeldixApi api;
@@ -80,6 +87,8 @@ public final class VoiceChatAddon implements HeldixAddon {
 	private volatile Map<UUID, VoiceEngine.Position> positions = Map.of();
 	/** Namen für die Anzeige (auch Gruppenmitglieder weit weg), im Tick gesammelt */
 	private final Map<UUID, String> names = new HashMap<>();
+	/** Kennzeichen der Gruppenmitglieder („Gast“, „Browser“), im Tick gesammelt – bleibt nach dem Gehen für die Meldung */
+	private final Map<UUID, String> tags = new HashMap<>();
 	private Set<UUID> inRange = Set.of();
 
 	// Gruppe: Eingabe entprellen, Mitglieder für Hinweise beobachten
@@ -112,6 +121,8 @@ public final class VoiceChatAddon implements HeldixAddon {
 		groupName = module.addText("group", "Gruppe", "Alle mit demselben Gruppennamen (und Passwort) auf diesem Server hören sich überall – leer = keine Gruppe",
 				"", 32);
 		groupPassword = module.addText("group-password", "Gruppen-Passwort", "Optional – nur wer Name und Passwort kennt, kommt in die Gruppe", "", 64);
+		module.addAction(BROWSER_LINK, "Freunde ohne HeldixClient reden im Browser in deiner Gruppe mit – 24 Std. gültig, bis zu 4 Gäste "
+				+ "(braucht den Heldix-Dienst 1.11.0)", BROWSER_LINK_BUTTON, this::copyBrowserLink);
 		module.addAction("Mikrofon testen", "Zehn Sekunden lang hörst du dich selbst (nichts wird gesendet)", "Testen",
 				() -> testUntil = System.currentTimeMillis() + 10_000);
 
@@ -120,7 +131,7 @@ public final class VoiceChatAddon implements HeldixAddon {
 		module.addKey("mute", "Mikrofon stumm", "Schaltet dein Mikrofon stumm und wieder an", HeldixKeys.NONE, () -> setMuted(!muted));
 		module.addKey("deafen", "Ton aus", "Andere nicht mehr hören (und selbst nicht senden)", HeldixKeys.NONE, () -> setDeafened(!deafened));
 
-		hudModule = api.registerHudModule(ModuleSpec.of("anzeige", "Voice Chat-Anzeige", "Mikrofon, Gruppe und wer gerade spricht").at(9999, 80)
+		hudModule = api.registerHudModule(ModuleSpec.of("anzeige", "Voice Chat-Anzeige", "Mikrofon, Gruppe und wer gerade spricht").at(9999, 124)
 				.withIcon("headphones"), new Hud());
 		hudLayout = hudModule.addStyleChoice("layout", "Darstellung", List.of("Liste", "Kompakt"), 0);
 		hudHeads = hudModule.addStyleToggle("heads", "Köpfe zeigen", true);
@@ -177,8 +188,14 @@ public final class VoiceChatAddon implements HeldixAddon {
 				on && (voice.status() == VoiceChannel.Status.CONNECTED || test), voice.range());
 		// Namen von Sprechern und Gruppenmitgliedern, die nicht in der Nähe sind
 		for (UUID speaker : engine.speaking()) if (!names.containsKey(speaker)) api.playerName(speaker).ifPresent(name -> names.put(speaker, name));
-		for (UUID member : group) if (!names.containsKey(member)) api.playerName(member).ifPresent(name -> names.put(member, name));
+		for (UUID member : group) {
+			if (!names.containsKey(member)) api.playerName(member).ifPresent(name -> names.put(member, name));
+			String tag = voice.isGuest(member) ? GUEST_TAG : voice.inBrowser(member) ? BROWSER_TAG : null;
+			if (tag != null) tags.put(member, tag);
+			else tags.remove(member);
+		}
 		if (names.size() > 512) names.clear();
+		if (tags.size() > 128) tags.clear();
 		if (on) showMarkers(voice, nearby, group);
 	}
 
@@ -252,8 +269,8 @@ public final class VoiceChatAddon implements HeldixAddon {
 		if (members.equals(knownMembers)) return;
 		List<String> joined = new ArrayList<>();
 		List<String> left = new ArrayList<>();
-		for (UUID member : members) if (!knownMembers.contains(member)) joined.add(nameOf(member));
-		for (UUID member : knownMembers) if (!members.contains(member)) left.add(nameOf(member));
+		for (UUID member : members) if (!knownMembers.contains(member)) joined.add(labelOf(member));
+		for (UUID member : knownMembers) if (!members.contains(member)) left.add(labelOf(member));
 		knownMembers = members;
 		if (!joined.isEmpty()) api.notify("Voice-Gruppe „" + current + "“", String.join(", ", joined) + (joined.size() == 1 ? " ist dazugekommen" : " sind dazugekommen"));
 		if (!left.isEmpty()) api.notify("Voice-Gruppe „" + current + "“", String.join(", ", left) + (left.size() == 1 ? " ist gegangen" : " sind gegangen"));
@@ -266,7 +283,47 @@ public final class VoiceChatAddon implements HeldixAddon {
 	String nameOf(UUID player) {
 		String name = names.get(player);
 		if (name == null) name = api.playerName(player).orElse(null);
-		return name != null ? name : "Ein Spieler";
+		return name != null ? name : tags.containsKey(player) ? "Jemand im Browser" : "Ein Spieler";
+	}
+
+	/** Kennzeichen eines Teilnehmers: „Gast“ (ohne HeldixClient), „Browser“ (Spieler auf der Webseite) oder null */
+	public String tagOf(UUID player) {
+		VoiceChannel voice = api.voice();
+		if (voice.isGuest(player)) return GUEST_TAG;
+		if (voice.inBrowser(player)) return BROWSER_TAG;
+		return tags.get(player);
+	}
+
+	/** Name mit Kennzeichen für Meldungen, z. B. „Tom (Gast)“ */
+	private String labelOf(UUID player) {
+		String tag = tagOf(player);
+		return nameOf(player) + (tag != null ? " (" + tag + ")" : "");
+	}
+
+	// ======================================================================================
+	// Browser-Link und Gäste (ab 1.2.0, Heldix-API 9, Heldix-Dienst 1.11.0)
+	// ======================================================================================
+
+	/** Knopf „Browser-Link kopieren“: Link für die aktuelle Gruppe in die Zwischenablage (24 Std.) */
+	public void copyBrowserLink() {
+		if (!module.isEnabled()) {
+			api.notify("Browser-Link", "Schalte zuerst Voice Chat ein und trag eine Gruppe ein");
+			return;
+		}
+		String group = api.voice().group();
+		api.voice().createBrowserLink(link -> {
+			api.copyToClipboard(link);
+			api.notify("Browser-Link kopiert", "Wer ihn öffnet, redet im Browser in „" + (group == null ? "deiner Gruppe" : group)
+					+ "“ mit – 24 Std. gültig, bis zu 4 Gäste");
+		}, error -> api.notify("Browser-Link", error));
+	}
+
+	/** Gast aus der Gruppe entfernen (Knopf in der Anzeige bei offenem Chat) */
+	public void removeGuest(UUID guest) {
+		if (!api.voice().isGuest(guest)) return;
+		String name = nameOf(guest);
+		api.voice().removeGuest(guest);
+		api.notify("Voice-Gruppe", name + " (Gast) ist entfernt");
 	}
 
 	boolean testing() {
@@ -456,8 +513,14 @@ public final class VoiceChatAddon implements HeldixAddon {
 	private record Head(String icon, String label, int color, boolean meter) {
 	}
 
-	/** ein Sprecher in der Liste */
-	private record Speaker(UUID uuid, String name, float level, boolean group) {
+	/**
+	 * ein Sprecher (bzw. bei offenem Chat ein Mitglied der Gruppe) in der Liste; tag = „Gast“, „Browser“ oder null, speaking =
+	 * spricht gerade
+	 */
+	private record Speaker(UUID uuid, String name, float level, boolean group, String tag, boolean speaking) {
+		boolean guest() {
+			return GUEST_TAG.equals(tag);
+		}
 	}
 
 	private final class Hud implements HudRenderer {
@@ -473,7 +536,11 @@ public final class VoiceChatAddon implements HeldixAddon {
 			int row = Math.max(lineHeight, FACE) + 4;
 			boolean preview = canvas.isPreview();
 			Head head = head(style);
-			List<Speaker> speakers = speakers(preview);
+			boolean buttons = canvas.interactive() && module.isEnabled();
+			// bei offenem Chat: alle Mitglieder der Gruppe (auch Gäste, mit Knopf zum Entfernen), sonst nur wer gerade spricht
+			boolean memberList = buttons && api.voice().group() != null && api.voice().status() == VoiceChannel.Status.CONNECTED;
+			List<Speaker> speakers = memberList ? members() : speakers(preview);
+			boolean linkButton = buttons && api.voice().group() != null && api.voice().guestsAvailable();
 			String info = info(preview);
 			int infoColor = infoColor();
 			boolean active = !speakers.isEmpty() || engine.transmitting() || testing() || muted || deafened || engine.problem() != null
@@ -484,14 +551,15 @@ public final class VoiceChatAddon implements HeldixAddon {
 				compact(canvas, style, head, speakers);
 				return;
 			}
-			boolean buttons = canvas.interactive() && module.isEnabled();
 			int faces = hudHeads.getAsBoolean() ? FACE + 4 : 0;
-			int width = pad * 2 + BADGE + 5 + canvas.textWidth(head.label(), text) + (head.meter() ? 22 : 0) + (buttons ? 30 : 0);
+			int width = pad * 2 + BADGE + 5 + canvas.textWidth(head.label(), text) + (head.meter() ? 22 : 0) + (buttons ? 30 : 0)
+					+ (linkButton ? 15 : 0);
 			if (info != null) width = Math.max(width, pad * 2 + BADGE + 5 + canvas.textWidth(info, text));
-			int shown = Math.min(speakers.size(), 5);
+			int shown = Math.min(speakers.size(), memberList ? 8 : 5);
 			for (int i = 0; i < shown; i++) {
 				Speaker speaker = speakers.get(i);
-				width = Math.max(width, pad * 2 + faces + canvas.textWidth(speaker.name(), text) + 6 + 14 + (speaker.group() ? 12 : 0));
+				width = Math.max(width, pad * 2 + faces + canvas.textWidth(speaker.name(), text) + 6 + 14 + (speaker.group() ? 12 : 0)
+						+ (speaker.tag() != null ? canvas.textWidth(speaker.tag(), text) + 4 : 0) + (buttons && speaker.guest() ? 15 : 0));
 			}
 			String more = speakers.size() > shown ? "+" + (speakers.size() - shown) + " weitere" : null;
 			int rows = 1 + (info != null ? 1 : 0) + shown + (more != null ? 1 : 0);
@@ -510,6 +578,11 @@ public final class VoiceChatAddon implements HeldixAddon {
 				canvas.iconButton("mute", muted ? "mic-off" : "mic", right - 27, y, 12, muted ? STATUS_RED : style.textColor(),
 						muted ? "Mikrofon an" : "Mikrofon stumm");
 				right -= 30;
+				if (linkButton) {
+					canvas.iconButton("browser-link", "user-plus", right - 12, y, 12, style.textColor(),
+							"Browser-Link kopieren\nFreunde ohne HeldixClient reden im Browser in deiner Gruppe mit (24 Std.)");
+					right -= 15;
+				}
 			}
 			if (head.meter()) meter(canvas, right - 18, y + (row - 4) / 2f, engine.level(), engine.transmitting() ? SPEAKING : style.accent());
 			y += row;
@@ -531,10 +604,21 @@ public final class VoiceChatAddon implements HeldixAddon {
 				}
 				canvas.text(speaker.name(), x, y + (row - 4 - lineHeight) / 2f + 1, style.textColor(), text, style.shadow());
 				x += canvas.textWidth(speaker.name(), text) + 4;
+				// Gäste und Spieler im Browser gekennzeichnet
+				if (speaker.tag() != null) {
+					canvas.text(speaker.tag(), x, y + (row - 4 - lineHeight) / 2f + 1, HeldixColors.MUTED, text, style.shadow());
+					x += canvas.textWidth(speaker.tag(), text) + 4;
+				}
 				if (speaker.group()) {
 					canvas.icon("friends", (int) x, y + (row - 4 - 9) / 2, 9, GROUP);
 				}
-				bars(canvas, width - pad - 11, y + (row - 4) / 2f, speaker.level(), color);
+				float barsX = width - pad - 11;
+				if (buttons && speaker.guest()) {
+					canvas.iconButton("kick:" + speaker.uuid(), "close", barsX, y + (row - 4 - 11) / 2f, 11, STATUS_RED,
+							"Gast entfernen\n" + speaker.name() + " fliegt aus der Gruppe (mit dem Link kann er neu beitreten)");
+					barsX -= 15;
+				}
+				if (speaker.speaking()) bars(canvas, barsX, y + (row - 4) / 2f, speaker.level(), color);
 				y += row;
 			}
 			if (more != null) canvas.text(more, pad, y + (row - 4 - lineHeight) / 2f, HeldixColors.MUTED, text, style.shadow());
@@ -545,8 +629,14 @@ public final class VoiceChatAddon implements HeldixAddon {
 			switch (click.hotspot()) {
 				case "mute" -> setMuted(!muted);
 				case "deafen" -> setDeafened(!deafened);
+				case "browser-link" -> copyBrowserLink();
 				default -> {
-					return false;
+					if (!click.hotspot().startsWith("kick:")) return false;
+					try {
+						removeGuest(UUID.fromString(click.hotspot().substring(5)));
+					} catch (IllegalArgumentException e) {
+						return false;
+					}
 				}
 			}
 			return true;
@@ -581,7 +671,8 @@ public final class VoiceChatAddon implements HeldixAddon {
 			float alpha = 0.45f + 0.55f * speaker.level();
 			int ring = ((int) (alpha * 255) << 24) | (color & 0xFFFFFF);
 			canvas.roundedRect(x - 1.5f, y - 1.5f, FACE + 3, FACE + 3, 3, ring);
-			if (!canvas.playerHead(speaker.uuid().toString(), Math.round(x), Math.round(y), FACE)) {
+			// Gäste haben keinen Minecraft-Skin (zufällige ID): gleich das Symbol, ohne nachzuschlagen
+			if (speaker.guest() || !canvas.playerHead(speaker.uuid().toString(), Math.round(x), Math.round(y), FACE)) {
 				canvas.roundedRect(x, y, FACE, FACE, 2, 0xFF1B2232);
 				canvas.icon("user", Math.round(x + 2), Math.round(y + 2), FACE - 4, HeldixColors.MUTED);
 			}
@@ -643,14 +734,26 @@ public final class VoiceChatAddon implements HeldixAddon {
 			if (module.isEnabled() && !deafened) {
 				Set<UUID> group = api.voice().groupMembers();
 				for (UUID speaker : engine.speaking()) {
-					list.add(new Speaker(speaker, nameOf(speaker), engine.levelOf(speaker), group.contains(speaker)));
+					list.add(new Speaker(speaker, nameOf(speaker), engine.levelOf(speaker), group.contains(speaker), tagOf(speaker), true));
 				}
 				list.sort((a, b) -> a.name().compareToIgnoreCase(b.name()));
 			}
 			if (list.isEmpty() && preview) {
-				list.add(new Speaker(new UUID(0, 1), "Steve", 0.7f, false));
-				list.add(new Speaker(new UUID(0, 2), "Alex", 0.4f, true));
+				list.add(new Speaker(new UUID(0, 1), "Steve", 0.7f, false, null, true));
+				list.add(new Speaker(new UUID(0, 2), "Alex", 0.4f, true, null, true));
 			}
+			return list;
+		}
+
+		/** bei offenem Chat: wer gerade spricht und alle Mitglieder der Gruppe (Sprecher zuerst, dann nach Namen) */
+		private List<Speaker> members() {
+			List<Speaker> list = new ArrayList<>(speakers(false));
+			Set<UUID> listed = new HashSet<>();
+			for (Speaker speaker : list) listed.add(speaker.uuid());
+			for (UUID member : api.voice().groupMembers()) {
+				if (listed.add(member)) list.add(new Speaker(member, nameOf(member), 0f, true, tagOf(member), false));
+			}
+			list.sort((a, b) -> a.speaking() != b.speaking() ? (a.speaking() ? -1 : 1) : a.name().compareToIgnoreCase(b.name()));
 			return list;
 		}
 	}

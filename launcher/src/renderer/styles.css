@@ -530,6 +530,18 @@ input::placeholder { color: var(--faint); }
 .toast-icon { width: 20px; height: 20px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 800; color: #fff; background: var(--accent); margin-top: 1px; }
 .toast.error .toast-icon { background: var(--danger); }
 .toast.success .toast-icon { background: #10b981; }
+/* Hinweis mit Knopf (Party-Einladung, „<Leiter> ist auf … – Beitreten“) */
+.toast-icon.action { width: 26px; height: 26px; border-radius: 8px; color: var(--accent-text); background: var(--accent-soft); }
+.toast-icon.action svg { width: 15px; height: 15px; }
+.action-toast-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 13px; }
+.action-toast-text > span:not(.action-toast-buttons) { color: var(--muted); font-size: 12px; }
+.action-toast-buttons { display: flex; gap: 6px; margin-top: 6px; }
+.action-toast-buttons .primary.small, .action-toast-buttons .ghost.small { height: 28px; padding: 0 10px; border-radius: 8px; font-size: 12px; gap: 6px; }
+.action-toast-buttons .btn-icon { width: 13px; height: 13px; }
+/* Abzeichen (Heldix-Symbol je Rolle, badges.ts) */
+.badge-icon { display: inline-block; flex: none; vertical-align: -2px; image-rendering: auto; }
+.account-label .badge-icon { margin-left: 5px; }
+.account-current-badge { display: inline-flex; align-items: center; gap: 6px; margin-top: 5px; color: var(--muted); font-size: 12px; font-weight: 600; }
 @keyframes toast-in { from { opacity: 0; transform: translateX(20px); } }
 
 /* ---------- Scrollbars ---------- */

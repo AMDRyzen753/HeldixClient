@@ -35,6 +35,9 @@ function show(data) {
   $('wert-online').textContent = Number.isFinite(data?.online) ? NUMBER.format(data.online) : '–';
   $('wert-spieler').textContent = Number.isFinite(data?.players) ? NUMBER.format(data.players) : '–';
   $('wert-launcher').textContent = typeof data?.launcher === 'string' && data.launcher ? data.launcher : 'noch keine';
+  // Offene Welten: ab Dienst 1.12.0 (null = Welt teilen auf diesem Dienst aus)
+  $('kachel-welten').hidden = !Number.isFinite(data?.worlds);
+  $('wert-welten').textContent = Number.isFinite(data?.worlds) ? NUMBER.format(data.worlds) : '–';
   if (Number.isFinite(data?.since)) {
     $('wert-seit').textContent = duration(Date.now() - data.since);
     $('wert-seit-datum').textContent = `seit ${formatDateTime(data.since)}`;

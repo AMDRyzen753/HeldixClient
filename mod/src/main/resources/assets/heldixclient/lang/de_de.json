@@ -8,6 +8,8 @@
 	"key.heldixclient.waypoint": "Wegpunkt setzen",
 	"key.heldixclient.hudInteract": "HUD bedienen (Maus frei)",
 	"key.heldixclient.playerMenu": "Spielermenü (auf einen Spieler zielen)",
+	"key.heldixclient.knockAllow": "Einblendung: erlauben / annehmen (Welt teilen, Party)",
+	"key.heldixclient.knockDeny": "Einblendung: ablehnen (Welt teilen, Party)",
 	"key.heldixclient.module.fps": "FPS an/aus",
 	"key.heldixclient.module.cps": "CPS an/aus",
 	"key.heldixclient.module.ping": "Ping an/aus",

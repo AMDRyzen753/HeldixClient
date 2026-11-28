@@ -1,0 +1,33 @@
+Prüfbericht: Lumi, der Laternengeist (lumi), Slot companion, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  companions/Lumi/Lumi.cosmetic.json  132,7 KB  sha256 28345d8c970923663c7c275af63161b99807c3c7d20874cf03043d5be6791dff
+  companions/Lumi/textures/Lumi_albedo.png  2,3 KB  sha256 861840445329790f68b1ec4711728bc215c52ce254cd49e2543bed29a35717b2
+  companions/Lumi/textures/Lumi_emissive_anim.png  12,0 KB  sha256 f16750a1ccceeb9c1b078cef10a10b5dd0c71ff458177a5f3af3cb7e13830f29
+
+Größe:
+  vorher: 147,1 KB (JSON 132,7 KB + Texturen)
+  nachher: Manifest 59,8 KB von höchstens 512,0 KB, Umschlag etwa 61,1 KB von 544,0 KB
+
+Mesh:
+  608 Vertices, 304 Dreiecke, 7 Knochen, größte Rundung der Positionen 0,0125 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+  Begleiter: Ursprung attach.origin = [15, -5, 1] px (Positionen relativ dazu), Seite links
+
+Animationen (7), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 72 Frames bei 24 fps, Schleife, 7 Spuren, 361 Keys
+  Fly: 24 Frames bei 24 fps, Schleife, 6 Spuren, 87 Keys
+  Emote: 96 Frames bei 24 fps, Schleife, 7 Spuren, 711 Keys
+  Sleep: 72 Frames bei 24 fps, Schleife, 7 Spuren, 79 Keys
+  Startle: 19 Frames bei 24 fps, einmalig, 6 Spuren, 130 Keys
+  Spawn: 33 Frames bei 24 fps, einmalig, 7 Spuren, 199 Keys
+  Celebrate: 37 Frames bei 24 fps, einmalig, 6 Spuren, 287 Keys
+  zusammen 1854 Keys statt 4132 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1499°, move 0,0198 px, scale 0,0000
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,0619 px (Spawn, Frame 3, Vertex 588)
+
+Zustände: 14 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,3 s
+Partikel: 5 Vorschläge → 5 Einträge (.L-Knochen auch für .R)
+Leuchten: 8 Bilder, 2 Ticks je Bild, Puls 2,2 s zwischen 0,5 und 1
+Texturen: texture.png 128 × 128 (2,3 KB) = Lumi_albedo.png; glow.png 128 × 1024 (12,0 KB) = Lumi_emissive_anim.png

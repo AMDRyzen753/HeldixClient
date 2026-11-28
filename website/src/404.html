@@ -3,16 +3,20 @@
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="404">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap notfound">
-  <div class="code gradient">404</div>
-  <h1>Diese Seite gibt es nicht</h1>
-  <p class="lead">Vielleicht ein alter Link? Auf der Startseite findest du alles zu HeldixClient.</p>
-  <div class="notfound-links"><a class="button" href="/">Zur Startseite</a><a class="button ghost" href="/hilfe">Hilfe-Center</a><a class="button ghost" href="/download">Download</a></div>
+<main id="inhalt">
+  <section class="page-hero page-hero--center" aria-labelledby="seite-titel">
+    <div class="container notfound">
+      <p class="notfound__code text-gradient" aria-hidden="true">404</p>
+      <h1 class="h2" id="seite-titel">Diese Seite gibt es nicht</h1>
+      <p class="lead">Vielleicht ein alter Link? Hier geht es weiter:</p>
+      <div class="btn-group"><a class="btn btn--primary" href="/">{{icon:home}}Zur Startseite</a><a class="btn btn--secondary" href="/hilfe">{{icon:help-circle}}Hilfe-Center</a><a class="btn btn--secondary" href="/download">{{icon:download}}Download</a></div>
+    </div>
+  </section>
 </main>
 
 {{include:footer.html}}

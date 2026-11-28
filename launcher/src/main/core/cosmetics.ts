@@ -2,6 +2,8 @@
 //
 // Die Regeln selbst stehen in cosmetics-format.ts – eine unveränderte Kopie von service/src/cosmetics-format.ts
 // (npm run test:cosmetics prüft, dass beide gleich sind). Hier kommt nur dazu, was der Dienst nicht braucht.
+// Alles Folgende gilt für Format 1 (Würfel). Format 2 (Mesh mit Keyframes, Body-Modellraum mit +Y unten) beschreiben
+// cosmetics-format.ts und docs/dienst.md; die Rechnung für die Vorschau steht in renderer/cosmetic-mesh.ts.
 //
 // Koordinaten (Modell, Einheiten in Pixeln = 1/16 Block): rechtshändig, +Y nach oben, +Z nach vorn (Blickrichtung),
 // damit +X = links des Trägers (wie die Minecraft-Welt bei Blick nach Süden). Java-Modellraum (y nach unten,
@@ -15,7 +17,16 @@
 //   Matrix eines Bones = Eltern · T(pivot + bob) · Rz · Ry · Rx · T(-pivot), Winkel in Grad, rechte-Hand-Regel
 //   (positiv = gegen den Uhrzeigersinn, wenn man von der positiven Achse zum Ursprung schaut); erst X, dann Y, dann Z.
 //
-// Box-UV (wie Minecraft): Würfel (w, h, d) mit uv (u, v) belegt (2d + 2w) × (d + h):
+// Größe (model.scale, 0,25–1,5, fehlt: 1): skaliert das ganze Modell gleichmäßig um den Anker (Ursprung 0, 0, 0),
+//   über den Bone-Matrizen: Ecke = S(scale) · Matrix des Bones · v. Pivots, Würfel, bob und die Grenze von 48 Pixeln
+//   gelten vor der Skalierung (in Modellpixeln); der Anker selbst bleibt, wo er ist. cosmeticBoneMatrices() liefert
+//   S schon mit (jede Kette beginnt mit S statt der Einheitsmatrix). Beim Begleiter multipliziert sich companion.scale
+//   dazu: Welt = Platz · S(companion.scale) · S(model.scale) · Matrix des Bones.
+//
+// Textur: model.textureSize ist die Größe in Texeln (UV-Raum). Das PNG hat die 1-, 2- oder 4-fache Auflösung davon
+//   (z. B. 512 × 256 für 128 × 64 Texel); UV wird immer durch textureSize geteilt, nie durch die Bildgröße.
+//
+// Box-UV (wie Minecraft): Würfel (w, h, d) mit uv (u, v) belegt (2d + 2w) × (d + h) Texel:
 //   oben (u+d, v) w×d · unten (u+d+w, v) w×d · rechts/-X (u, v+d) d×h · vorn/+Z (u+d, v+d) w×h
 //   links/+X (u+d+w, v+d) d×h · hinten/-Z (u+2d+w, v+d) w×h. Genaue Ecken: cosmeticCubeFaces().
 //   mirror spiegelt den Würfel an seiner eigenen Mitte in x (Textur seitenverkehrt, wie Minecraft). Würfel mit einer
@@ -37,16 +48,17 @@
 import { createPublicKey, verify, type KeyObject } from 'node:crypto';
 import {
   checkCosmeticEnvelope,
-  COSMETIC_LIMITS,
+  COSMETIC_MAX_ENVELOPE_BYTES,
+  COSMETIC_MAX_MANIFEST_BYTES,
   cosmeticSignedText,
   decodeBase64,
   parseCosmeticManifest,
   PNG_DATA_URL_PREFIX,
   utf8Length,
   type AnimationAxis,
+  type AnyCosmeticManifest,
   type CosmeticAnimation,
   type CosmeticCube,
-  type CosmeticManifest,
   type CosmeticModel,
   type CosmeticSlot,
   type Vec3,
@@ -55,7 +67,7 @@ import {
 export const COSMETIC_SLOT_NAMES: Record<CosmeticSlot, string> = {
   head: 'Hüte & Kopf',
   back: 'Flügel & Rücken',
-  aura: 'Partikel',
+  aura: 'Aura',
   companion: 'Begleiter',
   cape: 'Capes',
 };
@@ -77,9 +89,12 @@ export function pngFromDataUrl(dataUrl: string): Buffer {
   return Buffer.from(bytes);
 }
 
-/** Prüft Größe und JSON eines Manifest-Texts nach allen Regeln; wirft mit deutscher Meldung. */
-export function parseCosmeticManifestText(text: string): CosmeticManifest {
-  if (utf8Length(text) > COSMETIC_LIMITS.manifestBytes) throw new Error(`Cosmetic ungültig: „manifest“ ist zu groß (höchstens ${COSMETIC_LIMITS.manifestBytes / 1024} KB)`);
+/**
+ * Prüft Größe und JSON eines Manifest-Texts nach allen Regeln (Format 1 oder 2, an manifest.format unterscheiden);
+ * wirft mit deutscher Meldung. Die Grenze des Formats (160 KB bzw. 512 KB) prüft parseCosmeticManifest.
+ */
+export function parseCosmeticManifestText(text: string): AnyCosmeticManifest {
+  if (utf8Length(text) > COSMETIC_MAX_MANIFEST_BYTES) throw new Error(`Cosmetic ungültig: „manifest“ ist zu groß (höchstens ${COSMETIC_MAX_MANIFEST_BYTES / 1024} KB)`);
   const manifest = parseCosmeticManifest(text);
   if (typeof manifest === 'string') throw new Error(`Cosmetic ungültig: ${manifest}`);
   return manifest;
@@ -90,12 +105,12 @@ export function parseCosmeticManifestText(text: string): CosmeticManifest {
  * "heldix-cosmetic\n" + manifest mit dem öffentlichen Update-Schlüssel (PEM oder KeyObject), dann alle Regeln des
  * Manifests. input: Dateiinhalt (Text oder Bytes) oder schon geparstes Objekt. Liefert das geprüfte Manifest.
  */
-export function verifyCosmeticEnvelope(input: string | Uint8Array | object, publicKey: string | KeyObject): CosmeticManifest {
+export function verifyCosmeticEnvelope(input: string | Uint8Array | object, publicKey: string | KeyObject): AnyCosmeticManifest {
   let value: unknown = input;
   if (typeof input === 'string' || input instanceof Uint8Array) {
     const text = typeof input === 'string' ? input : Buffer.from(input).toString('utf8');
     // grobe Schranke vor dem Parsen; die genaue Grenze prüft checkCosmeticEnvelope an der ausgelieferten Form
-    if (utf8Length(text) > 2 * COSMETIC_LIMITS.envelopeBytes) throw new Error(`Cosmetic ungültig: Der Umschlag ist zu groß (höchstens ${COSMETIC_LIMITS.envelopeBytes / 1024} KB)`);
+    if (utf8Length(text) > 2 * COSMETIC_MAX_ENVELOPE_BYTES) throw new Error(`Cosmetic ungültig: Der Umschlag ist zu groß (höchstens ${COSMETIC_MAX_ENVELOPE_BYTES / 1024} KB)`);
     try {
       value = JSON.parse(text);
     } catch {
@@ -189,6 +204,8 @@ export type Mat4 = number[];
 
 export const mat4Identity = (): Mat4 => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 export const mat4Translation = (x: number, y: number, z: number): Mat4 => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1];
+/** gleichmäßige Skalierung um den Ursprung */
+export const mat4Scale = (s: number): Mat4 => [s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, 0, 0, 0, 1];
 
 export function mat4Multiply(a: Mat4, b: Mat4): Mat4 {
   const out = new Array<number>(16);
@@ -219,12 +236,16 @@ export function mat4Apply(m: Mat4, p: Vec3, w = 1): Vec3 {
   ];
 }
 
-/** Matrix jedes Bones (Modellkoordinaten), Eltern zuerst; pose aus cosmeticPose() oder Ruhelage. */
+/**
+ * Matrix jedes Bones (Modellkoordinaten), Eltern zuerst; pose aus cosmeticPose() oder Ruhelage. Enthält schon
+ * model.scale: Ergebnis = S(scale) · Matrix des Bones (jede Kette beginnt mit S).
+ */
 export function cosmeticBoneMatrices(model: CosmeticModel, pose?: Map<string, BonePose>): Map<string, Mat4> {
   const matrices = new Map<string, Mat4>();
+  const root = mat4Scale(model.scale);
   for (const bone of model.bones) {
     const p = pose?.get(bone.name) ?? { rotation: bone.rotation, offset: [0, 0, 0] as Vec3 };
-    const parent = bone.parent ? matrices.get(bone.parent) ?? mat4Identity() : mat4Identity();
+    const parent = bone.parent ? matrices.get(bone.parent) ?? root : root;
     let m = mat4Multiply(parent, mat4Translation(bone.pivot[0] + p.offset[0], bone.pivot[1] + p.offset[1], bone.pivot[2] + p.offset[2]));
     m = mat4Multiply(m, mat4Rotation(2, p.rotation[2]));
     m = mat4Multiply(m, mat4Rotation(1, p.rotation[1]));

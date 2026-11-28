@@ -1,0 +1,32 @@
+Prüfbericht: Eiskranz (eiskranz), Slot aura, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  auras/FrostCrown/FrostCrown.cosmetic.json  885,4 KB  sha256 52d64e4f3e69111352c08e1569f2427b724289f0a67886e5e01874b21522db5a
+  auras/FrostCrown/textures/FrostCrown_albedo.png  4,2 KB  sha256 f9426464fafac4057e7bcfbe24f95172fc4ca36d042e969ded0f988f12faa13d
+  auras/FrostCrown/textures/FrostCrown_emissive_anim.png  53,9 KB  sha256 100299d7f17b77881135eaf2edbf7b0c748f784a522e891a533569f3bbb7789a
+
+Größe:
+  vorher: 943,4 KB (JSON 885,4 KB + Texturen)
+  nachher: Manifest 243,5 KB von höchstens 512,0 KB, Umschlag etwa 248,7 KB von 544,0 KB
+
+Mesh:
+  3976 Vertices, 1988 Dreiecke, 32 Knochen, größte Rundung der Positionen 0,0156 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+
+Animationen (7), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 96 Frames bei 24 fps, Schleife, 32 Spuren, 1008 Keys
+  Active: 48 Frames bei 24 fps, Schleife, 32 Spuren, 1027 Keys
+  Sneak: 144 Frames bei 24 fps, Schleife, 32 Spuren, 764 Keys
+  Emote: 120 Frames bei 24 fps, Schleife, 32 Spuren, 1592 Keys
+  Spawn: 31 Frames bei 24 fps, einmalig, 32 Spuren, 816 Keys
+  Despawn: 25 Frames bei 24 fps, einmalig, 32 Spuren, 685 Keys
+  Celebrate: 41 Frames bei 24 fps, einmalig, 32 Spuren, 1502 Keys
+  zusammen 7394 Keys statt 34885 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1427°, move 0,0200 px, scale 0,0020
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,0621 px (Emote, Frame 26, Vertex 2154)
+
+Zustände: 15 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,35 s
+Partikel: 5 Vorschläge → 5 Einträge (.L-Knochen auch für .R)
+Leuchten: 8 Bilder, 3 Ticks je Bild, Puls 3 s zwischen 0,6 und 1
+Texturen: texture.png 256 × 256 (4,2 KB) = FrostCrown_albedo.png; glow.png 256 × 2048 (53,9 KB) = FrostCrown_emissive_anim.png

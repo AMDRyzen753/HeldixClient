@@ -107,6 +107,9 @@ public final class AutoTest implements HeldixModInitializer {
 		// Ohne Fokus (jemand arbeitet nebenher am PC) würde „Hintergrund-FPS“ die Bildrate senken; Prüfungen,
 		// die auf ein gezeichnetes Bild warten (Zoom, Freelook, HUD-Größe), liefen dann ins Leere.
 		t.run(mc -> HeldixConfig.get().backgroundFps = false);
+		// Arbeitet jemand nebenher am PC, dreht eine echte Mausbewegung über dem Spielfenster sonst den Spieler und
+		// verfälscht Prüfungen, die auf die Blickrichtung angewiesen sind (Wegpunkte, Cosmetics). Tests drehen selbst.
+		t.run(mc -> mc.options.sensitivity().set(0.0));
 		t.waitTicks(20);
 		// Nur beim Entwickeln: HELDIX_AUTOTEST_ONLY=cosmetics führt nur die Cosmetics-Prüfungen in einer Testwelt aus
 		if ("cosmetics".equals(System.getenv("HELDIX_AUTOTEST_ONLY"))) {
@@ -171,7 +174,7 @@ public final class AutoTest implements HeldixModInitializer {
 		t.check("Hauptmenü ist die Heldix-Startseite",
 				t.compute(mc -> mc.gui.screen() instanceof TitleScreen && mc.gui.screen().children().stream().anyMatch(child -> child instanceof StartCard)));
 		t.check("Startseite zeigt die Schnellstart-Karten",
-				t.compute(mc -> mc.gui.screen().children().stream().filter(child -> child instanceof StartCard).count() == 4));
+				t.compute(mc -> mc.gui.screen().children().stream().filter(child -> child instanceof StartCard).count() == 5));
 
 		// --- Grafik: Ressourcen der Mod, Shader, F3 -----------------------------------------
 		// eigenständig lädt der Heldix Loader die Ressourcen als eigenes Paket, in Fabric macht das Fabric API
@@ -364,10 +367,24 @@ public final class AutoTest implements HeldixModInitializer {
 		FeatureTests.social(t);
 		// Spielermenü (Mausrad-Klick auf einen Spieler) und Voice Chat über den Heldix-Dienst
 		VoiceTests.run(t);
-		// Heldix-Symbol je Rolle: Tab-Liste (mit Fußzeile) und Namensschilder über Köpfen
+		// Einladungen (Freunde-Seite, Pausemenü, Annehmen, Echtzeit) und Gäste im Voice Chat (Dienst 1.11.0, API 9, Voice Chat 1.2.0)
+		InviteTests.run(t);
+		// Welt teilen (Dienst 1.12.0): Sicherung, Adresse, Freunde einladen, Relay mit Test-Client (Status, Anklopfen, Erlauben), Heldix-Welten
+		WorldShareTests.run(t);
+		// Freunde 2.0 (Dienst 1.12.0): Favorit, Spitzname, Status, „Nicht stören“, Party (Einladung, Chat, Folgen, Voice), Karten,
+		// Reaktionen, Antworten, Löschen, „schreibt …“, Vorschläge, Profilkarte, zuletzt online
+		FriendsTests.run(t);
+		// Minimap-Addon (API 8): Welt von oben, eigenes Bild im HUD, Wegpunkte, Zoom
+		MinimapTests.run(t);
+		// Emote-Rad (Addon mit Zugriff auf Minecraft, von einem externen Entwickler)
+		EmoteRadTests.run(t);
+		// Heldix-Symbol je Rolle (alle Rollen und Schriften): Tab-Liste (mit Fußzeile) und Namensschilder über Köpfen
 		BadgeTests.run(t);
+		// Statuszeile für den Discord-Status (0.13.8): Dimension, Spielmodus, Weltname, Mindestabstand, abwesend
+		StatusTests.run(t);
 		// Heldix-Cosmetics: Katalog (signiert), Seite im Heldix-Menü, alle Slots, andere Spieler, Addon-API (mit --service)
 		CosmeticTests.run(t);
+		Format2Tests.run(t); // Cosmetics im Format 2 (Meshes mit Keyframe-Animationen, 0.13.8): Format, Katalog, Zustände, Partikel, Menü
 		FeatureTests.addonStore(t);
 		// Heldix-API 3: Einstellungen (Regler, Farbe, Text), Spotify-Darstellungen, Daten, Scheduler, Befehle, Events
 		AddonApiTests.settings(t);
@@ -601,6 +618,8 @@ public final class AutoTest implements HeldixModInitializer {
 		});
 		t.waitSoft(mc -> capePathNow(mc).contains("cape/heldix"), 10);
 		t.check("Heldix-Cape wieder angelegt", capePath(t).contains("cape/heldix"));
+		// Cape-Fix (ruhig, ohne schwarze Ränder, Elytra-Formen) und die neuen Capes mit Team-Sperre
+		CapeFixTests.run(t);
 	}
 
 	/** Pfad der Cape-Textur des eigenen Spielers ("" = kein Cape) */

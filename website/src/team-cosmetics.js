@@ -6,19 +6,24 @@
 //
 // Vor dem Veröffentlichen prüft die Seite selbst (cosmetics-common.js, dieselben Regeln wie der Dienst): Form und
 // Größe des Umschlags, Ed25519-Signatur über "heldix-cosmetic\n" + Manifest gegen den öffentlichen Update-Schlüssel
-// aus GET /v1/team/cosmetics, alle Regeln von Format 1, dazu Version und Slot gegen den Katalog. Erst wenn alles grün
-// ist, geht der Umschlag unverändert an den Dienst – der prüft dasselbe noch einmal.
+// aus GET /v1/team/cosmetics, alle Regeln von Format 1 bzw. 2, dazu Version und Slot gegen den Katalog. Erst wenn alles
+// grün ist, geht der Umschlag unverändert an den Dienst – der prüft dasselbe noch einmal. Format 2 (animierte Meshes):
+// Vorschau mit Auswahl der Animation (Namen aus dem Manifest), Steckbrief mit Mesh, Animationen, Zuständen und Leuchten.
 import { busy, confirmAction, emptyState, formatBytes, formatDate, formatDateTime, h, icon, loadingState, openDialog, rerender, showError, toast, uid } from './app-common.js';
 import {
   BUILTIN_CAPE_IDS,
   COSMETIC_ID_RE,
   COSMETIC_LIMITS,
+  COSMETIC_LIMITS_2,
+  COSMETIC_MAX_ENVELOPE_BYTES,
   COSMETIC_SLOTS,
   CosmeticError,
   SLOT_NAMES,
   SLOT_TITLES,
+  animationButtons,
   checkCosmeticEnvelope,
   cosmeticAnimated,
+  cosmeticAnimations,
   drawCosmeticPreview,
   prepareCosmetic,
   verifyCosmeticEnvelope,
@@ -46,7 +51,7 @@ function normalizeEntry(entry) {
     version: Number.isInteger(entry.version) && entry.version > 0 ? entry.version : null,
     name: text(entry.name, COSMETIC_LIMITS.nameMax) || entry.id,
     description: text(entry.description, COSMETIC_LIMITS.descriptionMax),
-    access: entry.access === 'team' ? 'team' : 'all',
+    access: entry.access === 'team' || entry.access === 'unlock' ? entry.access : 'all',
     date: typeof entry.date === 'string' ? entry.date : null,
     sha256: typeof entry.sha256 === 'string' && /^[0-9a-f]{64}$/.test(entry.sha256) ? entry.sha256 : null,
     size: number(entry.size),
@@ -70,39 +75,103 @@ function normalizeOverview(data) {
   };
 }
 
-/** Vorschau auf einer Leinwand, bewegt (wenn das Cosmetic sich bewegt und Bewegung erlaubt ist). */
-function animatePreview(canvas, item) {
-  const started = performance.now();
+/**
+ * Vorschau auf einer Leinwand, bewegt (wenn das Cosmetic sich bewegt und Bewegung erlaubt ist). choice (Format 2):
+ * { animation } – gewählte Animation; ändert sie sich, beginnt die Zeit von vorn. Format 2 zeichnet höchstens
+ * 24-mal pro Sekunde (so schnell laufen die Keyframes; die 2D-Zeichnung der Dreiecke ist aufwendiger).
+ */
+function animatePreview(canvas, item, choice = { animation: null }) {
+  let started = performance.now();
+  let shown = choice.animation;
+  let last = -Infinity;
+  const mesh = item.manifest.format === 2;
   const moving = cosmeticAnimated(item.manifest) && !reducedMotion();
   const draw = (now) => {
     if (!canvas.isConnected) return;
-    try {
-      drawCosmeticPreview(canvas, item, { t: moving ? (now - started) / 1000 : 0 });
-    } catch {
-      return;
+    if (choice.animation !== shown) {
+      shown = choice.animation;
+      started = now;
+      last = -Infinity;
     }
-    if (moving) requestAnimationFrame(draw);
+    if (!mesh || now - last >= 1000 / 24 || !moving) {
+      last = now;
+      try {
+        drawCosmeticPreview(canvas, item, { t: moving ? (now - started) / 1000 : 0, animation: shown });
+      } catch {
+        return;
+      }
+    }
+    if (moving || choice.redraw) {
+      choice.redraw = false;
+      requestAnimationFrame(draw);
+    }
+  };
+  choice.restart = () => {
+    choice.redraw = true;
+    if (!moving) requestAnimationFrame(draw);
   };
   requestAnimationFrame(draw);
+}
+
+/** Format 2: Auswahl der Animation (Namen aus dem Manifest, Standard: Zustand idle). */
+function animationChips(manifest, choice) {
+  const info = cosmeticAnimations(manifest);
+  if (!info || info.clips.length < 2) return null;
+  choice.animation = info.idle;
+  const group = h('div', { class: 'anim-chips cosmetic-anims', role: 'group', 'aria-label': `Animation von ${manifest.name}` });
+  const render = () =>
+    group.replaceChildren(
+      ...animationButtons(info, choice.animation, (name) => {
+        choice.animation = name;
+        render();
+        choice.restart?.();
+      }),
+    );
+  render();
+  return group;
 }
 
 /** Leinwand + Textur (+ Leuchtebene) eines geprüften Manifests. */
 function previewBlock(manifest, { size = 168 } = {}) {
   const canvas = h('canvas', { class: 'cosmetic-canvas', width: String(size * 2), height: String(size * 2), role: 'img', 'aria-label': `Vorschau: ${manifest.name}` });
+  const choice = { animation: null };
+  const chips = animationChips(manifest, choice);
   prepareCosmetic(manifest)
-    .then((item) => animatePreview(canvas, item))
+    .then((item) => animatePreview(canvas, item, choice))
     .catch(() => canvas.replaceWith(h('p', { class: 'muted small', text: 'Die Vorschau ließ sich nicht zeichnen.' })));
+  // Format 2: Leucht-Streifen mit emissive.frames Bildern untereinander
+  const glowFrames = manifest.format === 2 ? (manifest.emissive?.frames ?? 1) : 1;
   return h(
     'div',
     { class: 'cosmetic-preview' },
     h('div', { class: 'cosmetic-stage' }, canvas),
+    chips,
     h(
       'div',
       { class: 'cosmetic-textures' },
       h('figure', null, h('img', { class: 'cosmetic-texture', src: manifest.texture, alt: `Textur von ${manifest.name}`, width: String(manifest.image.width), height: String(manifest.image.height) }), h('figcaption', { text: `Textur ${manifest.image.width} × ${manifest.image.height}` })),
-      manifest.glow ? h('figure', null, h('img', { class: 'cosmetic-texture', src: manifest.glow, alt: `Leuchtebene von ${manifest.name}`, width: String(manifest.image.width), height: String(manifest.image.height) }), h('figcaption', { text: 'Leuchtebene' })) : null,
+      manifest.glow ? h('figure', null, h('img', { class: 'cosmetic-texture', src: manifest.glow, alt: `Leuchtebene von ${manifest.name}`, width: String(manifest.image.width), height: String(manifest.image.height * glowFrames) }), h('figcaption', { text: glowFrames > 1 ? `Leuchtebene (${glowFrames} Bilder)` : 'Leuchtebene' })) : null,
     ),
   );
+}
+
+/** Format 2: Mesh, Animationen, Zustände, Leuchten, Partikel und Platz des Begleiters. */
+function meshFacts(manifest, fact) {
+  const { mesh, bones, states, emissive, particles, attach } = manifest;
+  const clips = Object.entries(manifest.animations);
+  const stateList = Object.entries(states)
+    .filter(([key]) => key !== 'blendSeconds')
+    .map(([key, name]) => `${key} → ${name}`)
+    .join(', ');
+  return [
+    fact('Format', '2 · animiertes Mesh (ab Launcher und Spiel 0.13.8)'),
+    fact('Mesh', `${NUMBER.format(mesh.vertexCount)} Ecken · ${NUMBER.format(mesh.triangleCount)} Dreiecke · ${bones.length === 1 ? '1 Knochen' : `${bones.length} Knochen`}${mesh.joints ? ' · weiche Haut' : ''}`),
+    fact('Animationen', clips.map(([name, clip]) => `${name} (${(clip.frames / clip.fps).toFixed(1).replace('.', ',')} s${clip.loop ? '' : ', einmalig'})`).join(' · ')),
+    fact('Zustände', `${stateList} · Überblenden ${String(states.blendSeconds).replace('.', ',')} s`),
+    emissive ? fact('Leuchten', `${emissive.frames === 1 ? '1 Bild' : `${emissive.frames} Bilder`} · ${emissive.frametimeTicks} Ticks je Bild · Puls ${String(emissive.pulse.min).replace('.', ',')}–${String(emissive.pulse.max).replace('.', ',')} alle ${String(emissive.pulse.period).replace('.', ',')} s`) : null,
+    particles.length ? fact('Partikel', [...new Set(particles.map((p) => p.particle))].join(', ')) : null,
+    attach ? fact('Begleiter', `Ursprung ${attach.origin.join(' / ')} px · ${attach.side === 'right' ? 'rechte' : 'linke'} Seite`) : null,
+  ].filter(Boolean).flat();
 }
 
 /** Steckbrief eines geprüften Manifests. */
@@ -116,10 +185,11 @@ function manifestFacts(manifest, { envelopeBytes = null } = {}) {
     fact('Name', h('strong', { text: manifest.name })),
     fact('ID', h('code', { class: 'mono', text: manifest.id })),
     fact('Version', String(manifest.version)),
-    fact('Wählbar für', manifest.access === 'team' ? 'nur Team-Mitglieder' : 'alle Spieler'),
+    fact('Wählbar für', manifest.access === 'team' ? 'nur Team-Mitglieder' : manifest.access === 'unlock' ? 'nur, wer es freigeschaltet hat (Belohnung für Einladungen)' : 'alle Spieler'),
     fact('Beschreibung', manifest.description || '–'),
     fact('Textur', `${manifest.image.width} × ${manifest.image.height} Pixel · ${formatBytes(manifest.image.bytes)}${manifest.glow ? ' · mit Leuchtebene' : ''}`),
-    manifest.model ? fact('Modell', `${manifest.model.bones.length === 1 ? '1 Bone' : `${manifest.model.bones.length} Bones`} · ${cubes === 1 ? '1 Würfel' : `${cubes} Würfel`}${manifest.animations.length ? ` · ${manifest.animations.length === 1 ? '1 Animation' : `${manifest.animations.length} Animationen`} (${[...new Set(manifest.animations.map((a) => a.type))].join(', ')})` : ''}`) : null,
+    ...(manifest.format === 2 ? meshFacts(manifest, fact) : []),
+    manifest.model ? fact('Modell', `${manifest.model.bones.length === 1 ? '1 Bone' : `${manifest.model.bones.length} Bones`} · ${cubes === 1 ? '1 Würfel' : `${cubes} Würfel`}${manifest.model.scale !== 1 ? ` · Größe ${manifest.model.scale}` : ''}${manifest.animations.length ? ` · ${manifest.animations.length === 1 ? '1 Animation' : `${manifest.animations.length} Animationen`} (${[...new Set(manifest.animations.map((a) => a.type))].join(', ')})` : ''}`) : null,
     manifest.particles ? fact('Partikel', `${manifest.particles.frames} Bilder · ${manifest.particles.rate}/s · ${manifest.particles.motion} · Radius ${manifest.particles.radius}`) : null,
     manifest.cape ? fact('Cape', `${manifest.cape.frames === 1 ? '1 Bild' : `${manifest.cape.frames} Bilder`} · ${manifest.cape.fps} Bilder/s`) : null,
     manifest.companion ? fact('Begleiter', `Platz ${manifest.companion.offset.join(' / ')} · Größe ${manifest.companion.scale}`) : null,
@@ -210,6 +280,7 @@ export function initTeamCosmetics({ teamCall, onChange }) {
           chip(SLOT_NAMES[entry.slot] ?? entry.slot),
           chip(`Version ${entry.version ?? '?'}`, 'accent'),
           entry.access === 'team' ? h('span', { class: 'chip team-only' }, icon('shield'), 'Nur Team') : null,
+          entry.access === 'unlock' ? h('span', { class: 'chip accent' }, icon('lock'), 'Belohnung') : null,
           entry.hidden ? chip('ausgeblendet', 'warning') : null,
         ),
         entry.description ? h('div', { class: 'row-sub', text: entry.description }) : null,
@@ -348,8 +419,8 @@ export function initTeamCosmetics({ teamCall, onChange }) {
     renderCheck();
     if (!state.data) await load().catch(() => {});
     // 1. Größe und Form
-    if (file.size > COSMETIC_LIMITS.envelopeBytes) {
-      chosen.problems.push(['fail', `Die Datei ist zu groß (${formatBytes(file.size)}; höchstens ${COSMETIC_LIMITS.envelopeBytes / 1024} KB).`]);
+    if (file.size > COSMETIC_MAX_ENVELOPE_BYTES) {
+      chosen.problems.push(['fail', `Die Datei ist zu groß (${formatBytes(file.size)}; höchstens ${COSMETIC_MAX_ENVELOPE_BYTES / 1024} KB).`]);
     } else {
       try {
         chosen.text = (await file.text()).replace(/^﻿/, '');
@@ -410,12 +481,18 @@ export function initTeamCosmetics({ teamCall, onChange }) {
     if (!chosen.envelope) return list;
     const data = state.data;
     if (data && !data.keyConfigured) list.push(['fail', 'Im Dienst ist kein Update-Schlüssel eingerichtet – Veröffentlichen geht erst danach.']);
-    list.push(['ok', `Umschlag { manifest, signature }, ${formatBytes(new TextEncoder().encode(chosen.text ?? '').length)} (höchstens ${COSMETIC_LIMITS.envelopeBytes / 1024} KB)`]);
+    // Grenze des Formats (Format 1: 192 KB, Format 2: 544 KB); solange das Format offen ist, die größte
+    const format = (chosen.manifest ?? chosen.raw)?.format;
+    const envelopeMax = format === 2 ? COSMETIC_LIMITS_2.envelopeBytes : format === 1 ? COSMETIC_LIMITS.envelopeBytes : COSMETIC_MAX_ENVELOPE_BYTES;
+    list.push(['ok', `Umschlag { manifest, signature }, ${formatBytes(new TextEncoder().encode(chosen.text ?? '').length)} (höchstens ${envelopeMax / 1024} KB)`]);
     if (chosen.signature === 'ok') list.push(['ok', 'Signatur gültig – mit dem Update-Schlüssel des Dienstes signiert (im Browser geprüft)']);
     else if (chosen.signature === 'fail') list.push(['fail', 'Die Signatur stimmt nicht: nicht mit dem Update-Schlüssel signiert oder nachträglich verändert.']);
     else if (chosen.signature === 'nokey') list.push(['fail', 'Ohne öffentlichen Update-Schlüssel des Dienstes lässt sich die Signatur nicht prüfen.']);
     else if (chosen.signature === 'error') list.push(['fail', `Die Signatur ließ sich nicht prüfen: ${chosen.signatureError}`]);
-    if (chosen.manifest) list.push(['ok', 'Manifest erfüllt alle Regeln von Format 1 (Slot, Textur, Modell, Grenzen)']);
+    if (chosen.manifest?.format === 2) {
+      list.push(['ok', 'Manifest erfüllt alle Regeln von Format 2 (Slot, Textur, Mesh, Knochen, Animationen, Grenzen)']);
+      list.push(['info', 'Format 2 (animiertes Mesh) zeigen Launcher und Spiel ab 0.13.8 – ältere lassen es einfach weg.']);
+    } else if (chosen.manifest) list.push(['ok', 'Manifest erfüllt alle Regeln von Format 1 (Slot, Textur, Modell, Grenzen)']);
     else if (chosen.manifestError) list.push(['fail', `Manifest: ${chosen.manifestError}.`]);
     const m = chosen.manifest ?? chosen.raw;
     if (m && typeof m.id === 'string') {
@@ -432,6 +509,7 @@ export function initTeamCosmetics({ teamCall, onChange }) {
       const name = FILE_RE.exec(chosen.fileName);
       if (!name || name[1] !== m.id || Number(name[2]) !== m.version) list.push(['warn', `Der Dateiname passt nicht zu ID und Version (erwartet ${m.id}-${m.version}.cosmetic.json). Geprüft wird der Inhalt.`]);
       if (m.access === 'team') list.push(['info', 'Wählbar nur für Team-Mitglieder (access: team). Sehen können es alle.']);
+      if (m.access === 'unlock') list.push(['info', 'Belohnung (access: unlock): wählbar nur für Spieler, die es freigeschaltet haben – zum Beispiel über Einladungen. Sehen können es alle. Freigeschaltet wird nur, was der Dienst als Belohnung kennt.']);
     }
     return list;
   }
@@ -483,7 +561,7 @@ export function initTeamCosmetics({ teamCall, onChange }) {
         h('p', {
           text: existing
             ? `Die neue Version ersetzt Version ${existing.version}. ${existing.wearers ? `${wearersText(existing.wearers)} sehen sie beim nächsten Laden des Katalogs.` : ''}`.trim()
-            : `„${m.name}“ steht danach im Katalog (${SLOT_TITLES[m.slot] ?? m.slot}) – im Spiel, im Launcher und auf der Webseite${m.access === 'team' ? ', wählbar nur für das Team' : ''}.`,
+            : `„${m.name}“ steht danach im Katalog (${SLOT_TITLES[m.slot] ?? m.slot}) – im Spiel, im Launcher und auf der Webseite${m.access === 'team' ? ', wählbar nur für das Team' : m.access === 'unlock' ? ', wählbar nur für Spieler, die es freigeschaltet haben' : ''}.`,
         }),
         h('p', { class: 'muted small', text: 'Gesendet wird der Umschlag genau so, wie er in der Datei steht. Der Dienst prüft Signatur und Regeln noch einmal.' }),
       ],

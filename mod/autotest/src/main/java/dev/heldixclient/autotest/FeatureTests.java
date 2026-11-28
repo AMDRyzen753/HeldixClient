@@ -155,6 +155,11 @@ final class FeatureTests {
 		// --- Wegpunkte -----------------------------------------------------------------------
 		module(t, "waypoints");
 		t.run(mc -> {
+			// Blick nach Süden (+z, waagerecht): die Wegpunkte liegen davor bzw. dahinter
+			mc.player.setYRot(0f);
+			mc.player.yRotO = 0f;
+			mc.player.setXRot(0f);
+			mc.player.xRotO = 0f;
 			Waypoints.current(mc).removeIf(w -> true);
 			Waypoints.Waypoint ahead = Waypoints.add(mc, "Vorne");
 			ahead.z += 14;
@@ -354,8 +359,8 @@ final class FeatureTests {
 			t.check("Freundschaftsanfrage kommt in Echtzeit an", t.compute(mc -> Social.incoming().stream().anyMatch(r -> r.uuid().equals(friendId))));
 			t.setScreen(() -> new HeldixMenuScreen(null, Shell.Page.FRIENDS));
 			t.waitTicks(8);
-			t.check("Freunde: Reiter Freunde, Anfragen, Privatsphäre",
-					t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabIds()).equals(List.of("FRIENDS", "MESSAGES", "REQUESTS", "PRIVACY")));
+			t.check("Freunde: Reiter Freunde, Party, Nachrichten, Anfragen, Privatsphäre",
+					t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).tabIds()).equals(List.of("FRIENDS", "PARTY", "MESSAGES", "REQUESTS", "PRIVACY")));
 			t.check("Navigation zeigt die offene Anfrage", "1".equals(t.compute(mc -> Shell.badge(Shell.Page.FRIENDS))));
 			t.screenshot("heldix-26a-freunde-hinweis");
 			AutoTest.openPage(t, "REQUESTS");

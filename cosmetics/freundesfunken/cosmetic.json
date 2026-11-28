@@ -1,0 +1,19 @@
+{
+  "format": 1,
+  "id": "freundesfunken",
+  "version": 1,
+  "slot": "aura",
+  "name": "Freundesfunken",
+  "description": "Ein türkiser und ein goldener Funke kreisen um dich – Belohnung für Einladungen",
+  "access": "unlock",
+  "particles": {
+    "frames": 4,
+    "rate": 5,
+    "lifetime": 30,
+    "size": 0.2,
+    "motion": "orbit",
+    "radius": 0.75,
+    "color": "#ffffff",
+    "fullbright": true
+  }
+}

@@ -1,0 +1,105 @@
+/* Vorschaukarte (Open Graph/Twitter) 1200×630 – nur für website/werkzeug/og-karten.cjs, wird nicht ausgeliefert. */
+html,
+body {
+  width: 1200px;
+  height: 630px;
+  margin: 0;
+  overflow: hidden;
+}
+body {
+  background: var(--bg);
+}
+.og {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: 560px 1fr;
+  align-items: center;
+  gap: 48px;
+  width: 1200px;
+  height: 630px;
+  padding: 64px 0 64px 72px;
+  overflow: hidden;
+}
+.og::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background: url("/assets/background.svg") center / cover no-repeat;
+  opacity: 0.35;
+}
+.og::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(55% 75% at 8% 12%, rgba(37, 99, 235, 0.38), transparent 70%),
+    radial-gradient(45% 70% at 95% 85%, rgba(139, 92, 246, 0.3), transparent 70%),
+    linear-gradient(180deg, rgba(7, 10, 18, 0.1), rgba(7, 10, 18, 0.65));
+}
+.og--ohne-bild {
+  grid-template-columns: 1fr;
+  padding-right: 72px;
+}
+.og__text {
+  display: grid;
+  gap: 22px;
+  align-content: center;
+}
+.og .brand {
+  font-size: 30px;
+  gap: 14px;
+}
+.og .brand img {
+  width: 48px;
+  height: 48px;
+}
+.og__eyebrow {
+  color: var(--accent-text);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.og__titel {
+  font-size: 64px;
+  font-weight: 700;
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+}
+.og--ohne-bild .og__titel {
+  font-size: 76px;
+  max-width: 900px;
+}
+.og__unter {
+  color: var(--text-2);
+  font-size: 26px;
+  line-height: 1.35;
+}
+.og__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.og__chips .chip {
+  min-height: 38px;
+  padding: 4px 16px;
+  font-size: 18px;
+}
+.og__bild {
+  margin: 0;
+  height: 470px;
+  border-radius: 28px 0 0 28px;
+  border: 1px solid var(--line-strong);
+  border-right: 0;
+  overflow: hidden;
+  box-shadow: var(--sh-3);
+}
+.og__bild img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: left top;
+}

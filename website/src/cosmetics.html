@@ -1,21 +1,35 @@
-<!--seite {"titel": "Cosmetics", "beschreibung": "Hüte, Flügel, Partikel-Auren, Begleiter und animierte Capes für HeldixClient in 3D ansehen und anprobieren. Alle HeldixClient-Spieler sehen deine Cosmetics im Spiel – ohne etwas zu installieren.", "bild": "/images/capes.png"}-->
+<!--seite {"titel": "Cosmetics", "beschreibung": "Hüte, Flügel, Auren, Begleiter und animierte Capes für HeldixClient in 3D ansehen und anprobieren – mit Animationen wie im Spiel. Alle HeldixClient-Spieler sehen deine Cosmetics, ohne etwas zu installieren."}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
+<link rel="stylesheet" href="/cosmetics.css">
 <script src="/vendor/skinview3d.bundle.js" defer></script>
 <script type="module" src="/cosmetics.js"></script>
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="cosmetics">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap capes-page cosmetics-page" data-katalog="laden">
-  <div class="page-hero">
-    <span class="eyebrow">Cosmetics</span>
-    <h1>Hüte, Flügel, Auren – <span class="gradient">in 3D anprobieren</span></h1>
-    <p class="lead">Stell dir ein Outfit zusammen und dreh die Figur mit der Maus oder dem Finger. Andere HeldixClient-Spieler sehen deine Cosmetics im Spiel, ohne etwas zu installieren.</p>
-  </div>
+<main id="inhalt" class="capes-page cosmetics-page" data-katalog="laden">
+  <section class="page-hero" aria-labelledby="seite-titel">
+    <div class="container page-hero__grid">
+      <div class="page-hero__inner">
+        <span class="eyebrow">{{icon:cape}}Cosmetics</span>
+        <h1 class="h1" id="seite-titel">Hüte, Flügel, Auren – <span class="text-gradient">in 3D anprobieren</span></h1>
+        <p class="lead">Stell dir ein Outfit zusammen und dreh die Figur mit der Maus oder dem Finger. Flügel schlagen, Begleiter folgen dir, Auren leuchten – andere HeldixClient-Spieler sehen deine Cosmetics im Spiel, ohne etwas zu installieren.</p>
+        <div class="page-hero__actions">
+          <a class="btn btn--primary" href="#cosmetic-slots">{{icon:eye}}Jetzt anprobieren</a>
+          <a class="btn btn--secondary" href="/konto#reiter=profil">{{icon:user}}Meine Cosmetics</a>
+        </div>
+      </div>
+      <figure class="page-hero__media frame">
+        <img src="/bilder/cosmetics-animiert.webp" width="640" height="360" alt="Spieler mit animierten Cosmetics im Spiel: Flügel, Auren am Boden und Begleiter.">
+      </figure>
+    </div>
+  </section>
+
+  <div class="container cosmetics-body">
 
   <noscript><p class="notice">Die 3D-Ansicht braucht JavaScript. Ohne siehst du hier die {{CAPES_ANZAHL}} eingebauten Capes; Cosmetics wählst du im Heldix-Menü, im Launcher oder im Konto.</p></noscript>
 
@@ -35,10 +49,11 @@
       <div class="viewer-fallback" id="viewer-ersatz" hidden>
         <p>Die 3D-Ansicht braucht WebGL. Dein Browser unterstützt es gerade nicht – du siehst das gewählte Cosmetic als Bild.</p>
       </div>
+      <div class="anim-chips viewer-anims" id="cosmetic-animationen" role="group" aria-label="Animation" hidden></div>
       <div class="viewer-controls">
-        <button class="button tiny ghost" type="button" id="cosmetic-elytra" aria-pressed="false" hidden>{{icon:sparkles}}Elytra</button>
-        <button class="button tiny ghost" type="button" id="cosmetic-animation" aria-pressed="true">{{icon:pause}}<span>Animation</span></button>
-        <button class="button tiny ghost" type="button" id="cosmetic-mein-skin" hidden>{{icon:user}}<span>Mit meinem Skin anprobieren</span></button>
+        <button class="btn btn--secondary btn--sm" type="button" id="cosmetic-elytra" aria-pressed="false" hidden>{{icon:sparkles}}Elytra</button>
+        <button class="btn btn--secondary btn--sm" type="button" id="cosmetic-animation" aria-pressed="true">{{icon:pause}}<span>Animation</span></button>
+        <button class="btn btn--secondary btn--sm" type="button" id="cosmetic-mein-skin" hidden>{{icon:user}}<span>Mit meinem Skin anprobieren</span></button>
       </div>
     </div>
 
@@ -49,7 +64,8 @@
         <p class="muted" id="cosmetic-beschreibung"></p>
         <div class="chips-row cosmetic-chips" id="cosmetic-chips"></div>
         <p class="cape-meta" id="cosmetic-meta"></p>
-        <button class="button tiny ghost cosmetic-remove" type="button" id="cosmetic-ablegen" hidden>{{icon:close}}<span>Ablegen</span></button>
+        <p class="cosmetic-reward-hint" id="cosmetic-belohnung" hidden></p>
+        <button class="btn btn--secondary btn--sm cosmetic-remove" type="button" id="cosmetic-ablegen" hidden>{{icon:close}}<span>Ablegen</span></button>
       </div>
       <p class="notice cosmetic-status" id="cosmetic-status" role="status" hidden></p>
       <div class="cape-picker cosmetic-picker" role="radiogroup" aria-label="Cape wählen" id="cosmetic-auswahl">
@@ -74,10 +90,10 @@
   </details>
   <p class="hint center">Jedes Cosmetic aus dem Katalog ist vom HeldixClient-Team signiert. Die Seite prüft die Signatur in deinem Browser, bevor sie es zeigt – Cosmetics sind reine Daten (Modell und Bild), kein Programmcode.</p>
   <p class="hint center">3D-Ansicht mit skinview3d und three.js (MIT-Lizenz, <a href="/vendor/skinview3d.LICENSE.txt">skinview3d</a>, <a href="/vendor/three.LICENSE.txt">three.js</a>). Der Standard-Skin ist eine eigene Zeichnung.</p>
+  </div>
 </main>
 
 {{ICONS_ALLE_HTML}}
-<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 {{include:footer.html}}
 </body>
 </html>

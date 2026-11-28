@@ -21,6 +21,8 @@ public final class BadgeDisplay {
 	/** Zeile für die Fußzeile der Tab-Liste (null = keine); wird nur im Client-Tick neu berechnet */
 	private static Component footerLine;
 	private static int footerCount;
+	/** GUI-Skalierung, mit der footerLine gebaut wurde (Schrift des Symbols) */
+	private static int footerScale;
 	private static int tickCounter;
 	private static Component lastFooterIn;
 	private static Component lastFooterLine;
@@ -36,8 +38,10 @@ public final class BadgeDisplay {
 	static void tick(Minecraft mc) {
 		if (++tickCounter % 10 != 0) return;
 		int count = count(mc);
-		if (count == footerCount && (count == 0) == (footerLine == null)) return;
+		int scale = dev.heldixclient.ui.Ui.scale();
+		if (count == footerCount && (count == 0) == (footerLine == null) && scale == footerScale) return;
 		footerCount = count;
+		footerScale = scale;
 		footerLine = count > 0 ? Component.empty().append(Badge.symbol())
 				.append(Component.literal(" HeldixClient: " + count + " Spieler hier").withStyle(ChatFormatting.GRAY)) : null;
 	}
@@ -97,13 +101,30 @@ public final class BadgeDisplay {
 	 */
 	public static Component nameTag(Component name, Entity entity) {
 		if (name == null || !(entity instanceof Player player)) return name;
-		if (Minecraft.getInstance().gui.hud.isHidden()) return name;
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.gui.hud.isHidden()) return name;
 		Component result = name;
 		if (HeldixConfig.get().badgeNameTags) {
 			Badge.Role role = Social.roleOf(player.getUUID());
-			if (role != null) result = Badge.prefix(name, role);
+			if (role != null) result = Badge.prefix(name, role, nameTagScale(mc, entity));
 		}
 		// Symbole der Addons hinter dem Namen (z. B. „spricht“ im Voice Chat)
 		return dev.heldixclient.player.PlayerMarkerStore.decorate(result, player.getUUID());
+	}
+
+	/** Höhe des Namensschilds je Textpixel in Blöcken (wie bei Minecraft) */
+	private static final double NAME_TAG_SCALE = 0.025;
+
+	/**
+	 * Schrift-Stufe fürs Namensschild: so viele Bildpunkte je Textpixel, wie das Schild gerade auf dem Bildschirm hat
+	 * (Abstand zur Kamera, Sichtfeld mit Zoom, Fensterhöhe). Minecraft zeichnet Schrift ohne Mipmaps – mit einer
+	 * passenden Auflösung flimmert das Symbol aus der Entfernung nicht und ist aus der Nähe scharf.
+	 */
+	public static int nameTagScale(Minecraft mc, Entity entity) {
+		var camera = mc.gameRenderer.mainCamera();
+		double distance = camera.position().distanceTo(entity.position().add(0, entity.getBbHeight() + 0.5, 0));
+		double halfFov = Math.toRadians(Math.clamp(camera.getFov(), 1f, 170f) / 2);
+		double pixelsPerBlock = mc.getWindow().getHeight() / (2 * Math.max(0.5, distance) * Math.tan(halfFov));
+		return (int) Math.clamp(Math.round(pixelsPerBlock * NAME_TAG_SCALE), 1, Badge.MAX_SCALE);
 	}
 }

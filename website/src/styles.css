@@ -2280,7 +2280,8 @@ a.status:hover {
   outline-offset: 3px;
 }
 
-/* Cape-Auswahl: Ausschnitte aus images/capes.png (9 Karten à 120 × 183 px, Abstand 142 px) */
+/* Cape-Auswahl: Ausschnitte aus images/capes.png (1872 × 252 px, 13 Karten à 120 × 183 px ab x = 24, Abstand 142 px;
+   background-position-x = (24 + 142 · Spalte) / (1872 − 120), background-size = 1872 / 120) */
 .cape-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(98px, 1fr));
@@ -2330,36 +2331,48 @@ a.status:hover {
   border-radius: 7px;
   background-image: url("images/capes.png");
   background-repeat: no-repeat;
-  background-size: 1086.667% auto;
+  background-size: 1560% auto;
   background-position-y: 28.986%;
   color: var(--faint);
 }
 .cape-art[data-cape="heldix"] {
-  background-position-x: 2.027%;
+  background-position-x: 1.37%;
 }
 .cape-art[data-cape="mitternacht"] {
-  background-position-x: 14.02%;
+  background-position-x: 9.475%;
 }
 .cape-art[data-cape="aurora"] {
-  background-position-x: 26.014%;
+  background-position-x: 17.58%;
 }
 .cape-art[data-cape="glut"] {
-  background-position-x: 38.007%;
+  background-position-x: 25.685%;
 }
 .cape-art[data-cape="kristall"] {
-  background-position-x: 50%;
+  background-position-x: 33.79%;
 }
 .cape-art[data-cape="neon"] {
-  background-position-x: 61.993%;
+  background-position-x: 41.895%;
 }
 .cape-art[data-cape="sakura"] {
-  background-position-x: 73.986%;
+  background-position-x: 50%;
 }
 .cape-art[data-cape="gewitter"] {
-  background-position-x: 85.98%;
+  background-position-x: 58.105%;
 }
 .cape-art[data-cape="galaxie"] {
-  background-position-x: 97.973%;
+  background-position-x: 66.21%;
+}
+.cape-art[data-cape="matrix"] {
+  background-position-x: 74.315%;
+}
+.cape-art[data-cape="matrix_rot"] {
+  background-position-x: 82.42%;
+}
+.cape-art[data-cape="matrix_tuerkis"] {
+  background-position-x: 90.525%;
+}
+.cape-art[data-cape="sakura_orange"] {
+  background-position-x: 98.63%;
 }
 .cape-art.none,
 .cape-art.unknown {
@@ -4649,6 +4662,54 @@ p.hint.center {
   border-color: var(--accent);
   background: rgba(59, 130, 246, 0.24);
 }
+/* Format 2: Auswahl der Animation (Namen aus dem Manifest) – /cosmetics, Konto, Team */
+.anim-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.anim-chips[hidden] {
+  display: none;
+}
+.anim-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(7, 10, 18, 0.6);
+  color: var(--muted);
+  font: 700 12px/1 var(--font);
+  cursor: pointer;
+}
+.anim-chip:hover {
+  color: var(--text);
+  border-color: var(--line-accent);
+}
+.anim-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.anim-chip[aria-pressed="true"] {
+  color: var(--accent-text);
+  background: rgba(59, 130, 246, 0.24);
+  border-color: var(--accent);
+}
+.anim-once {
+  font-weight: 600;
+  font-size: 11px;
+  opacity: 0.75;
+}
+.viewer-anims {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 60px;
+  z-index: 1;
+}
 .viewer-fallback {
   position: absolute;
   inset: 0;
@@ -4864,6 +4925,36 @@ p.hint.center {
 .cosmetic-pick-badge .icon {
   width: 13px;
   height: 13px;
+}
+/* Belohnung für Einladungen (access: unlock) */
+.cosmetic-pick-badge.reward {
+  background: rgba(139, 92, 246, 0.2);
+  color: #c4b5fd;
+}
+.cosmetic-reward-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  color: var(--muted);
+  font-size: 14px;
+}
+.cosmetic-reward-hint[hidden] {
+  display: none;
+}
+.cosmetic-reward-hint .icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: #c4b5fd;
+}
+.cosmetic-reward-hint a {
+  font-weight: 700;
 }
 .cosmetic-pick:focus-visible {
   outline: 2px solid var(--accent-text);

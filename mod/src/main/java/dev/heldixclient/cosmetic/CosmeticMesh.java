@@ -12,6 +12,11 @@ import java.util.List;
  * <ul>
  *   <li>Modellraum in Pixeln, +Y oben, +Z vorn, +X = linke Seite des Trägers. Pivots und Würfel sind absolut.</li>
  *   <li>Bone-Matrix = Eltern · T(pivot + bob) · Rz · Ry · Rx · T(−pivot), Grad, Rechte-Hand-Regel.</li>
+ *   <li>model.scale (fehlt: 1) skaliert das ganze Modell um den Anker: Ecke = S(scale) · Bone-Matrix · v. Deshalb
+ *       beginnt hier jede Kette (Bone ohne Eltern) mit S(scale) statt der Einheitsmatrix; Lage, Ruhelage (Vorschaubilder)
+ *       und {@link #bounds} enthalten die Größe also schon. Beim Begleiter kommt companion.scale noch dazu.</li>
+ *   <li>UV in Texeln von model.textureSize, hier durch textureSize geteilt (nicht durch die Bildgröße: das PNG darf die
+ *       2- oder 4-fache Auflösung haben).</li>
  *   <li>Box-UV wie Minecraft ({@code cosmeticCubeFaces}); mirror spiegelt den Würfel an seiner Mitte in x; Flächen mit
  *       Fläche 0 fallen weg, Würfel mit einer Kante 0 sind Ebenen mit Vorder- und Rückseite.</li>
  *   <li>Animationen additiv ({@code cosmeticPose}): flap/sway Winkel += A·sin(2π(speed·t + phase)), spin Winkel +=
@@ -25,6 +30,8 @@ public final class CosmeticMesh {
 	public static final int STRIDE = 8;
 
 	final int boneCount;
+	/** model.scale: Größe des ganzen Modells um den Anker */
+	final float scale;
 	final int[] parent;
 	final float[] pivot;
 	final float[] rest;
@@ -49,6 +56,7 @@ public final class CosmeticMesh {
 	CosmeticMesh(CosmeticFormat.Model model, List<CosmeticFormat.Animation> animations) {
 		List<CosmeticFormat.Bone> bones = model.bones();
 		boneCount = bones.size();
+		scale = (float) model.scale();
 		parent = new int[boneCount];
 		pivot = new float[boneCount * 3];
 		rest = new float[boneCount * 3];
@@ -95,6 +103,11 @@ public final class CosmeticMesh {
 
 	public int boneCount() {
 		return boneCount;
+	}
+
+	/** model.scale (1 = wie gebaut) */
+	public float scale() {
+		return scale;
 	}
 
 	public int vertexCount() {
@@ -222,14 +235,17 @@ public final class CosmeticMesh {
 		matrices(scratch, scratch, out);
 	}
 
-	/** rotation: 3 Werte je Bone ab 0; offset: 3 Werte je Bone ab boneCount · 3 (dasselbe Feld wie rotation erlaubt) */
+	/**
+	 * rotation: 3 Werte je Bone ab 0; offset: 3 Werte je Bone ab boneCount · 3 (dasselbe Feld wie rotation erlaubt).
+	 * Ketten beginnen mit S(model.scale), so gilt für jeden Bone: Ergebnis = S · Bone-Matrix.
+	 */
 	private void matrices(float[] rotation, float[] offset, Matrix4f[] out) {
 		int n = boneCount * 3;
 		int offsetBase = offset == rotation ? n : 0;
 		for (int b = 0; b < boneCount; b++) {
 			Matrix4f m = out[b];
 			if (parent[b] >= 0) m.set(out[parent[b]]);
-			else m.identity();
+			else m.scaling(scale);
 			float px = pivot[b * 3];
 			float py = pivot[b * 3 + 1];
 			float pz = pivot[b * 3 + 2];

@@ -1,264 +1,490 @@
-<!--seite {"titelVoll": "HeldixClient – Launcher und Client für Minecraft", "beschreibung": "HeldixClient: eigener Launcher, eigener Mod-Loader, Module wie HUD-Editor, Freelook und Wegpunkte, animierte Capes und Freunde. Kostenlos für Windows und Mac."}-->
+<!--seite {"titelVoll":"HeldixClient – Minecraft zusammen spielen","beschreibung":"HeldixClient ist ein kostenloser Launcher und Client für Minecraft: Freunde einladen, Party, Welt teilen ohne Server, Voice Chat – auch im Browser –, animierte Capes und Cosmetics, eigenes HUD und Addons. Für Windows und Mac.","software":true}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/start.css">
 <script type="module" src="/start.js"></script>
 </head>
-<body class="home">
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="start">
 {{include:nav.html}}
 
 <main id="inhalt">
-  <div class="wrap hero">
-    <span class="pill reveal"><span class="dot"></span>Version {{VERSION}} · Windows und Mac · kostenlos</span>
-    <h1 class="reveal">Minecraft, so wie du es <span class="gradient">spielen willst.</span></h1>
-    <p class="lead reveal">Ein eigener Launcher, ein eigener Mod-Loader und {{MODULE_ANZAHL}} Module im Spiel – vom HUD-Editor über Freelook bis zu animierten Capes, die auch deine Freunde sehen.</p>
-    <div class="hero-actions reveal">
-      <div class="hero-cta">
-        <a class="button big" href="/download" data-download-cta>{{icon:download}}<span class="cta-label">Kostenlos herunterladen</span></a>
-        <span class="button-sub" data-download-sub>Windows 10/11 und macOS 11 oder neuer</span>
+  <!-- ===== Hero ===== -->
+  <section class="hero" aria-labelledby="hero-titel">
+    <div class="container container--wide hero__grid">
+      <div class="hero__text">
+        <a class="chip chip--lg chip--accent hero__news" href="/neuigkeiten#versionen">{{icon:sparkles}}Neu in {{VERSION}}: Party, Welt teilen und Freunde 2.0{{icon:chevron-right}}</a>
+        <h1 class="display" id="hero-titel">Minecraft macht mehr Spaß <span class="text-gradient">zusammen.</span></h1>
+        <p class="lead hero__lead">Lade Freunde mit einem Link ein, öffnet deine Welt ohne eigenen Server und redet miteinander – auch mit Freunden, die nur einen Browser haben. Dazu animierte Capes, dein eigenes HUD und Addons. Kostenlos für Windows und Mac.</p>
+        <div class="hero__actions">
+          <div class="download-cta">
+            <a class="btn btn--primary btn--lg" href="/download" data-download id="hero-download">{{icon:download}}<span data-download-label>{{t:download.knopf}}</span></a>
+            <span class="download-cta__sub"><span data-download-sub>{{t:download.unter}}</span> · <a href="/download">{{t:download.alle}}</a></span>
+          </div>
+          <a class="btn btn--social btn--lg" href="/konto#reiter=einladen">{{icon:user-plus}}{{t:nav.einladen}}</a>
+        </div>
+        <ul class="hero__facts" aria-label="Auf einen Blick">
+          <li>{{icon:check}}Kostenlos, ohne Abo</li>
+          <li>{{icon:check}}Keine Werbung, kein Tracking</li>
+          <li>{{icon:check}}Updates und Addons signiert</li>
+        </ul>
       </div>
-      <a class="button big ghost" href="#funktionen">Funktionen ansehen</a>
-    </div>
-    <div class="shot reveal">
-      <div class="frame" data-tilt><img src="/images/launcher-start.png" alt="Startseite des HeldixClient-Launchers mit Spielfigur, Spielen-Knopf und Instanzen" width="1180" height="740"></div>
-    </div>
-    <div class="stats">
-      <div class="stat glass reveal"><strong>{{MODULE_ANZAHL}}</strong><span>Module im Spiel</span></div>
-      <div class="stat glass reveal"><strong>{{CAPES_ANZAHL}}</strong><span>animierte Capes</span></div>
-      <div class="stat glass reveal"><strong>Vulkan</strong><span>und OpenGL</span></div>
-      {{#github}}<div class="stat glass reveal"><strong>MIT</strong><span>quelloffen</span></div>{{/github}}{{^github}}<div class="stat glass reveal"><strong>0</strong><span>Werbung und Tracking</span></div>{{/github}}
-    </div>
-  </div>
 
-  <section id="neuigkeiten" aria-labelledby="neuigkeiten-titel" hidden>
-    <div class="wrap">
-      <div class="section-head">
-        <span class="eyebrow">Neuigkeiten</span>
-        <h2 id="neuigkeiten-titel">Was es Neues gibt</h2>
+      <div class="hero__stage">
+        <figure class="stage__shot frame">
+          <img src="/bilder/welt-zusammen.webp" width="580" height="362" alt="Viele HeldixClient-Spieler stehen zusammen auf einer Wiese, mit Flügeln, Kronen, Partyhüten und kleinen Drachen als Begleiter.">
+        </figure>
+        <div class="float float--invite card card--glass card--compact" aria-hidden="true">
+          <div class="person">
+            <span class="avatar">{{kopf:Funkenflug}}</span>
+            <span class="person__text"><span class="person__name">Funkenflug lädt dich ein</span><span class="person__meta">„Komm in meine Welt!“</span></span>
+          </div>
+          <div class="float__row">{{icon:world}}<span>k7m2xq.welt.heldixclient.com</span></div>
+          <div class="float__row float__row--reward">{{icon:sparkles}}<span>Willkommens-Belohnung: Freundesfunken</span></div>
+          <span class="btn btn--primary btn--sm">{{icon:connect}}Annehmen und beitreten</span>
+        </div>
+        <div class="float float--voice card card--glass card--compact" aria-hidden="true">
+          <div class="card__head">
+            <span class="icon-tile icon-tile--voice">{{icon:headphones}}</span>
+            <span class="person__text"><span class="person__name">Voice-Gruppe</span><span class="person__meta person__meta--voice">3 im Gespräch</span></span>
+          </div>
+          <ul class="voice-list">
+            <li><span class="avatar avatar--sm">{{kopf:Kristallherz}}<span class="avatar__status avatar__status--voice"></span></span><span>Kristallherz</span><span class="chip">Browser</span><span class="speaking"><i></i><i></i><i></i><i></i></span></li>
+            <li><span class="avatar avatar--sm">{{kopf:Moosbart}}<span class="avatar__status avatar__status--online"></span></span><span>Moosbart</span></li>
+            <li><span class="avatar avatar--sm">{{kopf:Funkenflug}}<span class="avatar__status avatar__status--online"></span></span><span>Funkenflug</span></li>
+          </ul>
+        </div>
+        <div class="float float--friends card card--glass card--compact" aria-hidden="true">
+          <span class="avatar-stack">{{kopf:Glimmerfee}}{{kopf:Kieselkatze}}{{kopf:Nebelwanderer}}</span>
+          <span><strong>Party · 4 von 8</strong></span>
+        </div>
       </div>
-      <div class="news-grid" id="neuigkeiten-liste"></div>
-      <p class="section-more"><a class="button ghost small" href="/neuigkeiten">Alle Neuigkeiten und Versionen{{icon:chevron-right}}</a></p>
+    </div>
+
+    <!-- Live-Zahlen: erscheinen nur, wenn der Dienst sie nennt (ab 50 Spielern online) -->
+    <div class="container container--wide">
+      <div class="live-bar" data-live-bar aria-label="Gerade beim Heldix-Dienst" hidden>
+        <div class="live" data-live="online" data-state="laden">
+          <span class="live__value"><span class="dot dot--online"></span><span class="live__num">–</span></span>
+          <span class="live__label">Spieler gerade online</span>
+        </div>
+        <div class="live" data-live="voice" data-state="laden">
+          <span class="live__value"><span class="dot dot--voice"></span><span class="live__num">–</span></span>
+          <span class="live__label">gerade im Voice</span>
+        </div>
+        <div class="live" data-live="welten" data-state="laden">
+          <span class="live__value">{{icon:world}}<span class="live__num">–</span></span>
+          <span class="live__label">offene Welten</span>
+        </div>
+        <p class="live-bar__note">Live vom Heldix-Dienst · nur Summen, ohne Namen</p>
+      </div>
     </div>
   </section>
 
-  <section id="funktionen" aria-labelledby="funktionen-titel">
-    <div class="wrap">
+  <!-- ===== Zusammen spielen ===== -->
+  <section class="section" id="zusammen" aria-labelledby="zusammen-titel">
+    <div class="container">
       <div class="section-head reveal">
-        <span class="eyebrow">Funktionen</span>
-        <h2 id="funktionen-titel">Alles, was ein Client braucht – und ein bisschen mehr</h2>
-        <p>Launcher, Loader und Client kommen aus einem Guss: gleiche Schrift, gleiche Icons, ein Design.</p>
+        <span class="eyebrow">{{icon:friends}}Zusammen spielen</span>
+        <h2 class="h2" id="zusammen-titel">Alles, damit deine Freunde dabei sind</h2>
+        <p class="lead">Einladen, beitreten, miteinander reden, gemeinsam weiterziehen – im Launcher, im Spiel und im Browser.</p>
+        <p class="section-head__actions"><a class="link-arrow" href="/zusammen">Alles über „Zusammen spielen“{{icon:chevron-right}}</a></p>
       </div>
 
-      <div class="story">
-        <div class="story-text reveal">
-          <span class="badge">{{icon:loader-heldix}}</span>
-          <span class="eyebrow">Launcher</span>
-          <h2>Ein Launcher für jede Version</h2>
-          <p>Instanzen mit eigenen Welten, Mods und Einstellungen – mit Heldix Loader, Fabric oder ganz ohne Mods.</p>
-          <ul class="story-list">
-            <li>{{icon:check}}<span>Mods und Shaderpacks von Modrinth mit einem Klick, dazu ein fertiges Leistungs-Paket</span></li>
-            <li>{{icon:check}}<span>Java und Spieldateien lädt der Launcher selbst</span></li>
-            <li>{{icon:check}}<span>Unter Windows aktualisiert sich der Launcher von allein</span></li>
-          </ul>
-          <a class="story-link" href="/hilfe/instanzen-und-loader">Mehr über Instanzen{{icon:chevron-right}}</a>
-        </div>
-        <div class="shot reveal"><div class="frame" data-tilt><img src="/images/launcher-instanzen.png" alt="Instanzen im HeldixClient-Launcher" loading="lazy" width="1180" height="740"></div></div>
-      </div>
+      <div class="bento">
+        <article class="card card--reward bento__invite reveal">
+          <div class="bento__invite-text">
+            <span class="eyebrow eyebrow--reward">{{icon:gift}}Freunde einladen</span>
+            <h3 class="h3">Freunde einladen – und Belohnungen holen</h3>
+            <p class="card__text">Teile deinen Link aus dem Launcher, dem Spiel oder deinem Konto. Wer neu dazukommt, bekommt sofort den Freundesfunken, und ihr seid gleich befreundet.</p>
+            <div class="card__foot">
+              <a class="btn btn--social" href="/konto#reiter=einladen">{{icon:link}}Meinen Link holen</a>
+              <a class="link-arrow" href="/hilfe/einladungen">So funktioniert's{{icon:chevron-right}}</a>
+            </div>
+          </div>
+          <ol class="rewards" aria-label="Belohnungen fürs Einladen">
+            <li class="reward">
+              <img class="reward__img reward__img--funken" src="/bilder/freundesfunken.webp" width="130" height="130" alt="" loading="lazy">
+              <div class="reward__text">
+                <strong>Freundesfunken</strong>
+                <span>Aura · ab 1 bestätigtem Freund – für Neue sofort</span>
+              </div>
+              <span class="chip chip--reward">ab 1</span>
+            </li>
+            <li class="reward">
+              <img class="reward__img" src="/bilder/freundesband.webp" width="200" height="320" alt="" loading="lazy">
+              <div class="reward__text">
+                <strong>Cape Freundesband</strong>
+                <span>Animiert · ab 3 bestätigten Freunden</span>
+              </div>
+              <span class="chip chip--reward">ab 3</span>
+            </li>
+            <li class="rewards__note">Bestätigt ist ein Freund, sobald er insgesamt 30 Minuten mit HeldixClient gespielt hat.</li>
+          </ol>
+        </article>
 
-      <div class="story flip">
-        <div class="story-text reveal">
-          <span class="badge">{{icon:modules}}</span>
-          <span class="eyebrow">Client und Menü</span>
-          <h2>Ein Menü für alles im Spiel</h2>
-          <p>Die rechte Umschalttaste öffnet das Heldix-Menü: Module als Kacheln, Einstellungen, Cape und Freunde an einem Ort.</p>
-          <ul class="story-list">
-            <li>{{icon:check}}<span>HUD-Editor: verschieben, vergrößern, an Kanten einrasten, Rückgängig mit <kbd>Strg</kbd>+<kbd>Z</kbd></span></li>
-            <li>{{icon:check}}<span>Freelook, Zoom, Wegpunkte, Fadenkreuz, Chat-Extras und mehr</span></li>
-            <li>{{icon:check}}<span>Eigenes Hauptmenü mit „Weiterspielen“</span></li>
-          </ul>
-          <a class="story-link" href="/module">Alle {{MODULE_ANZAHL}} Module ansehen{{icon:chevron-right}}</a>
-        </div>
-        <div class="shot reveal"><div class="frame" data-tilt><img src="/images/spiel-heldix-menue.png" alt="Heldix-Menü mit Modul-Kacheln" loading="lazy" width="1280" height="720"></div></div>
-      </div>
+        <article class="card card--voice bento__voice reveal">
+          <div class="card__media"><img src="/bilder/voice-browser.webp" width="880" height="517" alt="Voice im Browser: ein Gast im Gespräch mit einem Spieler, mit Mikrofon, Sprachaktivierung und Lautstärke je Person." loading="lazy"></div>
+          <span class="eyebrow eyebrow--voice">{{icon:mic}}Voice Chat</span>
+          <h3 class="h3">Reden wie am selben Tisch – auch im Browser</h3>
+          <p class="card__text">Das Voice-Chat-Addon lässt dich Spieler in deiner Nähe hören, mit Richtung und Abstand – auf jedem Server, ohne Plugin. In einer Gruppe redet ihr über den ganzen Server, in einer Party und einer geteilten Welt ganz von selbst. Freunde ohne HeldixClient kommen per Gast-Link im Browser dazu.</p>
+          <div class="cluster"><span class="chip">Push-to-Talk</span><span class="chip">Gruppen</span><span class="chip chip--voice">Bis zu 4 Gäste im Browser</span></div>
+        </article>
 
-      <div class="story">
-        <div class="story-text reveal">
-          <span class="badge">{{icon:friends}}</span>
-          <span class="eyebrow">Freunde</span>
-          <h2>Zusammen spielen, auch im Browser</h2>
-          <p>Freundesliste mit Online-Status, Nachrichten im Spiel und „Beitreten“: Mit einem Klick bist du auf dem Server deines Freundes.</p>
-          <ul class="story-list">
-            <li>{{icon:check}}<span>Das Heldix-Symbol in der Tab-Liste zeigt, wer HeldixClient nutzt</span></li>
-            <li>{{icon:check}}<span>Blockieren und Melden direkt im Chat</span></li>
-            <li>{{icon:check}}<span>Dein <a href="/konto">Konto im Browser</a>: Freunde, Nachrichten, Support – ohne Passwort</span></li>
-          </ul>
-          <a class="story-link" href="/hilfe/freunde">So funktionieren Freunde{{icon:chevron-right}}</a>
-        </div>
-        <div class="shot reveal"><div class="frame" data-tilt><img src="/images/spiel-mehrspieler.png" alt="Mehrspieler-Seite mit Serverliste im Heldix-Design" loading="lazy" width="1280" height="720"></div></div>
-      </div>
+        <article class="card bento__third reveal">
+          <div class="card__media card__media--rechts"><img src="/bilder/chat-spiel.webp" width="854" height="480" alt="Chat mit einer Freundin im Heldix-Menü: Antwort auf eine Nachricht, „schreibt …“ und oben der Knopf „Beitreten“." loading="lazy"></div>
+          <span class="eyebrow">{{icon:chat}}Freunde</span>
+          <h3 class="h3">Freunde, Nachrichten, Beitreten</h3>
+          <p class="card__text">Freundesliste mit Status und Favoriten, Nachrichten mit Antworten und Reaktionen – im Spiel, im Launcher und im Browser. Spielt ein Freund auf einem öffentlichen Server oder in einer offenen Welt, bringt dich „Beitreten“ direkt hin.</p>
+        </article>
 
-      <div class="story flip">
-        <div class="story-text reveal">
-          <span class="badge">{{icon:cape}}</span>
-          <span class="eyebrow">Capes und Cosmetics</span>
-          <h2>{{CAPES_ANZAHL}} animierte Capes – und mehr</h2>
-          <p>Wehender Stoff, leuchtende Details, hohe Auflösung. Dazu Hüte, Flügel, Partikel-Auren und Begleiter aus dem Cosmetics-Katalog – andere HeldixClient-Spieler sehen, was du trägst.</p>
-          <ul class="story-list">
-            <li>{{icon:check}}<span>Ohne Installation: Cosmetics sind vom Team signierte Daten, kein Programmcode</span></li>
-            <li>{{icon:check}}<span>Eigene Cape-Bilder bleiben auf deinem PC</span></li>
-          </ul>
-          <a class="story-link" href="/cosmetics">Cosmetics in 3D anprobieren{{icon:chevron-right}}</a>
-        </div>
-        <div class="shot reveal"><div class="frame" data-tilt><img src="/images/capes.png" alt="Die animierten Heldix-Capes nebeneinander" loading="lazy" width="1304" height="252"></div></div>
-      </div>
+        <article class="card bento__third reveal">
+          <div class="card__media"><img src="/bilder/einladung-dialog.webp" width="520" height="390" alt="Launcher-Dialog: Wolkenlaeufer lädt dich ein, mit Server, Willkommens-Belohnung und dem Knopf „Annehmen und beitreten“." loading="lazy"></div>
+          <span class="eyebrow">{{icon:connect}}Beitreten-Links</span>
+          <h3 class="h3">„Komm auf meinen Server“</h3>
+          <p class="card__text">Ein Link mit Serveradresse: Wer ihn öffnet, startet HeldixClient und landet direkt auf dem Server. Im Discord-Status steht dazu ein „Mitspielen“-Knopf – auch für offene Welten.</p>
+        </article>
 
-      <div class="story">
-        <div class="story-text reveal">
-          <span class="badge">{{icon:performance}}</span>
-          <span class="eyebrow">Leistung und Shader</span>
-          <h2>Schnell, auch wenn es schön aussieht</h2>
-          <p>Vulkan als Standard unter Windows, FPS-Boost per Schalter und der Heldix-Shader mit Bloom, Tiefenunschärfe und Umgebungsverdeckung.</p>
-          <ul class="story-list">
-            <li>{{icon:check}}<span>In unseren Messungen rund 40 % mehr FPS mit Vulkan</span></li>
-            <li>{{icon:check}}<span>Farbstile und Stärke einstellbar</span></li>
-          </ul>
-          <a class="story-link" href="/hilfe/mehr-fps">Mehr FPS herausholen{{icon:chevron-right}}</a>
-        </div>
-        <div class="shot reveal"><div class="frame" data-tilt><img src="/images/spiel-shader.png" alt="Shader-Einstellungen im Heldix-Menü" loading="lazy" width="1280" height="720"></div></div>
+        <article class="card bento__third reveal">
+          <div class="party-demo" aria-hidden="true">
+            <div class="party-demo__head"><span class="icon-tile icon-tile--voice">{{icon:party}}</span><strong>Party · 4 von 8</strong></div>
+            <ul class="party-demo__list">
+              <li><span class="avatar avatar--sm">{{kopf:Funkenflug}}</span>Funkenflug<span class="chip chip--accent">{{icon:crown}}Leitung</span></li>
+              <li><span class="avatar avatar--sm">{{kopf:Moosbart}}</span>Moosbart</li>
+              <li><span class="avatar avatar--sm">{{kopf:Glimmerfee}}</span>Glimmerfee</li>
+            </ul>
+            <div class="party-demo__follow">{{icon:arrow}}<span>Funkenflug ist auf <b>mc.beispiel.de</b></span><span class="btn btn--primary btn--sm">Beitreten</span></div>
+          </div>
+          <span class="eyebrow">{{icon:party}}Party</span>
+          <h3 class="h3">Gemeinsam von Server zu Server</h3>
+          <p class="card__text">Bis zu 8 Spieler in einer Party mit eigenem Chat. Ihr seht, wo jeder gerade spielt; wechselt die Leitung den Server, folgt ihr mit einem Klick – und seid dort automatisch zusammen im Voice.</p>
+        </article>
+
+        <article class="card card--accent bento__world reveal" id="welt">
+          <div class="bento__world-text">
+            <span class="eyebrow">{{icon:world}}Welt teilen</span>
+            <h3 class="h2">Deine Welt. Deine Freunde. Kein Server nötig.</h3>
+            <p class="card__text">Öffne deine Einzelspielerwelt mit einem Klick für Freunde – ohne Portfreigabe und ohne Abo. Die Welt bleibt auf deinem PC, du bestimmst, wer reinkommt und was er darf. Freunde treten über eine feste Adresse bei, auch ohne HeldixClient.</p>
+            <ul class="check-list">
+              <li>{{icon:check}}<span>Wer darf rein: nur Eingeladene, Freunde oder alle mit Adresse – mit Anklopfen</span></li>
+              <li>{{icon:check}}<span>Rollen: Besucher, Mitspieler oder Operator</span></li>
+              <li>{{icon:check}}<span>Vor dem Teilen legt HeldixClient eine Sicherung an</span></li>
+              <li>{{icon:check}}<span>Die IP-Adressen der Mitspieler siehst du nicht</span></li>
+            </ul>
+            <div class="card__foot"><a class="link-arrow" href="/hilfe/welt-teilen">So teilst du deine Welt{{icon:chevron-right}}</a></div>
+          </div>
+          <div class="world-demo" aria-hidden="true">
+            <div class="world-demo__card">
+              <div class="world-demo__top"><span class="icon-tile">{{icon:world}}</span><span class="person__text"><span class="person__name">Burg am See</span><span class="person__meta person__meta--online">Geteilt · 3 von 8 Spielern</span></span></div>
+              <div class="world-demo__address"><code>k7m2xq.welt.heldixclient.com</code><span class="btn btn--secondary btn--sm">{{icon:copy}}Kopieren</span></div>
+              <ul class="world-demo__people">
+                <li><span class="avatar avatar--sm">{{kopf:Kieselkatze}}</span>Kieselkatze<span class="chip">Mitspieler</span></li>
+                <li><span class="avatar avatar--sm">{{kopf:Sternschnuppe42}}</span>Sternschnuppe42<span class="chip">Besucher</span></li>
+              </ul>
+              <div class="world-demo__knock">{{icon:bell}}<span><b>Nebelwanderer</b> möchte beitreten</span><span class="btn btn--primary btn--sm">Erlauben</span></div>
+            </div>
+            <p class="world-demo__caption">Beispiel – Adresse und Namen sind ausgedacht.</p>
+          </div>
+        </article>
       </div>
     </div>
   </section>
 
-  <section id="module-vorschau" aria-labelledby="module-titel">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <span class="eyebrow">Module</span>
-        <h2 id="module-titel">Schalte ein, was du brauchst</h2>
-        <p>Jedes Modul lässt sich einzeln an- und abschalten und im HUD-Editor platzieren.</p>
-      </div>
-      <div class="tiles">
-{{MODULE_KACHELN_HTML}}
-      </div>
-      <p class="section-more"><a class="button ghost small" href="/module">Alle Module{{icon:chevron-right}}</a></p>
-    </div>
-  </section>
-
-  <section id="addon-store" aria-labelledby="addon-store-titel">
-    <div class="wrap">
-      <div class="store-band reveal">
-        <div class="store-band-text">
-          <span class="eyebrow">{{icon:addons}}Addon-Store</span>
-          <h2 id="addon-store-titel">Noch mehr Module mit Addons</h2>
-          <p>Addons erweitern HeldixClient um eigene Module und HUD-Anzeigen. In den Store kommt nur, was das Team geprüft und signiert hat.</p>
-          <ul class="story-list">
-            <li>{{icon:check}}<span>Installieren mit einem Klick – im Launcher oder im Spiel</span></li>
-            <li>{{icon:check}}<span>Laufen auch nach Minecraft-Updates weiter</span></li>
-            <li>{{icon:check}}<span>Hat ein Addon einen Fehler, schaltet HeldixClient nur das Addon ab</span></li>
+  <!-- ===== Dein Look ===== -->
+  <section class="section section--raised" id="look" aria-labelledby="look-titel">
+    <div class="container">
+      <div class="look">
+        <div class="look__text reveal">
+          <span class="eyebrow">{{icon:cape}}Dein Look</span>
+          <h2 class="h2" id="look-titel">Zeig, wer du bist – alle sehen es</h2>
+          <p class="lead">Animierte Capes mit wehendem Stoff, dazu Flügel, Hüte, Auren und Begleiter, die sich bewegen. Andere HeldixClient-Spieler sehen, was du trägst – im Spiel, im Launcher und auf der Webseite.</p>
+          <ul class="check-list">
+            <li>{{icon:check}}<span>{{CAPES_OEFFENTLICH}} animierte Heldix-Capes: Flammen flackern, Sterne funkeln, Blitze zucken</span></li>
+            <li>{{icon:check}}<span>Cosmetics für Kopf, Rücken, Aura und Begleiter – Flügel schlagen, Begleiter folgen dir</span></li>
+            <li>{{icon:check}}<span>Eigene Cape-Bilder per Ziehen und Ablegen – sie bleiben auf deinem PC</span></li>
           </ul>
-          <p class="store-band-actions"><a class="button" href="/addons">{{icon:addons}}Zum Addon-Store</a></p>
+          <div class="btn-group">
+            <a class="btn btn--secondary" href="/cosmetics">{{icon:eye}}In 3D anprobieren</a>
+          </div>
         </div>
-        <div class="store-band-list" id="start-addons" aria-label="Beliebt im Addon-Store" hidden></div>
+        <ul class="cosmetic-grid reveal" aria-label="Beispiele aus dem Cosmetics-Katalog">
+          <li class="cosmetic"><img src="/bilder/cosmetic-engelsfluegel.webp" width="320" height="320" alt="" loading="lazy"><span class="cosmetic__name">Engelsflügel</span><span class="chip">Rücken</span></li>
+          <li class="cosmetic"><img src="/bilder/cosmetic-krone.webp" width="320" height="320" alt="" loading="lazy"><span class="cosmetic__name">Krone</span><span class="chip">Kopf</span></li>
+          <li class="cosmetic"><img src="/bilder/cosmetic-mini-drache.webp" width="320" height="320" alt="" loading="lazy"><span class="cosmetic__name">Mini-Drache</span><span class="chip">Begleiter</span></li>
+          <li class="cosmetic"><img src="/bilder/cosmetic-drachenfluegel.webp" width="320" height="320" alt="" loading="lazy"><span class="cosmetic__name">Drachenflügel</span><span class="chip">Rücken</span></li>
+          <li class="cosmetic"><img src="/bilder/cosmetic-heiligenschein.webp" width="320" height="320" alt="" loading="lazy"><span class="cosmetic__name">Heiligenschein</span><span class="chip">Kopf</span></li>
+          <li class="cosmetic"><img src="/bilder/cosmetic-partyhut.webp" width="320" height="320" alt="" loading="lazy"><span class="cosmetic__name">Partyhut</span><span class="chip">Kopf</span></li>
+        </ul>
       </div>
-    </div>
-  </section>
 
-  <section id="bilder" aria-labelledby="bilder-titel">
-    <div class="wrap">
-      <div class="section-head reveal">
-        <span class="eyebrow">Bilder</span>
-        <h2 id="bilder-titel">So sieht HeldixClient aus</h2>
-        <p>Ein Fenster für alles: Heldix-Menü, Einzel- und Mehrspieler teilen sich die Leisten oben – mit Schnellsuche (Strg+K) und voller Bedienung per Tastatur.</p>
-      </div>
-      <div class="gallery">
-        <figure class="big reveal"><button type="button" data-full="/images/spiel-hauptmenue.png"><img src="/images/spiel-hauptmenue.png" alt="Heldix-Hauptmenü im Spiel" loading="lazy"><figcaption>Hauptmenü mit Weiterspielen</figcaption></button></figure>
-        <figure class="reveal"><button type="button" data-full="/images/spiel-hud-editor.png"><img src="/images/spiel-hud-editor.png" alt="HUD-Editor mit Werkzeugleiste" loading="lazy"><figcaption>HUD-Editor</figcaption></button></figure>
-        <figure class="reveal"><button type="button" data-full="/images/spiel-cape.png"><img src="/images/spiel-cape.png" alt="Cape-Auswahl mit drehender Spielfigur" loading="lazy"><figcaption>Cape-Auswahl</figcaption></button></figure>
-        <figure class="reveal"><button type="button" data-full="/images/spiel-ladebildschirm.png"><img src="/images/spiel-ladebildschirm.png" alt="Ladebildschirm im Heldix-Design" loading="lazy"><figcaption>Ladebildschirm</figcaption></button></figure>
-        <figure class="reveal"><button type="button" data-full="/images/spiel-einzelspieler.png"><img src="/images/spiel-einzelspieler.png" alt="Einzelspieler-Seite mit Weltenliste" loading="lazy"><figcaption>Einzelspieler</figcaption></button></figure>
-        <figure class="reveal"><button type="button" data-full="/images/launcher-start.png"><img src="/images/launcher-start.png" alt="Startseite des Launchers" loading="lazy"><figcaption>Launcher</figcaption></button></figure>
-      </div>
-    </div>
-  </section>
-
-  <section id="datenschutz" aria-labelledby="privat-titel">
-    <div class="wrap">
-      <div class="privacy reveal">
-        <div>
-          <span class="eyebrow">Privatsphäre</span>
-          <h2 id="privat-titel">Deine Daten bleiben bei dir</h2>
-          <p>HeldixClient schickt keine Nutzungsdaten nach Hause. Für Freunde und Capes speichert der Heldix-Dienst nur das Nötigste, und du entscheidest, was andere sehen.</p>
-          <p><a href="/datenschutz">Datenschutzerklärung lesen</a></p>
+      <div class="capes reveal">
+        <div class="capes__head">
+          <h3 class="h4">Die Heldix-Capes</h3>
+          <a class="link-arrow" href="/cosmetics#capes">Alle Capes ansehen{{icon:chevron-right}}</a>
         </div>
-        <ul class="checks">
-          <li>{{icon:check}}<span>Kein Tracking und keine Werbung – auch nicht auf dieser Seite. Ein Cookie gibt es nur, wenn du dich im Konto anmeldest.</span></li>
-          <li>{{icon:check}}<span>Die Microsoft-Anmeldung bleibt auf deinem Gerät.</span></li>
-          <li>{{icon:check}}<span>Online-Status, Server und Cape einzeln abschaltbar.</span></li>
-          <li>{{icon:check}}<span>Alles löschen mit einem Klick: Heldix-Menü → Freunde → Privatsphäre oder hier im <a href="/konto">Konto</a>.</span></li>
+        <ul class="capes__row" aria-label="Animierte Heldix-Capes">
+          <li><img src="/bilder/cape-heldix.webp" width="124" height="188" alt="" loading="lazy"><span>Heldix</span></li>
+          <li><img src="/bilder/cape-mitternacht.webp" width="124" height="188" alt="" loading="lazy"><span>Mitternacht</span></li>
+          <li><img src="/bilder/cape-aurora.webp" width="124" height="188" alt="" loading="lazy"><span>Aurora</span></li>
+          <li><img src="/bilder/cape-glut.webp" width="124" height="188" alt="" loading="lazy"><span>Glut</span></li>
+          <li><img src="/bilder/cape-kristall.webp" width="124" height="188" alt="" loading="lazy"><span>Kristall</span></li>
+          <li><img src="/bilder/cape-neon.webp" width="124" height="188" alt="" loading="lazy"><span>Neon</span></li>
+          <li><img src="/bilder/cape-sakura.webp" width="124" height="188" alt="" loading="lazy"><span>Sakura</span></li>
+          <li><img src="/bilder/cape-gewitter.webp" width="124" height="188" alt="" loading="lazy"><span>Gewitter</span></li>
+          <li><img src="/bilder/cape-galaxie.webp" width="124" height="188" alt="" loading="lazy"><span>Galaxie</span></li>
+          <li><img src="/bilder/cape-matrix.webp" width="124" height="188" alt="" loading="lazy"><span>Matrix</span></li>
+          <li class="capes__reward"><img src="/bilder/freundesband.webp" width="200" height="320" alt="" loading="lazy"><span>Freundesband</span><span class="chip chip--reward">{{icon:gift}}Belohnung</span></li>
         </ul>
       </div>
     </div>
   </section>
 
-  <section id="fragen" aria-labelledby="fragen-titel">
-    <div class="wrap">
+  <!-- ===== Spielgefühl ===== -->
+  <section class="section" id="funktionen" aria-labelledby="funktionen-titel">
+    <div class="container">
       <div class="section-head reveal">
-        <span class="eyebrow">Fragen</span>
-        <h2 id="fragen-titel">Häufige Fragen</h2>
+        <span class="eyebrow">{{icon:hud}}Spielgefühl</span>
+        <h2 class="h2" id="funktionen-titel">Dein Spiel, deine Regeln</h2>
+        <p class="lead">Ein eigenes Menü statt Optionen-Wust, ein HUD, das du frei platzierst, und mehr FPS per Schalter.</p>
       </div>
-      <div class="faq reveal">
-        <details>
-          <summary>Brauche ich Minecraft dafür?{{icon:chevron-down}}</summary>
-          <p>Ja. HeldixClient ist ein Launcher und Client für Minecraft: Java Edition. Du meldest dich mit dem Microsoft-Konto an, mit dem du Minecraft gekauft hast; die Spieldateien lädt der Launcher direkt von Mojang.</p>
-        </details>
-        <details>
-          <summary>Kostet HeldixClient etwas?{{icon:chevron-down}}</summary>
-          <p>Nein. HeldixClient ist kostenlos, es gibt keine Werbung und keine Bezahl-Funktionen.{{#github}} Der Quellcode ist offen (MIT-Lizenz) und liegt auf <a href="{{GITHUB_URL}}">GitHub</a>.{{/github}}</p>
-        </details>
-        <details>
-          <summary>Läuft HeldixClient auf dem Mac?{{icon:chevron-down}}</summary>
-          <p>Ja, ab macOS 11 – für Apple Silicon und Intel. Vulkan gibt es auf dem Mac nicht, und neue Versionen lädst du dort über die <a href="/download">Download-Seite</a>.</p>
-        </details>
-        <details>
-          <summary>Darf ich HeldixClient auf Servern benutzen?{{icon:chevron-down}}</summary>
-          <p>HeldixClient bringt nur Funktionen mit, die übliche Clients auch haben – keine Cheats. Manche Server verbieten einzelne Funktionen: Freelook ist zum Beispiel auf hypixel.net automatisch abgeschaltet. Halte dich an die Regeln des jeweiligen Servers.</p>
-        </details>
-        <details>
-          <summary>Warum warnt Windows oder macOS beim Installieren?{{icon:chevron-down}}</summary>
-          <p>Die Installationsdateien haben noch keine kostenpflichtige Signatur. Unter Windows geht es über „Weitere Informationen“ → „Trotzdem ausführen“ weiter, auf dem Mac unter Systemeinstellungen → Datenschutz &amp; Sicherheit → „Dennoch öffnen“. Schritt für Schritt steht das auf der <a href="/download">Download-Seite</a>.</p>
-        </details>
-        <details>
-          <summary>Was speichert der Heldix-Dienst über mich?{{icon:chevron-down}}</summary>
-          <p>Für Freunde, Capes und das Heldix-Symbol: deine Minecraft-UUID, deinen Spielernamen, dein Heldix-Cape, deine Einstellungen, deine Freundschaften und Nachrichten an Freunde (höchstens 30 Tage). Kein Passwort, keine E-Mail-Adresse. Alles dazu steht in der <a href="/datenschutz">Datenschutzerklärung</a>; löschen kannst du es jederzeit im Heldix-Menü, unter <a href="/konto">Konto</a> auch herunterladen.</p>
-        </details>
-        <details>
-          <summary>Wo bekomme ich Hilfe?{{icon:chevron-down}}</summary>
-          <p>Im <a href="/hilfe">Hilfe-Center</a> stehen Anleitungen zu Installation, Anmeldung, Modulen und typischen Problemen. Kommst du nicht weiter, schreib dem Team über eine <a href="/konto#ziel=support">Support-Anfrage</a>.</p>
-        </details>
-      </div>
-    </div>
-  </section>
 
-  <section id="download" aria-labelledby="download-titel">
-    <div class="wrap">
-      <div class="cta-band reveal">
-        <span class="eyebrow">Download</span>
-        <h2 id="download-titel">In zwei Minuten startklar</h2>
-        <p>Installieren, mit deinem Microsoft-Konto anmelden, Instanz wählen, spielen.</p>
-        <div class="hero-actions">
-          <a class="button big" href="/download" data-download-cta>{{icon:download}}<span class="cta-label">Kostenlos herunterladen</span></a>
-          <a class="button big ghost" href="/hilfe">Hilfe-Center</a>
+      <div class="tabs feel reveal" data-tabs>
+        <div class="tabs__list" role="tablist" aria-label="Spielgefühl">
+          <button class="tabs__tab" type="button" role="tab" id="tab-module" aria-controls="panel-module" aria-selected="true">{{icon:modules}}Module und Menü</button>
+          <button class="tabs__tab" type="button" role="tab" id="tab-hud" aria-controls="panel-hud" aria-selected="false" tabindex="-1">{{icon:hud}}HUD-Editor</button>
+          <button class="tabs__tab" type="button" role="tab" id="tab-leistung" aria-controls="panel-leistung" aria-selected="false" tabindex="-1">{{icon:performance}}Leistung und Shader</button>
+        </div>
+
+        <div class="tabs__panel feel__panel" role="tabpanel" id="panel-module" aria-labelledby="tab-module">
+          <figure class="frame"><img src="/bilder/spiel-heldix-menue.webp" width="854" height="480" alt="Heldix-Menü mit Modulen als Kacheln, Reitern und Suche." loading="lazy"></figure>
+          <div class="feel__text">
+            <h3 class="h3 tabs__panel-title">Module und Menü</h3>
+            <p class="h3 feel__claim">Alle Module, ein Menü</p>
+            <p class="card__text">Die rechte Umschalttaste öffnet das Heldix-Menü: {{MODULE_ANZAHL}} eingebaute Module und die aus deinen Addons als Kacheln mit Suche, Einstellungen in Gruppen, Cape, Freunde und Party an einem Ort.</p>
+            <ul class="check-list">
+              <li>{{icon:check}}<span>FPS, CPS, Ping, Koordinaten, Keystrokes, Rüstung und Trank-Effekte</span></li>
+              <li>{{icon:check}}<span>Freelook (<kbd>Alt</kbd>), Zoom (<kbd>C</kbd>), Wegpunkte (<kbd>B</kbd>) und Fadenkreuz-Editor</span></li>
+              <li>{{icon:check}}<span>Dauersprint und ein Chat mit Uhrzeit und zusammengefassten Nachrichten</span></li>
+            </ul>
+            <a class="link-arrow" href="/module">Alle Funktionen und Module{{icon:chevron-right}}</a>
+          </div>
+        </div>
+
+        <div class="tabs__panel feel__panel" role="tabpanel" id="panel-hud" aria-labelledby="tab-hud">
+          <figure class="frame"><img src="/bilder/spiel-hud-editor.webp" width="854" height="480" alt="HUD-Editor mit Werkzeugleiste und Elemente-Liste im Spiel." loading="lazy"></figure>
+          <div class="feel__text">
+            <h3 class="h3 tabs__panel-title">HUD-Editor</h3>
+            <p class="h3 feel__claim">Alles dahin, wo du es willst</p>
+            <p class="card__text">Zieh jede Anzeige an ihren Platz. Der Editor rastet an Rändern und anderen Elementen ein – mit Umschalt platzierst du frei.</p>
+            <ul class="check-list">
+              <li>{{icon:check}}<span>Größe über die Ecke oder das Mausrad, Raster und Pfeiltasten</span></li>
+              <li>{{icon:check}}<span>Elemente-Liste zum Ein- und Ausblenden, Rückgängig mit <kbd>Strg</kbd>+<kbd>Z</kbd></span></li>
+              <li>{{icon:check}}<span>Drei HUD-Stile: Heldix, Klassisch und Minimal</span></li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="tabs__panel feel__panel" role="tabpanel" id="panel-leistung" aria-labelledby="tab-leistung">
+          <div class="perf frame" aria-hidden="true">
+            <span class="eyebrow">{{icon:fps}}Bilder pro Sekunde</span>
+            <div class="perf__row"><span>OpenGL</span><div class="perf__bar"><i class="perf__fill perf__fill--base"></i></div><b>100 %</b></div>
+            <div class="perf__row"><span>Vulkan</span><div class="perf__bar"><i class="perf__fill perf__fill--vulkan"></i></div><b>≈ 140 %</b></div>
+            <p class="perf__note">In unseren Messungen unter Windows – auf jedem PC etwas anders.</p>
+          </div>
+          <div class="feel__text">
+            <h3 class="h3 tabs__panel-title">Leistung und Shader</h3>
+            <p class="h3 feel__claim">Schnell, auch wenn es schön aussieht</p>
+            <p class="card__text">Unter Windows startet HeldixClient mit Vulkan – in unseren Messungen rund 40 % mehr FPS. Klappt Vulkan nicht, geht es automatisch mit OpenGL weiter.</p>
+            <ul class="check-list">
+              <li>{{icon:check}}<span>FPS-Boost per Schalter – Ausschalten stellt alles wieder her</span></li>
+              <li>{{icon:check}}<span>Heldix-Shader: acht Farbstile, Bloom, Tiefenunschärfe und Umgebungsverdeckung</span></li>
+              <li>{{icon:check}}<span>Weniger FPS im Hintergrund – schont Akku und Lüfter</span></li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>
   </section>
-</main>
 
-<div class="lightbox" id="lightbox" hidden>
-  <button class="close" type="button" aria-label="Schließen">{{icon:close}}</button>
-  <figure><img alt=""><figcaption></figcaption></figure>
-</div>
+  <!-- ===== Erweitern ===== -->
+  <section class="section section--raised" id="addon-store" aria-labelledby="erweitern-titel">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="eyebrow">{{icon:addons}}Erweitern</span>
+        <h2 class="h2" id="erweitern-titel">Mehr Funktionen mit einem Klick</h2>
+        <p class="lead">Addons aus dem Addon-Store sind vom Team geprüft und signiert. Wer noch mehr will, nimmt Fabric-Mods und Shaderpacks dazu.</p>
+      </div>
+      <div class="extend">
+        <article class="card card--raised extend__store reveal">
+          <div class="card__head">
+            <span class="icon-tile icon-tile--lg">{{icon:addons}}</span>
+            <div><h3 class="h3">Addon-Store</h3><p class="text-3 small">Im Launcher, im Spiel und auf der Webseite</p></div>
+            <span class="chip chip--online card__head-end">{{icon:shield}}Vom Team signiert</span>
+          </div>
+          <ul class="addon-list" id="start-addons">
+            <li class="addon"><span class="icon-tile icon-tile--voice">{{icon:mic}}</span><span><strong>Voice Chat</strong><span>Sprich mit Spielern in deiner Nähe, in Gruppen und mit Gästen im Browser.</span></span></li>
+            <li class="addon"><span class="icon-tile">{{icon:map}}</span><span><strong>Minimap</strong><span>Karte deiner Umgebung im HUD, mit Wegpunkten und Himmelsrichtungen.</span></span></li>
+            <li class="addon"><span class="icon-tile icon-tile--online">{{icon:music}}</span><span><strong>Spotify</strong><span>Laufender Song mit Cover im HUD, Musik per Taste steuern.</span></span></li>
+            <li class="addon"><span class="icon-tile">{{icon:clock}}</span><span><strong>Uhrzeit &amp; Spielzeit</strong><span>Echte Uhrzeit und Spielzeit mit Pausen-Erinnerung.</span></span></li>
+            <li class="addon"><span class="icon-tile">{{icon:cube}}</span><span><strong>Item Physics</strong><span>Items fallen, überschlagen sich und liegen flach am Boden.</span></span></li>
+            <li class="addon"><span class="icon-tile">{{icon:user}}</span><span><strong>Emote-Rad</strong><span>Sitzen, Winken, Verbeugen – auf Taste <kbd>J</kbd>.</span></span></li>
+          </ul>
+          <div class="card__foot">
+            <a class="btn btn--primary" href="/addons">{{icon:addons}}Zum Addon-Store</a>
+            <span class="text-3 small">Hat ein Addon einen Fehler, schaltet HeldixClient nur das Addon ab.</span>
+          </div>
+        </article>
+        <article class="card reveal">
+          <span class="icon-tile icon-tile--lg">{{icon:loader-fabric}}</span>
+          <h3 class="h3">Fabric-Mods und Shaderpacks</h3>
+          <p class="card__text">Leg eine Fabric-Instanz an: Mods von Modrinth mit einem Klick samt Abhängigkeiten, ein fertiges Leistungs-Paket und Shaderpacks. HeldixClient läuft dort mit – Menü, HUD und Addons inklusive.</p>
+          <a class="link-arrow" href="/hilfe/mods-installieren">Mods installieren{{icon:chevron-right}}</a>
+        </article>
+        <article class="card reveal">
+          <span class="icon-tile icon-tile--lg">{{icon:code}}</span>
+          <h3 class="h3">Eigene Addons</h3>
+          <p class="card__text">Schreib Addons gegen die Heldix-API – sie laufen auch nach Minecraft-Updates weiter. Reiche sie in deinem Konto ein; das Team prüft und signiert sie für den Store.</p>
+          <a class="link-arrow" href="/entwickler">Für Entwickler{{icon:chevron-right}}</a>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== In 3 Schritten ===== -->
+  <section class="section" id="start" aria-labelledby="start-titel">
+    <div class="container">
+      <div class="steps-layout">
+        <div>
+          <div class="section-head reveal">
+            <span class="eyebrow">{{icon:play}}Los geht's</span>
+            <h2 class="h2" id="start-titel">In 3 Schritten startklar</h2>
+          </div>
+          <ol class="steps">
+            <li class="step reveal">
+              <span class="step__num">1</span>
+              <div class="step__text">
+                <h3 class="h4">Herunterladen und installieren</h3>
+                <p>Für Windows 10/11 oder macOS 11 und neuer. Windows warnt beim ersten Start, weil der Installer noch keine kostenpflichtige Signatur hat – <a href="#frage-warnung">so geht's weiter</a>.</p>
+              </div>
+            </li>
+            <li class="step reveal">
+              <span class="step__num">2</span>
+              <div class="step__text">
+                <h3 class="h4">Einrichten und mit Microsoft anmelden</h3>
+                <p>Beim ersten Start führt dich die Einrichtung durch: Konto, mit dem du Minecraft: Java Edition gekauft hast, dazu empfohlene Addons wie Voice Chat und Minimap. Die Anmeldung bleibt auf deinem Gerät.</p>
+              </div>
+            </li>
+            <li class="step reveal">
+              <span class="step__num">3</span>
+              <div class="step__text">
+                <h3 class="h4">Spielen – und Freunde einladen</h3>
+                <p>„Spielen“ drücken; Java und Spieldateien lädt der Launcher selbst. Hat dich jemand eingeladen, nimmst du die Einladung gleich in der Einrichtung an. Deinen eigenen Link findest du unter Freunde → Einladen.</p>
+              </div>
+            </li>
+          </ol>
+          <div class="btn-group steps__cta">
+            <a class="btn btn--primary btn--lg" href="/download" data-download>{{icon:download}}<span data-download-label>{{t:download.knopf}}</span></a>
+          </div>
+        </div>
+        <figure class="steps__shot reveal">
+          <div class="frame"><img src="/bilder/einrichtung-willkommen.webp" width="960" height="600" alt="Einrichtung beim ersten Start: Willkommen bei HeldixClient, mit der Einladung einer Freundin und den drei Schritten Konto, Addons und Fertig." loading="lazy"></div>
+          <figcaption>Beim ersten Start: Einrichtung mit Einladung, Konto und Addons – in unter einer Minute.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Warum ===== -->
+  <section class="section section--tight" aria-labelledby="warum-titel">
+    <div class="container">
+      <h2 class="sr-only" id="warum-titel">Warum HeldixClient</h2>
+      <ul class="facts">
+        <li class="fact reveal"><span class="icon-tile">{{icon:star}}</span><div><strong>Kostenlos, ohne Abo</strong><p>Keine Bezahl-Funktionen und keine Werbung – auch Welt teilen nicht.</p></div></li>
+        <li class="fact reveal"><span class="icon-tile">{{icon:eye-off}}</span><div><strong>Kein Tracking</strong><p>HeldixClient schickt keine Nutzungsdaten nach Hause.</p></div></li>
+        <li class="fact reveal"><span class="icon-tile">{{icon:location}}</span><div><strong>Server in Deutschland</strong><p>Der Heldix-Dienst für Freunde, Voice und Welten läuft in Deutschland.</p></div></li>
+        <li class="fact reveal"><span class="icon-tile">{{icon:shield}}</span><div><strong>Geprüft und signiert</strong><p>Updates, Addons und Cosmetics nur mit gültiger Signatur.</p></div></li>
+      </ul>
+      <p class="facts__more"><a class="link-arrow" href="/warum">Warum HeldixClient{{icon:chevron-right}}</a></p>
+    </div>
+  </section>
+
+  <!-- ===== Neues vom Team (nur, wenn es Neuigkeiten gibt) ===== -->
+  <section class="section section--tight" id="neuigkeiten" aria-labelledby="neuigkeiten-titel" hidden>
+    <div class="container">
+      <div class="news-head">
+        <div>
+          <span class="eyebrow">{{icon:news}}Neuigkeiten</span>
+          <h2 class="h3" id="neuigkeiten-titel">Neues vom Team</h2>
+        </div>
+        <a class="link-arrow" href="/neuigkeiten">Alle Neuigkeiten{{icon:chevron-right}}</a>
+      </div>
+      <div class="news-grid" id="neuigkeiten-liste"></div>
+    </div>
+  </section>
+
+  <!-- ===== Fragen ===== -->
+  <section class="section" id="fragen" aria-labelledby="fragen-titel">
+    <div class="container faq">
+      <div class="faq__head reveal">
+        <span class="eyebrow">{{icon:help-circle}}Fragen</span>
+        <h2 class="h2" id="fragen-titel">Häufige Fragen</h2>
+        <p class="text-2">Mehr Anleitungen stehen im Hilfe-Center.</p>
+        <a class="btn btn--secondary" href="/hilfe">{{icon:help-circle}}Zum Hilfe-Center</a>
+      </div>
+      <div class="accordion reveal">
+        <details>
+          <summary>Brauche ich Minecraft dafür?{{icon:chevron-down}}</summary>
+          <div class="accordion__body"><p>Ja. HeldixClient ist ein Launcher und Client für Minecraft: Java Edition. Du meldest dich mit dem Microsoft-Konto an, mit dem du Minecraft gekauft hast; die Spieldateien lädt der Launcher direkt von Mojang.</p></div>
+        </details>
+        <details>
+          <summary>Kostet HeldixClient etwas?{{icon:chevron-down}}</summary>
+          <div class="accordion__body"><p>Nein. HeldixClient ist kostenlos, ohne Werbung und ohne Bezahl-Funktionen – auch Capes, Cosmetics, Addons aus dem Store und das Teilen deiner Welt.</p></div>
+        </details>
+        <details>
+          <summary>Brauchen meine Freunde auch HeldixClient?{{icon:chevron-down}}</summary>
+          <div class="accordion__body"><p>Für Freundesliste, Party, Nachrichten, Cosmetics und Voice im Spiel ja. Zum Mitreden reicht aber ein Browser: Aus dem Spiel kopierst du einen Gast-Link für deine Voice-Gruppe – 24 Stunden gültig, bis zu 4 Gäste. Deine geteilte Welt betreten auch Spieler ohne HeldixClient, wenn sie dieselbe Minecraft-Version haben.</p></div>
+        </details>
+        <details>
+          <summary>Was bekomme ich fürs Einladen?{{icon:chevron-down}}</summary>
+          <div class="accordion__body"><p>Wer über deinen Link neu dazukommt, bekommt sofort den Freundesfunken, und ihr seid gleich befreundet. Du selbst bekommst den Freundesfunken ab 1 und das Cape Freundesband ab 3 bestätigten Freunden. Bestätigt ist ein Freund, sobald er insgesamt 30 Minuten mit HeldixClient gespielt hat.</p></div>
+        </details>
+        <details>
+          <summary>Läuft HeldixClient auf dem Mac?{{icon:chevron-down}}</summary>
+          <div class="accordion__body"><p>Ja, ab macOS 11 – für Apple Silicon und Intel. Vulkan gibt es auf dem Mac nicht, und neue Versionen lädst du dort über die <a href="/download">Download-Seite</a>.</p></div>
+        </details>
+        <details>
+          <summary>Darf ich HeldixClient auf Servern benutzen?{{icon:chevron-down}}</summary>
+          <div class="accordion__body"><p>HeldixClient bringt keine Cheats mit. Manche Server verbieten einzelne Funktionen – Freelook bleibt auf bekannten Servern, deren Regeln es verbieten, automatisch aus. Halte dich an die Regeln des jeweiligen Servers.</p></div>
+        </details>
+        <details id="frage-warnung">
+          <summary>Warum warnt Windows oder macOS beim Installieren?{{icon:chevron-down}}</summary>
+          <div class="accordion__body"><p>Die Installationsdateien haben noch keine kostenpflichtige Signatur. Unter Windows geht es über „Weitere Informationen“ → „Trotzdem ausführen“ weiter, auf dem Mac unter Systemeinstellungen → Datenschutz &amp; Sicherheit → „Dennoch öffnen“.</p></div>
+        </details>
+        <details>
+          <summary>Was speichert der Heldix-Dienst über mich?{{icon:chevron-down}}</summary>
+          <div class="accordion__body"><p>Für Freunde, Capes, Welten und Einladungen: deine Minecraft-UUID, deinen Spielernamen, deine Cosmetics und Einstellungen, Freundschaften, Einladungen, die Einstellungen deiner geteilten Welten und Nachrichten an Freunde (höchstens 30 Tage). Partys liegen nur im Arbeitsspeicher. Kein Passwort, keine E-Mail-Adresse. Alles steht in der <a href="/datenschutz">Datenschutzerklärung</a>; herunterladen und löschen kannst du es im <a href="/konto">Konto</a>.</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Abschluss ===== -->
+  <section class="section section--tight" aria-labelledby="cta-titel">
+    <div class="container">
+      <div class="cta-band reveal">
+        <div class="cta-band__heads" aria-hidden="true">{{kopf:Funkenflug}}{{kopf:Kristallherz}}{{kopf:Moosbart}}{{kopf:Glimmerfee}}{{kopf:Kieselkatze}}</div>
+        <h2 class="h1" id="cta-titel">Spiel nicht allein.</h2>
+        <p class="lead">Hol dir HeldixClient und schick deinen Freunden einen Link. Wer neu dazukommt, bekommt den Freundesfunken – und ihr seid sofort befreundet.</p>
+        <div class="btn-group cta-band__actions">
+          <a class="btn btn--primary btn--lg" href="/download" data-download>{{icon:download}}<span data-download-label>{{t:download.knopf}}</span></a>
+          <a class="btn btn--social btn--lg" href="/konto#reiter=einladen">{{icon:user-plus}}{{t:nav.einladen}}</a>
+        </div>
+        <p class="cta-band__sub">Kostenlos · Windows und Mac · Version {{VERSION}}</p>
+      </div>
+    </div>
+  </section>
+</main>
 
 {{ICONS_ALLE_HTML}}
 {{include:footer.html}}

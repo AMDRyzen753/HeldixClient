@@ -204,7 +204,7 @@ canvas.scrollingText("Ein sehr langer Titel, der nicht passt", 20, 4, 80, Heldix
 | `cosmetics().worn(uuid, slot)` → `Optional<String>` | was ein Spieler trägt: für dich deine Auswahl, für andere, was der Dienst beim Nachschlagen gemeldet hat (nur erkennbare HeldixClient-Spieler in der Nähe oder in der Tab-Liste) |
 | `cosmetics().mine()` → `Map<Slot, String>` | deine Auswahl je Slot (`HEAD`, `BACK`, `AURA`, `COMPANION`, `CAPE`; nur belegte, ohne Vorschauen, ohne eigene Cape-Bilder) |
 | `cosmetics().preview(slot, id, dauer)` → `Registration` | zeigt ein Cosmetic **nur bei dir** (Third-Person, Inventar, Figuren im Heldix-Menü), z. B. als Vorschau in einem Addon-Menü; endet nach der Dauer (höchstens 1 h), mit `cancel()` oder wenn das Addon abgeschaltet wird. Beim Dienst ändert sich nichts. Unbekannte ID für den Slot: `IllegalArgumentException` |
-| `cosmetics().animate(slot, effekt)` | kurzer Effekt (etwa 1,6 s) an deinem Cosmetic, nur bei dir: `"flap"` (Flügel doppelt so schnell, `BACK`), `"spin"` (einmal drehen, `HEAD`/`BACK`/`COMPANION`), `"bounce"` (hüpfen, `HEAD`/`BACK`/`COMPANION`), `"burst"` (Schwall Partikel, `AURA`, höchstens 64 gleichzeitig); ein Effekt, den es für den Slot nicht gibt: `IllegalArgumentException` |
+| `cosmetics().animate(slot, effekt)` | kurzer Effekt (etwa 1,6 s) an deinem Cosmetic, nur bei dir: `"flap"` (Flügel doppelt so schnell, `BACK`), `"spin"` (einmal drehen, `HEAD`/`BACK`/`COMPANION`), `"bounce"` (hüpfen, `HEAD`/`BACK`/`COMPANION`), `"burst"` (Schwall Partikel, `AURA`, höchstens 64 gleichzeitig); ein Effekt, den es für den Slot nicht gibt: `IllegalArgumentException`. Bei Cosmetics im Format 2 (Meshes mit eigenen Animationen, ab HeldixClient 0.13.8) spielen `"flap"` und `"burst"` die Jubel-Animation des Cosmetics (falls es eine hat), `"spin"` und `"bounce"` wirken wie gewohnt |
 | `cosmetics().onChange(change -> …)` → `Registration` | deine Auswahl hat sich geändert (Heldix-Menü, Launcher, Webseite – letztere beim nächsten Abgleich): `slot()`, `previous()`, `current()`; im Haupt-Thread, Fehler zählen wie Addon-Fehler |
 
 ```java
@@ -323,11 +323,33 @@ Jedes Modul – eingebaut oder aus einem Addon – bekommt außerdem von HeldixC
 | `api.voice().setGroup(name, passwort)`, `group()`, `groupMembers()`, `groupsAvailable()`, `groupProblem()` | Gruppe über den ganzen Server (alle Dimensionen, ohne Abstand, höchstens 16); an den Dienst geht nur SHA-256 aus Name und Passwort |
 | `api.playerName(uuid)` | Name aus Welt, Tab-Liste oder Freundesliste (Haupt-Thread) |
 
+**API 8** (ab HeldixClient 0.13.7, `"api": 8`): Welt von oben, eigene Bilder, Wegpunkte
+
+| Neu | Wofür |
+| --- | --- |
+| `api.worldMap()` → `WorldMap` | `sampleSurface` (Farbe, Höhe, Wassertiefe je Spalte; Farben `TEXTURE` oder `MAP`), `view()` (weiche Position fürs aktuelle Bild), `surfaceY`, `hasCeiling`; umgesetzt in `WorldSampler` (Durchschnittsfarbe der Oberseiten-Textur aus dem Ressourcenpaket mal Biom-Färbung, höchstens 24 neue Texturen je Tick) |
+| `WorldMap.sampleBelow(…, topY, …)` | ab einer Höhe abwärts (Höhlen, Nether) – nur im Einzelspieler (`undergroundAllowed()`, Fair Play) |
+| `api.createImage(b, h)` → `HudImage`, `canvas.image(bild, x, y, b, h)`, `canvas.pixelScale()` | selbst gefüllte Bilder (bis 512², höchstens 16 je Addon) als `DynamicTexture` (`AddonImages`), beim Abschalten freigegeben |
+| `api.waypoints()` → `List<WaypointInfo>` | sichtbare Wegpunkte der aktuellen Welt, nur lesen |
+
+**API 9** (ab HeldixClient 0.13.7, `"api": 9`): Gäste und Browser-Teilnehmer im Sprachkanal, Browser-Link für die Voice-Gruppe
+
+| Neu | Wofür |
+| --- | --- |
+| `api.voice().isGuest(uuid)`, `inBrowser(uuid)` | Gast ohne HeldixClient (über einen Browser-Link, zufällige ID statt Minecraft-UUID) bzw. Teilnehmer auf der Webseite (Gast oder angemeldeter Spieler). Beide haben keine Position und stehen in `groupMembers()` – wie Mitglieder in einer anderen Dimension |
+| `api.voice().guestsAvailable()` | kann der verbundene Heldix-Dienst Gäste (ab 1.11.0, Feature `guests`)? Für Knöpfe, die es nur dann geben soll |
+| `api.voice().removeGuest(uuid)` | Gast aus der eigenen Gruppe entfernen (Nachricht `kick`); der Dienst trennt ihn sofort (4004), sein Zugang gilt nicht mehr |
+| `api.voice().createBrowserLink(onLink, onError)` | Web-Link `<webseite>/einladung#<code>` für die aktuelle Gruppe auf dem aktuellen Server (Einladung mit Gruppe, 24 Std., höchstens 4 Gäste; dieselbe Gruppe bekommt denselben Link). Genau ein Callback läuft im Haupt-Thread: der Link oder eine deutsche Meldung („Du bist in keiner Voice-Gruppe …“, „Der Heldix-Dienst kann noch keine Gäste im Browser …“). Den Prüfwert der Gruppe kennt nur der Client; er geht als `voice.group` an `POST /v1/invites` |
+| `api.copyToClipboard(text)` | Text in die Zwischenablage (Haupt-Thread, nur auf Wunsch des Spielers), z. B. den Browser-Link |
+| `api.playerName(uuid)` | liefert ab API 9 auch den Namen eines Gasts |
+
+Umgesetzt in `VoiceLink` (liest `guests` und `browser` aus `peers`, schickt `kick`, erkennt das Feature `guests`) und `AddonPlayers`; das Protokoll steht in [dienst.md](dienst.md). Ältere Dienste schicken `guests`/`browser` nicht – dann gibt es einfach keine Gäste, und `createBrowserLink` meldet den Grund.
+
 **Warum so:** Neue Methoden gibt es nur an Schnittstellen, die HeldixClient selbst bereitstellt (`HeldixApi`, `HeldixEvents`, `HudCanvas`, `ModuleHandle`); Schnittstellen, die Addons selbst schreiben (`HeldixAddon`, `DroppedItemRenderer`, Listener), bleiben unverändert. Einzige Ausnahme ist `HudRenderer`: Es bekommt in API 5 nur **Default-Methoden** (`onClick`, `onHover`), bleibt ein funktionales Interface, und fertige Addons (auch Lambdas) laufen unverändert. `HudClick`, `HudHover` und `HudStyle` stellt HeldixClient bereit, deshalb sind es Schnittstellen. `GameInfo`, `PlayerState`, `DroppedItem`, `CosmeticInfo` und `CosmeticChange` sind Schnittstellen statt Records, damit spätere Versionen Werte ergänzen können, ohne Addons zu brechen. `DroppedItemPose` baut das Addon selbst, deshalb ist es ein Record (wie `ItemInfo`). Die bisherigen Events (`onTick` …) geben weiter `void` zurück – eine andere Rückgabe würde fertige Addons brechen.
 
 Tastencodes aus `HeldixKeys` sind feste GLFW-Werte. HeldixClient übersetzt sie in die Tasten der jeweiligen Minecraft-Version (seit 26.x nimmt Minecraft SDL-Scancodes). Bis 0.13.0 landeten sie unübersetzt im Spiel: Standardtasten wie Pos1 lagen dadurch auf falschen Tasten, und `HeldixKeys.NONE` brachte das Spiel zum Absturz. Falsch gespeicherte Standardtasten setzt HeldixClient einmal auf die richtigen zurück.
 
-Addons für API 1 bis 6 laufen unverändert weiter. Ein Addon, das eine neuere API braucht, als der installierte HeldixClient kann, wird mit dem Hinweis „bitte HeldixClient aktualisieren“ übersprungen (z. B. ein Addon mit `"api": 7` in HeldixClient 0.13.4). Launcher und Addon-Store im Spiel zeigen es dort mit „Braucht einen neueren HeldixClient“ statt mit „Installieren“.
+Addons für API 1 bis 8 laufen unverändert weiter. Ein Addon, das eine neuere API braucht, als der installierte HeldixClient kann, wird mit dem Hinweis „bitte HeldixClient aktualisieren“ übersprungen (z. B. ein Addon mit `"api": 9` in HeldixClient 0.13.5). Launcher und Addon-Store im Spiel zeigen es dort mit „Braucht einen neueren HeldixClient“ statt mit „Installieren“.
 
 Details stehen in den Javadoc-Kommentaren der [API-Klassen](../mod/heldix-api/src/main/java/dev/heldixclient/api).
 
@@ -499,16 +521,39 @@ Bewertungen (1–5 Sterne) und Meldungen zu Addons gehen auf der Webseite und im
 
 ### Voice-Chat-Addon
 
-Proximity-Voice-Chat über den Heldix-Dienst ([mod/addons/voicechat](../mod/addons/voicechat), Version 1.1.0, API 7), auf jedem Server ohne Plugin.
+Proximity-Voice-Chat über den Heldix-Dienst ([mod/addons/voicechat](../mod/addons/voicechat), Version 1.2.0, API 9), auf jedem Server ohne Plugin.
 
 - **Ton:** Aufnahme mit `javax.sound` (48 kHz mono, 20-ms-Rahmen), Rauschfilter (Hochpass 90 Hz gegen Brummen, dazu ein Rauschtor, das den Grundpegel verfolgt und leises Rauschen zwischen den Worten auf 20 % dämpft), Opus mit [Concentus](https://github.com/jaredmdobson/concentus) (reines Java, BSD-Lizenz, liegt in der JAR mit `META-INF/LICENSE-concentus.txt`), 24 kbit/s mit FEC. Wiedergabe: je Sprecher ein Decoder mit 60 ms Puffer, Lücken überbrückt Opus; Mischen in Stereo nach Abstand (bis 4 Blöcke voll, am Rand der Reichweite still) und Richtung (`NearbyPlayer.direction()`); die eigene Gruppe ohne Abstand. Signaltöne (kurze Gleittöne) bei Push-to-Talk und beim Stummschalten werden nur lokal dazugemischt.
 - **Sprechen:** Push-to-Talk (`addKey`, ab Werk V) oder Sprachaktivierung mit Schwelle und 300 ms Nachlauf; Tasten „Mikrofon stumm“ und „Ton aus“; „Mikrofon testen“ spielt zehn Sekunden lang die eigenen Rahmen ab, ohne zu senden.
 - **Gruppen** (ab 1.1.0): Einstellungen „Gruppe“ und „Gruppen-Passwort“ (Textfelder, 1,5 s nach dem letzten Tippen übernommen) → `voice().setGroup`. Mitglieder hören sich auf dem ganzen Server, auch in anderen Dimensionen; Kommen und Gehen meldet eine Einblendung. Spieler in der Nähe hören weiter wie gewohnt.
 - **Status** (ab 1.1.0): Mikrofon stumm / Ton aus gehen per `voice().setState` an Raum und Gruppe.
+- **Gäste im Browser** (ab 1.2.0, API 9, Heldix-Dienst 1.11.0): Im Gruppen-Bereich des Untermenüs steht direkt unter „Gruppen-Passwort“ der Knopf „Browser-Link kopieren“ (`voice().createBrowserLink`, dann `api.copyToClipboard`; bei offenem Chat auch als Knopf in der Anzeige). Wer den Link öffnet, redet auf der Webseite in der Gruppe mit – als Gast mit Namen oder angemeldet; 24 Std. gültig, höchstens 4 Gäste. Gäste und Spieler im Browser stehen in der Anzeige mit „Gast“ bzw. „Browser“ (Gäste ohne Skin-Abfrage, mit Symbol), Kommen und Gehen meldet die Einblendung mit Kennzeichen. Bei offenem Chat zeigt die Anzeige alle Mitglieder der Gruppe; ein × neben einem Gast entfernt ihn (`voice().removeGuest`). Kann der Dienst keine Gäste (`guestsAvailable()` false), gibt es den Knopf in der Anzeige nicht, und der Knopf im Untermenü meldet den Grund.
 - **Symbole über dem Kopf** (ab 1.1.0, `showAbove`): `volume-1` bis `volume-3` je nach Lautstärke des Sprechers (grün, Gruppe violett), `mic-off` bzw. `headphones-off` (rot) für den Status der anderen, `volume-off` (grau) für von dir stumm Geschaltete. Einstellung „Symbole über dem Kopf“: Aus, Nur beim Sprechen, Sprechen und Status.
 - **Anzeige:** HUD-Element „Voice Chat-Anzeige“: Kopfzeile mit Mikrofon im runden Feld, Zustand und Pegel (fünf Balken), darunter Reichweite und Gruppe, dann die Sprecher mit Kopf, farbigem Ring und hüpfenden Balken. Mit offenem Chat Knöpfe für Mikrofon stumm und Ton aus. Stil-Optionen im HUD-Editor: Darstellung (Liste/Kompakt), Köpfe zeigen, Nur zeigen, wenn etwas los ist. Spielermenü mit Stummschalten, Lauter und Leiser je Spieler (gespeichert in der Addon-Konfiguration).
 - **Start:** Das Modul ist ab Werk aus. Mikrofon und Lautsprecher sind nur offen, solange es an und der Kanal verbunden ist (oder der Test läuft). Beim ersten Einschalten erklärt eine Einblendung, wohin die Stimme geht.
-- **Autotest:** `-Dheldixclient.voicechat.testAudio=true` ersetzt Mikrofon und Lautsprecher durch einen Testton bzw. nichts, `-Dheldixclient.voice.testServer=…` gibt dem Einzelspieler einen Raum. Beides setzt `test:launch` mit `--autotest`. `VoiceTests` prüft dazu die Symbole über dem Kopf, den Status in beide Richtungen, Signaltöne und eine Gruppe über Dimensionen hinweg.
+- **Autotest:** `-Dheldixclient.voicechat.testAudio=true` ersetzt Mikrofon und Lautsprecher durch einen Testton bzw. nichts, `-Dheldixclient.voice.testServer=…` gibt dem Einzelspieler einen Raum. Beides setzt `test:launch` mit `--autotest`. `VoiceTests` prüft dazu die Symbole über dem Kopf, den Status in beide Richtungen, Signaltöne und eine Gruppe über Dimensionen hinweg; `InviteTests` den Browser-Link (Seite Freunde, Addon-Knopf, API – derselbe Link) und einen Gast, der wie die Webseite beitritt (Unterprotokolle `heldix-voice` und `gast.<token>`, Origin der Webseite), uns hört, spricht, als Gast gekennzeichnet ist und mit `removeGuest` getrennt wird (4004).
+
+### Minimap-Addon
+
+Karte der Umgebung im HUD ([mod/addons/minimap](../mod/addons/minimap), Version 1.0.0, API 8), nur über die Heldix-API – läuft in Heldix- und Fabric-Instanzen.
+
+- **Daten:** Im Tick liest das Addon die Chunks um den Spieler über `worldMap().sampleSurface` (höchstens 12 neue und 4 aufgefrischte je Tick, nahe alle 2 s, ferne alle 8 s neu), daraus entsteht ein Fenster schattierter Farben (Licht von Nordwesten, Wasser nach Tiefe dunkler). Chunks weit außerhalb werden vergessen.
+- **Bild:** Jedes Bild tastet das Fenster gedreht und gezoomt ab (Auflösung = Größe × `pixelScale`, höchstens 256²), schneidet es mit weicher Kante rund oder eckig zu und zeichnet es mit `canvas.image`. Neu berechnet wird nur, wenn sich Position, Blick, Zoom oder Fenster geändert haben.
+- **Darüber:** Rand, Himmelsrichtungen (N rot), Wegpunkte (außerhalb als Punkt am Rand, Todespunkt als rotes Kreuz), Pfeil des Spielers, Koordinaten darunter.
+- **Einstellungen:** Form, Größe, Drehen, Himmelsrichtungen und Koordinaten auch im Rechtsklick-Menü des HUD-Editors; Sichtweite (32–256), Farben (Texturen/Kartenfarben), Höhen schattieren, Wegpunkte, Höhlenansicht. Tasten Hereinzoomen/Herauszoomen (Ziffernblock + und −, 16–512 Blöcke).
+- **Fair Play:** Auf Servern nur die Oberfläche; Höhlenansicht und Nether nur im Einzelspieler. Keine Spieler und keine Mobs auf der Karte.
+- **Autotest:** `MinimapTests` prüft die API (Farben, Höhen, Feldgrößen, Höhlenansicht, Wegpunkte) und das Addon (Chunks, Bild im HUD, Zoom per Taste, eckig mit Kartenfarben).
+
+### Emote-Rad
+
+Addon eines externen Entwicklers ([mod/addons/emoterad](../mod/addons/emoterad), Version 1.0.0, API 2). Es ersetzt die Spieler-Renderer von Minecraft 26.3 per Reflexion durch `EmoteAvatarRenderer` (Sitzen, Winken, Verbeugen, „Krallen zeigen“; für alle anderen Spieler und ohne Emote zeichnet er wie Minecraft), Rad auf Taste J – nur am eigenen Spieler sichtbar.
+
+- **Zugriff auf Minecraft:** `clientEntrypoint` (`Start`, prüft beim Spielstart, ob es die nötigen Felder gibt), `"minecraft": ["26.3"]`, `"loaders": ["heldix", "fabric"]`; Store und Menü zeigen „Greift in Minecraft ein“. `npm run addon` übernimmt dafür `access`, `minecraft` und `loaders` aus der JAR ins signierte Store-Manifest.
+- **Nur solange das Modul an ist:** aus setzt Minecrafts eigene Renderer wieder ein. Das laufende Emote steht in der Systemeigenschaft `heldix.emote.lokal` (`NAME;STÄRKE`).
+- **Beim Einbau geändert:** Name ohne „(Test)“, Kurzbeschreibung unter 200 Zeichen, `clientEntrypoint` und Manifest v2, Renderer zurück beim Ausschalten.
+- **Autotest:** `EmoteRadTests` (Renderer je nach Modul, Rad auf J, ein Emote läuft und endet, keine Fehler).
+
+Die Cyber-Flügel und Krallen desselben Entwicklers kamen ebenfalls als Addons; sie sind jetzt Cosmetics im Katalog (für alle sichtbar), übernommen mit `npm run cosmetics-import` – siehe [entwicklung.md](entwicklung.md).
 
 ### Item-Physics-Addon
 

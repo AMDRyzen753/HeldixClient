@@ -59,11 +59,23 @@ async function main(): Promise<void> {
 
   const entry = new AdmZip(jarPath).getEntry('heldix.addon.json');
   if (!entry) throw new Error(`${jar}: heldix.addon.json fehlt`);
-  const meta = JSON.parse(entry.getData().toString('utf8')) as { id?: string; name?: string; version?: string; description?: string; authors?: string[]; api?: number };
+  const meta = JSON.parse(entry.getData().toString('utf8')) as {
+    id?: string;
+    name?: string;
+    version?: string;
+    description?: string;
+    authors?: string[];
+    api?: number;
+    clientEntrypoint?: string;
+    transformers?: string[];
+    minecraft?: string | string[];
+    loaders?: string[];
+  };
   if (meta.id !== id) throw new Error(`${jar}: ID in heldix.addon.json ist „${meta.id}“, erwartet „${id}“`);
   if (typeof meta.api !== 'number' || meta.api > HELDIX_ADDON_API) throw new Error(`${jar}: braucht Addon-API ${meta.api}, HeldixClient kann bis ${HELDIX_ADDON_API}`);
   const store = JSON.parse(await readFile(path.join(addonDir, 'store.json'), 'utf8').catch(() => '{}')) as StoreInfo;
 
+  const minecraftAccess = Boolean(meta.clientEntrypoint) || (Array.isArray(meta.transformers) && meta.transformers.length > 0);
   const data = await readFile(jarPath);
   const version = String(meta.version);
   const manifest = parseAddonManifest({
@@ -83,6 +95,10 @@ async function main(): Promise<void> {
     sha256: createHash('sha256').update(data).digest('hex'),
     date: new Date().toISOString(),
     notes: store.hinweise ?? [],
+    // Zugriff wie im Spiel (AddonManifest): "minecraft", sobald clientEntrypoint oder transformers gesetzt sind
+    access: minecraftAccess ? 'minecraft' : 'api',
+    minecraft: typeof meta.minecraft === 'string' ? [meta.minecraft] : (meta.minecraft ?? []),
+    loaders: meta.loaders,
     // Team-Addons sind „Offiziell“; Community-Addons signiert das Team bei der Freigabe im Team-Bereich
     official: true,
     author: null,

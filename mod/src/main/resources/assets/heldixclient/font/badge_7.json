@@ -1,0 +1,13 @@
+{
+  "providers": [
+    {
+      "type": "bitmap",
+      "file": "heldixclient:font/badge_7.png",
+      "ascent": 7,
+      "height": 8,
+      "chars": [
+        ""
+      ]
+    }
+  ]
+}

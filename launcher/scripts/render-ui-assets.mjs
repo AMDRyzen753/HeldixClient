@@ -5,14 +5,22 @@
 //   textures/gui/heldix/background.png          – Hintergrund des Hauptmenüs (gleiches Motiv wie im Launcher)
 //   textures/gui/heldix/logo.png                – HeldixClient-Symbol
 //   font/ui_<stil>_<skalierung>.json            – Schrift Inter je GUI-Skalierung (scharf ohne Skalieren)
-//   font/badge.json + textures/font/badge*.png  – Heldix-Symbol als Schriftzeichen (U+E000–U+E003, je Rolle eins)
+//   font/badge*.json + textures/font/badge*.png – Abzeichen je Rolle als Schriftzeichen (U+E000 …, je GUI-Skalierung)
 //   font/marker.json + textures/font/marker.png – alle Icons als Schriftzeichen (U+E100 + Nummer) für Namensschilder
-// Aufruf: npm run ui-assets
-import { app, BrowserWindow } from 'electron';
+//   src/renderer/ui-icons.ts (Launcher)         – dieselben Icons (currentColor) und die Abzeichen als SVG mit Bezeichnung
+// Aufruf: npm run ui-assets            (nur die Abzeichen: npm run ui-assets -- --nur-abzeichen,
+//                                     dazu als SVG-Dateien: --abzeichen-svg=<ordner>)
+//         node scripts/render-ui-assets.mjs --nur-launcher
+//                                     nur src/renderer/ui-icons.ts – ohne Electron, schreibt nichts in der Mod
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
+
+/** nur die Icons und Abzeichen des Launchers (ohne Electron, ohne Schriften und Grafiken der Mod) */
+const launcherOnly = process.argv.includes('--nur-launcher');
+const electron = launcherOnly ? null : await import('electron');
+const { app, BrowserWindow } = electron ? (electron.app ? electron : electron.default) : {};
 
 const launcherDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const assets = path.join(launcherDir, '..', 'mod', 'src', 'main', 'resources', 'assets', 'heldixclient');
@@ -129,6 +137,7 @@ const ICONS = {
   send: '<path d="M20.5 3.5 L3.5 10.5 L10.5 13.5 L13.5 20.5 Z"/><path d="M20.5 3.5 L10.5 13.5"/>',
   ban: '<circle cx="12" cy="12" r="8.5"/><path d="M6 6 L18 18"/>',
   flag: '<path d="M5.5 21 V3.5"/><path d="M5.5 4 H18 L15.5 8.5 L18 13 H5.5"/>',
+  map: '<path d="M3.5 6.5 L9 4.5 L15 6.5 L20.5 4.5 V17.5 L15 19.5 L9 17.5 L3.5 19.5 Z"/><path d="M9 4.5 V17.5 M15 6.5 V19.5"/>',
   // Voice Chat
   mic: '<rect x="9" y="2.5" width="6" height="11.5" rx="3"/><path d="M5.5 11 A6.5 6.5 0 0 0 18.5 11"/><path d="M12 17.5 V21"/>',
   'mic-off': '<path d="M15 9 V5.5 A3 3 0 0 0 9.3 4.2"/><path d="M9 9 V11 A3 3 0 0 0 13.9 13.3"/>'
@@ -144,6 +153,13 @@ const ICONS = {
   // runde Fläche hinter Symbolen über dem Kopf (Schrift heldixclient:marker)
   disc: '<circle cx="12" cy="12" r="11.5" fill="#fff" stroke="none"/>',
   ring: '<circle cx="12" cy="12" r="10.9" stroke-width="1.6"/>',
+  // Freunde 2.0 (hinten angehängt, damit die Nummern der Zeichen in heldixclient:marker bleiben): Glocke (Benachrichtigungen),
+  // Antworten, Reaktion, Leiter der Party, „Nicht stören“
+  bell: '<path d="M18 16.2 V11 A6 6 0 0 0 6 11 V16.2 L4.5 17.8 H19.5 Z"/><path d="M9.8 20.2 A2.4 2.4 0 0 0 14.2 20.2"/><path d="M12 3.2 V5"/>',
+  reply: '<path d="M10 7.5 L5 12.5 L10 17.5"/><path d="M5 12.5 H13.5 A5.5 5.5 0 0 1 19 18 V19.5"/>',
+  smile: '<circle cx="12" cy="12" r="8.5"/><path d="M8.6 14.2 A4.2 4.2 0 0 0 15.4 14.2"/><path d="M9.2 9.8 H9.3 M14.7 9.8 H14.8"/>',
+  crown: '<path d="M4.5 17.5 L3.5 8 L8.5 11.5 L12 5.5 L15.5 11.5 L20.5 8 L19.5 17.5 Z"/><path d="M5 20.5 H19"/>',
+  moon: '<path d="M19.5 14.6 A8 8 0 1 1 9.4 4.5 A6.4 6.4 0 0 0 19.5 14.6 Z"/>',
 };
 
 const NAMES = Object.keys(ICONS);
@@ -170,63 +186,312 @@ ${NAMES.map((n) => `<div style="display:flex;flex-direction:column;align-items:c
 </div></body></html>`;
 
 // ---------------------------------------------------------------------------------------------
-// Heldix-Symbol je Rolle (Tab-Liste und Namensschild): Sechseck des Logos in der Farbe der Rolle, weißes Zeichen darin.
-// U+E000 ist das Logo selbst (alle HeldixClient-Spieler); die Rollen meldet der Heldix-Dienst (siehe docs/dienst.md).
+// Abzeichen (Heldix-Symbol je Rolle) für Tab-Liste und Namensschild: Sechseck wie das Logo (Verlauf, Glanz, Kante),
+// je Rolle eigene Farbe und eigenes weißes Symbol mit Schatten. Ein Zeichen je Rolle (U+E000 …) in den Schriften
+//   heldixclient:badge        – 64 px hoch (Namensschild aus der Nähe; überall, wo die Größe offen ist)
+//   heldixclient:badge_<1–7>  – 8 × n px hoch: bei GUI-Skalierung n in der Tab-Liste genau ein Texel je Bildpunkt
+// Eine Zelle ist 7 × 8 GUI-Pixel (das Sechseck mit Spitze oben füllt die Breite), der Vorschub ist immer 8.
+// Die badge-Werte meldet der Heldix-Dienst (siehe docs/dienst.md); Badge.java ordnet sie den Zeichen zu.
+// Neue Rolle: hier mit dem nächsten freien Zeichen eintragen, npm run ui-assets, dann in Badge.Role.
 // ---------------------------------------------------------------------------------------------
 
-const BADGE_HEXAGON = 'M82.68 22 Q100 12 117.32 22 L158.89 46 Q176.21 56 176.21 76 L176.21 124 Q176.21 144 158.89 154 L117.32 178 Q100 188 82.68 178 L41.11 154 Q23.79 144 23.79 124 L23.79 76 Q23.79 56 41.11 46 Z';
+/** Zeichenfläche eines Abzeichens (7 : 8) */
+const BADGE_W = 175;
+const BADGE_H = 200;
+/** Skalierungen der Schriften; die größte ist heldixclient:badge */
+const BADGE_SCALES = [1, 2, 3, 4, 5, 6, 7, 8];
+/** Feine Ausschnitte (detail) erst ab dieser Höhe in Pixeln – kleiner verschwimmen sie nur */
+const BADGE_DETAIL_FROM = 32;
+
+/** Sechseck mit Spitze oben und runden Ecken (wie im Logo: Ecke = Bézier über k · Kantenlänge) */
+function hexagon(cx, cy, r, k) {
+  const v = [];
+  for (let i = 0; i < 6; i++) {
+    const a = ((-90 + i * 60) * Math.PI) / 180;
+    v.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+  }
+  const at = (from, to) => [from[0] + (to[0] - from[0]) * k, from[1] + (to[1] - from[1]) * k];
+  const f = (p) => `${p[0].toFixed(2)} ${p[1].toFixed(2)}`;
+  let d = `M${f(at(v[0], v[1]))}`;
+  for (let i = 1; i <= 6; i++) {
+    const corner = v[i % 6];
+    d += ` L${f(at(corner, v[i - 1]))} Q${f(corner)} ${f(at(corner, v[(i + 1) % 6]))}`;
+  }
+  return `${d} Z`;
+}
+
+const BADGE_HEXAGON = hexagon(87.5, 100, 101, 0.22);
+const BADGE_INNER = hexagon(87.5, 100, 84, 0.22);
+
+/** Zahnrad als Pfad (Zähne als Trapeze) */
+function gearPath(cx, cy, outer, inner, teeth) {
+  const points = [];
+  const step = (Math.PI * 2) / teeth;
+  for (let i = 0; i < teeth; i++) {
+    const base = i * step - Math.PI / 2;
+    for (const [offset, r] of [[-0.3, inner], [-0.17, outer], [0.17, outer], [0.3, inner]]) {
+      const a = base + offset * step;
+      points.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+    }
+  }
+  return points.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(2)} ${p[1].toFixed(2)}`).join(' ') + ' Z';
+}
+
+/** Stern mit fünf Zacken; facets = Dreiecke der rechten Zackenhälften (für die Schattierung) */
+function star(cx, cy, outer, inner) {
+  const pts = [];
+  for (let i = 0; i < 10; i++) {
+    const a = ((-90 + i * 36) * Math.PI) / 180;
+    const r = i % 2 === 0 ? outer : inner;
+    pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+  }
+  const f = (p) => `${p[0].toFixed(2)} ${p[1].toFixed(2)}`;
+  const outline = pts.map((p, i) => `${i ? 'L' : 'M'}${f(p)}`).join(' ') + ' Z';
+  const facets = [];
+  for (let i = 0; i < 10; i += 2) facets.push(`M${cx} ${cy} L${f(pts[i])} L${f(pts[i + 1])} Z`);
+  return { outline, facets: facets.join(' ') };
+}
+
+const STAR = star(50, 53, 49, 21);
+
+/**
+ * Rollen in der Reihenfolge der Übersicht. Symbole im Feld 100 × 100 (mittig im Sechseck):
+ *   symbol – weiße Teile; cut – Ausschnitte (dort scheint der Grund durch); shade – halb durchsichtige Teile
+ *   (Graustufe in der Maske); detail – feine Ausschnitte erst ab BADGE_DETAIL_FROM Pixeln;
+ *   tool – zweites Symbol obenauf, mit Abstand rundherum (toolCut: Ausschnitte darin), nur groß;
+ *   small – gröbere Fassung (symbol, cut, …) unter BADGE_DETAIL_FROM Pixeln.
+ * badge: Wert vom Heldix-Dienst (null = alle HeldixClient-Spieler, auch Unbekanntes); label wie in Badge.java.
+ */
 const BADGE_ROLES = [
   {
-    // Team-Admin: rot, Krone
-    name: 'admin',
-    char: '\uE001',
-    colors: ['#991b1b', '#dc2626', '#fb923c'],
-    shadow: '#450a0a',
-    symbol: '<path d="M52 136 L52 78 L77 101 L100 60 L123 101 L148 78 L148 136 Z" stroke="#fff" stroke-width="10" stroke-linejoin="round"/>',
+    // alle HeldixClient-Spieler: blau, „H“ aus dem Logo
+    name: 'player', char: '', badge: null, label: 'HeldixClient-Spieler', group: 'Alle',
+    colors: ['#1d4ed8', '#3b82f6', '#22d3ee'], shadow: '#0b1f4d',
+    symbol: '<rect x="7" y="5" width="27" height="90" rx="7.5"/><rect x="66" y="5" width="27" height="90" rx="7.5"/>'
+      + '<path d="M32 57 L68 33.5 L68 61 L32 84.5 Z"/>',
   },
   {
-    // Moderator: grün, Schild mit Haken
-    name: 'moderator',
-    char: '\uE002',
-    colors: ['#047857', '#10b981', '#6ee7b7'],
-    shadow: '#022c22',
-    symbol: '<path d="M100 52 L146 68 V100 C146 128 127 146 100 157 C73 146 54 128 54 100 V68 Z"/>'
-      + '<path d="M78 104 L94 120 L123 89" fill="none" stroke="#0d9466" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>',
+    // Team-Admin: rot, Krone mit Edelsteinen
+    name: 'admin', char: '', badge: 'admin', label: 'Team-Admin', group: 'Team',
+    colors: ['#991b1b', '#dc2626', '#fb923c'], shadow: '#450a0a',
+    symbol: '<path d="M10 33 L30 54 L50 20 L70 54 L90 33 L83 71 L17 71 Z" stroke-width="7"/>'
+      + '<circle cx="9" cy="29" r="8"/><circle cx="50" cy="15" r="9"/><circle cx="91" cy="29" r="8"/>'
+      + '<rect x="14" y="78" width="72" height="16" rx="5"/>',
+    cut: '<path d="M50 43 L57.5 54 L50 65 L42.5 54 Z"/>',
+    detail: '<circle cx="29" cy="86" r="3.6"/><circle cx="50" cy="86" r="4.2"/><circle cx="71" cy="86" r="3.6"/>',
   },
   {
-    // Addon-Entwickler: violett, „</>“
-    name: 'developer',
-    char: '\uE003',
-    colors: ['#5b21b6', '#8b5cf6', '#e879f9'],
-    shadow: '#2e1065',
-    symbol: '<path d="M77 68 L45 100 L77 132 M123 68 L155 100 L123 132 M111 60 L89 140" fill="none" stroke="#fff" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>',
+    // Entwickler (Team): Indigo, Zahnrad mit Schraubenschlüssel
+    name: 'developer-team', char: '', badge: 'developer-team', label: 'Entwickler', group: 'Team',
+    colors: ['#312e81', '#4f46e5', '#a5b4fc'], shadow: '#1e1b4b',
+    symbol: `<path d="${gearPath(50, 50, 48, 37, 8)}"/>`,
+    cut: '<circle cx="50" cy="50" r="22"/>',
+    tool: '<g transform="rotate(45 50 50)"><path d="M43.5 34 V92 A6.5 6.5 0 0 0 56.5 92 V34 Z"/>'
+      + '<circle cx="50" cy="22" r="18"/></g>',
+    toolCut: '<g transform="rotate(45 50 50)"><rect x="43" y="-2" width="14" height="22" rx="3"/></g>',
+    // klein: nur ein Zahnrad mit sechs breiten Zähnen (acht Zähne und Schlüssel verschwimmen dort)
+    small: { symbol: `<path d="${gearPath(50, 50, 49, 35, 6)}" stroke-width="4"/>`, cut: '<circle cx="50" cy="50" r="16"/>' },
+  },
+  {
+    // Moderator: grün, Schild mit Haken (rechte Hälfte etwas dunkler)
+    name: 'moderator', char: '', badge: 'moderator', label: 'Moderator', group: 'Team',
+    colors: ['#047857', '#10b981', '#6ee7b7'], shadow: '#022c22',
+    symbol: '<path d="M50 4 L89 17 V47 C89 72 72 88 50 97 C28 88 11 72 11 47 V17 Z" stroke-width="5"/>',
+    shade: '<rect x="50" y="0" width="56" height="106" fill="#d6d6d6"/>',
+    cut: '<path d="M29 50 L44 65 L72 36" fill="none" stroke-width="13"/>',
+    detail: '<path d="M50 13 L80 23 V47 C80 66 68 79 50 87 C32 79 20 66 20 47 V23 Z" fill="none" stroke-width="2.6"/>',
+  },
+  {
+    // Supporter: Himmelblau, Headset mit Mikrofon
+    name: 'supporter', char: '', badge: 'supporter', label: 'Supporter', group: 'Team',
+    colors: ['#075985', '#0ea5e9', '#7dd3fc'], shadow: '#082f49',
+    symbol: '<path d="M16 56 V48 A34 34 0 0 1 84 48 V56" fill="none" stroke-width="10"/>'
+      + '<rect x="5" y="46" width="24" height="34" rx="9"/><rect x="71" y="46" width="24" height="34" rx="9"/>'
+      + '<path d="M17 78 C17 91 27 94 41 94" fill="none" stroke-width="6.5"/><rect x="38" y="87" width="22" height="13" rx="6.5"/>',
+    detail: '<path d="M12 56 V70 M88 56 V70" fill="none" stroke-width="3"/>',
+  },
+  {
+    // Designer: Pink, Pinsel mit Farbstrich
+    name: 'designer', char: '', badge: 'designer', label: 'Designer', group: 'Team',
+    colors: ['#9d174d', '#ec4899', '#f9a8d4'], shadow: '#500724',
+    symbol: '<g transform="rotate(40 50 50)"><path d="M44 -10 A6 6 0 0 1 56 -10 L58.5 34 H41.5 Z"/>'
+      + '<rect x="38.5" y="35" width="23" height="17" rx="3"/>'
+      + '<path d="M38 54 H62 C68 66 67 82 58 94 C55 98 51 102 45 106 C46 98 41 92 37 84 C33 75 34 63 38 54 Z"/></g>'
+      + '<path d="M30 94 C44 100 58 88 72 91 C80 93 86 96 92 94" fill="none" stroke-width="7"/>',
+    cut: '<g transform="rotate(40 50 50)"><rect x="36" y="41.5" width="28" height="4"/></g>',
+    detail: '<g transform="rotate(40 50 50)"><path d="M46.5 -8 V30" fill="none" stroke-width="2.8"/>'
+      + '<path d="M44 62 C42 70 43 78 47 86" fill="none" stroke-width="2.6"/></g>',
+  },
+  {
+    // Tester: Bernstein, Erlenmeyerkolben mit Haken (oben Glas, unten Flüssigkeit)
+    name: 'tester', char: '', badge: 'tester', label: 'Tester', group: 'Team',
+    colors: ['#92400e', '#d97706', '#fcd34d'], shadow: '#451a03',
+    symbol: '<path d="M38 12 V37 L12 81 C7 90 12 97 22 97 H78 C88 97 93 90 88 81 L62 37 V12 Z" stroke-width="4"/>'
+      + '<rect x="31" y="3" width="38" height="12" rx="5"/>',
+    shade: '<path d="M-6 -6 H106 V56 C88 52 78 60 66 57 C54 54 46 60 34 57 C24 55 14 58 -6 56 Z" fill="#8c8c8c"/>',
+    cut: '<path d="M31 77 L43 88 L69 65" fill="none" stroke-width="10"/>',
+    detail: '<circle cx="47" cy="45" r="3.4"/><circle cx="55" cy="33" r="2.4"/>',
+  },
+  {
+    // Partner: Türkis, Handschlag
+    name: 'partner', char: '', badge: 'partner', label: 'Partner', group: 'Community',
+    colors: ['#0f766e', '#14b8a6', '#67e8f9'], shadow: '#042f2e',
+    // Ärmel links und rechts, dazwischen die Hände: die rechte Hand greift von oben über die linke (Daumen oben,
+    // Finger unten als Bögen)
+    symbol: '<path d="M2 40 L16 30 L33 58 L19 68 Z" stroke-width="6"/><path d="M98 40 L84 30 L67 58 L81 68 Z" stroke-width="6"/>'
+      + '<path d="M22 40 C30 33 38 29 47 29 H58 C66 29 73 33 79 38 L66 60 C62 67 56 71 49 71 H40 C33 71 28 67 25 61 Z" stroke-width="5"/>'
+      + '<circle cx="35" cy="69" r="7"/><circle cx="45" cy="73" r="7"/><circle cx="55" cy="71" r="7"/><circle cx="63" cy="64" r="6.5"/>',
+    cut: '<path d="M22 37 L35 59 M78 37 L65 59" fill="none" stroke-width="5"/>'
+      + '<path d="M61 30 C53 31 46 35 42 42 L36 52" fill="none" stroke-width="4.5"/>',
+    detail: '<path d="M40 64 L41 70 M50 66 L51 72 M59 63 L60 68" fill="none" stroke-width="3"/>',
+  },
+  {
+    // Creator: Orange, Play-Knopf mit Funkeln
+    name: 'creator', char: '', badge: 'creator', label: 'Creator', group: 'Community',
+    colors: ['#c2410c', '#f97316', '#fdba74'], shadow: '#431407',
+    symbol: '<circle cx="45" cy="56" r="41"/>'
+      + '<path d="M85 2 L88.5 11.5 L98 15 L88.5 18.5 L85 28 L81.5 18.5 L72 15 L81.5 11.5 Z" stroke-width="2"/>',
+    cut: '<path d="M36 37 L64 56 L36 75 Z" stroke-width="7"/>',
+    detail: '<circle cx="45" cy="56" r="34.5" fill="none" stroke-width="2.4"/>',
+  },
+  {
+    // Botschafter: Gold, Stern (rechte Zackenhälften etwas dunkler)
+    name: 'ambassador', char: '', badge: 'ambassador', label: 'Botschafter', group: 'Community',
+    colors: ['#a16207', '#eab308', '#fef08a'], shadow: '#422006',
+    symbol: `<path d="${STAR.outline}" stroke-width="7"/>`,
+    shade: `<path d="${STAR.facets}" fill="#e2e2e2" stroke="#e2e2e2" stroke-width="7"/>`,
+  },
+  {
+    // Addon-Entwickler (veröffentlichtes Community-Addon, vergibt der Dienst selbst): violett, „</>“
+    name: 'developer', char: '', badge: 'developer', label: 'Addon-Entwickler', group: 'Automatisch',
+    colors: ['#5b21b6', '#8b5cf6', '#e879f9'], shadow: '#2e1065',
+    symbol: '<path d="M29 24 L5 50 L29 76 M71 24 L95 50 L71 76" fill="none" stroke-width="14"/>'
+      + '<path d="M58 14 L42 86" fill="none" stroke-width="12"/>',
   },
 ];
 
-/** Symbol einer Rolle als SVG (gleicher Aufbau wie logo.svg: Verlauf, Glanz, Kante, Zeichen mit Schatten) */
-function badgeSvg(role) {
+let badgeIds = 0;
+
+/**
+ * Ein Abzeichen als SVG, height Pixel hoch (Breite 7/8 davon). Aufbau wie logo.svg: Verlauf, Glanz, Kante (oben hell,
+ * unten dunkel), feine Innenkante; das Symbol weiß mit Schatten in der Farbe der Rolle.
+ */
+function badgeSvg(role, height) {
+  const id = `b${++badgeIds}`;
   const [c0, c1, c2] = role.colors;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="256" height="256">
+  const big = height >= BADGE_DETAIL_FROM;
+  // klein: eigene, gröbere Fassung, wenn die Rolle eine hat; Werkzeug obenauf nur groß
+  const look = !big && role.small ? { ...role, ...role.small, tool: null } : role;
+  const cuts = `${look.cut ?? ''}${big ? look.detail ?? '' : ''}`;
+  const area = 'x="-40" y="-40" width="180" height="180"';
+  // Werkzeug obenauf: im Symbol darunter einen Rand um das Werkzeug ausschneiden
+  const toolGap = look.tool ? `<g stroke-width="9">${look.tool}</g>` : '';
+  const symbolMask = `<mask id="${id}m" maskUnits="userSpaceOnUse" ${area}><rect ${area} fill="#fff"/>${look.shade ?? ''}`
+    + `<g fill="#000" stroke="#000" stroke-width="0" stroke-linecap="round" stroke-linejoin="round">${cuts}${toolGap}</g></mask>`;
+  const toolMask = look.tool ? `<mask id="${id}t" maskUnits="userSpaceOnUse" ${area}><rect ${area} fill="#fff"/>`
+    + `<g fill="#000">${look.toolCut ?? ''}</g></mask>` : '';
+  const scale = 1.06;
+  const ox = (BADGE_W - 100 * scale) / 2;
+  const oy = (BADGE_H - 100 * scale) / 2;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${BADGE_W} ${BADGE_H}" width="${(height * 7) / 8}" height="${height}" style="display:block">
   <defs>
-    <linearGradient id="fill" x1="0.15" y1="1" x2="0.85" y2="0">
+    <linearGradient id="${id}f" x1="0.15" y1="1" x2="0.85" y2="0">
       <stop offset="0" stop-color="${c0}"/><stop offset="0.55" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/>
     </linearGradient>
-    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.32"/><stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+    <linearGradient id="${id}s" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.34"/><stop offset="0.52" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
-    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/><stop offset="0.6" stop-color="#ffffff" stop-opacity="0.08"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0.15"/>
+    <linearGradient id="${id}e" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.7"/><stop offset="0.45" stop-color="#ffffff" stop-opacity="0.1"/>
+      <stop offset="0.7" stop-color="#000000" stop-opacity="0.05"/><stop offset="1" stop-color="#000000" stop-opacity="0.38"/>
     </linearGradient>
-    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="${role.shadow}" flood-opacity="0.5"/>
+    <clipPath id="${id}c"><path d="${BADGE_HEXAGON}"/></clipPath>
+    <filter id="${id}d" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="3.5" stdDeviation="3.5" flood-color="${role.shadow}" flood-opacity="0.6"/>
     </filter>
+    ${symbolMask}${toolMask}
   </defs>
-  <path d="${BADGE_HEXAGON}" fill="url(#fill)"/>
-  <path d="${BADGE_HEXAGON}" fill="url(#sheen)"/>
-  <path d="${BADGE_HEXAGON}" fill="none" stroke="url(#edge)" stroke-width="2"/>
-  <g filter="url(#shadow)" fill="#ffffff">${role.symbol}</g>
+  <path d="${BADGE_HEXAGON}" fill="url(#${id}f)"/>
+  <path d="${BADGE_HEXAGON}" fill="url(#${id}s)"/>
+  <path d="${BADGE_HEXAGON}" fill="none" stroke="url(#${id}e)" stroke-width="12" clip-path="url(#${id}c)"/>
+  <path d="${BADGE_INNER}" fill="none" stroke="#ffffff" stroke-opacity="${big ? 0.2 : 0.1}" stroke-width="2.5"/>
+  <g transform="translate(${ox} ${oy}) scale(${scale})" filter="url(#${id}d)" fill="#ffffff" stroke="#ffffff" stroke-width="0" stroke-linecap="round" stroke-linejoin="round">
+    <g mask="url(#${id}m)">${look.symbol}</g>${look.tool ? `<g mask="url(#${id}t)">${look.tool}</g>` : ''}
+  </g>
 </svg>`;
+}
+
+/** Abzeichen in der Reihenfolge ihrer Zeichen (so stehen sie in den Schrift-Grafiken) */
+const BADGE_BY_CHAR = [...BADGE_ROLES].sort((a, b) => a.char.codePointAt(0) - b.char.codePointAt(0));
+
+/** Alle Abzeichen je Skalierung in einer Zeile (Zeile s: 8·s hoch), untereinander – danach in Zeilen geschnitten */
+function badgeAtlasHtml() {
+  let top = 0;
+  const rows = [];
+  for (const s of BADGE_SCALES) {
+    rows.push(BADGE_BY_CHAR.map((role, i) => `<div style="position:absolute;left:${i * 7 * s}px;top:${top}px">${badgeSvg(role, 8 * s)}</div>`).join(''));
+    top += 8 * s;
+  }
+  return `<!doctype html><html><body style="margin:0;background:transparent;overflow:hidden">${rows.join('\n')}</body></html>`;
+}
+
+const PREVIEW_COLUMNS = 4;
+const PREVIEW_CARD_W = 300;
+const PREVIEW_CARD_H = 128;
+
+/** Übersicht für die Doku: groß, mit Bezeichnung, badge-Wert und den Größen im Spiel (GUI-Skalierung 2, 3, 4) */
+function badgePreviewHtml() {
+  const card = (role) => `<div style="box-sizing:border-box;height:${PREVIEW_CARD_H}px;display:flex;gap:16px;align-items:center;padding:0 16px;background:rgba(255,255,255,0.045);border:1px solid rgba(255,255,255,0.07);border-radius:14px">
+  ${badgeSvg(role, 96)}
+  <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+    <div style="font:700 15px 'Segoe UI',sans-serif;color:#e8edf5">${role.label}</div>
+    <div style="font:600 10.5px 'Segoe UI',sans-serif;color:#7c8799;text-transform:uppercase;letter-spacing:0.06em">${role.group}</div>
+    <div style="font:500 12px Consolas,monospace;color:#98a2b3">${role.badge === null ? 'badge: null / unbekannt' : `badge: "${role.badge}"`}</div>
+    <div style="display:flex;gap:9px;align-items:flex-end;margin-top:3px;padding:5px 8px;background:rgba(0,0,0,0.35);border-radius:6px">
+      ${[2, 3, 4].map((s) => badgeSvg(role, 8 * s)).join('')}
+      <span style="font:600 10.5px 'Segoe UI',sans-serif;color:#7c8799">im Spiel</span>
+    </div>
+  </div>
+</div>`;
+  return `<!doctype html><html><body style="margin:0;overflow:hidden;background:#0d1220">
+<div style="padding:18px;display:grid;grid-template-columns:repeat(${PREVIEW_COLUMNS}, ${PREVIEW_CARD_W}px);grid-auto-rows:${PREVIEW_CARD_H}px;gap:12px">
+${BADGE_ROLES.map(card).join('\n')}
+</div></body></html>`;
+}
+
+/** Abzeichen rendern: Schriften heldixclient:badge und badge_1–7, Übersicht docs/images/abzeichen.png */
+async function writeBadges() {
+  const fontTextures = path.join(assets, 'textures', 'font');
+  await mkdir(fontTextures, { recursive: true });
+  const largest = Math.max(...BADGE_SCALES);
+  const chars = BADGE_BY_CHAR.map((role) => role.char).join('');
+  const atlas = await render(badgeAtlasHtml(), BADGE_BY_CHAR.length * 7 * largest, BADGE_SCALES.reduce((sum, s) => sum + 8 * s, 0), true);
+  let top = 0;
+  for (const s of BADGE_SCALES) {
+    const name = s === largest ? 'badge' : `badge_${s}`;
+    const image = atlas.crop({ x: 0, y: top, width: BADGE_BY_CHAR.length * 7 * s, height: 8 * s });
+    await writeFile(path.join(fontTextures, `${name}.png`), image.toPNG());
+    const font = { providers: [{ type: 'bitmap', file: `heldixclient:font/${name}.png`, ascent: 7, height: 8, chars: [chars] }] };
+    await writeFile(path.join(fontDir, `${name}.json`), `${JSON.stringify(font, null, 2)}\n`);
+    top += 8 * s;
+  }
+  const rows = Math.ceil(BADGE_ROLES.length / PREVIEW_COLUMNS);
+  const preview = await render(badgePreviewHtml(), PREVIEW_COLUMNS * PREVIEW_CARD_W + (PREVIEW_COLUMNS - 1) * 12 + 36,
+    rows * PREVIEW_CARD_H + (rows - 1) * 12 + 36);
+  await writeFile(path.join(launcherDir, '..', 'docs', 'images', 'abzeichen.png'), preview.toPNG());
+  // auf Wunsch die Abzeichen als einzelne SVG-Dateien (z. B. für Webseite und Launcher)
+  const svgDir = argValue('--abzeichen-svg');
+  if (svgDir) {
+    await mkdir(svgDir, { recursive: true });
+    for (const role of BADGE_ROLES) await writeFile(path.join(svgDir, `${role.name}.svg`), `${badgeSvg(role, 64)}\n`);
+  }
+  console.log(`Abzeichen geschrieben: ${BADGE_ROLES.length} Rollen (U+E000–U+${chars.codePointAt(chars.length - 1).toString(16).toUpperCase()}), Schriften badge und badge_1–${largest - 1}`);
+}
+
+/** Wert eines Aufruf-Arguments --name=wert (null = fehlt) */
+function argValue(name) {
+  const arg = process.argv.find((a) => a.startsWith(`${name}=`));
+  return arg ? arg.slice(name.length + 1) : null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -402,10 +667,44 @@ async function writeFonts() {
 // Rendern mit Electron (SVG → PNG)
 // ---------------------------------------------------------------------------------------------
 
-app.commandLine.appendSwitch('force-device-scale-factor', '1');
-app.on('window-all-closed', () => {});
+if (app) {
+  app.commandLine.appendSwitch('force-device-scale-factor', '1');
+  app.on('window-all-closed', () => {});
+}
 
-async function render(html, width, height) {
+/**
+ * Icons und Abzeichen für den Launcher (src/renderer/ui-icons.ts): Icons mit currentColor, Abzeichen je Rolle als
+ * fertiges SVG (64 px hoch, wie --abzeichen-svg) mit Bezeichnung wie BADGE_LABELS im Heldix-Dienst.
+ */
+async function writeLauncherIcons() {
+  const launcherIcons = Object.fromEntries(NAMES.map((n) => [n, ICONS[n].replaceAll('#fff', 'currentColor')]));
+  // eigene IDs ab 0: gleiche Ausgabe, egal ob vorher andere Abzeichen gezeichnet wurden
+  badgeIds = 0;
+  const badges = Object.fromEntries(BADGE_ROLES.map((role) => [role.name, badgeSvg(role, 64).replace(/\s*\n\s*/g, ' ')]));
+  // klein (Listen, unter 32 px): gröbere Fassung ohne feine Ausschnitte, wie im Spiel
+  const small = Object.fromEntries(BADGE_ROLES.map((role) => [role.name, badgeSvg(role, 16).replace(/\s*\n\s*/g, ' ')]));
+  const labels = Object.fromEntries(BADGE_ROLES.map((role) => [role.name, role.label]));
+  const header = [
+    '// Erzeugt von scripts/render-ui-assets.mjs (npm run ui-assets bzw. node scripts/render-ui-assets.mjs --nur-launcher) – nicht von Hand ändern.',
+    '// Das Icon-Set von HeldixClient: dieselben Icons wie im Spiel, 24er-Raster, 2 px Linien.',
+  ].join('\n');
+  await writeFile(path.join(launcherDir, 'src', 'renderer', 'ui-icons.ts'),
+    `${header}\nexport const UI_ICONS: Record<string, string> = ${JSON.stringify(launcherIcons, null, 2)};\n`
+    + '\n/** Abzeichen je Rolle (Sechseck wie das Logo, eigenes Symbol): Schlüssel = badge-Wert des Dienstes, player = alle anderen */\n'
+    + `export const UI_BADGES: Record<string, string> = ${JSON.stringify(badges, null, 2)};\n`
+    + '\n/** dieselben Abzeichen für kleine Darstellung (unter 32 px, z. B. in der Freundesliste) */\n'
+    + `export const UI_BADGES_SMALL: Record<string, string> = ${JSON.stringify(small, null, 2)};\n`
+    + '\n/** Bezeichnungen wie BADGE_LABELS in service/src/roles.ts (player = normaler HeldixClient-Spieler) */\n'
+    + `export const BADGE_LABELS: Record<string, string> = ${JSON.stringify(labels, null, 2)};\n`);
+}
+
+if (launcherOnly) {
+  await writeLauncherIcons();
+  console.log(`Launcher-Icons geschrieben: ${NAMES.length} Icons, ${BADGE_ROLES.length} Abzeichen (src/renderer/ui-icons.ts)`);
+}
+
+/** HTML als Bild; exact: Größe muss stimmen (Schrift-Grafiken), sonst wird höchstens skaliert */
+async function render(html, width, height, exact = false) {
   const win = new BrowserWindow({
     width,
     height,
@@ -419,12 +718,21 @@ async function render(html, width, height) {
   await new Promise((resolve) => setTimeout(resolve, 600));
   let image = await win.webContents.capturePage();
   const size = image.getSize();
-  if (size.width !== width || size.height !== height) image = image.resize({ width, height, quality: 'best' });
+  if (size.width !== width || size.height !== height) {
+    if (exact) throw new Error(`Bild ist ${size.width} × ${size.height} statt ${width} × ${height} groß`);
+    image = image.resize({ width, height, quality: 'best' });
+  }
   win.destroy();
   return image;
 }
 
-app.whenReady().then(async () => {
+if (app) app.whenReady().then(async () => {
+  // --nur-abzeichen: nur die Abzeichen neu zeichnen (Schriften badge*, docs/images/abzeichen.png), sonst alles
+  if (process.argv.includes('--nur-abzeichen')) {
+    await writeBadges();
+    app.quit();
+    return;
+  }
   await mkdir(out, { recursive: true });
 
   await writeFile(path.join(out, 'icons.png'), (await render(iconsHtml(CELL), COLUMNS * CELL, ROWS * CELL)).toPNG());
@@ -449,20 +757,10 @@ app.whenReady().then(async () => {
   const logoImage = await render(logoHtml, 256, 256);
   await writeFile(path.join(out, 'logo.png'), logoImage.resize({ width: 128, height: 128, quality: 'best' }).toPNG());
 
-  // Heldix-Symbol als Schriftzeichen – steht in der Tab-Liste und im Namensschild vor dem Namen von HeldixClient-Spielern:
-  // U+E000 das Logo (alle), U+E001 Team-Admin, U+E002 Moderator, U+E003 Addon-Entwickler
-  const fontTextures = path.join(assets, 'textures', 'font');
-  await mkdir(fontTextures, { recursive: true });
-  await writeFile(path.join(fontTextures, 'badge.png'), logoImage.resize({ width: 32, height: 32, quality: 'best' }).toPNG());
-  const badgeProviders = [{ type: 'bitmap', file: 'heldixclient:font/badge.png', ascent: 7, height: 8, chars: ['\uE000'] }];
-  for (const role of BADGE_ROLES) {
-    const html = `<!doctype html><html><body style="margin:0;background:transparent;overflow:hidden"><div style="width:256px;height:256px">${badgeSvg(role)}</div></body></html>`;
-    const image = await render(html, 256, 256);
-    await writeFile(path.join(fontTextures, `badge_${role.name}.png`), image.resize({ width: 32, height: 32, quality: 'best' }).toPNG());
-    badgeProviders.push({ type: 'bitmap', file: `heldixclient:font/badge_${role.name}.png`, ascent: 7, height: 8, chars: [role.char] });
-  }
-  await writeFile(path.join(fontDir, 'badge.json'), `${JSON.stringify({ providers: badgeProviders }, null, 2)}\n`);
+  // Abzeichen je Rolle als Schriftzeichen (Tab-Liste und Namensschild), siehe oben
+  await writeBadges();
 
+  const fontTextures = path.join(assets, 'textures', 'font');
   // Alle Icons als Schriftzeichen (Schrift heldixclient:marker, U+E100 + Nummer in icons.json): für Symbole am
   // Namensschild über dem Kopf, z. B. „spricht gerade“ im Voice Chat. Weiß, Minecraft färbt sie mit der Textfarbe.
   const markerCell = 32;
@@ -482,14 +780,8 @@ app.whenReady().then(async () => {
 
   await writeFonts();
 
-  // dieselben Icons für den Launcher (src/renderer/ui-icons.ts), Farbe dort per currentColor
-  const launcherIcons = Object.fromEntries(NAMES.map((n) => [n, ICONS[n].replaceAll('#fff', 'currentColor')]));
-  const header = [
-    '// Erzeugt von scripts/render-ui-assets.mjs (npm run ui-assets) – nicht von Hand ändern.',
-    '// Das Icon-Set von HeldixClient: dieselben Icons wie im Spiel, 24er-Raster, 2 px Linien.',
-  ].join('\n');
-  await writeFile(path.join(launcherDir, 'src', 'renderer', 'ui-icons.ts'),
-    `${header}\nexport const UI_ICONS: Record<string, string> = ${JSON.stringify(launcherIcons, null, 2)};\n`);
+  // dieselben Icons für den Launcher (src/renderer/ui-icons.ts), Farbe dort per currentColor, dazu die Abzeichen
+  await writeLauncherIcons();
   console.log(`Oberflächen-Grafiken geschrieben: ${NAMES.length} Icons, Ecken bis ${MAX_R} px, Schriften für Skalierung 1–6`);
   app.quit();
 });

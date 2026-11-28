@@ -56,7 +56,8 @@ public interface Cosmetics {
 	/**
 	 * Alle Cosmetics im Katalog, die HeldixClient geladen und geprüft hat (Signatur des Teams, alle Regeln des Formats),
 	 * sortiert nach Slot und Name. Leer, solange der Katalog lädt oder ohne Heldix-Dienst. Die eingebauten Capes stehen
-	 * nicht darin (ihre IDs: heldix, mitternacht, aurora, glut, kristall, neon, sakura, gewitter, galaxie).
+	 * nicht darin (ihre IDs: heldix, mitternacht, aurora, glut, kristall, neon, sakura, gewitter, galaxie, matrix,
+	 * matrix_rot, matrix_tuerkis, sakura_orange).
 	 */
 	List<CosmeticInfo> catalog();
 

@@ -52,6 +52,37 @@
 .profile-tag-close { width: 12px; height: 12px; margin-right: -3px; }
 .profile-motion { position: absolute; top: 8px; right: 8px; }
 
+/* Format 2: Animationen des gezeigten Cosmetics (Namen aus dem Manifest) */
+.profile-anims {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  pointer-events: none;
+}
+.profile-anims[hidden] { display: none; }
+.profile-anim {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.profile-anim:hover { color: var(--text); }
+.profile-anim[aria-pressed="true"] { color: var(--accent-text); background: var(--accent-soft); border-color: var(--accent-line); }
+.profile-anim-once { font-size: 10px; font-weight: 600; opacity: 0.75; }
+
 .profile-stage-foot { display: flex; align-items: center; gap: 10px; padding: 11px 12px 11px 14px; border-top: 1px solid var(--line); background: var(--surface); }
 .profile-stage-text { flex: 1; min-width: 0; }
 .profile-stage-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -180,6 +211,10 @@ input[type="text"].profile-skin-input { width: 100%; height: 28px; margin: 0 -4p
 /* nur für das HeldixClient-Team */
 .profile-cape-team { position: absolute; top: 6px; left: 6px; display: inline-flex; align-items: center; gap: 3px; height: 18px; padding: 0 6px 0 5px; border-radius: 6px; background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
 .profile-cape-team svg { width: 10px; height: 10px; stroke-width: 2.6; }
+/* Belohnung für Einladungen (access „unlock“) */
+.profile-cape-reward { background: var(--accent-soft); color: var(--accent-text); }
+.profile-reward-hint { flex-wrap: wrap; }
+.profile-reward-hint svg { color: var(--accent-text); }
 
 /* ---------- Cosmetics (quadratische Vorschau, 3D aus cosmetic-scene.ts) ---------- */
 .profile-cape.square .profile-cape-art {
@@ -194,6 +229,8 @@ input[type="text"].profile-skin-input { width: 100%; height: 28px; margin: 0 -4p
 /* lange deutsche Namen („Heiligenschein“) möglichst in einer Zeile, sonst trennen */
 .profile-cape.square { padding-left: 4px; padding-right: 4px; }
 .profile-cape.square .profile-cape-name { font-size: 12px; hyphens: auto; }
+.profile-cape-name.long { overflow-wrap: normal; letter-spacing: -0.015em; }
+.profile-cape.square .profile-cape-name.long { font-size: 11px; }
 .profile-cosmetic-thumb { display: block; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.2s, transform 0.18s ease; }
 .profile-cosmetic-thumb.ready { opacity: 1; }
 .profile-cape.square:hover .profile-cosmetic-thumb { transform: scale(1.06); }

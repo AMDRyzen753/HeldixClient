@@ -90,7 +90,7 @@ async function main(): Promise<void> {
     for (const leftover of (await readdir(addonsDir)).filter((f) => f === '.entfernen' || f === '.ausschalten' || f.endsWith('.neu') || f.endsWith('.part'))) {
       await rm(path.join(addonsDir, leftover), { force: true });
     }
-    for (const id of ['uhrzeit', 'spotify', 'itemphysics', 'voicechat']) {
+    for (const id of ['uhrzeit', 'spotify', 'itemphysics', 'voicechat', 'minimap', 'emoterad']) {
       const libs = path.join(modRepo, 'addons', id, 'build', 'libs');
       const built = await Promise.all((await readdir(libs).catch(() => [] as string[]))
         .filter((f) => f.startsWith(`heldix-addon-${id}-`) && f.endsWith('.jar'))
@@ -183,6 +183,8 @@ async function main(): Promise<void> {
   if (autotest) testArgs.push('-Dheldixclient.voicechat.testAudio=true', '-Dheldixclient.voice.testServer=autotest.heldixclient.com');
   // --service=<url>: Heldix-Dienst im Entwicklungsmodus (Anmeldung ohne Mojang, nur für Tests)
   if (flag('service')) testArgs.push(`-Dheldixclient.service=${flag('service')}`, '-Dheldixclient.service.dev=true');
+  // --welt-port=<port>: Relay des lokalen Dienstes (HELDIX_DIENST_WELT_PORT) für „Welt teilen“ im Autotest (Test-Client per TCP)
+  if (autotest && flag('welt-port')) testArgs.push(`-Dheldixclient.welt.testPort=${Number(flag('welt-port'))}`);
   if (autotest && graphicsArgs.length) testArgs.push(`-Dheldix.autotest.backend=${graphicsApi === 'vulkan' ? 'Vulkan' : 'OpenGL'}`);
   if (benchmark) {
     testArgs.push('-Dheldix.benchmark=true', `-Dheldix.benchmark.seconds=${benchmarkSeconds}`);

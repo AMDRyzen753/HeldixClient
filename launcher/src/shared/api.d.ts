@@ -35,11 +35,27 @@ export interface Settings {
   discordPresence: boolean;
   /** Serveradresse im Discord-Status zeigen (nur öffentliche Domains) */
   discordShowServer: boolean;
+  /** Knöpfe „Mitspielen“ und „HeldixClient holen“ im Discord-Status (Einladungslinks des Heldix-Dienstes) */
+  discordInviteButtons: boolean;
+  /** Dimension und Spielmodus im Discord-Status („Im Nether · Überleben“) */
+  discordShowDetails: boolean;
+  /** Name der Einzelspielerwelt im Discord-Status (Standard aus) */
+  discordShowWorldName: boolean;
+  /** Spielerzahl auf dem Server bzw. in der geteilten Welt („(3 von 8)“), in einer Heldix-Party deren Größe */
+  discordShowParty: boolean;
+  /** Voice Chat im Discord-Status („Im Voice mit 3 anderen“) */
+  discordShowVoice: boolean;
+  /** eigener Minecraft-Kopf als kleines Bild (vom Heldix-Dienst gerendert), sonst das Loader-Symbol */
+  discordShowHead: boolean;
+  /** nur „Spielt HeldixClient“ ohne weitere Angaben */
+  discordMinimal: boolean;
+  /** Fenster schließen, während ein Spiel läuft: Launcher bleibt im Infobereich (Tray) */
+  closeToTray: boolean;
   /** Grafik-API für Minecraft-Versionen mit Vulkan-Unterstützung */
   graphicsApi: GraphicsApi;
   /** abgestimmte JVM-Einstellungen (G1, kompakte Objekt-Header ab Java 25) */
   jvmTuning: boolean;
-  /** neue Launcher-Versionen im Hintergrund laden und beim Beenden installieren */
+  /** beim Start nach Updates suchen und gleich installieren, im laufenden Launcher im Hintergrund laden; aus = nur Hinweis */
   autoUpdate: boolean;
   /** zuletzt gesehene Version für "Was ist neu" (null = noch nie) */
   lastSeenVersion: string | null;
@@ -47,12 +63,65 @@ export interface Settings {
   social: boolean;
   /** Windows-/macOS-Benachrichtigung bei neuen Nachrichten und Anfragen, wenn der Launcher nicht im Vordergrund ist */
   socialNotifications: boolean;
+  /** Party: dem Leiter automatisch folgen (nur, wenn gerade kein Spiel läuft; Standard aus) */
+  partyAutoFollow: boolean;
   /** Benachrichtigung, wenn es für installierte Addons Updates gibt (einmal je Version) */
   addonUpdateNotifications: boolean;
   /** Addon-Updates automatisch installieren, wenn kein Spiel läuft */
   addonAutoUpdate: boolean;
   /** Kontowechsel im Spiel (Heldix-Menü) erlauben; beim ersten Wechsel zu einem Konto fragt der Launcher nach */
   gameAccountSwitch: boolean;
+  /** Einrichtungs-Assistent erledigt (fertig oder übersprungen); bestehende Installationen gelten als eingerichtet */
+  setupDone: boolean;
+}
+
+/** Einrichtungs-Assistent beim ersten Start (main/core/setup.ts) */
+export interface SetupInfo {
+  /** Assistent zeigen */
+  show: boolean;
+  /** Einladung (Link oder Download), die nach dem Assistenten im Einladungsdialog kommt; null = keine */
+  invite: string | null;
+}
+
+/** Ein offizielles Addon im Schritt „Addons“ */
+export interface SetupAddon {
+  id: string;
+  name: string;
+  version: string;
+  summary: string;
+  /** Name im Heldix-Icon-Set */
+  icon: string;
+  category: 'hud' | 'musik' | 'chat' | 'werkzeuge' | 'sonstiges';
+  /** Größe der JAR in Bytes */
+  size: number;
+  /** minecraft = greift in Minecraft ein */
+  access: AddonAccess;
+  /** empfohlen: Voice Chat, Minimap, Uhrzeit & Spielzeit */
+  recommended: boolean;
+  /** in allen passenden Ziel-Instanzen schon installiert (gleiche oder neuere Version) */
+  installed: boolean;
+  /** vorausgewählt (empfohlen und noch nicht installiert) */
+  preselected: boolean;
+}
+
+export interface SetupAddons {
+  /** offline = Addon-Store nicht erreichbar (Schritt überspringbar), no-instance = keine Instanz mit HeldixClient */
+  status: 'ok' | 'offline' | 'no-instance';
+  error: string | null;
+  addons: SetupAddon[];
+  /** Standard-Instanzen mit HeldixClient, in die installiert wird */
+  targets: { id: string; name: string }[];
+}
+
+export interface SetupInstallResult {
+  id: string;
+  name: string;
+  /** Instanzen, in die es installiert wurde */
+  installed: string[];
+  /** Instanzen, in denen es schon war */
+  already: string[];
+  /** Fehler (auch teilweise, z. B. eine Instanz läuft gerade) */
+  error: string | null;
 }
 
 /** "Was ist neu" nach einem Update: alle Versionen seit der zuletzt gesehenen */
@@ -176,6 +245,16 @@ export type SocialStatus = 'disabled' | 'no-service' | 'no-account' | 'offline-a
 /** Was ein Freund gerade macht (null = online im Menü bzw. unbekannt) */
 export type FriendActivity = 'menu' | 'singleplayer' | 'multiplayer' | 'realms' | 'lan';
 
+/**
+ * Abzeichen (Heldix-Dienst ab 1.12.0, BADGE_LABELS in service/src/roles.ts): Team-Rolle (nur mit öffentlichem
+ * Teamprofil), Community-Abzeichen oder Addon-Entwickler. null = normaler HeldixClient-Spieler (blaues „H“).
+ * developer-team (Entwickler im Team) ist nicht developer (Addon-Entwickler).
+ */
+export type PlayerBadge = 'admin' | 'developer-team' | 'moderator' | 'supporter' | 'designer' | 'tester' | 'partner' | 'creator' | 'ambassador' | 'developer';
+
+/** „Ist online“-Benachrichtigungen: für alle Freunde, nur Favoriten oder keine (wertet der Client aus) */
+export type OnlineNotify = 'all' | 'favorites' | 'none';
+
 export interface Friend {
   /** UUID ohne Bindestriche, klein */
   uuid: string;
@@ -188,6 +267,29 @@ export interface Friend {
   since: number;
   /** ungelesene Nachrichten von ihm */
   unread: number;
+  /** eigene Angaben, nur für dich: Favorit (Stern, oben in der Liste) */
+  favorite: boolean;
+  /** eigener Spitzname für ihn (höchstens 24 Zeichen), null = keiner */
+  nickname: string | null;
+  /** eigene Notiz (höchstens 200 Zeichen), null = keine */
+  note: string | null;
+  /** sein Statustext (höchstens 40 Zeichen), auch wenn er offline ist */
+  statusText: string | null;
+  /** „Nicht stören“ (nur, solange er online ist) */
+  dnd: boolean;
+  /** zuletzt online (ms, vom Dienst gerundet), nur offline und wenn er es zeigt */
+  lastOnline: number | null;
+  badge: PlayerBadge | null;
+}
+
+/** Eigenes Profil beim Dienst (GET /v1/me), soweit die Freunde-Seite es braucht */
+export interface SocialMe {
+  uuid: string;
+  name: string;
+  badge: PlayerBadge | null;
+  statusText: string | null;
+  dnd: boolean;
+  onlineNotify: OnlineNotify;
 }
 
 export interface FriendRequest {
@@ -202,13 +304,26 @@ export interface SocialOverview {
   /** deutsche Fehlermeldung bei status = error */
   error: string | null;
   /** beim Dienst angemeldeter Spieler */
-  me: { uuid: string; name: string } | null;
-  /** online zuerst, dann nach Name */
+  me: SocialMe | null;
+  /** Favoriten zuerst, dann online, dann nach Name */
   friends: Friend[];
   incoming: FriendRequest[];
   outgoing: FriendRequest[];
   /** ungelesene Nachrichten insgesamt */
   unread: number;
+  /** Echtzeit-Begleiter (/v1/ws?client=launcher): live = verbunden, sonst fragt der Launcher regelmäßig ab */
+  realtime: 'off' | 'connecting' | 'live';
+}
+
+/** Reaktionen auf Nachrichten (8 feste, REACTIONS in service/src/messages.ts); höchstens eine je Person */
+export type ReactionId = 'like' | 'love' | 'laugh' | 'wow' | 'sad' | 'party' | 'fire' | 'eyes';
+
+/** Beitreten-Karte in einer Nachricht: Server-Adresse, Welt-Code (6 Zeichen) oder Einladungs-Code (10 Zeichen) */
+export interface MessageCard {
+  kind: 'server' | 'world' | 'invite';
+  target: string;
+  /** höchstens 60 Zeichen, eine Zeile */
+  title: string;
 }
 
 export interface ChatMessage {
@@ -216,12 +331,132 @@ export interface ChatMessage {
   id: number;
   from: string;
   to: string;
-  /** reiner Text, nie als HTML ausgeben */
+  /** reiner Text, nie als HTML ausgeben (bei Karten der Rückfall für ältere Clients) */
   text: string;
   at: number;
   read: boolean;
   /** vom angemeldeten Spieler gesendet */
   mine: boolean;
+  /** Antwort auf: text = erste 100 Zeichen; gelöschte Nachricht: from und text null */
+  replyTo: { id: number; from: string | null; text: string | null } | null;
+  card: MessageCard | null;
+  /** Reaktion je Spieler (UUID) */
+  reactions: Record<string, ReactionId>;
+}
+
+/** Echtzeit in einer Unterhaltung (uuid = Freund) */
+export type ChatEvent =
+  | { kind: 'message'; uuid: string; message: ChatMessage }
+  | { kind: 'deleted'; uuid: string; id: number }
+  | { kind: 'reaction'; uuid: string; id: number; reactions: Record<string, ReactionId> }
+  /** „schreibt …“: 6 s nach dem letzten Ereignis bzw. bei einer neuen Nachricht ausblenden */
+  | { kind: 'typing'; uuid: string }
+  /** in einem anderen Client gelesen */
+  | { kind: 'read'; uuid: string };
+
+/** Profilkarte eines Freundes (GET /v1/friends/<uuid>/profile) */
+export interface FriendProfile {
+  friend: Friend;
+  /** nur gemeinsame Freunde, nach Name */
+  mutual: { uuid: string; name: string }[];
+  /** Heldix-Cape ('' = keins oder nicht sichtbar) */
+  cape: string;
+  /** Cosmetics je Slot (null = nicht sichtbar) */
+  cosmetics: Record<string, string | null> | null;
+}
+
+/** Freunde von Freunden (nur Spieler mit „In Vorschlägen erscheinen“) */
+export interface FriendSuggestions {
+  /** false = „Vorschläge zeigen“ ist aus (oder Dienst ohne Vorschläge) */
+  enabled: boolean;
+  suggestions: { uuid: string; name: string; mutual: number }[];
+}
+
+// ---------- Party (Heldix-Dienst ab 1.12.0, main/core/party.ts) ----------
+
+/** Ort eines Party-Mitglieds: gleiche address = gleicher Ort */
+export interface PartyLocation {
+  kind: 'server' | 'world';
+  /** Server-Adresse bzw. Welt-Code */
+  target: string;
+  /** zum Beitreten (Welt: <code>.<Welt-Domain>) */
+  address: string;
+  /** Server-Adresse bzw. Name der Welt */
+  title: string;
+}
+
+export interface PartyMember {
+  uuid: string;
+  name: string;
+  leader: boolean;
+  /** im Spiel verbunden */
+  online: boolean;
+  /** gar keine Verbindung (fliegt nach awayUntil raus) */
+  away: boolean;
+  awayUntil: number | null;
+  state: FriendActivity | null;
+  location: PartyLocation | null;
+  joined: number;
+}
+
+export interface PartyChatMessage {
+  id: number;
+  from: string;
+  name: string;
+  text: string;
+  at: number;
+  mine: boolean;
+}
+
+export interface Party {
+  id: string;
+  leader: string;
+  created: number;
+  /** höchstens so viele Mitglieder (8) */
+  max: number;
+  /** in Beitrittsreihenfolge */
+  members: PartyMember[];
+  /** offene Einladungen dieser Party */
+  invites: { uuid: string; name: string; by: string; at: number; expires: number }[];
+  /** Ort des Leiters */
+  target: PartyLocation | null;
+  /** gemeinsame Voice-Gruppe aktiv (du und mindestens ein anderes Mitglied am selben Ort) */
+  voice: boolean;
+  /** Party-Chat (nur im Speicher des Dienstes, die letzten 50) */
+  chat: PartyChatMessage[];
+}
+
+/** Einladung in eine Party an dich */
+export interface PartyInvite {
+  party: string;
+  from: { uuid: string; name: string };
+  leader: { uuid: string; name: string };
+  members: number;
+  at: number;
+  expires: number;
+  /** „Nicht stören“: ohne Hinweis */
+  quiet: boolean;
+}
+
+export interface PartyState {
+  /** off = Freunde aus/kein Microsoft-Konto · unsupported = Dienst ohne Party (vor 1.12.0) · error = siehe error */
+  status: 'ok' | 'off' | 'unsupported' | 'error';
+  error: string | null;
+  party: Party | null;
+  invites: PartyInvite[];
+  /** eigene UUID (wer ist „du“) */
+  me: string | null;
+  /** warum die letzte Party endete (nur bis zur nächsten): verlassen, entfernt, aufgelöst */
+  ended: 'left' | 'removed' | 'dissolved' | null;
+}
+
+/** Der Leiter ist woanders: „<Leiter> ist auf <Ziel> – Beitreten“ */
+export interface PartyFollow {
+  party: string;
+  leader: { uuid: string; name: string };
+  target: PartyLocation;
+  /** automatisch gefolgt (Einstellung „Automatisch folgen“, kein Spiel lief) */
+  joined: boolean;
 }
 
 export interface Conversation {
@@ -251,7 +486,119 @@ export interface SocialPrivacy {
   showServer: boolean;
   /** Nachrichten von Freunden annehmen */
   messages: boolean;
+  /** Freunde sehen „zuletzt online vor …“ (nur mit Online-Status) */
+  showLastOnline: boolean;
+  /** in den Vorschlägen der Freunde deiner Freunde erscheinen (Standard aus) */
+  suggestable: boolean;
+  /** dir selbst Vorschläge zeigen */
+  showSuggestions: boolean;
+  /** „Ist online“-Benachrichtigungen */
+  onlineNotify: OnlineNotify;
 }
+
+// ---------- Einladungen (Heldix-Dienst ab 1.11.0, siehe core/invites.ts) ----------
+
+/** Ergebnis der Freundschaft beim Annehmen */
+export type InviteFriendResult = 'new' | 'already' | 'blocked' | 'limit' | 'self';
+/** warum es keine Willkommens-Belohnung gab */
+export type InviteRewardReason = 'not-new' | 'already-invited' | 'self';
+
+/** Ein eigener Einladungslink */
+export interface InviteLink {
+  /** 10 Zeichen (Zugangsdaten zur Einladung, nicht loggen) */
+  code: string;
+  /** Link zur Webseite (…/einladung#<code>), null, wenn der Dienst keine Webseite kennt */
+  url: string | null;
+  /** heldixclient://einladung/<code> */
+  appUrl: string;
+  created: number;
+  expires: number;
+  /** „Komm auf meinen Server“, sonst null (allgemeiner Link) */
+  server: string | null;
+  /** mit Voice-Gruppe (Browser-Link aus dem Spiel, 24 Stunden) */
+  voice: boolean;
+  /** so oft angenommen */
+  accepted: number;
+}
+
+export interface InviteReward {
+  cosmetic: string;
+  /** Name aus dem Katalog bzw. der bekannten Belohnung */
+  name: string;
+  /** ab so vielen bestätigten Freunden */
+  friends: number;
+  unlocked: boolean;
+}
+
+/** Bereich „Freunde einladen“ */
+export interface InviteState {
+  /** false = Dienst ohne Einladungen (vor 1.11.0): Bereich ausblenden */
+  available: boolean;
+  /** deutsche Meldung, wenn nichts geladen werden konnte */
+  error: string | null;
+  /** allgemeiner Link (ohne Server) */
+  link: InviteLink | null;
+  /** offene Links */
+  invites: InviteLink[];
+  /** über eigene Links dazugekommen */
+  invited: number;
+  /** davon bestätigt (30 Minuten gespielt) */
+  confirmed: number;
+  pending: number;
+  /** Belohnungen nach bestätigten Freunden, aufsteigend */
+  rewards: InviteReward[];
+  /** freigeschaltete Cosmetics (access „unlock“) */
+  unlocked: string[];
+}
+
+/** Hinweis im Ergebnis des Einladungsdialogs */
+export interface InviteNote {
+  tone: 'success' | 'info' | 'warn';
+  text: string;
+}
+
+/** Einladung aus einem Link (heldixclient://einladung/<code>), für den Dialog */
+export interface PublicInviteView {
+  code: string;
+  /** missing = abgelaufen, zurückgenommen, unbekannt oder Dienst ohne Einladungen · error = siehe error */
+  status: 'ok' | 'missing' | 'error';
+  error: string | null;
+  inviter: { uuid: string; name: string } | null;
+  /** normalisierte Serveradresse („Komm auf meinen Server“) */
+  server: string | null;
+  voice: { members: number; guests: number; maxGuests: number } | null;
+  expires: number;
+  /** Willkommens-Belohnung für neue Spieler */
+  welcome: { id: string; name: string } | null;
+  /** aktives Konto im Launcher */
+  account: { name: string; type: 'microsoft' | 'offline' } | null;
+  /** warum „Annehmen“ gerade nicht geht (z. B. kein Microsoft-Konto), sonst null */
+  acceptProblem: string | null;
+  /** Instanz für „Annehmen und beitreten“ (zuletzt gespielte mit HeldixClient) */
+  join: { instanceId: string; instanceName: string } | null;
+  /** warum „Annehmen und beitreten“ nicht geht (keine Instanz mit HeldixClient, Spiel läuft), sonst null */
+  joinProblem: string | null;
+}
+
+export interface InviteAcceptView {
+  inviter: { uuid: string; name: string };
+  server: string | null;
+  friend: InviteFriendResult;
+  /** freigeschaltete Willkommens-Belohnung */
+  reward: { id: string; name: string } | null;
+  rewardReason: InviteRewardReason | null;
+  notes: InviteNote[];
+  /** Spiel wird gestartet und verbindet mit dem Server */
+  joined: { instanceId: string; instanceName: string; server: string } | null;
+  /** Beitreten ging nicht (angenommen ist die Einladung trotzdem) */
+  joinError: string | null;
+}
+
+/** Neues bei den Einladungen (der Launcher vergleicht GET /v1/invites mit dem letzten Stand) */
+export type InviteEvent =
+  | { kind: 'unlock'; cosmetic: string; name: string }
+  | { kind: 'accepted'; /** nur, wenn eindeutig */ name: string | null; count: number }
+  | { kind: 'confirmed'; count: number };
 
 // ---------- Skins & Capes ----------
 
@@ -288,6 +635,8 @@ export interface HeldixCape {
   fps: number;
   /** hat Leuchtteile (capes/<id>_glow.png) */
   glow: boolean;
+  /** nur für das HeldixClient-Team (capes.json „team“: true; der Heldix-Dienst prüft das) */
+  team: boolean;
 }
 
 export interface ProfileState {
@@ -363,25 +712,112 @@ export interface CosmeticParticlesData {
   fullbright: boolean;
 }
 
+/**
+ * Format 2: Keyframes einer Spur, base64 genau wie im signierten Manifest (keys Uint16LE; values je nach Spur, siehe
+ * renderer/cosmetic-mesh.ts). Entpackt wird erst in der Oberfläche.
+ */
+export interface CosmeticKeyframesData {
+  keys: string;
+  values: string;
+}
+
+export interface CosmeticMeshTrackData {
+  /** Index in CosmeticMeshData.skeleton */
+  bone: number;
+  rot: CosmeticKeyframesData | null;
+  move: CosmeticKeyframesData | null;
+  scale: CosmeticKeyframesData | null;
+}
+
+export interface CosmeticMeshAnimationData {
+  /** Name aus dem Manifest ([A-Za-z0-9_], z. B. „Idle“, „Emote“) */
+  name: string;
+  fps: number;
+  frames: number;
+  loop: boolean;
+  tracks: CosmeticMeshTrackData[];
+}
+
+export interface CosmeticMeshBoneData {
+  name: string;
+  /** Index eines Knochens weiter vorn oder −1 */
+  parent: number;
+  /** Pixel im Body-Modellraum (Ursprung Hals, +X links, +Y unten, +Z hinten) */
+  pivot: CosmeticVec3;
+  tail: CosmeticVec3;
+}
+
+/** Leucht-Streifen (glow = frames Bilder untereinander) und Puls */
+export interface CosmeticMeshEmissive {
+  frames: number;
+  frametimeTicks: number;
+  pulse: { period: number; min: number; max: number } | null;
+}
+
+export interface CosmeticMeshParticleData {
+  bone: number;
+  at: 'pivot' | 'tail';
+  particle: string;
+  perSecond: number;
+  color: string | null;
+  /** nur in diesen Animationen (null = immer) */
+  states: string[] | null;
+}
+
+/** Format 2 (animiertes Mesh, alle Slots außer cape): Daten für die 3D-Vorschau */
+export interface CosmeticMeshData {
+  vertexCount: number;
+  triangleCount: number;
+  /** base64 wie im Manifest: Int16LE ×3 (1/32 Pixel), Int8 ×3, Uint16LE ×2, Uint8, Uint16LE ×3 */
+  positions: string;
+  normals: string;
+  uvs: string;
+  bones: string;
+  triangles: string;
+  /** weiche Haut (freiwillig, beide oder keins): Uint8 ×4 Knochen und Uint8 ×4 Gewichte (Summe 255) je Ecke */
+  joints: string | null;
+  weights: string | null;
+  /** Knochen, Eltern zuerst */
+  skeleton: CosmeticMeshBoneData[];
+  /** Reihenfolge wie im Manifest */
+  animations: CosmeticMeshAnimationData[];
+  /** Spielerzustand → Animation (idle immer da; z. B. emote, start_flying, elytra) */
+  states: Record<string, string>;
+  blendSeconds: number;
+  emissive: CosmeticMeshEmissive | null;
+  /**
+   * origin: Ursprung des Begleiters im Body-Raum (Pixel; Ecken, pivot und tail zählen relativ dazu), sonst null;
+   * side: Modell ist links gebaut, rechts = an X gespiegelt
+   */
+  attach: { origin: CosmeticVec3 | null; side: 'left' | 'right' };
+  particles: CosmeticMeshParticleData[];
+}
+
 /** Cosmetic aus dem Katalog: Signatur und alle Regeln geprüft */
 export interface CosmeticItem {
   id: string;
   slot: CosmeticSlotName;
+  /** 1 = Würfel-Modell/Partikel/Cape, 2 = animiertes Mesh (siehe mesh) */
+  format: number;
   version: number;
   name: string;
   description: string;
   /** access: team – nur Team-Mitglieder dürfen es wählen (alle sehen es) */
   teamOnly: boolean;
+  /** access: unlock – Belohnung (z. B. für Einladungen), nur wählbar, wenn freigeschaltet (siehe CosmeticsState.unlocked) */
+  unlockOnly: boolean;
   /** SHA-256 des Umschlags (neu mit jeder Version) */
   sha256: string;
   /** PNG als data:-URL (auch Palette-PNGs) */
   texture: string;
   /** Leuchtebene (ohne Licht gezeichnet), gleich groß wie texture */
   glow: string | null;
-  /** Breite und Höhe der Textur in Pixeln */
+  /** Breite und Höhe der Textur in Texeln: bei Modellen model.textureSize (UV-Raum; das Bild darf 2- oder 4-mal so groß sein), sonst die Bildgröße */
   textureSize: [number, number];
   /** Modell (head, back, companion), sonst leer */
   bones: CosmeticBoneData[];
+  /** model.scale: Größe des ganzen Modells um den Anker, über den Bone-Matrizen (1 = wie gebaut, auch ohne Modell) */
+  modelScale: number;
   animations: CosmeticAnimationData[];
   /** nur aura: Textur = frames quadratische Bilder nebeneinander */
   particles: CosmeticParticlesData | null;
@@ -389,6 +825,8 @@ export interface CosmeticItem {
   cape: { frames: number; fps: number } | null;
   /** nur companion: Platz in Blöcken (x rechts, y hoch, z vorn) und Größe */
   companion: { offset: CosmeticVec3; scale: number } | null;
+  /** Format 2: Mesh mit Knochen und Keyframe-Animationen (dann bones/animations/particles leer) */
+  mesh: CosmeticMeshData | null;
 }
 
 /** Eigene Auswahl je Slot (null = nichts); cape auch eingebaute Heldix-Capes */
@@ -409,6 +847,8 @@ export interface CosmeticsState {
   canChoose: boolean;
   /** im HeldixClient-Team (darf Cosmetics „nur fürs Team“ wählen); null = unbekannt */
   team: boolean | null;
+  /** freigeschaltete Belohnungen (access „unlock“) aus GET /v1/me/cosmetics; null = unbekannt (ohne Dienst) */
+  unlocked: string[] | null;
   /** deutsche Meldung, wenn etwas nicht ging (Rest bleibt nutzbar) */
   error: string | null;
 }
@@ -709,6 +1149,126 @@ export interface ServerStatus {
   motd: string | null;
 }
 
+/** Schalter für den Discord-Status (Einstellungen → Discord, siehe main/core/presence.ts) */
+export interface DiscordPresenceOptions {
+  showServer: boolean;
+  showDetails: boolean;
+  showWorldName: boolean;
+  showParty: boolean;
+  showVoice: boolean;
+  showHead: boolean;
+  buttons: boolean;
+  minimal: boolean;
+}
+
+/** Seite im Launcher (für den Discord-Status „Stöbert im Addon-Store“ …) */
+export type LauncherView = 'home' | 'instances' | 'store' | 'friends' | 'profile' | 'settings' | 'console' | 'setup';
+
+/** Vorschau des Discord-Status in den Einstellungen: genau das, was der Launcher an Discord schickt (bzw. schicken würde) */
+export interface DiscordPreview {
+  /** Einstellung „Discord-Status anzeigen“ */
+  enabled: boolean;
+  details: string | null;
+  state: string | null;
+  /** Bild je Lage: Name unter discord/<name>.png (in der Oberfläche mitgeliefert); null = Logo */
+  largeImage: string | null;
+  largeText: string | null;
+  /** head = eigener Kopf, sonst Name des Loader-Symbols, null = keins */
+  smallImage: string | null;
+  smallText: string | null;
+  /** „seit“ in ms */
+  since: number | null;
+  party: [number, number] | null;
+  buttons: string[];
+  /** eigener Spieler (für den Kopf in der Vorschau) */
+  player: { uuid: string; name: string } | null;
+}
+
+// ---------- Welt teilen (Heldix-Dienst ab 1.12.0, main/core/worlds.ts) ----------
+
+/** Gerade geöffnete Welt eines Freundes (GET /v1/worlds → friends) */
+export interface FriendWorld {
+  id: string;
+  /** 6 Zeichen; Adresse <code>.welt.<Domain> */
+  code: string;
+  name: string;
+  address: string;
+  host: { uuid: string; name: string };
+  players: number;
+  maxPlayers: number;
+  /** Minecraft-Version des Gastgebers (null = unbekannt) */
+  version: string | null;
+}
+
+export interface WorldsOverview {
+  /** off = Freunde aus/kein Microsoft-Konto/kein Dienst · unsupported = Dienst ohne Welt teilen · error = siehe error */
+  status: 'ok' | 'off' | 'unsupported' | 'error';
+  error: string | null;
+  friends: FriendWorld[];
+}
+
+/** Öffentliche Welt-Info (GET /v1/public/worlds/<code>) */
+export interface PublicWorldView {
+  code: string;
+  name: string;
+  address: string | null;
+  host: { uuid: string; name: string };
+  online: boolean;
+  players: number;
+  maxPlayers: number;
+  version: string | null;
+  /** open = jeder mit der Adresse, closed = nur Eingeladene/Freunde (andere klopfen an) */
+  access: 'open' | 'closed';
+}
+
+/** Welt aus einem Link (heldixclient://welt/<code>) für den Dialog „Welt von <Name>“ */
+export interface WorldJoinView {
+  code: string;
+  /** missing = gibt es nicht (mehr) bzw. Dienst ohne Welt teilen · error = siehe error */
+  status: 'ok' | 'missing' | 'error';
+  error: string | null;
+  world: PublicWorldView | null;
+  /** Instanz, mit der „Beitreten“ startet */
+  join: { instanceId: string; instanceName: string; minecraft: string } | null;
+  /** warum Beitreten gerade nicht geht (keine passende Instanz, Welt zu, Spiel läuft), sonst null */
+  joinProblem: string | null;
+  /** Freund des Spielers (sonst klopft man ggf. an) */
+  friend: boolean;
+}
+
+// ---------- Benachrichtigungen (Glocke, main/core/notifications.ts) ----------
+
+export type NotificationKind = 'friend-request' | 'message' | 'invite-accepted' | 'invite-confirmed' | 'unlock' | 'world-open' | 'world-invite' | 'party-invite' | 'party-follow' | 'update' | 'addons';
+
+/** Wohin ein Klick führt */
+export interface NotificationTarget {
+  view: 'friends' | 'invites' | 'cosmetics' | 'store' | 'updates' | 'world' | 'party';
+  /** Freund (Unterhaltung) */
+  uuid?: string;
+  /** Cosmetic */
+  id?: string;
+  /** Welt-Code */
+  code?: string;
+}
+
+export interface LauncherNotification {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  at: number;
+  read: boolean;
+  /** zusammengefasste Meldungen (z. B. 3 Nachrichten) */
+  count: number;
+  target: NotificationTarget | null;
+}
+
+export interface NotificationList {
+  /** neueste zuerst, höchstens 100, höchstens 30 Tage */
+  items: LauncherNotification[];
+  unread: number;
+}
+
 export type DiscordStatus =
   | { state: 'disabled' }
   | { state: 'unconfigured' }
@@ -811,7 +1371,16 @@ export interface HeldixApi {
   listConversations(): Promise<Conversation[]>;
   /** älteste zuerst; before = id der ältesten geladenen Nachricht für die vorige Seite */
   getMessages(uuid: string, before?: number): Promise<{ messages: ChatMessage[]; more: boolean }>;
-  sendMessage(uuid: string, text: string): Promise<ChatMessage>;
+  /** extra: Antwort auf eine Nachricht dieser Unterhaltung und/oder Beitreten-Karte (text bleibt Pflicht, als Rückfall) */
+  sendMessage(uuid: string, text: string, extra?: { replyTo?: number | null; card?: MessageCard | null }): Promise<ChatMessage>;
+  /** eigene Nachricht löschen (für beide) */
+  deleteMessage(uuid: string, id: number): Promise<void>;
+  /** eigene Reaktion setzen (ersetzt eine vorhandene) bzw. entfernen (null) */
+  reactMessage(uuid: string, id: number, reaction: ReactionId | null): Promise<ChatMessage>;
+  /** „schreibt …“ an den Freund (gedrosselt: höchstens alle 3 s) */
+  sendTyping(uuid: string): Promise<void>;
+  /** Echtzeit in Unterhaltungen (neue, gelöschte Nachrichten, Reaktionen, „schreibt …“) */
+  onChatEvent(callback: (event: ChatEvent) => void): () => void;
   markRead(uuid: string): Promise<void>;
   listBlocked(): Promise<BlockedPlayer[]>;
   blockPlayer(uuid: string): Promise<BlockedPlayer[]>;
@@ -819,10 +1388,67 @@ export interface HeldixApi {
   reportPlayer(uuid: string, reason: ReportReason, note?: string): Promise<void>;
   getSocialPrivacy(): Promise<SocialPrivacy>;
   setSocialPrivacy(patch: Partial<SocialPrivacy>): Promise<SocialPrivacy>;
+  /** eigener Statustext (höchstens 40 Zeichen, null = löschen) und „Nicht stören“ */
+  setSocialStatus(patch: { statusText?: string | null; dnd?: boolean }): Promise<SocialOverview>;
+  /** eigene Angaben zu einem Freund: Favorit, Spitzname (≤ 24), Notiz (≤ 200); '' bzw. null löscht */
+  updateFriend(uuid: string, patch: { favorite?: boolean; nickname?: string | null; note?: string | null }): Promise<SocialOverview>;
+  getFriendProfile(uuid: string): Promise<FriendProfile>;
+  getFriendSuggestions(): Promise<FriendSuggestions>;
+  /** Anfrage an einen Vorschlag */
+  requestSuggestion(uuid: string): Promise<SocialOverview>;
   /** startet eine HeldixClient-Instanz (Standard: die ausgewählte) und verbindet direkt mit dem Server des Freundes */
   joinFriend(uuid: string, instanceId?: string): Promise<void>;
+  /** „Beitreten“ auf einer Server-Karte: öffentliche Domain, zuletzt gespielte Instanz mit HeldixClient, Quick Play */
+  joinServer(address: string): Promise<{ instanceId: string; instanceName: string; server: string }>;
   /** Skin eines Spielers (Freund, Anfrage, Blockierter) als PNG-data:-URL über den Heldix-Dienst, zwischengespeichert; null = Standard-Skin zeigen */
   getPlayerSkin(uuid: string): Promise<string | null>;
+
+  // ---------- Party ----------
+  getParty(refresh?: boolean): Promise<PartyState>;
+  onParty(callback: (state: PartyState) => void): () => void;
+  /** Der Leiter ist woanders (Knopf „Beitreten“ in der Oberfläche) */
+  onPartyFollow(callback: (follow: PartyFollow) => void): () => void;
+  /** Klick auf eine Benachrichtigung zur Party: Freunde → Party öffnen */
+  onPartyOpen(callback: () => void): () => void;
+  /** Freund einladen (ohne Party entsteht eine mit dir als Leiter) */
+  partyInvite(uuid: string): Promise<PartyState>;
+  /** eigene Einladung zurückziehen (Leiter) */
+  partyCancelInvite(uuid: string): Promise<PartyState>;
+  partyAccept(partyId: string): Promise<PartyState>;
+  partyDecline(partyId: string): Promise<PartyState>;
+  partyLeave(): Promise<PartyState>;
+  /** Mitglied entfernen (Leiter) */
+  partyKick(uuid: string): Promise<PartyState>;
+  /** Leitung übergeben (Leiter) */
+  partyTransfer(uuid: string): Promise<PartyState>;
+  partyChat(text: string): Promise<PartyState>;
+  /** dem Leiter folgen: Server bzw. geteilte Welt mit passender Instanz */
+  partyJoin(): Promise<{ instanceName: string; title: string }>;
+  /** eigene geteilte Welten (für „Welt teilen“ im Chat) */
+  listOwnWorlds(): Promise<{ code: string; name: string; address: string | null; online: boolean }[]>;
+
+  // ---------- Einladungen ----------
+  /** Code aus einem geöffneten Link heldixclient://einladung/<code> bzw. aus dem Download abholen (einmal; null = keiner) */
+  takeInviteLink(): Promise<string | null>;
+  /** Ein Link wurde geöffnet (Launcher lief schon): takeInviteLink() aufrufen */
+  onInviteOpen(callback: () => void): () => void;
+  /** eingefügter Link (Web-Link, heldixclient://-Link oder Code): öffnet den Einladungsdialog (über onInviteOpen); wirft bei allem anderen */
+  pasteInviteLink(text: string): Promise<string>;
+  /** Einladung für den Dialog (öffentlich, dazu Konto und Instanz für „Annehmen und beitreten“) */
+  getPublicInvite(code: string): Promise<PublicInviteView>;
+  /** annehmen (Microsoft-Konto); join = danach die Instanz starten und direkt mit dem Server verbinden */
+  acceptInvite(code: string, join: boolean): Promise<InviteAcceptView>;
+  /** Bereich „Freunde einladen“ (available = false ohne Einladungen beim Dienst) */
+  getInvites(): Promise<InviteState>;
+  /** Link anlegen (server null = allgemein); eine offene gleiche Einladung wird wiederverwendet */
+  createInvite(server: string | null): Promise<InviteLink>;
+  revokeInvite(code: string): Promise<InviteState>;
+  /** Neues bei den Einladungen, während der Launcher im Vordergrund ist (sonst Benachrichtigung) */
+  onInviteEvent(callback: (event: InviteEvent) => void): () => void;
+  /** Klick auf eine Benachrichtigung zu Einladungen: Freunde → Einladen öffnen */
+  onInvitesOpen(callback: () => void): () => void;
+  /** Klick auf „Neues Cosmetic freigeschaltet“: Skins & Cosmetics mit diesem Cosmetic öffnen */
+  onCosmeticOpen(callback: (id: string) => void): () => void;
 
   // ---------- Skins & Capes ----------
   getProfile(refresh?: boolean): Promise<ProfileState>;
@@ -871,18 +1497,63 @@ export interface HeldixApi {
   onGameState(callback: (state: GameState) => void): () => void;
   getDiscordStatus(): Promise<DiscordStatus>;
   onDiscordStatus(callback: (status: DiscordStatus) => void): () => void;
+  /** Vorschau des Discord-Status (auch, wenn er aus ist) */
+  getDiscordPreview(): Promise<DiscordPreview>;
+  onDiscordPreview(callback: (preview: DiscordPreview) => void): () => void;
+  /** aktuelle Seite für den Discord-Status („Stöbert im Addon-Store“) */
+  setPresenceView(view: LauncherView): void;
+
+  // ---------- Welt teilen ----------
+  /** offene Welten der Freunde (letzter Stand; frisch = sofort neu fragen) */
+  getWorlds(refresh?: boolean): Promise<WorldsOverview>;
+  onWorlds(callback: (overview: WorldsOverview) => void): () => void;
+  /** Code aus einem geöffneten Link heldixclient://welt/<code> abholen (einmal; null = keiner) */
+  takeWorldLink(): Promise<string | null>;
+  /** Ein Welt-Link wurde geöffnet (Launcher lief schon): takeWorldLink() aufrufen */
+  onWorldOpen(callback: () => void): () => void;
+  /** Welt für den Dialog (öffentlich, dazu die Instanz fürs Beitreten) */
+  getWorldJoin(code: string): Promise<WorldJoinView>;
+  /** passende Instanz starten und per Quick Play auf <code>.welt.<Domain> verbinden */
+  joinWorld(code: string): Promise<{ instanceId: string; instanceName: string; address: string }>;
+  /** Dialog zu einer Welt öffnen (z. B. aus „Offene Welten“ oder der Glocke) */
+  openWorldDialog(code: string): Promise<void>;
+
+  // ---------- Benachrichtigungen ----------
+  listNotifications(): Promise<NotificationList>;
+  markNotificationRead(id: string): Promise<NotificationList>;
+  markAllNotificationsRead(): Promise<NotificationList>;
+  clearNotifications(): Promise<NotificationList>;
+  onNotifications(callback: (list: NotificationList) => void): () => void;
+  /** Klick im Infobereich auf eine Benachrichtigung: Glocke öffnen und dorthin springen */
+  onNotificationOpen(callback: (id: string | null) => void): () => void;
 
   getUpdateState(): Promise<UpdateState>;
   checkForUpdate(): Promise<UpdateState>;
-  /** startet den Installer und beendet den Launcher (er öffnet sich danach neu) */
+  /** lädt das Update (falls nur gemeldet), startet den Installer und beendet den Launcher (er öffnet sich danach neu) */
   installUpdate(): Promise<void>;
   onUpdateState(callback: (state: UpdateState) => void): () => void;
+  /** Hinweis „Update verfügbar“ vom Start abholen (einmal; null = keiner): Einstellung „Updates automatisch“ aus bzw. macOS */
+  takeUpdateNotice(): Promise<UpdateState | null>;
+  /** Hinweis vom Start ist da (die Prüfung lief im Hintergrund): takeUpdateNotice() aufrufen */
+  onUpdateNotice(callback: () => void): () => void;
 
   /** öffnet heldixclient.com im Browser, schon angemeldet (Profil, Freunde, Nachrichten, Support, Team-Bereich) */
   openWebAccount(target?: WebTarget): Promise<void>;
   /** öffnet eine öffentliche Seite von heldixclient.com, z. B. "neuigkeiten" */
   openWebsite(page: 'neuigkeiten' | 'das-team' | 'status' | 'download' | 'hilfe' | 'addons' | `hilfe/${string}`): Promise<void>;
-  /** null = nichts Neues zu zeigen */
+  /** null = nichts Neues zu zeigen (auch, solange der Einrichtungs-Assistent offen ist) */
   getWhatsNew(): Promise<WhatsNew | null>;
   markWhatsNewSeen(): Promise<void>;
+
+  // ---------- Einrichtungs-Assistent ----------
+  /** Assistent beim Start zeigen? Dazu die liegende Einladung (bleibt bis finishSetup liegen) */
+  getSetup(): Promise<SetupInfo>;
+  /** „Einrichtung erneut starten“ (Einstellungen) */
+  restartSetup(): Promise<SetupInfo>;
+  /** offizielle, passende Addons aus dem Store (Signatur geprüft) für die Standard-Instanzen */
+  getSetupAddons(): Promise<SetupAddons>;
+  /** ein Addon aus der Auswahl in die Standard-Instanzen installieren */
+  installSetupAddon(addonId: string): Promise<SetupInstallResult>;
+  /** fertig bzw. übersprungen: setupDone speichern; danach geben takeInviteLink und getWhatsNew wieder etwas heraus */
+  finishSetup(skipped: boolean): Promise<void>;
 }

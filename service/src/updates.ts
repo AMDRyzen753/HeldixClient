@@ -9,6 +9,7 @@ import path from 'node:path';
 import { pipeline, Transform } from 'node:stream';
 import { pipeline as pipelineAsync } from 'node:stream/promises';
 import { HttpError } from './http';
+import { isInviteCode } from './validate';
 
 /** Windows-Installer, z. B. `HeldixClient-Setup-0.12.0.exe` oder `HeldixClient-Setup-1.0.0-beta.2.exe` (steht im Manifest). */
 export const SETUP_FILE_RE = /^HeldixClient-Setup-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.exe$/;
@@ -49,6 +50,25 @@ export function parseDownloadName(file: string): DownloadName | null {
   const mac = MAC_FILE_RE.exec(file);
   if (mac) return { platform: 'mac', arch: mac[2] as 'arm64' | 'x64', kind: mac[3] as 'dmg' | 'zip', version: mac[1]! };
   return null;
+}
+
+/**
+ * Einladung im Download (ab 1.11.0): `?einladung=<code>` an `/v1/launcher/download/…`. Gültig nur ein Code wie bei den
+ * Einladungen (10 Zeichen aus a–z und 2–9 ohne i, l, o, 0, 1), sonst null – dann gilt der Parameter als nicht da.
+ */
+export function downloadInvite(url: string | undefined): string | null {
+  const value = new URL(url ?? '/', 'http://heldix.invalid').searchParams.get('einladung');
+  return isInviteCode(value) ? value : null;
+}
+
+/**
+ * Dateiname für `Content-Disposition`: Der Windows-Installer heißt mit Einladung
+ * `HeldixClient-Setup-<version>-einladung-<code>.exe` (der Installer liest den Code aus seinem Namen), alles andere
+ * behält seinen Namen.
+ */
+export function downloadName(file: string, invite: string | null): string {
+  const windows = invite === null ? null : WINDOWS_FILE_RE.exec(file);
+  return windows ? `HeldixClient-Setup-${windows[1]}-einladung-${invite}.exe` : file;
 }
 
 const INVALID_NAME =
@@ -407,12 +427,14 @@ export class Updates {
    * `GET`/`HEAD /v1/launcher/download/<file>`: liefert einen Installer aus dem Update-Ordner, auf Wunsch einen Teil
    * (`Range`). Die Datei wird gestreamt; ein langsamer Client bremst das Lesen (kein Puffern im Speicher).
    * Kommt `idleTimeoutMs` lang nichts beim Client an, wird die Verbindung getrennt.
+   * Mit `?einladung=<code>` heißt der Windows-Installer im `Content-Disposition` anders (siehe downloadName); Inhalt,
+   * Größe, ETag, Caching und Range bleiben gleich.
    */
   async serve(req: IncomingMessage, res: ServerResponse, file: string, idleTimeoutMs: number): Promise<void> {
     const real = await this.resolve(file);
     if (real === null) throw new HttpError(404, NO_SUCH_FILE);
     await sendFile(req, res, real, {
-      name: file,
+      name: downloadName(file, downloadInvite(req.url)),
       contentType: CONTENT_TYPES[parseDownloadName(file)!.kind],
       cacheControl: 'no-cache',
       idleTimeoutMs,

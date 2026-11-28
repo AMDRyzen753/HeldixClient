@@ -14,6 +14,8 @@ import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.RemotePlayer;
 import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FontDescription;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.TextColor;
 import net.minecraft.util.Unit;
@@ -34,9 +36,11 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Heldix-Symbol je Rolle (normal, Team-Admin, Moderator, Addon-Entwickler): vor Namen in der Tab-Liste (Teamfarbe färbt
- * das Symbol nicht), Zeile „HeldixClient: … Spieler hier“ in der Fußzeile und im Namensschild über dem Kopf – mit
- * Schleichen, Unsichtbarkeit, F1 und vom Server ausgeblendeten Namensschildern.
+ * Heldix-Symbol je Rolle (normal, Team-Rollen, Community-Abzeichen, Addon-Entwickler; Unbekanntes = normal): Zuordnung
+ * der badge-Werte, Zeichen in allen Schriften (heldixclient:badge und badge_1–7), Tooltip; vor Namen in der Tab-Liste
+ * (Schrift passend zur GUI-Skalierung, Teamfarbe färbt das Symbol nicht), Zeile „HeldixClient: … Spieler hier“ in der
+ * Fußzeile und im Namensschild über dem Kopf (Schrift nach Größe auf dem Bildschirm) – mit Schleichen, Unsichtbarkeit,
+ * F1 und vom Server ausgeblendeten Namensschildern.
  *
  * <p>Die Rollen kommen über {@link Social#testLookup} (dieselbe Auswertung wie echte Antworten des Dienstes), die
  * Spieler stehen nur auf dem Client: Einträge in der Tab-Liste und {@link RemotePlayer} vor der Kamera.
@@ -48,13 +52,26 @@ final class BadgeTests {
 		}
 	}
 
+	/** Die ersten fünf stehen vorne vor der Kamera, die übrigen dahinter etwas höher */
 	private static final List<Fake> FAKES = List.of(
 			new Fake("Spielerin", null, Badge.Role.PLAYER),
 			new Fake("TeamAdmin", "admin", Badge.Role.ADMIN),
 			new Fake("Moderatorin", "moderator", Badge.Role.MODERATOR),
-			new Fake("Entwickler", "developer", Badge.Role.DEVELOPER),
+			new Fake("AddonEntwickler", "developer", Badge.Role.DEVELOPER),
 			// kein HeldixClient-Spieler: bekommt nichts
-			new Fake("Vanilla", "-", null));
+			new Fake("Vanilla", "-", null),
+			new Fake("TeamEntwickler", "developer-team", Badge.Role.TEAM_DEVELOPER),
+			new Fake("Supporterin", "supporter", Badge.Role.SUPPORTER),
+			new Fake("Designerin", "designer", Badge.Role.DESIGNER),
+			new Fake("Testerin", "tester", Badge.Role.TESTER),
+			new Fake("Partnerin", "partner", Badge.Role.PARTNER),
+			new Fake("Creatorin", "creator", Badge.Role.CREATOR),
+			new Fake("Botschafterin", "ambassador", Badge.Role.AMBASSADOR),
+			// Rolle eines neueren Dienstes: normales Symbol
+			new Fake("Zukunft", "zukunft-rolle", Badge.Role.PLAYER));
+	private static final int FRONT_ROW = 5;
+	/** Vorschub jedes Abzeichens in jeder Schrift (Breite 7 + 1) */
+	private static final int ADVANCE = 8;
 	private static final String RED_TEAM = "heldix_rot";
 	private static final String HIDDEN_TEAM = "heldix_versteckt";
 
@@ -82,10 +99,11 @@ final class BadgeTests {
 				PlayerTeam red = scoreboard.addPlayerTeam(RED_TEAM);
 				red.setColor(Optional.of(TeamColor.RED));
 				scoreboard.addPlayerToTeam("TeamAdmin", red);
-				scoreboard.addPlayerToTeam("Entwickler", red);
+				scoreboard.addPlayerToTeam("AddonEntwickler", red);
 				PlayerTeam hidden = scoreboard.addPlayerTeam(HIDDEN_TEAM);
 				hidden.setNameTagVisibility(Team.Visibility.NEVER);
 			});
+			roles(t);
 			tabList(t, online, infos);
 			nameTags(t, remotes);
 		} catch (Exception e) {
@@ -110,6 +128,43 @@ final class BadgeTests {
 				BadgeDisplay.refresh();
 			});
 		}
+	}
+
+	// --- Rollen, Zeichen und Schriften --------------------------------------------------------
+
+	/**
+	 * Jede Rolle: badge-Wert → Rolle (Unbekanntes und null = normal), eigenes Zeichen, in jeder Schrift vorhanden
+	 * (Vorschub 8 statt des Ersatzzeichens), Tooltip mit Bezeichnung.
+	 */
+	private static void roles(TestContext t) {
+		Set<String> glyphs = new java.util.HashSet<>();
+		for (Badge.Role role : Badge.Role.values()) {
+			t.check("Rolle " + role.label() + ": badge " + (role.key() == null ? "null" : "„" + role.key() + "“") + " → " + Badge.Role.of(role.key()),
+					Badge.Role.of(role.key()) == role);
+			char glyph = role.glyph().charAt(0);
+			t.check("Rolle " + role.label() + ": eigenes Zeichen U+" + Integer.toHexString(glyph).toUpperCase(),
+					role.glyph().length() == 1 && glyphs.add(role.glyph()) && glyph >= 0xE000 && glyph <= 0xE0FF);
+			List<Integer> widths = new ArrayList<>();
+			for (int scale = 1; scale <= Badge.MAX_SCALE; scale++) {
+				int s = scale;
+				widths.add(t.compute(mc -> mc.font.width(Badge.symbol(role, s))));
+			}
+			t.check("Rolle " + role.label() + ": Zeichen in allen Schriften badge_1–7 und badge (Vorschub " + widths + ")",
+					widths.stream().allMatch(w -> w == ADVANCE));
+			String tooltip = tooltipOfGlyph(Badge.symbol(role, 2));
+			t.check("Rolle " + role.label() + ": Tooltip „" + (tooltip == null ? "" : tooltip.replace("\n", " / ")) + "“",
+					tooltip != null && tooltip.equals(role.label() + "\n" + role.group().label()));
+		}
+		// Gegenprobe: ein Zeichen, das es nicht gibt, hat einen anderen Vorschub (sonst taugt die Prüfung oben nichts)
+		int missing = t.compute(mc -> mc.font.width(Component.literal(String.valueOf((char) 0xE0FF)).withStyle(Badge.symbol(Badge.Role.ADMIN, 2).getStyle())));
+		t.check("Zeichen, das es nicht gibt: anderer Vorschub (" + missing + ")", missing != ADVANCE);
+		for (String unknown : new String[] {"", "Admin", "zukunft-rolle", "developer_team"}) {
+			t.check("Unbekannter badge-Wert „" + unknown + "“ → normales Symbol", Badge.Role.of(unknown) == Badge.Role.PLAYER);
+		}
+		t.check("badge null → normales Symbol", Badge.Role.of(null) == Badge.Role.PLAYER);
+		t.check("Team-Entwickler und Addon-Entwickler getrennt", Badge.Role.of("developer-team") == Badge.Role.TEAM_DEVELOPER
+				&& Badge.Role.of("developer") == Badge.Role.DEVELOPER && Badge.Role.TEAM_DEVELOPER.group() == Badge.Group.TEAM
+				&& Badge.Role.DEVELOPER.group() == Badge.Group.ADDON);
 	}
 
 	// --- Tab-Liste --------------------------------------------------------------------------
@@ -138,14 +193,22 @@ final class BadgeTests {
 		t.check("Tab-Liste: Teamfarbe färbt das Symbol nicht (" + colorOfGlyph(admin) + ")", Integer.valueOf(0xFFFFFF).equals(colorOfGlyph(admin)));
 		t.check("Tab-Liste: Name behält die Teamfarbe (" + colorOfText(admin, "TeamAdmin") + ")",
 				Integer.valueOf(TeamColor.RED.rgb()).equals(colorOfText(admin, "TeamAdmin")));
+		// Schrift passend zur GUI-Skalierung (ein Texel je Bildpunkt), Tooltip mit der Bezeichnung
+		int guiScale = t.compute(mc -> mc.getWindow().getGuiScale());
+		String wantedFont = fontName(guiScale);
+		Component designer = t.compute(mc -> mc.gui.hud.getTabList().getNameForDisplay(infos.get(7)));
+		t.check("Tab-Liste: Schrift des Symbols passt zur GUI-Skalierung " + guiScale + " (" + fontOfGlyph(designer) + ")", wantedFont.equals(fontOfGlyph(designer)));
+		t.check("Tab-Liste: Tooltip des Symbols nennt die Rolle (" + tooltipOfGlyph(designer) + ")",
+				tooltipOfGlyph(designer) != null && tooltipOfGlyph(designer).startsWith("Designer\n"));
 		if (online) {
 			boolean own = t.compute(mc -> Badge.roleAtStart(mc.gui.hud.getTabList().getNameForDisplay(
 					mc.getConnection().getPlayerInfo(mc.getUser().getProfileId()))) == Badge.Role.PLAYER);
 			t.check("Tab-Liste: eigenes Heldix-Symbol (normal)", own);
 		}
 
-		// Fußzeile: unter der des Servers bzw. allein; zählt alle mit Symbol (die vier oben, dazu man selbst)
-		int expected = 4 + (online && t.compute(mc -> HeldixConfig.get().socialVisible) ? 1 : 0);
+		// Fußzeile: unter der des Servers bzw. allein; zählt alle mit Symbol (alle Testspieler außer „Vanilla“, dazu man selbst)
+		int withBadge = (int) FAKES.stream().filter(fake -> fake.role() != null).count();
+		int expected = withBadge + (online && t.compute(mc -> HeldixConfig.get().socialVisible) ? 1 : 0);
 		t.run(mc -> BadgeDisplay.refresh());
 		String alone = t.compute(mc -> {
 			Component footer = Hooks.tabFooter(null);
@@ -204,8 +267,12 @@ final class BadgeTests {
 				Fake fake = FAKES.get(i);
 				RemotePlayer remote = new RemotePlayer(mc.level, new GameProfile(fake.uuid(), fake.name()));
 				remote.setId(-4300 - i); // nur auf dem Client: eigene, freie Nummer
-				// nebeneinander vor der Kamera (Blick nach Süden = +z), Gesicht zur Kamera
-				remote.snapTo(mc.player.getX() + (i - (FAKES.size() - 1) / 2.0) * 2.2, mc.player.getY(), mc.player.getZ() + 6.5, 180f, 0f);
+				// nebeneinander vor der Kamera (Blick nach Süden = +z), Gesicht zur Kamera; die neuen Rollen dahinter, höher
+				boolean front = i < FRONT_ROW;
+				int column = front ? i : i - FRONT_ROW;
+				int columns = front ? FRONT_ROW : FAKES.size() - FRONT_ROW;
+				remote.snapTo(mc.player.getX() + (column - (columns - 1) / 2.0) * (front ? 2.2 : 2.4), mc.player.getY() + (front ? 0 : 2.4),
+						mc.player.getZ() + (front ? 6.5 : 11), 180f, 0f);
 				remote.yBodyRot = 180f;
 				remote.yHeadRot = 180f;
 				mc.level.addEntity(remote);
@@ -223,6 +290,11 @@ final class BadgeTests {
 		}
 		Component adminTag = nameTag(t, remotes.get(1));
 		t.check("Namensschild: Teamfarbe färbt das Symbol nicht", adminTag != null && Integer.valueOf(0xFFFFFF).equals(colorOfGlyph(adminTag)));
+		// Schrift nach Größe auf dem Bildschirm: hinten (11 Blöcke) höchstens so fein wie vorne (6,5 Blöcke)
+		int near = t.compute(mc -> BadgeDisplay.nameTagScale(mc, remotes.get(1)));
+		int far = t.compute(mc -> BadgeDisplay.nameTagScale(mc, remotes.get(FRONT_ROW + 1)));
+		t.check("Namensschild: Schrift-Stufe nach Abstand (vorne " + near + ", hinten " + far + ")", near >= far && far >= 1);
+		t.check("Namensschild: Symbol in der Schrift dieser Stufe (" + fontOfGlyph(adminTag) + ")", fontName(near).equals(fontOfGlyph(adminTag)));
 		t.screenshot("heldix-30-namensschilder");
 
 		// Schleichen: Minecraft zeigt das Schild blass und nicht durch Wände – das Symbol gehört dazu
@@ -259,9 +331,9 @@ final class BadgeTests {
 
 		// Server blendet Namensschilder über ein Team aus (nameTagVisibility never)
 		RemotePlayer developer = remotes.get(3);
-		t.run(mc -> mc.level.getScoreboard().addPlayerToTeam("Entwickler", mc.level.getScoreboard().getPlayerTeam(HIDDEN_TEAM)));
+		t.run(mc -> mc.level.getScoreboard().addPlayerToTeam("AddonEntwickler", mc.level.getScoreboard().getPlayerTeam(HIDDEN_TEAM)));
 		t.check("Vom Server ausgeblendetes Schild: kein Symbol", nameTag(t, developer) == null);
-		t.run(mc -> mc.level.getScoreboard().addPlayerToTeam("Entwickler", mc.level.getScoreboard().getPlayerTeam(RED_TEAM)));
+		t.run(mc -> mc.level.getScoreboard().addPlayerToTeam("AddonEntwickler", mc.level.getScoreboard().getPlayerTeam(RED_TEAM)));
 		t.check("Schild wieder da, mit Symbol", Badge.roleAtStart(nameTag(t, developer)) == Badge.Role.DEVELOPER);
 
 		// Einstellung „Heldix-Symbol über Köpfen“ aus: Schild ohne Symbol
@@ -271,9 +343,9 @@ final class BadgeTests {
 				plain != null && Badge.roleAtStart(plain) == null && plain.getString().equals("TeamAdmin"));
 		t.run(mc -> HeldixConfig.get().badgeNameTags = true);
 
-		// näher heran: Symbol und Name gut lesbar
+		// näher heran (vordere Reihe): Symbol und Name gut lesbar
 		t.run(mc -> {
-			for (RemotePlayer remote : remotes) remote.snapTo(remote.getX(), remote.getY(), mc.player.getZ() + 4.5, 180f, 0f);
+			for (RemotePlayer remote : remotes.subList(0, FRONT_ROW)) remote.snapTo(remote.getX(), remote.getY(), mc.player.getZ() + 4.5, 180f, 0f);
 		});
 		t.waitTicks(4);
 		t.screenshot("heldix-30c-namensschilder-nah");
@@ -298,6 +370,38 @@ final class BadgeTests {
 			return Optional.empty();
 		}, Style.EMPTY);
 		return color[0];
+	}
+
+	/** Schrift des Heldix-Symbols (Pfad der Schrift, z. B. „badge_2“; null = keine eigene) */
+	private static String fontOfGlyph(Component text) {
+		String[] font = {null};
+		text.visit((style, part) -> {
+			if (!part.isEmpty() && Badge.roleAtStart(Component.literal(part.substring(0, 1))) != null) {
+				if (style.getFont() instanceof FontDescription.Resource resource) font[0] = resource.id().getPath();
+				return Optional.of(Unit.INSTANCE);
+			}
+			return Optional.empty();
+		}, Style.EMPTY);
+		return font[0];
+	}
+
+	/** Tooltip-Text am Heldix-Symbol (null = keiner) */
+	private static String tooltipOfGlyph(Component text) {
+		String[] tooltip = {null};
+		text.visit((style, part) -> {
+			if (!part.isEmpty() && Badge.roleAtStart(Component.literal(part.substring(0, 1))) != null) {
+				if (style.getHoverEvent() instanceof HoverEvent.ShowText show) tooltip[0] = show.value().getString();
+				return Optional.of(Unit.INSTANCE);
+			}
+			return Optional.empty();
+		}, Style.EMPTY);
+		return tooltip[0];
+	}
+
+	/** Name der Schrift für n Bildpunkte je Pixel (wie Badge: 1–7 eigene, ab 8 heldixclient:badge) */
+	private static String fontName(int scale) {
+		int s = Math.clamp(scale, 1, Badge.MAX_SCALE);
+		return s == Badge.MAX_SCALE ? "badge" : "badge_" + s;
 	}
 
 	/** Farbe eines Textteils (null = ohne Farbe) */

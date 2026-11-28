@@ -1,0 +1,9 @@
+{
+	"id": "minimap",
+	"name": "Minimap",
+	"version": "${version}",
+	"description": "Karte deiner Umgebung im HUD – rund oder eckig, dreht sich mit, in echten Blockfarben, mit Wegpunkten und Himmelsrichtungen.",
+	"authors": ["HeldixClient"],
+	"entrypoint": "dev.heldixclient.addons.minimap.MinimapAddon",
+	"api": 8
+}

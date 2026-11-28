@@ -17,12 +17,21 @@
 // - 3D-Ansicht: skinview3d (MIT) samt Lizenztexten, dazu ein selbst gezeichneter Standard-Skin
 // - Bilder (docs/images), Logo, Hintergrund und die Schrift Inter (aus der Mod) werden mitkopiert
 // - sitemap.xml und robots.txt
+// Seit 0.13.8 (Design-System design.css):
+// - Texte der gemeinsamen Teile aus src/texte/de.json ({{t:bereich.schluessel}}) – Englisch kommt als en.json dazu
+// - Rollen-Abzeichen ({{abzeichen:id}}, aus UI_BADGES in ui-icons.ts, als <img> mit data:-SVG – CSP-sicher),
+//   Beispiel-Pixelköpfe für Schmuckkarten ({{kopf:Name}}, nur ausgedachte Namen)
+// - Vorschaukarten je Seite (src/og/<seite>.png, vorab gerendert mit website/werkzeug/og-karten.cjs),
+//   strukturierte Daten (SoftwareApplication) auf Start- und Download-Seite
+// - Versionsverlauf aus launcher/release-notes.md ({{VERSIONEN_HTML}}, /neuigkeiten)
+// - Schrift: WOFF2 aus den TTF-Dateien der Mod (ohne Abhängigkeiten: Tabellen unverändert, Brotli), TTF als Rückfall
+// - Bilder der Seiten (src/bilder/*.webp) und eigene Grafiken (src/assets) werden mitkopiert
 // Angaben für Impressum/Datenschutz aus site.config.json (fehlt sie: site.config.example.json mit Hinweis).
 // Die Adresse der API (__API_DOMAIN__) setzt erst der Server-Installer ein (nur in *.html).
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { deflateSync } from 'node:zlib';
+import { brotliCompressSync, constants as zlibConstants, deflateSync } from 'node:zlib';
 
 const websiteDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(websiteDir, '..');
@@ -313,6 +322,107 @@ function defaultSkin() {
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// WOFF2 aus TTF – ohne Abhängigkeiten
+// Alle Tabellen bleiben unverändert („Null-Transform“, auch für glyf/loca: Version 3), komprimiert wird der ganze
+// Tabellenstrom mit Brotli (in Node eingebaut). Spart rund 60 % gegenüber TTF; Browser entpacken das wie jedes WOFF2.
+// ---------------------------------------------------------------------------------------------------------
+
+const WOFF2_TAGS = 'cmap head hhea hmtx maxp name OS/2 post cvt  fpgm glyf loca prep CFF  VORG EBDT EBLC gasp hdmx kern LTSH PCLT VDMX vhea vmtx BASE GDEF GPOS GSUB EBSC JSTF MATH CBDT CBLC COLR CPAL SVG  sbix acnt avar bdat bloc bsln cvar fdsc feat fmtx fvar gvar hsty just lcar mort morx opbd prop trak Zapf Silf Glat Gloc Feat Sill '.match(/.{5}/g).map((tag) => tag.slice(0, 4));
+
+function base128(value) {
+  const out = [value & 0x7f];
+  for (let rest = Math.floor(value / 128); rest > 0; rest = Math.floor(rest / 128)) out.unshift((rest & 0x7f) | 0x80);
+  return out;
+}
+
+export function ttfToWoff2(ttf) {
+  const tables = [];
+  for (let i = 0; i < ttf.readUInt16BE(4); i++) {
+    const entry = 12 + i * 16;
+    const tag = ttf.toString('latin1', entry, entry + 4);
+    if (tag === 'DSIG') continue; // Signatur passt nach dem Umpacken nicht mehr
+    const offset = ttf.readUInt32BE(entry + 8);
+    tables.push({ tag, data: ttf.subarray(offset, offset + ttf.readUInt32BE(entry + 12)) });
+  }
+  tables.sort((a, b) => (a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0));
+  const directory = [];
+  for (const table of tables) {
+    const known = WOFF2_TAGS.indexOf(table.tag);
+    const transform = table.tag === 'glyf' || table.tag === 'loca' ? 3 : 0;
+    directory.push((transform << 6) | (known < 0 ? 63 : known));
+    if (known < 0) directory.push(...Buffer.from(table.tag, 'latin1'));
+    directory.push(...base128(table.data.length));
+  }
+  const stream = Buffer.concat(tables.map((table) => table.data));
+  const compressed = brotliCompressSync(stream, {
+    params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 11, [zlibConstants.BROTLI_PARAM_MODE]: zlibConstants.BROTLI_MODE_FONT, [zlibConstants.BROTLI_PARAM_SIZE_HINT]: stream.length },
+  });
+  const length = (48 + directory.length + compressed.length + 3) & ~3;
+  const out = Buffer.alloc(length);
+  out.writeUInt32BE(0x774f4632, 0); // „wOF2“
+  out.writeUInt32BE(ttf.readUInt32BE(0), 4);
+  out.writeUInt32BE(length, 8);
+  out.writeUInt16BE(tables.length, 12);
+  out.writeUInt32BE(12 + 16 * tables.length + tables.reduce((sum, table) => sum + ((table.data.length + 3) & ~3), 0), 16);
+  out.writeUInt32BE(compressed.length, 20);
+  Buffer.from(directory).copy(out, 48);
+  compressed.copy(out, 48 + directory.length);
+  return out;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Versionsverlauf aus launcher/release-notes.md
+// Abschnitte „# ---------- 0.13.8 ----------“; aktive Zeilen „- …“ und auskommentierte „# - …“ (schon veröffentlicht).
+// ---------------------------------------------------------------------------------------------------------
+
+export function readReleaseNotes(file) {
+  if (!existsSync(file)) return [];
+  const versions = [];
+  let current = null;
+  for (const line of readFileSync(file, 'utf8').replace(/\r\n?/g, '\n').split('\n')) {
+    const head = /^#\s*-{3,}\s*(\d+\.\d+\.\d+)\s*(?:\(([^)]*)\))?\s*-{3,}\s*$/.exec(line);
+    if (head) {
+      const note = head[2] ?? '';
+      current = { version: head[1], notes: [], skipped: /übersprungen/i.test(note) };
+      versions.push(current);
+      continue;
+    }
+    const item = /^(?:#\s*)?- (.+)$/.exec(line);
+    if (item && current) current.notes.push(item[1].trim());
+  }
+  return versions.filter((entry) => entry.notes.length);
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Beispiel-Pixelköpfe (nur Schmuck mit ausgedachten Namen): Haut, Haare, Augen aus einem Hash des Namens
+// ---------------------------------------------------------------------------------------------------------
+
+function exampleHead(name) {
+  let hash = 2166136261;
+  for (const char of name) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
+  const pick = (list, shift) => list[(hash >>> shift) % list.length];
+  const skin = pick(['#f2c9a0', '#e0ac7d', '#c68a5b', '#9a6640', '#6e4529', '#f5d7b8'], 0);
+  const hair = pick(['#3b2414', '#6b3f1d', '#e2b250', '#1f1a17', '#b43c2a', '#5b6b7d', '#2f4f9b', '#7c3aed'], 3);
+  const eye = pick(['#3b5bdb', '#2f9e44', '#5c3d2e', '#1c7ed6', '#7048e8'], 7);
+  const cap = (hash >>> 11) % 4 === 0 ? pick(['#dc2626', '#16a34a', '#2563eb', '#f59e0b'], 13) : null;
+  const px = [];
+  const rect = (x, y, w, h, fill) => px.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`);
+  rect(0, 0, 8, 8, skin);
+  rect(0, 0, 8, 2, cap ?? hair);
+  if (cap) rect(0, 2, 8, 1, hair);
+  else {
+    rect(0, 2, 1, 1, hair);
+    rect(7, 2, 1, 1, hair);
+  }
+  rect(1, 4, 2, 1, '#ffffff');
+  rect(5, 4, 2, 1, '#ffffff');
+  rect(2, 4, 1, 1, eye);
+  rect(5, 4, 1, 1, eye);
+  rect(3, 6, 2, 1, '#7a4a35');
+  return `<svg class="kopf" viewBox="0 0 8 8" aria-hidden="true" shape-rendering="crispEdges">${px.join('')}</svg>`;
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // Module und Capes aus den Quellen der Mod
 // ---------------------------------------------------------------------------------------------------------
 
@@ -389,10 +499,34 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
 
   const version = JSON.parse(readFileSync(path.join(root, 'launcher', 'package.json'), 'utf8')).version;
   const iconsSource = readFileSync(path.join(root, 'launcher', 'src', 'renderer', 'ui-icons.ts'), 'utf8');
-  const icons = JSON.parse(iconsSource.slice(iconsSource.indexOf('{'), iconsSource.lastIndexOf('}') + 1));
+  // ui-icons.ts enthält mehrere Tabellen (UI_ICONS, UI_BADGES, …): jede bis zum ersten „};“ am Zeilenanfang lesen
+  const iconTable = (name) => {
+    const start = iconsSource.indexOf(`export const ${name}`);
+    if (start < 0) return null;
+    const open = iconsSource.indexOf('{', start);
+    return JSON.parse(iconsSource.slice(open, iconsSource.indexOf('\n};', open) + 2));
+  };
+  // Ergänzungen nur für die Webseite (gleicher Stil: 24er-Raster, 2 px Linie); das Icon-Set des Launchers hat Vorrang
+  const webIcons = JSON.parse(readFileSync(path.join(srcDir, 'data', 'icons-web.json'), 'utf8'));
+  const icons = { ...webIcons, ...iconTable('UI_ICONS') };
+  delete icons._hinweis;
+  const badges = iconTable('UI_BADGES') ?? {};
   const svg = (name) => {
     if (!icons[name]) throw new Error(`Unbekanntes Icon: ${name}`);
     return `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true">${icons[name]}</svg>`;
+  };
+  /** Abzeichen als <img> mit data:-SVG (die SVGs bringen eigene Verläufe und Stile mit – so bleibt die CSP streng). */
+  const badgeImg = (id, label = '') => {
+    if (!badges[id]) throw new Error(`Unbekanntes Abzeichen: ${id}`);
+    const data = Buffer.from(badges[id].replace(/\s+/g, ' ').trim()).toString('base64');
+    return `<img class="rolle" src="data:image/svg+xml;base64,${data}" width="28" height="32" alt="${escape(label)}"${label ? '' : ' aria-hidden="true"'} decoding="async">`;
+  };
+  // Texte der gemeinsamen Teile (Kopf, Fuß, wiederkehrende Knöpfe)
+  const texts = JSON.parse(readFileSync(path.join(srcDir, 'texte', 'de.json'), 'utf8'));
+  const text = (key) => {
+    const value = key.split('.').reduce((object, part) => object?.[part], texts);
+    if (typeof value !== 'string') throw new Error(`Text fehlt in texte/de.json: ${key}`);
+    return value;
   };
   const stand = new Intl.DateTimeFormat('de-DE', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
 
@@ -405,16 +539,19 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
     const kind = module.addon ? 'addon' : module.hud ? 'hud' : 'funktion';
     const kindLabel = module.addon ? 'Addon' : module.hud ? 'HUD-Anzeige' : 'Funktion';
     const search = [module.name, module.description, extra.text, kindLabel, ...(extra.tasten ?? []), ...(extra.einstellungen ?? []), extra.hinweis].filter(Boolean).join(' ').toLowerCase();
-    return `<article class="module-card tile reveal" id="modul-${escape(module.id)}" data-kategorie="${kind}" data-suche="${escape(search.replace(/\[\[|\]\]/g, ''))}">
-  <div class="module-top"><span class="badge">${svg(module.icon)}</span><span class="chip ${kind === 'hud' ? 'accent' : kind === 'addon' ? 'warning' : ''}">${kindLabel}</span>${module.enabled ? '<span class="chip success">von Anfang an an</span>' : ''}</div>
-  <h3>${escape(module.name)}</h3>
-  <p class="module-short">${escape(module.description)}${module.addon ? ` · ${escape(module.addon.name)}` : ''}</p>
-  ${extra.text ? `<p class="module-text">${inline(extra.text)}</p>` : ''}
-  ${extra.tasten?.length ? `<ul class="module-keys" aria-label="Tasten">${extra.tasten.map((key) => `<li>${inline(key)}</li>`).join('')}</ul>` : ''}
-  ${extra.einstellungen?.length ? `<details class="module-more"><summary>Einstellungen${svg('chevron-down')}</summary><ul>${extra.einstellungen.map((entry) => `<li>${inline(entry)}</li>`).join('')}</ul></details>` : ''}
-  ${extra.hinweis ? `<p class="module-hint">${svg('info')}<span>${inline(extra.hinweis)}</span></p>` : ''}
-  ${extra.bild ? `<button class="module-shot" type="button" data-full="/images/${escape(extra.bild)}">${svg('image')}Im Spiel ansehen</button>` : ''}
-  ${module.addon ? `<a class="module-store" href="/addons#${escape(module.addon.id)}">${svg('addons')}Im Addon-Store ansehen</a>` : ''}
+    const actions = [
+      extra.bild ? `<button class="btn btn--secondary btn--sm module-shot" type="button" data-full="/images/${escape(extra.bild)}" data-full-alt="${escape(module.name)} im Spiel">${svg('image')}Im Spiel ansehen</button>` : '',
+      module.addon ? `<a class="link-arrow module-store" href="/addons#${escape(module.addon.id)}">${svg('addons')}Im Addon-Store ansehen</a>` : '',
+    ].filter(Boolean);
+    return `<article class="card module-card reveal" id="modul-${escape(module.id)}" data-kategorie="${kind}" data-suche="${escape(search.replace(/\[\[|\]\]/g, ''))}">
+  <div class="module-card__top"><span class="icon-tile${kind === 'addon' ? ' icon-tile--reward' : kind === 'hud' ? '' : ' icon-tile--online'}">${svg(module.icon)}</span><span class="chip ${kind === 'hud' ? 'chip--accent' : kind === 'addon' ? 'chip--reward' : 'chip--online'}">${kindLabel}</span>${module.enabled ? '<span class="chip">von Anfang an an</span>' : ''}</div>
+  <h3 class="card__title">${escape(module.name)}</h3>
+  <p class="module-card__short">${escape(module.description)}${module.addon ? ` · ${escape(module.addon.name)}` : ''}</p>
+  ${extra.text ? `<p class="card__text">${inline(extra.text)}</p>` : ''}
+  ${extra.tasten?.length ? `<ul class="module-card__keys" aria-label="Tasten">${extra.tasten.map((key) => `<li>${inline(key)}</li>`).join('')}</ul>` : ''}
+  ${extra.einstellungen?.length ? `<details class="module-card__more"><summary>Einstellungen${svg('chevron-down')}</summary><ul>${extra.einstellungen.map((entry) => `<li>${inline(entry)}</li>`).join('')}</ul></details>` : ''}
+  ${extra.hinweis ? `<p class="module-card__hint">${svg('info')}<span>${inline(extra.hinweis)}</span></p>` : ''}
+  ${actions.length ? `<div class="module-card__actions">${actions.join('')}</div>` : ''}
 </article>`;
   };
 
@@ -422,12 +559,12 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
   const capes = readCapes();
   const capeButtons = capes
     .map(
-      (cape, index) => `<button class="cape-pick" type="button" role="radio" aria-checked="${index === 0 ? 'true' : 'false'}" tabindex="${index === 0 ? '0' : '-1'}" data-cape="${escape(cape.id)}" data-name="${escape(cape.name)}" data-beschreibung="${escape(cape.description)}" data-frames="${Number(cape.frames) || 1}" data-fps="${Number(cape.fps) || 10}" data-glow="${cape.glow ? '1' : '0'}">
+      (cape, index) => `<button class="cape-pick" type="button" role="radio" aria-checked="${index === 0 ? 'true' : 'false'}" tabindex="${index === 0 ? '0' : '-1'}" data-cape="${escape(cape.id)}" data-name="${escape(cape.name)}" data-beschreibung="${escape(cape.description)}" data-frames="${Number(cape.frames) || 1}" data-fps="${Number(cape.fps) || 10}" data-glow="${cape.glow ? '1' : '0'}"${cape.team === true ? ' data-team="1"' : ''}>
   <span class="cape-art" data-cape="${escape(cape.id)}" aria-hidden="true"></span><span class="cape-pick-name">${escape(cape.name)}</span></button>`,
     )
     .join('\n');
   const capeList = capes
-    .map((cape) => `<li><strong>${escape(cape.name)}</strong> – ${escape(cape.description)}${cape.glow ? ' <span class="chip accent">leuchtet</span>' : ''}</li>`)
+    .map((cape) => `<li><strong>${escape(cape.name)}</strong> – ${escape(cape.description)}${cape.glow ? ' <span class="chip accent">leuchtet</span>' : ''}${cape.team === true ? ' <span class="chip warning">nur Team</span>' : ''}</li>`)
     .join('');
 
   // --- Hilfe und Entwickler
@@ -436,7 +573,7 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
     ['launcher', 'Launcher & Instanzen', 'Loader, Mods & Addons, Shaderpacks, Updates', 'loader-heldix'],
     ['grafik', 'Grafik & Leistung', 'Vulkan, OpenGL, FPS-Boost, Shader', 'performance'],
     ['spiel', 'Im Spiel', 'Heldix-Menü, Module, HUD, Capes & Cosmetics', 'modules'],
-    ['freunde', 'Freunde & Konto', 'Freunde, Nachrichten, Privatsphäre, Web-Konto', 'friends'],
+    ['freunde', 'Zusammen & Konto', 'Freunde, Party, Welt teilen, Nachrichten, Privatsphäre, Web-Konto', 'friends'],
     ['probleme', 'Probleme lösen', 'Startprobleme, Abstürze, Anmeldung', 'warning'],
   ];
   const readCollection = (dir) =>
@@ -455,8 +592,8 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
   const hilfeCategoriesHtml = HILFE_KATEGORIEN.map(([id, name, sub, icon]) => {
     const list = hilfe.filter((article) => article.meta.kategorie === id);
     if (!list.length) return '';
-    return `<section class="help-category reveal" id="kategorie-${id}" aria-labelledby="kategorie-${id}-titel">
-  <div class="help-category-head"><span class="badge">${svg(icon)}</span><div><h2 id="kategorie-${id}-titel">${escape(name)}</h2><p>${escape(sub)}</p></div></div>
+    return `<section class="card help-category reveal" id="kategorie-${id}" aria-labelledby="kategorie-${id}-titel">
+  <div class="help-category-head"><span class="icon-tile">${svg(icon)}</span><div><h2 id="kategorie-${id}-titel">${escape(name)}</h2><p>${escape(sub)}</p></div></div>
   <div class="article-list">${list.map((article) => articleCard(article, '/hilfe')).join('')}</div>
 </section>`;
   }).join('\n');
@@ -464,7 +601,23 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
     .map(([id, name, , icon]) => `<a class="topic-chip" href="#kategorie-${id}">${svg(icon)}${escape(name)}</a>`)
     .join('');
   const entwicklerCardsHtml = entwickler
-    .map((article, index) => `<a class="dev-card tile reveal" href="/entwickler/${article.slug}"><span class="dev-number">${String(index + 1).padStart(2, '0')}</span><h3>${escape(article.meta.titel)}</h3><p>${escape(article.meta.beschreibung)}</p><span class="story-link">Lesen${svg('chevron-right')}</span></a>`)
+    .map((article, index) => `<a class="card card--interactive dev-card reveal" href="/entwickler/${article.slug}"><span class="dev-number">${String(index + 1).padStart(2, '0')}</span><h3 class="h4">${escape(article.meta.titel)}</h3><p class="card__text">${escape(article.meta.beschreibung)}</p><span class="link-arrow">Lesen${svg('chevron-right')}</span></a>`)
+    .join('\n');
+
+  // --- Versionsverlauf (launcher/release-notes.md): neueste zuerst; die aktuelle Version steht oben groß
+  const releases = readReleaseNotes(path.join(root, 'launcher', 'release-notes.md'));
+  const noteText = (note) => escape(note).replace(/^(Neu(?: im Store)?:)/, '<strong>$1</strong>');
+  const notesList = (notes) => `<ul class="release-notes">${notes.map((note) => `<li>${noteText(note)}</li>`).join('')}</ul>`;
+  const current = releases.find((entry) => entry.version === version) ?? releases[0] ?? null;
+  const latestNotesHtml = current ? notesList(current.notes) : '<p class="text-2">Kleinere Verbesserungen und Fehlerbehebungen.</p>';
+  const versionsHtml = releases
+    .filter((entry) => entry !== current)
+    .map(
+      (entry) => `<li class="release-item" data-version="${escape(entry.version)}">
+  <div class="release-item__head"><h3 class="h4">Version ${escape(entry.version)}</h3>${entry.skipped ? '<span class="chip">kam mit der nächsten Version</span>' : ''}<span class="release-date" data-datum></span></div>
+  ${notesList(entry.notes)}
+</li>`,
+    )
     .join('\n');
 
   const values = {
@@ -498,6 +651,9 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
       .map((module) => `<a class="tile mini-tile reveal" href="/module#modul-${escape(module.id)}"><span class="badge">${svg(module.icon)}</span><h3>${escape(module.name)}</h3><p>${escape(module.description)}</p></a>`)
       .join('\n'),
     CAPES_ANZAHL: String(capes.length),
+    CAPES_OEFFENTLICH: String(capes.filter((cape) => cape.team !== true).length),
+    VERSIONEN_HTML: versionsHtml,
+    VERSION_NEU_HTML: latestNotesHtml,
     CAPES_AUSWAHL_HTML: capeButtons,
     CAPES_LISTE_HTML: capeList,
     HILFE_KATEGORIEN_HTML: hilfeCategoriesHtml,
@@ -514,13 +670,37 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
   const partials = path.join(srcDir, '_partials');
   const sitemap = [];
 
+  // Vorschaukarten (Open Graph/Twitter): src/og/<name>.png, vorab gerendert (website/werkzeug/og-karten.cjs)
+  const ogDir = path.join(srcDir, 'og');
+  const ogCards = existsSync(ogDir) ? new Set(readdirSync(ogDir).filter((name) => name.endsWith('.png')).map((name) => name.slice(0, -4))) : new Set();
+  /** Strukturierte Daten (schema.org) – ein Datenblock, kein Skript: verträgt sich mit der strengen CSP. */
+  const softwareJsonLd = () =>
+    `<script type="application/ld+json">${JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'SoftwareApplication',
+      name: 'HeldixClient',
+      applicationCategory: 'GameApplication',
+      operatingSystem: 'Windows 10, Windows 11, macOS 11 oder neuer',
+      softwareVersion: version,
+      inLanguage: 'de',
+      url: `${siteUrl}/`,
+      downloadUrl: `${siteUrl}/download`,
+      image: `${siteUrl}/og/start.png`,
+      description: 'Kostenloser Launcher und Client für Minecraft: Java Edition – Freunde einladen, Party, Voice Chat auch im Browser, Welt teilen, animierte Capes und Cosmetics, eigenes HUD und Addons.',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'EUR' },
+      publisher: { '@type': 'Organization', name: 'HeldixClient', url: `${siteUrl}/` },
+    }).replace(/</g, '\\u003c')}</script>`;
+
   /** Seitenangaben aus <!--seite {…}--> → Titel, Beschreibung, Open Graph, kanonische Adresse, noindex. */
   const pageMeta = (text, urlPath) => {
     const match = /<!--seite\s+(\{[\s\S]*?\})\s*-->\n?/.exec(text);
     if (!match) return { text, meta: '', noindex: false };
     const data = JSON.parse(match[1]);
     const title = data.titel ? `${data.titel} – HeldixClient` : 'HeldixClient';
-    const image = `${siteUrl}${data.bild || '/images/launcher-start.png'}`;
+    // Vorschaukarte: ausdrücklich angegeben („og“), sonst nach Seitenname, sonst die allgemeine
+    const name = urlPath === '/' ? 'start' : urlPath.slice(1).replace(/\//g, '-');
+    const card = data.og ?? (ogCards.has(name) ? name : ogCards.has(urlPath.split('/')[1]) ? urlPath.split('/')[1] : 'start');
+    const image = data.bild ? `${siteUrl}${data.bild}` : `${siteUrl}/og/${card}.png`;
     const url = `${siteUrl}${urlPath}`;
     const lines = [
       `<title>${escape(data.titelVoll || title)}</title>`,
@@ -533,7 +713,13 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
       data.beschreibung ? `<meta property="og:description" content="${escape(data.beschreibung)}">` : '',
       `<meta property="og:url" content="${escape(url)}">`,
       `<meta property="og:image" content="${escape(image)}">`,
+      data.bild ? '' : '<meta property="og:image:width" content="1200">\n<meta property="og:image:height" content="630">',
+      `<meta property="og:image:alt" content="${escape(data.titelVoll || title)}">`,
       '<meta name="twitter:card" content="summary_large_image">',
+      `<meta name="twitter:title" content="${escape(data.titelVoll || title)}">`,
+      data.beschreibung ? `<meta name="twitter:description" content="${escape(data.beschreibung)}">` : '',
+      `<meta name="twitter:image" content="${escape(image)}">`,
+      data.software ? softwareJsonLd() : '',
     ].filter(Boolean);
     return { text: text.replace(match[0], ''), meta: lines.join('\n'), noindex: Boolean(data.noindex) };
   };
@@ -542,21 +728,27 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
     const { text: withoutMeta, meta, noindex } = pageMeta(raw, urlPath);
     let out = withoutMeta.replace(/\{\{include:([\w.-]+)\}\}/g, (_, name) => readFileSync(path.join(partials, name), 'utf8').trimEnd());
     out = out.replace('{{SEITE_META}}', meta);
+    out = out.replace(/\{\{t:([\w.-]+)\}\}/g, (_, key) => text(key));
     // Bedingte Blöcke (auch über mehrere Zeilen)
     out = out.replace(/\{\{([#^])github\}\}([\s\S]*?)\{\{\/github\}\}/g, (_, mode, body) => ((mode === '#') === Boolean(githubUrl) ? body : ''));
     out = out.replace(/\{\{icon:([\w-]+)\}\}/g, (_, name) => svg(name));
+    out = out.replace(/\{\{kopf:([^}]{1,32})\}\}/g, (_, name) => exampleHead(name));
+    out = out.replace(/\{\{abzeichen:([\w-]+)(?::([^}]*))?\}\}/g, (_, id, label) => badgeImg(id, label ?? ''));
     out = out.replace(/\{\{([A-Z_]+)\}\}/g, (match, key) => {
       if (key in extra) return extra[key];
       if (!(key in values)) throw new Error(`Unbekannter Platzhalter: ${match}`);
       return values[key];
     });
     if (/\{\{[#^/]?[a-z]/.test(out)) throw new Error(`Unverarbeiteter Block in ${urlPath}`);
+    // CSP: keine Inline-Stile, -Handler oder -Skripte (JSON-LD ist ein Datenblock und erlaubt)
+    if (/\sstyle=|<style|\son[a-z]+="/i.test(out.replace(/<svg[\s\S]*?<\/svg>/g, ''))) throw new Error(`${urlPath}: Inline-Stil oder Inline-Handler (CSP)`);
+    if (/<script(?![^>]*\b(?:src=|type="application\/ld\+json"))[^>]*>/i.test(out)) throw new Error(`${urlPath}: Inline-Skript (CSP)`);
     if (!noindex && urlPath !== '/404') sitemap.push(urlPath);
     return out;
   };
 
   rmSync(outDir, { recursive: true, force: true });
-  for (const dir of ['assets', 'images', 'fonts', 'vendor', 'capes', 'hilfe', 'entwickler']) mkdirSync(path.join(outDir, dir), { recursive: true });
+  for (const dir of ['assets', 'images', 'bilder', 'og', 'fonts', 'vendor', 'capes', 'hilfe', 'entwickler', 'discord']) mkdirSync(path.join(outDir, dir), { recursive: true });
 
   // Seiten aus src/*.html
   for (const file of readdirSync(srcDir)) {
@@ -586,8 +778,8 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
         VERWANDT_HTML: siblings.length ? `<div class="related"><h2>${area === 'hilfe' ? 'Mehr zum Thema' : 'Weitere Seiten'}</h2><div class="article-list">${siblings.slice(0, 6).map((other) => articleCard(other, `/${area}`)).join('')}</div></div>` : '',
         SUPPORT_HTML:
           area === 'hilfe'
-            ? `<aside class="support-box">${svg('info')}<div><h2>Nicht gelöst?</h2><p>Schreib dem Team – die Antwort bekommst du im Konto und im Spiel.</p></div><a class="button small" href="/konto#ziel=support">Support-Anfrage stellen</a></aside>`
-            : `<aside class="support-box">${svg('chat')}<div><h2>Fragen zur API?</h2><p>Schreib dem Team über eine Support-Anfrage – auch für die API-Datei und das Beispielprojekt.</p></div><a class="button small" href="/konto#ziel=support">Support-Anfrage stellen</a></aside>`,
+            ? `<aside class="support-box"><span class="icon-tile">${svg('help-circle')}</span><div><h2>Nicht gelöst?</h2><p>Schreib dem Team – die Antwort bekommst du im Konto und im Spiel.</p></div><a class="btn btn--primary btn--sm" href="/konto#reiter=support">Support-Anfrage stellen</a></aside>`
+            : `<aside class="support-box"><span class="icon-tile">${svg('chat')}</span><div><h2>Fragen zur API?</h2><p>Schreib dem Team über eine Support-Anfrage – auch für die API-Datei und das Beispielprojekt.</p></div><a class="btn btn--primary btn--sm" href="/konto#reiter=support">Support-Anfrage stellen</a></aside>`,
       };
       const page = articleTemplate.replace('<!--seite {}-->', `<!--seite ${JSON.stringify({ titel: article.meta.titel, beschreibung: article.meta.beschreibung, typ: 'article' })}-->`);
       writeFileSync(path.join(outDir, area, `${article.slug}.html`), render(page, `/${area}/${article.slug}`, extra));
@@ -614,10 +806,20 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
   copyFileSync(path.join(root, 'launcher', 'src', 'renderer', 'logo.svg'), path.join(outDir, 'assets', 'logo.svg'));
   copyFileSync(path.join(root, 'launcher', 'src', 'renderer', 'background.svg'), path.join(outDir, 'assets', 'background.svg'));
   copyFileSync(path.join(root, 'launcher', 'build', 'icon.png'), path.join(outDir, 'assets', 'icon.png'));
+  // Eigene Grafiken (src/assets), Bilder der Seiten (src/bilder) und Vorschaukarten (src/og)
+  for (const dir of ['assets', 'bilder', 'og']) {
+    if (!existsSync(path.join(srcDir, dir))) continue;
+    for (const file of readdirSync(path.join(srcDir, dir)).filter((name) => /\.(svg|png|webp|avif|jpg|webm)$/.test(name))) copyFileSync(path.join(srcDir, dir, file), path.join(outDir, dir, file));
+  }
+  // Bilder für den Discord-Status des Launchers (Discord lädt sie über https, launcher/scripts/render-discord-art.mjs)
+  for (const image of readdirSync(path.join(srcDir, 'discord')).filter((name) => name.endsWith('.png'))) copyFileSync(path.join(srcDir, 'discord', image), path.join(outDir, 'discord', image));
   writeFileSync(path.join(outDir, 'assets', 'standard-skin.png'), defaultSkin());
   for (const image of readdirSync(path.join(root, 'docs', 'images')).filter((name) => /\.(png|jpg|webp)$/.test(name))) copyFileSync(path.join(root, 'docs', 'images', image), path.join(outDir, 'images', image));
   const fontDir = path.join(root, 'mod', 'src', 'main', 'resources', 'assets', 'heldixclient', 'font');
-  for (const font of FONTS) copyFileSync(path.join(fontDir, font), path.join(outDir, 'fonts', font));
+  for (const font of FONTS) {
+    copyFileSync(path.join(fontDir, font), path.join(outDir, 'fonts', font));
+    writeFileSync(path.join(outDir, 'fonts', font.replace(/\.ttf$/, '.woff2')), ttfToWoff2(readFileSync(path.join(fontDir, font))));
+  }
   copyFileSync(path.join(root, 'mod', 'src', 'main', 'resources', 'licenses', 'Inter-OFL.txt'), path.join(outDir, 'fonts', 'Inter-OFL.txt'));
   // Capes: Texturen (24 Bilder untereinander) und Leuchtebenen
   const capeDir = path.join(root, 'mod', 'src', 'main', 'resources', 'assets', 'heldixclient', 'textures', 'cape');
@@ -628,7 +830,7 @@ export function buildWebsite(outDir = path.join(websiteDir, 'dist')) {
   // Liste der eingebauten Capes für Seiten, die sie erst zur Laufzeit brauchen (cosmetics-common.js: loadBuiltinCapes)
   writeFileSync(
     path.join(outDir, 'capes', 'capes.json'),
-    JSON.stringify({ capes: capes.map((cape) => ({ id: cape.id, name: cape.name, description: cape.description, frames: Number(cape.frames) || 1, fps: Number(cape.fps) || 10, glow: Boolean(cape.glow) })) }),
+    JSON.stringify({ capes: capes.map((cape) => ({ id: cape.id, name: cape.name, description: cape.description, frames: Number(cape.frames) || 1, fps: Number(cape.fps) || 10, glow: Boolean(cape.glow), ...(cape.team === true ? { team: true } : {}) })) }),
   );
   // Öffentlicher Update-Schlüssel für die Prüfung der Cosmetics im Browser (cosmetics-common.js)
   const updateKey = readUpdatePublicKey();

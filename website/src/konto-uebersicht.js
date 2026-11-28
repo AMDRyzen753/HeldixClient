@@ -1,40 +1,39 @@
-// HeldixClient – Webseite: Konto → „Übersicht“ und die Glocke (Aktivität) in der Kopfzeile.
+// HeldixClient – Webseite: Konto → „Übersicht“ (Dashboard) und die Glocke (Aktivität) im Seitenkopf.
 //
-// - Übersicht: Gruß, Schnellaktionen, Kacheln mit dem Stand jedes Bereichs (ungelesene Nachrichten, offene Anfragen,
-//   Support-Anfragen, die auf dich warten, eigene Addons, Cape und Cosmetics, Sicherheit), letzte Aktivität und alle
-//   Bereiche als kurze Liste.
-// - Aktivität: neue Nachrichten, Freundschaftsanfragen, Antworten des Teams und Entscheidungen zu eigenen Addons.
-//   Was du gesehen hast (Glocke geöffnet, Eintrag gewählt, Bereich besucht, „Alles gelesen“), merkt sich dieser Browser
+// - Dashboard: Figur mit Skin, Cape und Cosmetics (3D aus konto-cosmetics.js), Gruß und was neu ist, Statustext,
+//   Einladungs-Fortschritt mit Belohnungen, Freunde online (Beitreten, Nachricht), ungelesene Nachrichten (mit
+//   Beitreten-Karten), Party, eigene Welten, Support und Sicherheit.
+// - Aktivität: neue Nachrichten, Freundschaftsanfragen, Party-Einladungen, Antworten des Teams und Entscheidungen zu
+//   eigenen Addons. Was du gesehen hast (Glocke geöffnet, Eintrag gewählt, Bereich besucht), merkt sich dieser Browser
 //   in localStorage – je Spieler. Ohne localStorage (privates Fenster, gesperrt) gilt das nur bis zum Neuladen.
 //
-// Keine eigenen Anfragen: konto.js reicht nach jedem Nachfragen den aktuellen Stand herein (update(stand)).
+// Keine eigenen Anfragen: konto.js reicht nach jeder Änderung den aktuellen Stand herein (update(stand)).
 // Texte vom Server landen nur als Text im Dokument.
-import { avatar, capeName, CAPES, emptyState, formatDate, h, icon, relativeTime, rerender, timeEl } from './app-common.js';
-import { sectionHref } from './app-shell.js';
+import { avatar, emptyState, h, icon, relativeTime, rerender, shortWhen, timeEl } from './app-common.js';
+import { sectionHref, shellIcon } from './app-shell.js';
+import { displayName, friendLine, friendsSummary, joinButton, joinCard, joinTarget, sortFriends } from './konto-sozial.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 const SEEN_PREFIX = 'heldix.konto.gesehen.';
 const MAX_SEEN = 400;
 const MAX_ITEMS = 12;
-const OVERVIEW_ITEMS = 6;
 /** Wie lange schon gelesene Einträge in der Aktivität bleiben. */
 const KEEP_MESSAGES = 3 * DAY;
 const KEEP_DECISIONS = 14 * DAY;
 const WEEKDAY = new Intl.DateTimeFormat('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
+const ACCESS = { invited: 'nur eingeladen', friends: 'Freunde dürfen rein', open: 'offen für alle' };
 
 const plural = (count, one, many) => `${count} ${count === 1 ? one : many}`;
-
-/** „A“, „A und B“, „A, B und 2 weitere“ */
-function nameList(names) {
-  const list = [...new Set(names.filter(Boolean))];
-  if (list.length <= 1) return list[0] ?? '';
-  if (list.length === 2) return `${list[0]} und ${list[1]}`;
-  return `${list[0]}, ${list[1]} und ${plural(list.length - 2, 'weitere', 'weitere')}`;
-}
 
 function clip(text, max = 90) {
   const value = String(text ?? '').replace(/\s+/g, ' ').trim();
   return [...value].length > max ? `${[...value].slice(0, max - 1).join('')}…` : value;
+}
+
+/** „A, B und C“ */
+function joinWords(parts) {
+  if (parts.length <= 1) return parts[0] ?? '';
+  return `${parts.slice(0, -1).join(', ')} und ${parts[parts.length - 1]}`;
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -97,10 +96,6 @@ function createSeenStore() {
 // Aktivität aus dem Stand bauen
 // ---------------------------------------------------------------------------------------------------------
 
-/**
- * Einträge (neueste zuerst). fresh: etwas Neues, das du (laut Dienst) noch nicht angesehen hast; ob es „neu“ in
- * der Glocke ist, entscheidet zusätzlich der Gesehen-Merker.
- */
 function buildItems(stand) {
   const items = [];
   const now = Date.now();
@@ -120,30 +115,18 @@ function buildItems(stand) {
       icon: 'chat',
       fresh: unread > 0,
       target: { section: 'nachrichten', params: { mit: conversation.uuid } },
-      player: { name: conversation.name, uuid: conversation.uuid },
     });
   }
   for (const request of stand.friends?.incoming ?? []) {
-    items.push({
-      id: `anfrage:${request.uuid}:${request.at}`,
-      kind: 'anfrage',
-      section: 'freunde',
-      title: 'Freundschaftsanfrage',
-      text: `${request.name} möchte mit dir befreundet sein`,
-      at: request.at,
-      icon: 'user-plus',
-      fresh: true,
-      target: { section: 'freunde' },
-      player: { name: request.name, uuid: request.uuid },
-    });
+    items.push({ id: `anfrage:${request.uuid}:${request.at}`, kind: 'anfrage', section: 'freunde', title: 'Freundschaftsanfrage', text: `${request.name} möchte mit dir befreundet sein`, at: request.at, icon: 'user-plus', fresh: true, target: { section: 'freunde' } });
+  }
+  for (const invite of stand.party?.invites ?? []) {
+    items.push({ id: `party:${invite.party}:${invite.at}`, kind: 'party', section: 'party', title: 'Party-Einladung', text: `${invite.from?.name ?? 'Ein Freund'} lädt dich in die Party ein`, at: invite.at, icon: 'friends', fresh: true, target: { section: 'party' } });
   }
   for (const ticket of stand.tickets ?? []) {
     const at = ticket.updatedAt ?? ticket.at;
-    if (ticket.unread) {
-      items.push({ id: `support:${ticket.id}:${at}`, kind: 'support', section: 'support', title: 'Antwort vom Team', text: clip(ticket.subject), at, icon: 'info', fresh: true, target: { section: 'support', params: { anfrage: ticket.id } } });
-    } else if (ticket.status === 'answered' && now - (at ?? 0) <= KEEP_DECISIONS) {
-      items.push({ id: `support:${ticket.id}:${at}`, kind: 'support', section: 'support', title: 'Anfrage beantwortet', text: clip(ticket.subject), at, icon: 'info', fresh: false, target: { section: 'support', params: { anfrage: ticket.id } } });
-    }
+    if (ticket.unread) items.push({ id: `support:${ticket.id}:${at}`, kind: 'support', section: 'support', title: 'Antwort vom Team', text: clip(ticket.subject), at, icon: 'info', fresh: true, target: { section: 'support', params: { anfrage: ticket.id } } });
+    else if (ticket.status === 'answered' && now - (at ?? 0) <= KEEP_DECISIONS) items.push({ id: `support:${ticket.id}:${at}`, kind: 'support', section: 'support', title: 'Anfrage beantwortet', text: clip(ticket.subject), at, icon: 'info', fresh: false, target: { section: 'support', params: { anfrage: ticket.id } } });
   }
   for (const sub of stand.submissions ?? []) {
     if (sub.status !== 'approved' && sub.status !== 'rejected') continue;
@@ -162,19 +145,18 @@ function buildItems(stand) {
 
 // ---------------------------------------------------------------------------------------------------------
 
-/**
- * shell: Rahmen der Seite. actions: { [aktion]: () => void } für die Schnellaktionen (freund, nachricht, cosmetics,
- * support, addon). onBadges(): nach jeder Änderung am Gesehen-Stand (für den Zähler an „Meine Addons“).
- */
-export function initOverview({ shell, actions = {} }) {
+/** shell: Rahmen der Seite. onStatus(): Knopf „Status setzen“. worldDomain(): Domain der Welten (für Beitreten). */
+export function initOverview({ shell, onStatus, worldDomain = () => null, openChat = () => {} }) {
   const seen = createSeenStore();
   let stand = {};
   let items = [];
   let bellSignature = null;
   let scheduled = false;
+  let bellOpen = false;
 
   const $ = (id) => document.getElementById(id);
   const isUnread = (item) => item.fresh && !seen.has(item.id);
+  const friendByUuid = (uuid) => stand.friends?.friends.find((friend) => friend.uuid === uuid) ?? null;
 
   // --- Glocke -------------------------------------------------------------------------------------------
 
@@ -187,7 +169,6 @@ export function initOverview({ shell, actions = {} }) {
   }
 
   const bellPanel = $('shell-aktivitaet');
-  let bellOpen = false;
   shell.onActivity((event) => {
     if (event.type === 'open') {
       bellOpen = true;
@@ -197,7 +178,6 @@ export function initOverview({ shell, actions = {} }) {
       if (seen.add([event.item.id])) scheduleBadges();
     }
   });
-  // Liste geschlossen (Klick daneben, Escape, Eintrag gewählt): jetzt ohne „neu“ zeichnen.
   if (bellPanel) {
     new MutationObserver(() => {
       if (bellPanel.hidden && bellOpen) {
@@ -206,8 +186,6 @@ export function initOverview({ shell, actions = {} }) {
       }
     }).observe(bellPanel, { attributes: true, attributeFilter: ['hidden'] });
   }
-
-  // --- Zähler ---------------------------------------------------------------------------------------------
 
   function scheduleBadges() {
     if (scheduled) return;
@@ -224,9 +202,13 @@ export function initOverview({ shell, actions = {} }) {
     const me = stand.me;
     const missing2fa = Boolean(me?.role && me.twoFactor && !me.twoFactor.enabled);
     shell.setBadge('sicherheit', missing2fa ? 1 : 0, { label: 'Zwei-Faktor-Anmeldung fehlt' });
+    const support = (stand.tickets ?? []).filter((ticket) => ticket.unread).length;
+    shell.setBadge('support', support, { label: support === 1 ? '1 neue Antwort' : `${support} neue Antworten` });
+    const partyInvites = stand.party?.invites?.length ?? 0;
+    shell.setBadge('party', partyInvites, { label: partyInvites === 1 ? '1 Einladung' : `${partyInvites} Einladungen` });
   }
 
-  // --- Übersicht ------------------------------------------------------------------------------------------
+  // --- Karten ---------------------------------------------------------------------------------------------
 
   function greeting() {
     const hour = new Date().getHours();
@@ -236,195 +218,237 @@ export function initOverview({ shell, actions = {} }) {
     return 'Noch wach?';
   }
 
-  function summaryLine(counts) {
-    const parts = [];
-    if (counts.unread) parts.push(plural(counts.unread, 'ungelesene Nachricht', 'ungelesene Nachrichten'));
-    if (counts.requests) parts.push(plural(counts.requests, 'Freundschaftsanfrage', 'Freundschaftsanfragen'));
-    if (counts.support) parts.push(plural(counts.support, 'neue Antwort vom Team', 'neue Antworten vom Team'));
-    if (counts.decisions) parts.push(plural(counts.decisions, 'Entscheidung zu deinen Addons', 'Entscheidungen zu deinen Addons'));
-    if (!parts.length) return 'Alles erledigt – gerade wartet nichts auf dich.';
-    const text = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} und ${parts[parts.length - 1]}`;
-    return `Neu für dich: ${text}.`;
-  }
-
-  function tile({ section, iconName, label, value, sub, tone = '', count = 0, countLabel = '', art = null }) {
-    return h(
-      'div',
-      { class: 'ov-tile-item', role: 'listitem' },
-      h(
-        'a',
-        { class: `ov-tile${tone ? ` ${tone}` : ''}`, href: `#reiter=${section}`, dataset: { goto: section, kachel: section, focusKey: `ov:${section}` } },
-        h('span', { class: 'ov-tile-top' }, h('span', { class: 'ov-tile-icon', 'aria-hidden': 'true' }, art ?? icon(iconName)), h('span', { class: 'ov-tile-label', text: label }), count ? h('span', { class: 'count', 'aria-label': countLabel || undefined, text: count > 99 ? '99+' : String(count) }) : null),
-        h('span', { class: 'ov-tile-value', text: value }),
-        sub ? h('span', { class: 'ov-tile-sub', text: sub }) : null,
-        h('span', { class: 'ov-tile-go', 'aria-hidden': 'true' }, icon('chevron-right')),
-      ),
-    );
-  }
-
-  function tiles(counts) {
-    const out = [];
-    const conversations = stand.conversations;
-    const friends = stand.friends;
-    // Nachrichten
-    if (!conversations) out.push(tile({ section: 'nachrichten', iconName: 'chat', label: 'Nachrichten', value: '…', sub: 'Wird geladen' }));
-    else {
-      const senders = conversations.filter((conversation) => conversation.unread).map((conversation) => conversation.name);
-      out.push(
-        tile({
-          section: 'nachrichten',
-          iconName: 'chat',
-          label: 'Nachrichten',
-          value: counts.unread ? plural(counts.unread, 'ungelesen', 'ungelesen') : 'Alles gelesen',
-          sub: counts.unread ? `von ${nameList(senders)}` : conversations.length ? plural(conversations.length, 'Unterhaltung', 'Unterhaltungen') : 'Schreib deinen Freunden',
-          tone: counts.unread ? 'news' : '',
-          count: counts.unread,
-          countLabel: `${counts.unread} ungelesen`,
-        }),
-      );
-    }
-    // Freunde
-    if (!friends) out.push(tile({ section: 'freunde', iconName: 'friends', label: 'Freunde', value: '…', sub: 'Wird geladen' }));
-    else {
-      const online = friends.friends.filter((friend) => friend.online).length;
-      out.push(
-        tile({
-          section: 'freunde',
-          iconName: 'friends',
-          label: 'Freunde',
-          value: counts.requests ? plural(counts.requests, 'offene Anfrage', 'offene Anfragen') : plural(friends.friends.length, 'Freund', 'Freunde'),
-          sub: [counts.requests ? plural(friends.friends.length, 'Freund', 'Freunde') : null, `${online} online`, friends.outgoing.length ? `${friends.outgoing.length} gesendet` : null].filter(Boolean).join(' · '),
-          tone: counts.requests ? 'news' : '',
-          count: counts.requests,
-          countLabel: counts.requests === 1 ? '1 offene Anfrage' : `${counts.requests} offene Anfragen`,
-        }),
-      );
-    }
-    // Support
-    const tickets = stand.tickets;
-    if (!tickets) out.push(tile({ section: 'support', iconName: 'info', label: 'Support', value: '…', sub: 'Wird geladen' }));
-    else {
-      const open = tickets.filter((ticket) => ticket.status !== 'closed').length;
-      const waiting = tickets.filter((ticket) => ticket.unread || ticket.status === 'answered').length;
-      out.push(
-        tile({
-          section: 'support',
-          iconName: 'info',
-          label: 'Support',
-          value: counts.support ? plural(counts.support, 'neue Antwort', 'neue Antworten') : waiting ? `${plural(waiting, 'Anfrage wartet', 'Anfragen warten')} auf dich` : open ? plural(open, 'offene Anfrage', 'offene Anfragen') : 'Nichts offen',
-          sub: open ? (waiting ? 'Das Team hat geantwortet' : 'Das Team meldet sich hier und im Spiel') : 'Fragen? Schreib dem Team.',
-          tone: counts.support ? 'news' : waiting ? 'warn' : '',
-          count: counts.support,
-          countLabel: counts.support === 1 ? '1 neue Antwort' : `${counts.support} neue Antworten`,
-        }),
-      );
-    }
-    // Meine Addons
-    const submissions = stand.submissions;
-    if (!submissions) out.push(tile({ section: 'addons', iconName: 'addons', label: 'Meine Addons', value: '…', sub: 'Wird geladen' }));
-    else {
-      const by = (status) => submissions.filter((sub) => sub.status === status).length;
-      const pending = by('pending');
-      const rejected = by('rejected');
-      const drafts = by('draft');
-      const inStore = (stand.addons ?? []).length;
-      const value = rejected ? plural(rejected, 'abgelehnt', 'abgelehnt') : pending ? plural(pending, 'in Prüfung', 'in Prüfung') : inStore ? plural(inStore, 'Addon im Store', 'Addons im Store') : drafts ? plural(drafts, 'Entwurf', 'Entwürfe') : 'Noch keine Addons';
-      const sub = [pending && rejected ? `${pending} in Prüfung` : null, inStore && (pending || rejected) ? `${inStore} im Store` : null, drafts && (pending || rejected || inStore) ? plural(drafts, 'Entwurf', 'Entwürfe') : null].filter(Boolean).join(' · ');
-      out.push(
-        tile({
-          section: 'addons',
-          iconName: 'addons',
-          label: 'Meine Addons',
-          value,
-          sub: sub || (submissions.length ? 'Einreichungen und Store' : 'Eigenes Addon einreichen'),
-          tone: counts.decisions ? 'news' : rejected ? 'warn' : '',
-          count: counts.decisions,
-          countLabel: counts.decisions === 1 ? '1 neue Entscheidung' : `${counts.decisions} neue Entscheidungen`,
-        }),
-      );
-    }
-    // Profil & Cosmetics
-    const me = stand.me;
-    if (me) {
-      const look = stand.look ?? null;
-      const capeId = me.cape || '';
-      const builtIn = CAPES.some(([id]) => id === capeId);
-      const art = capeId && builtIn ? h('span', { class: 'cape-art ov-cape-art', dataset: { cape: capeId } }) : look?.capeThumb ? h('img', { class: 'ov-thumb', src: look.capeThumb, alt: '', width: 40, height: 40 }) : null;
-      const worn = look?.worn ?? [];
-      out.push(
-        tile({
-          section: 'profil',
-          iconName: 'cape',
-          label: 'Cape & Cosmetics',
-          value: capeId ? `Cape: ${look?.capeName ?? capeName(capeId)}` : 'Kein Cape',
-          sub: me.visible === false ? 'Für andere unsichtbar' : worn.length ? worn.join(' · ') : look ? 'Noch keine Cosmetics gewählt' : 'Hut, Flügel, Aura und Begleiter',
-          tone: me.visible === false ? 'warn' : '',
-          art,
-        }),
-      );
-    }
-    // Sicherheit
-    if (me) {
-      const sessions = stand.sessions;
-      const team = Boolean(me.role);
-      const twoFactor = me.twoFactor ?? { enabled: false, verified: false };
-      out.push(
-        tile({
-          section: 'sicherheit',
-          iconName: 'shield',
-          label: 'Sicherheit',
-          value: sessions ? plural(sessions.length, 'angemeldeter Browser', 'angemeldete Browser') : 'Anmeldungen',
-          sub: team ? (twoFactor.enabled ? (twoFactor.verified ? 'Zwei-Faktor: eingerichtet, bestätigt' : 'Zwei-Faktor: eingerichtet') : 'Zwei-Faktor-Anmeldung fehlt') : me.expiresAt ? `Dieser Browser bis ${formatDate(me.expiresAt)}` : 'Kein Passwort nötig',
-          tone: team && !twoFactor.enabled ? 'warn' : '',
-          count: team && !twoFactor.enabled ? 1 : 0,
-          countLabel: 'Zwei-Faktor-Anmeldung fehlt',
-        }),
-      );
-    }
-    return out;
-  }
-
-  function activityRow(item) {
-    const unread = isUnread(item);
-    const link = h(
-      'a',
-      { class: `ov-act${unread ? ' unread' : ''}`, href: sectionHref('konto', item.target.section, item.target.params), dataset: { activity: item.id, focusKey: `act:${item.id}` } },
-      item.player ? avatar(item.player.name, item.player.uuid, { size: 'sm' }) : h('span', { class: `ov-act-icon ${item.kind}`, 'aria-hidden': 'true' }, icon(item.icon)),
-      h('span', { class: 'ov-act-body' }, h('span', { class: 'ov-act-title', text: item.title }), item.text ? h('span', { class: 'ov-act-text', text: item.text }) : null),
-      h('span', { class: 'ov-act-side' }, item.at ? timeEl(item.at, relativeTime(item.at)) : null, unread ? h('span', { class: 'unread-dot', role: 'img', 'aria-label': 'neu' }) : null),
-    );
-    link.addEventListener('click', (event) => {
-      if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
-      event.preventDefault();
-      seen.add([item.id]);
-      shell.select(item.target.section, { history: 'push', params: item.target.params ?? null, scroll: true, source: 'activity' });
-      document.getElementById('shell-titel')?.focus({ preventScroll: true });
-      render();
-    });
-    return h('li', null, link);
-  }
-
-  function renderOverview() {
-    const me = stand.me;
-    if (!me) return;
-    const counts = {
+  function counts() {
+    return {
       unread: (stand.conversations ?? []).reduce((sum, conversation) => sum + (Number(conversation.unread) || 0), 0),
       requests: stand.friends?.incoming.length ?? 0,
       support: (stand.tickets ?? []).filter((ticket) => ticket.unread).length,
+      party: stand.party?.invites?.length ?? 0,
       decisions: items.filter((item) => item.kind === 'addon' && isUnread(item)).length,
     };
+  }
+
+  function summaryLine(c) {
+    const parts = [];
+    if (c.unread) parts.push(plural(c.unread, 'ungelesene Nachricht', 'ungelesene Nachrichten'));
+    if (c.requests) parts.push(plural(c.requests, 'Freundschaftsanfrage', 'Freundschaftsanfragen'));
+    if (c.party) parts.push(plural(c.party, 'Party-Einladung', 'Party-Einladungen'));
+    if (c.support) parts.push(c.support === 1 ? '1 Antwort vom Team' : `${c.support} Antworten vom Team`);
+    if (c.decisions) parts.push(plural(c.decisions, 'Entscheidung zu deinen Addons', 'Entscheidungen zu deinen Addons'));
+    if (!parts.length) {
+      const online = stand.friends?.friends.filter((friend) => friend.online).length ?? 0;
+      return online ? `Alles gelesen. ${online === 1 ? '1 Freund ist' : `${online} Freunde sind`} gerade im Spiel.` : 'Alles gelesen – gerade gibt es nichts Neues.';
+    }
+    return `Neu für dich: ${joinWords(parts)}.`;
+  }
+
+  function cardHead({ iconNode, tone = '', title, titleId, sub, link = null }) {
+    return h(
+      'div',
+      { class: 'card__head' },
+      h('span', { class: `icon-tile${tone ? ` icon-tile--${tone}` : ''}` }, iconNode),
+      h('div', null, h('h2', { class: 'card__title', id: titleId, text: title }), sub ? h('p', { class: 'tiny text-3', text: sub }) : null),
+      link ? h('a', { class: 'btn btn--ghost btn--sm card__head-end', href: `#reiter=${link.section}`, dataset: { goto: link.section }, text: link.label ?? 'Alle' }) : null,
+    );
+  }
+
+  function renderHero() {
+    const me = stand.me;
+    const c = counts();
     $('uebersicht-tageszeit').textContent = `${greeting()} · ${WEEKDAY.format(Date.now())}`;
-    $('uebersicht-zeile').textContent = summaryLine(counts);
-    const statusSignature = JSON.stringify([counts, stand.conversations?.map((c) => [c.name, c.unread]), stand.friends && [stand.friends.friends.map((f) => f.online), stand.friends.outgoing.length], stand.tickets?.map((t) => [t.status, t.unread]), stand.submissions?.map((s) => s.status), stand.addons?.length, me.cape, me.visible, me.role, me.twoFactor, me.expiresAt, stand.sessions?.length, stand.look]);
-    rerender($('uebersicht-status'), statusSignature, () => tiles(counts));
-    const shown = items.slice(0, OVERVIEW_ITEMS);
-    const anyUnread = items.some(isUnread);
-    $('aktivitaet-gelesen').hidden = !anyUnread;
-    rerender($('uebersicht-aktivitaet'), JSON.stringify(shown.map((item) => [item.id, item.title, item.text, isUnread(item), Math.floor((Date.now() - (item.at ?? 0)) / 60000)])), () => {
-      if (!stand.conversations || !stand.friends) return h('p', { class: 'muted small', text: 'Wird geladen …' });
-      if (!shown.length) return emptyState('Gerade gibt es nichts Neues. Nachrichten, Anfragen und Antworten des Teams erscheinen hier.', 'check');
-      return h('ul', { class: 'ov-act-list' }, shown.map(activityRow));
+    $('uebersicht-zeile').textContent = summaryLine(c);
+    const status = $('uebersicht-status-zeile');
+    const statusParts = [me.dnd ? 'Nicht stören' : null, me.statusText ? `„${me.statusText}“` : null].filter(Boolean);
+    status.hidden = !statusParts.length;
+    status.textContent = statusParts.length ? `Dein Status: ${statusParts.join(' · ')}` : '';
+    const look = stand.look;
+    rerender($('uebersicht-look'), JSON.stringify(look ?? null), () => {
+      const chips = [];
+      if (look?.items) for (const item of look.items) chips.push(h('li', { class: `chip${item.reward ? ' chip--reward' : ''}` }, icon(item.slot === 'cape' ? 'cape' : 'sparkles'), `${item.label}: ${item.name}`));
+      else if (look?.capeName) chips.push(h('li', { class: 'chip' }, icon('cape'), `Cape: ${look.capeName}`));
+      if (!chips.length) chips.push(h('li', { class: 'chip', text: look ? 'Noch nichts angezogen' : 'Cosmetics werden geprüft …' }));
+      return chips;
     });
+  }
+
+  function renderInvite() {
+    const box = $('uebersicht-einladen');
+    const data = stand.invites;
+    box.hidden = !data;
+    if (!data) return;
+    rerender(box, JSON.stringify(data), () => {
+      const rewards = Array.isArray(data.rewards) ? data.rewards : [];
+      const confirmed = Number(data.confirmed) || 0;
+      return [
+        cardHead({ iconNode: shellIcon('gift'), tone: 'reward', title: 'Freunde einladen', titleId: 'uebersicht-einladen-titel', sub: data.link?.expires ? `Link gültig bis ${new Date(data.link.expires).toLocaleDateString('de-DE')}` : 'Dein Einladungslink' }),
+        data.link
+          ? h(
+              'div',
+              { class: 'input-group' },
+              h('input', { class: 'input input--mono', readonly: true, value: (data.link.url ?? `${location.origin}/einladung#${data.link.code}`).replace(/^https?:\/\//, ''), 'aria-label': 'Dein Einladungslink' }),
+              h('a', { class: 'btn btn--social btn--icon', href: '#reiter=einladen', dataset: { goto: 'einladen' }, 'aria-label': 'Freunde einladen öffnen' }, shellIcon('link')),
+            )
+          : null,
+        h('dl', { class: 'mini-stats' }, h('div', null, h('dt', { text: 'Eingeladen' }), h('dd', { text: String(data.invited ?? 0) })), h('div', null, h('dt', { text: 'Bestätigt' }), h('dd', { text: String(confirmed) })), h('div', null, h('dt', { text: 'Ausstehend' }), h('dd', { text: String(data.pending ?? 0) }))),
+        ...rewards.map((reward) => {
+          const done = Boolean(reward.unlocked);
+          const progress = Math.min(1, confirmed / Math.max(1, reward.friends));
+          const bar = h('div', { class: 'progress progress--reward', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(reward.friends), 'aria-valuenow': String(Math.min(confirmed, reward.friends)), 'aria-label': `Fortschritt ${reward.name ?? reward.cosmetic}` }, h('div', { class: 'progress__bar' }));
+          bar.firstChild.style.width = `${Math.round(progress * 100)}%`;
+          return h(
+            'div',
+            { class: `reward-row${done ? ' is-done' : ''}` },
+            h('span', { class: 'reward-row__icon' }, shellIcon(done ? 'check' : 'gift')),
+            h('div', null, h('strong', { text: reward.name ?? reward.cosmetic }), done ? h('span', { text: 'freigeschaltet' }) : bar),
+            h('span', { class: `chip ${done ? 'chip--online' : 'chip--reward'}`, text: `${Math.min(confirmed, reward.friends)} / ${reward.friends}` }),
+          );
+        }),
+      ];
+    });
+  }
+
+  function renderFriends() {
+    const box = $('uebersicht-freunde');
+    const friends = stand.friends?.friends ?? [];
+    const online = sortFriends(friends.filter((friend) => friend.online)).slice(0, 5);
+    rerender(box, JSON.stringify([online, friends.length, stand.friends?.incoming.length, worldDomain()]), () => [
+      cardHead({ iconNode: icon('friends'), tone: 'online', title: 'Freunde online', titleId: 'uebersicht-freunde-titel', sub: stand.friends ? friendsSummary(friends, stand.friends.incoming.length) : 'Wird geladen …', link: { section: 'freunde' } }),
+      !stand.friends
+        ? null
+        : online.length
+          ? h(
+              'ul',
+              { class: 'rows' },
+              online.map((friend) => {
+                const target = friend.server ? joinTarget({ server: friend.server, worldDomain: worldDomain() }) : null;
+                return h(
+                  'li',
+                  { class: 'row', dataset: { uuid: friend.uuid } },
+                  avatar(friend.name, friend.uuid, { online: true }),
+                  h('div', { class: 'row-main' }, h('div', { class: 'row-title', text: displayName(friend) }), h('div', { class: 'row-sub online', text: friendLine(friend) })),
+                  h('div', { class: 'row-actions' }, target ? joinButton(target) : null, h('button', { type: 'button', class: 'btn btn--secondary btn--sm btn--icon', 'aria-label': `Nachricht an ${displayName(friend)}`, onClick: () => openChat(friend.uuid) }, icon('chat'))),
+                );
+              }),
+            )
+          : emptyState(friends.length ? 'Gerade ist keiner deiner Freunde im Spiel.' : 'Noch keine Freunde – lade welche ein!', 'friends'),
+    ]);
+  }
+
+  function renderMessages() {
+    const box = $('uebersicht-nachrichten');
+    const conversations = (stand.conversations ?? []).slice(0, 4);
+    const unread = counts().unread;
+    rerender(box, JSON.stringify([conversations, worldDomain(), stand.friends?.friends.map((f) => [f.uuid, f.nickname])]), () => [
+      cardHead({ iconNode: icon('chat'), title: 'Nachrichten', titleId: 'uebersicht-nachrichten-titel', sub: unread ? `${unread} ungelesen` : 'Alles gelesen', link: { section: 'nachrichten' } }),
+      !stand.conversations
+        ? null
+        : conversations.length
+          ? h(
+              'ul',
+              { class: 'rows' },
+              conversations.map((conversation) => {
+                const friend = friendByUuid(conversation.uuid);
+                const last = conversation.last;
+                const mine = last?.from === stand.me?.uuid;
+                const link = h(
+                  'a',
+                  { class: 'row-link', href: sectionHref('konto', 'nachrichten', { mit: conversation.uuid }), dataset: { goto: 'nachrichten', params: JSON.stringify({ mit: conversation.uuid }) } },
+                  avatar(conversation.name, conversation.uuid),
+                  h('span', { class: 'row-main' }, h('span', { class: 'row-title', text: friend ? displayName(friend) : conversation.name }), last?.card ? null : h('span', { class: 'row-sub', text: `${mine ? 'Du: ' : ''}${clip(last?.text, 80)}` })),
+                  h('span', { class: 'row__time', text: shortWhen(last?.at) }),
+                );
+                return h('li', { class: `row${conversation.unread ? ' row--unread' : ''}` }, link, last?.card ? joinCard(last.card, { worldDomain: worldDomain() }) : null);
+              }),
+            )
+          : emptyState('Noch keine Nachrichten.', 'chat'),
+    ]);
+  }
+
+  function renderParty() {
+    const box = $('uebersicht-party');
+    const data = stand.party;
+    rerender(box, JSON.stringify(data ? { party: data.party && { ...data.party, chat: undefined }, invites: data.invites } : data), () => {
+      if (data === null && stand.partyAvailable === false) return [cardHead({ iconNode: shellIcon('party'), tone: 'voice', title: 'Party', titleId: 'uebersicht-party-titel', sub: 'ab Heldix-Dienst 1.12.0' })];
+      const party = data?.party;
+      const head = cardHead({ iconNode: shellIcon('party'), tone: 'voice', title: 'Party', titleId: 'uebersicht-party-titel', sub: party ? `${party.members.length} von ${party.max ?? 8}${party.leader === stand.me?.uuid ? ' · du leitest' : ''}` : data?.invites?.length ? plural(data.invites.length, 'Einladung', 'Einladungen') : 'Gerade keine Party', link: { section: 'party', label: 'Öffnen' } });
+      if (!party) {
+        return [head, data?.invites?.length ? h('p', { class: 'small text-2', text: `${data.invites[0].from?.name} lädt dich ein.` }) : h('p', { class: 'small text-2', text: 'Zusammen spielen mit bis zu 8 Freunden: gemeinsam folgen, gemeinsam im Voice.' })];
+      }
+      const target = party.target ? joinTarget({ location: party.target }) : null;
+      return [
+        head,
+        h('div', { class: 'party-mini' }, h('span', { class: 'avatar-stack' }, party.members.slice(0, 5).map((member) => avatar(member.name, member.uuid, { size: 'sm' }))), h('div', null, h('strong', { text: party.target ? party.target.title : 'Noch kein gemeinsamer Ort' }), h('p', { class: 'tiny text-3', text: party.voice ? 'Party-Voice aktiv' : 'Folgen und Voice im Spiel' }))),
+        target ? joinButton(target, { variant: 'secondary' }) : null,
+      ];
+    });
+  }
+
+  function renderWorlds() {
+    const box = $('uebersicht-welten');
+    const data = stand.worlds;
+    rerender(box, JSON.stringify(data ?? null), () => {
+      const mine = data?.mine ?? [];
+      const head = cardHead({ iconNode: icon('world'), tone: mine.some((world) => world.online) ? 'online' : '', title: 'Meine Welten', titleId: 'uebersicht-welten-titel', sub: !data ? 'Wird geladen …' : !data.available ? 'Welt teilen ist hier nicht eingerichtet' : mine.length ? plural(mine.length, 'Welt', 'Welten') : 'Noch keine Welt geteilt', link: data?.available ? { section: 'welten', label: 'Verwalten' } : null });
+      if (!data?.available) return [head];
+      if (!mine.length) return [head, h('p', { class: 'small text-2', text: 'Im Spiel unter Heldix-Menü → Welt teilen öffnest du eine Einzelspieler-Welt für Freunde.' })];
+      return [
+        head,
+        h(
+          'ul',
+          { class: 'rows' },
+          mine.slice(0, 3).map((world) => h('li', { class: 'row' }, h('span', { class: `icon-tile${world.online ? ' icon-tile--online' : ''}` }, icon('world')), h('div', { class: 'row-main' }, h('div', { class: 'row-title', text: world.name }), h('div', { class: `row-sub${world.online ? ' online' : ''}`, text: `${world.online ? `geöffnet · ${world.players ?? 1} von ${world.maxPlayers}` : 'zu'} · ${ACCESS[world.access] ?? world.access}` })))),
+        ),
+      ];
+    });
+  }
+
+  function renderSupport() {
+    const box = $('uebersicht-support');
+    const tickets = stand.tickets ?? [];
+    const open = tickets.filter((ticket) => ticket.status !== 'closed');
+    const ticket = tickets.find((entry) => entry.unread) ?? open[0] ?? null;
+    rerender(box, JSON.stringify([ticket, open.length, tickets.length]), () => [
+      cardHead({ iconNode: shellIcon('help-circle'), title: 'Support', titleId: 'uebersicht-support-titel', sub: !stand.tickets ? 'Wird geladen …' : tickets.some((entry) => entry.unread) ? plural(tickets.filter((entry) => entry.unread).length, 'neue Antwort', 'neue Antworten') : open.length ? plural(open.length, 'offene Anfrage', 'offene Anfragen') : 'Keine offenen Anfragen', link: { section: 'support', label: 'Öffnen' } }),
+      ticket
+        ? h(
+            'a',
+            { class: 'ticket-mini', href: sectionHref('konto', 'support', { anfrage: ticket.id }), dataset: { goto: 'support', params: JSON.stringify({ anfrage: ticket.id }) } },
+            h('span', { class: `chip ${ticket.status === 'answered' ? 'chip--online' : ticket.status === 'closed' ? '' : 'chip--accent'}`, text: ticket.status === 'answered' ? 'Beantwortet' : ticket.status === 'closed' ? 'Geschlossen' : 'Offen' }),
+            h('strong', { text: ticket.subject }),
+            h('span', { class: 'tiny text-3', text: `#${ticket.id} · ${relativeTime(ticket.updatedAt ?? ticket.at)}` }),
+          )
+        : h('p', { class: 'small text-2', text: 'Fragen oder Probleme? Das Team antwortet hier und im Spiel.' }),
+    ]);
+  }
+
+  function renderSecurity() {
+    const box = $('uebersicht-sicherheit');
+    const me = stand.me;
+    const sessions = stand.sessions?.length ?? null;
+    const missing2fa = Boolean(me?.role && me.twoFactor && !me.twoFactor.enabled);
+    rerender(box, JSON.stringify([sessions, missing2fa, me?.presence, me?.showServer, me?.visible]), () => [
+      cardHead({ iconNode: icon('shield'), tone: missing2fa ? '' : 'online', title: 'Sicherheit', titleId: 'uebersicht-sicherheit-titel', sub: missing2fa ? 'Zwei-Faktor-Anmeldung fehlt' : 'Alles in Ordnung' }),
+      h(
+        'ul',
+        { class: 'check-list small' },
+        sessions !== null ? h('li', null, icon('check'), h('span', { text: sessions === 1 ? 'Nur dieser Browser ist angemeldet' : `${sessions} angemeldete Browser` })) : null,
+        h('li', null, icon(me?.presence === false ? 'eye-off' : 'check'), h('span', { text: me?.presence === false ? 'Online-Status verborgen' : me?.showServer === false ? 'Online-Status sichtbar, Server verborgen' : 'Online-Status und Server für Freunde sichtbar' })),
+        missing2fa ? h('li', { class: 'is-warn' }, icon('warning'), h('span', { text: 'Für den Team-Bereich fehlt die Zwei-Faktor-Anmeldung.' })) : null,
+      ),
+      h('a', { class: 'link-arrow small', href: '#reiter=sicherheit', dataset: { goto: 'sicherheit' } }, 'Sitzungen verwalten', icon('chevron-right')),
+    ]);
+  }
+
+  function renderOverview() {
+    if (!stand.me) return;
+    renderHero();
+    renderInvite();
+    renderFriends();
+    renderMessages();
+    renderParty();
+    renderWorlds();
+    renderSupport();
+    renderSecurity();
   }
 
   /** Zähler, Übersicht und (wenn zu) die Glocke mit den aktuellen Einträgen zeichnen. */
@@ -439,38 +463,31 @@ export function initOverview({ shell, actions = {} }) {
     refreshViews();
   }
 
-  // --- Schnellaktionen und „Alles gelesen“ -----------------------------------------------------------------
-
-  $('uebersicht-aktionen').addEventListener('click', (event) => {
-    const link = event.target.closest('a[data-aktion]');
-    if (!link || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
-    const action = actions[link.dataset.aktion];
-    if (!action) return;
-    event.preventDefault();
-    action();
-  });
-  $('aktivitaet-gelesen').addEventListener('click', () => {
-    seen.add(items.map((item) => item.id));
-    render();
-    $('uebersicht-aktivitaet').focus?.();
-  });
+  $('uebersicht-status-knopf').addEventListener('click', () => onStatus?.());
   // Bereich besucht: was dort steht, gilt als gesehen (die Zahlen am Bereich bleiben, bis du es wirklich liest).
   shell.onSelect((section) => {
     if (!stand.me) return;
     if (seen.add(items.filter((item) => item.section === section).map((item) => item.id))) render();
   });
+  // Zeiten („vor 5 Min.“) ab und zu neu
+  setInterval(() => {
+    if (stand.me && shell.current() === 'uebersicht' && document.visibilityState === 'visible') {
+      for (const id of ['uebersicht-nachrichten', 'uebersicht-support']) delete $(id).dataset.signature;
+      renderMessages();
+      renderSupport();
+    }
+  }, 60_000);
 
   return {
-    /** Angemeldeter Spieler (Gruß, Kopf, Gesehen-Merker je Spieler). */
+    /** Angemeldeter Spieler (Gruß, Gesehen-Merker je Spieler). */
     setUser(me) {
       seen.viewer(me?.uuid ?? null);
       stand = { ...stand, me };
       $('uebersicht-gruss').textContent = `Hallo, ${me.name}!`;
-      $('uebersicht-avatar').replaceChildren(avatar(me.name, me.uuid, { size: 'lg' }));
       bellSignature = null;
       render();
     },
-    /** Neuer Stand (Teilmenge reicht): { friends, conversations, tickets, submissions, addons, sessions, look, me }. */
+    /** Neuer Stand (Teilmenge reicht): { friends, conversations, tickets, submissions, addons, sessions, look, me, party, worlds, invites }. */
     update(patch) {
       stand = { ...stand, ...patch };
       render();
@@ -484,3 +501,4 @@ export function initOverview({ shell, actions = {} }) {
     },
   };
 }
+

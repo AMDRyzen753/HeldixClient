@@ -1,0 +1,33 @@
+Prüfbericht: Jelly, die Qualle (jelly), Slot companion, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  companions/Jelly/Jelly.cosmetic.json  451,1 KB  sha256 c7177b4df5ba1dfb267e4187408eeee933915f6aa167b9ef8420069cc95493fb
+  companions/Jelly/textures/Jelly_albedo.png  2,9 KB  sha256 4fb39c1796c1f82fa7bc6d2049515d385d9723c2b81d0dff236926ec271b04e3
+  companions/Jelly/textures/Jelly_emissive_anim.png  18,6 KB  sha256 d95d17e3c90cc6a9d6b105aa8b80acdf03f2fc4b74a13aeed7eae3ec68c7390b
+
+Größe:
+  vorher: 472,7 KB (JSON 451,1 KB + Texturen)
+  nachher: Manifest 173,3 KB von höchstens 512,0 KB, Umschlag etwa 177,0 KB von 544,0 KB
+
+Mesh:
+  864 Vertices, 432 Dreiecke, 35 Knochen, größte Rundung der Positionen 0,0125 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+  Begleiter: Ursprung attach.origin = [14, -7, 1] px (Positionen relativ dazu), Seite links
+
+Animationen (7), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 72 Frames bei 24 fps, Schleife, 35 Spuren, 1569 Keys
+  Fly: 24 Frames bei 24 fps, Schleife, 35 Spuren, 803 Keys
+  Emote: 96 Frames bei 24 fps, Schleife, 35 Spuren, 3282 Keys
+  Sleep: 72 Frames bei 24 fps, Schleife, 35 Spuren, 504 Keys
+  Startle: 19 Frames bei 24 fps, einmalig, 35 Spuren, 473 Keys
+  Spawn: 33 Frames bei 24 fps, einmalig, 35 Spuren, 650 Keys
+  Celebrate: 41 Frames bei 24 fps, einmalig, 35 Spuren, 1244 Keys
+  zusammen 8525 Keys statt 12852 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1499°, move 0,0200 px, scale 0,0000
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,0573 px (Sleep, Frame 3, Vertex 319)
+
+Zustände: 14 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,3 s
+Partikel: 4 Vorschläge → 4 Einträge (.L-Knochen auch für .R)
+Leuchten: 8 Bilder, 3 Ticks je Bild, Puls 2 s zwischen 0,5 und 1
+Texturen: texture.png 128 × 128 (2,9 KB) = Jelly_albedo.png; glow.png 128 × 1024 (18,6 KB) = Jelly_emissive_anim.png

@@ -11,6 +11,9 @@
   <link rel="stylesheet" href="store.css">
   <link rel="stylesheet" href="friends.css">
   <link rel="stylesheet" href="profile.css">
+  <link rel="stylesheet" href="setup.css">
+  <link rel="stylesheet" href="notifications.css">
+  <link rel="stylesheet" href="worlds.css">
 </head>
 <body>
 <div class="splash" id="splash">
@@ -83,11 +86,16 @@
     <span class="titlebar-title" id="view-title">Start</span>
     <div class="titlebar-tools">
       <span class="titlebar-chip" id="titlebar-chip" hidden><span class="chip-dot"></span><span id="titlebar-chip-text"></span></span>
+      <!-- Glocke: Verlauf der Benachrichtigungen (renderer/notifications.ts) -->
+      <button class="titlebar-bell" id="bell-button" type="button" title="Benachrichtigungen" aria-label="Benachrichtigungen" aria-haspopup="dialog" aria-expanded="false">
+        <svg class="bell-icon" viewBox="0 0 24 24" aria-hidden="true"></svg><span class="bell-badge" id="bell-badge" hidden></span>
+      </button>
       <button class="titlebar-discord" id="home-discord" type="button" title="Discord-Status einstellen" hidden>
         <svg data-icon="chat"></svg><span class="home-chip-dot"></span><span id="home-discord-text">Discord</span>
       </button>
     </div>
   </header>
+  <div class="bell-panel" id="bell-panel" role="dialog" aria-label="Benachrichtigungen" hidden></div>
 
   <main>
     <!-- ============ Start ============ -->
@@ -172,6 +180,15 @@
                 <div class="panel-title"><h3>Weiterspielen</h3><span id="continue-sub">Direkt in Welten und auf Server</span></div>
               </div>
               <div class="row-list" id="continue-list"></div>
+            </section>
+
+            <!-- offene Welten der Freunde (Welt teilen, renderer/world.ts) -->
+            <section class="panel" id="home-worlds-panel" hidden>
+              <div class="panel-head">
+                <div class="panel-icon"><svg data-icon="world"></svg></div>
+                <div class="panel-title"><h3>Offene Welten deiner Freunde</h3><span id="home-worlds-sub">Welt teilen</span></div>
+              </div>
+              <div class="row-list" id="home-worlds"></div>
             </section>
 
             <section class="panel" id="home-instances-panel">
@@ -374,7 +391,8 @@
           <nav class="settings-nav" id="settings-nav" aria-label="Bereiche der Einstellungen">
             <button type="button" data-target="set-spiel" class="active"><svg data-icon="monitor"></svg><span>Spiel</span></button>
             <button type="button" data-target="set-leistung"><svg data-icon="performance"></svg><span>Leistung &amp; Java</span></button>
-            <button type="button" data-target="set-freunde"><svg data-icon="friends"></svg><span>Freunde &amp; Discord</span></button>
+            <button type="button" data-target="set-freunde"><svg data-icon="friends"></svg><span>Freunde</span></button>
+            <button type="button" data-target="set-discord"><svg data-icon="chat"></svg><span>Discord</span></button>
             <button type="button" data-target="set-updates"><svg data-icon="download"></svg><span>Updates &amp; Daten</span></button>
             <button type="button" data-target="set-erweitert"><svg data-icon="info"></svg><span>Über HeldixClient</span></button>
           </nav>
@@ -408,6 +426,10 @@
                 <label class="toggle-row">
                   <span>Launcher beim Spielstart ausblenden</span>
                   <input type="checkbox" class="switch" id="hide-toggle">
+                </label>
+                <label class="toggle-row">
+                  <span>Beim Schließen in den Infobereich<small class="toggle-sub">während ein Spiel läuft, bleibt der Launcher als Symbol neben der Uhr – mit Freunden und Benachrichtigungen</small></span>
+                  <input type="checkbox" class="switch" id="tray-toggle">
                 </label>
                 <label class="toggle-row">
                   <span>Kontowechsel im Spiel erlauben<small class="toggle-sub">im Heldix-Menü zwischen deinen Konten wechseln; beim ersten Wechsel zu einem Konto fragt der Launcher nach</small></span>
@@ -458,7 +480,7 @@
             </section>
 
             <section class="settings-group" id="set-freunde">
-              <h3 class="settings-group-title">Freunde &amp; Discord</h3>
+              <h3 class="settings-group-title">Freunde</h3>
               <div class="cards">
               <div class="card">
                 <div class="card-head">
@@ -478,20 +500,74 @@
                 </div>
               </div>
 
+              </div>
+            </section>
+
+            <section class="settings-group" id="set-discord">
+              <h3 class="settings-group-title">Discord</h3>
+              <div class="cards">
               <div class="card">
                 <div class="card-head">
                   <div class="card-icon discord"><svg data-icon="chat"></svg></div>
-                  <div><h3>Discord</h3><p class="hint">Zeigt Freunden in Discord, was du gerade spielst.</p></div>
+                  <div><h3>Discord-Status</h3><p class="hint">Zeigt Freunden in Discord, was du gerade spielst.</p></div>
                 </div>
                 <label class="toggle-row">
-                  <span>Discord-Status anzeigen</span>
+                  <span>Discord-Status anzeigen<small class="toggle-sub">verbindet sich von selbst, sobald Discord läuft</small></span>
                   <input type="checkbox" class="switch" id="discord-toggle">
                 </label>
-                <label class="toggle-row" id="discord-server-row">
-                  <span>Server anzeigen<small class="toggle-sub">nur öffentliche Server wie hypixel.net, nie IP-Adressen</small></span>
-                  <input type="checkbox" class="switch" id="discord-server-toggle">
-                </label>
+                <div class="stack" id="discord-mode-row">
+                  <span>Umfang</span>
+                  <div class="chip-toggle segmented" id="discord-mode">
+                    <button type="button" data-mode="full">Ausführlich</button>
+                    <button type="button" data-mode="minimal">Nur „Spielt HeldixClient“</button>
+                  </div>
+                </div>
                 <div class="discord-status" id="discord-status"><span class="discord-dot"></span><span id="discord-status-text"></span></div>
+              </div>
+
+              <div class="card" id="discord-preview-card">
+                <div class="card-head">
+                  <div class="card-icon discord"><svg data-icon="eye"></svg></div>
+                  <div><h3>Vorschau</h3><p class="hint" id="discord-preview-hint">So sieht dein Status gerade aus.</p></div>
+                </div>
+                <div class="discord-preview" id="discord-preview"></div>
+              </div>
+
+              <div class="card wide" id="discord-fields">
+                <div class="card-head">
+                  <div class="card-icon discord"><svg data-icon="options"></svg></div>
+                  <div><h3>Was zu sehen ist</h3><p class="hint">Nur öffentliche Angaben – nie IP-Adressen, Heimnetz-Namen oder Adressen geteilter Welten.</p></div>
+                </div>
+                <div class="toggle-grid">
+                  <label class="toggle-row" id="discord-server-row">
+                    <span>Server und Welten<small class="toggle-sub">„Spielt auf hypixel.net“, „In der Welt von Lena“ – nur öffentliche Server</small></span>
+                    <input type="checkbox" class="switch" id="discord-server-toggle">
+                  </label>
+                  <label class="toggle-row">
+                    <span>Dimension und Spielmodus<small class="toggle-sub">„Im Nether · Überleben“ und das passende Bild</small></span>
+                    <input type="checkbox" class="switch" id="discord-details-toggle">
+                  </label>
+                  <label class="toggle-row">
+                    <span>Weltname im Einzelspieler<small class="toggle-sub">„Spielt in ‚Meine Welt‘“ – Standard aus, Weltnamen sind oft privat</small></span>
+                    <input type="checkbox" class="switch" id="discord-worldname-toggle">
+                  </label>
+                  <label class="toggle-row">
+                    <span>Spielerzahl<small class="toggle-sub">„(3 von 8)“ auf Servern und in geteilten Welten – in einer Party deren Größe</small></span>
+                    <input type="checkbox" class="switch" id="discord-party-toggle">
+                  </label>
+                  <label class="toggle-row">
+                    <span>Voice Chat<small class="toggle-sub">„Im Voice mit 3 anderen“</small></span>
+                    <input type="checkbox" class="switch" id="discord-voice-toggle">
+                  </label>
+                  <label class="toggle-row">
+                    <span>Kopf als Bild<small class="toggle-sub">dein Minecraft-Kopf als kleines Bild, beim Darüberfahren mit Name und Cape</small></span>
+                    <input type="checkbox" class="switch" id="discord-head-toggle">
+                  </label>
+                  <label class="toggle-row" id="discord-invite-row">
+                    <span>Knöpfe<small class="toggle-sub">„Mitspielen“ (öffentliche Server, offene Welten) und „HeldixClient holen“ – mit deinen Einladungslinks, nur mit Microsoft-Konto</small></span>
+                    <input type="checkbox" class="switch" id="discord-invite-toggle">
+                  </label>
+                </div>
               </div>
               </div>
             </section>
@@ -523,7 +599,7 @@
                   <div><h3>Updates</h3><p class="hint">Neue Versionen des Launchers kommen über heldixclient.com.</p></div>
                 </div>
                 <label class="toggle-row">
-                  <span>Automatisch aktualisieren<small class="toggle-sub">im Hintergrund laden, beim Beenden installieren</small></span>
+                  <span>Automatisch aktualisieren<small class="toggle-sub">beim Start prüfen und gleich installieren, sonst nur ein Hinweis</small></span>
                   <input type="checkbox" class="switch" id="update-toggle">
                 </label>
                 <div class="discord-status" id="update-status"><span class="discord-dot"></span><span id="update-status-text"></span></div>
@@ -554,6 +630,7 @@
                   <div class="about-name">HeldixClient <span id="about-version"></span></div>
                   <div class="about-text" id="about-text"></div>
                 </div>
+                <button class="ghost about-action" id="setup-restart" type="button" title="Willkommen, Konto und Addons noch einmal durchgehen"><svg data-icon="reset" class="btn-icon"></svg>Einrichtung erneut starten</button>
               </div>
             </section>
           </div>

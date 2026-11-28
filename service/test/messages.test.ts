@@ -47,7 +47,7 @@ describe('Nachrichten', () => {
     assert.equal(first.status, 200, JSON.stringify(first.body));
     const message = first.body.message;
     assert.deepEqual(Object.keys(first.body), ['message']);
-    assert.deepEqual(Object.keys(message).sort(), ['at', 'from', 'id', 'read', 'text', 'to']);
+    assert.deepEqual(Object.keys(message).sort(), ['at', 'card', 'from', 'id', 'reactions', 'read', 'replyTo', 'text', 'to']);
     assert.equal(Number.isInteger(message.id), true);
     assert.equal(message.from, anna.uuid);
     assert.equal(message.to, ben.uuid);

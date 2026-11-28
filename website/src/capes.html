@@ -4,19 +4,23 @@
 <head>
 {{include:head.html}}
 <meta http-equiv="refresh" content="1; url=/cosmetics#capes">
+<link rel="stylesheet" href="/seiten.css">
 <script type="module" src="/capes.js"></script>
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="capes">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap">
-  <div class="page-hero">
-    <span class="eyebrow">Capes</span>
-    <h1>Capes sind jetzt <span class="gradient">Cosmetics</span></h1>
-    <p class="lead">Alle {{CAPES_ANZAHL}} Heldix-Capes findest du zusammen mit Hüten, Flügeln, Auren und Begleitern auf der Seite Cosmetics.</p>
-    <p><a class="button" href="/cosmetics#capes">{{icon:cape}}Zu den Capes</a></p>
-  </div>
+<main id="inhalt">
+  <section class="page-hero page-hero--center" aria-labelledby="seite-titel">
+    <div class="container">
+      <div class="page-hero__inner">
+        <span class="eyebrow">{{icon:cape}}Capes</span>
+        <h1 class="h1" id="seite-titel">Capes sind jetzt <span class="text-gradient">Cosmetics</span></h1>
+        <p class="lead">Alle {{CAPES_ANZAHL}} Heldix-Capes findest du zusammen mit Hüten, Flügeln, Auren und Begleitern auf der Seite Cosmetics.</p>
+        <a class="btn btn--primary" href="/cosmetics#capes">{{icon:cape}}Zu den Capes</a>
+      </div>
+    </div>
+  </section>
 </main>
 
 {{include:footer.html}}

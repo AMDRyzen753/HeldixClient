@@ -12,13 +12,17 @@
 // Auswahl: GET/PUT /v1/me/cosmetics über die Anmeldung beim Dienst (core/social.ts). Ob das Konto im Team ist, verrät
 // der Dienst über das Bearer-Token nicht; der Launcher schließt es aus der Auswahl (trägt es etwas nur fürs Team, ist
 // es im Team) bzw. aus der Antwort beim Wählen (403 = nicht im Team). Sonst bleibt es offen (null).
+//
+// Belohnungen (access „unlock“, z. B. für Einladungen): wählbar nur, wenn ihre ID in `unlocked` aus GET/PUT
+// /v1/me/cosmetics steht (ab Dienst 1.11.0; fehlt das Feld, ist nichts freigeschaltet). Die Oberfläche sperrt sie wie
+// Team-Einträge, choose() fragt vor dem Ablehnen noch einmal frisch nach.
 
 import { createHash, createPublicKey, type KeyObject } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { CosmeticItem, CosmeticSelection, CosmeticSlotName, CosmeticsState } from '../../shared/api';
+import type { CosmeticItem, CosmeticMeshData, CosmeticSelection, CosmeticSlotName, CosmeticsState } from '../../shared/api';
 import { cosmeticCubeFaces, verifyCosmeticEnvelope } from './cosmetics';
-import { BUILTIN_CAPE_IDS, COSMETIC_ID_RE, COSMETIC_LIMITS, COSMETIC_SLOTS, type CosmeticManifest } from './cosmetics-format';
+import { BUILTIN_CAPE_IDS, COSMETIC_FORMAT_2, COSMETIC_ID_RE, COSMETIC_MAX_ENVELOPE_BYTES, COSMETIC_SLOTS, type AnyCosmeticManifest, type CosmeticManifest2 } from './cosmetics-format';
 import { SERVICE_UNREACHABLE, ServiceError, serviceBase } from './heldixservice';
 import { USER_AGENT } from './http';
 
@@ -30,6 +34,8 @@ const MAX_LIST_BYTES = 1024 * 1024;
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const OFFLINE_MESSAGE = 'Cosmetics gibt es nur mit einem Microsoft-Konto.';
 export const TEAM_ONLY_MESSAGE = 'Dieses Cosmetic gibt es nur für das HeldixClient-Team.';
+/** wie der Dienst (403 LOCKED) */
+export const UNLOCK_MESSAGE = 'Dieses Cosmetic schaltest du frei, indem du Freunde zu HeldixClient einlädst.';
 
 /** Eintrag aus GET /v1/cosmetics (nicht signiert: Name & Co. kommen aus dem geprüften Manifest) */
 export interface CatalogEntry {
@@ -85,6 +91,13 @@ function parseEntries(raw: unknown): CatalogEntry[] {
   return entries;
 }
 
+/** Freigeschaltete Belohnungen (access „unlock“) aus GET/PUT /v1/me/cosmetics; fehlt das Feld (älterer Dienst): keine */
+export function parseUnlocked(raw: unknown): string[] {
+  const list = raw && typeof raw === 'object' ? (raw as { unlocked?: unknown }).unlocked : undefined;
+  if (!Array.isArray(list)) return [];
+  return [...new Set(list.filter((id): id is string => typeof id === 'string' && COSMETIC_ID_RE.test(id)))];
+}
+
 /** Auswahl aus GET/PUT /v1/me/cosmetics (unbekannte oder ungültige Werte = nichts) */
 export function parseSelection(raw: unknown): CosmeticSelection {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
@@ -92,15 +105,75 @@ export function parseSelection(raw: unknown): CosmeticSelection {
   return { head: pick(r.head), back: pick(r.back), aura: pick(r.aura), companion: pick(r.companion), cape: pick(r.cape) };
 }
 
+/**
+ * Format 2: Mesh, Knochen und Animationen für die Vorschau (Zahlenlisten bleiben Base64 wie im signierten Manifest,
+ * entpackt wird in der Oberfläche, siehe renderer/cosmetic-mesh.ts)
+ */
+function toMeshData(manifest: CosmeticManifest2): CosmeticMeshData {
+  const { blendSeconds, ...states } = manifest.states;
+  const keys = (k: { keys: string; values: string } | null) => (k ? { keys: k.keys, values: k.values } : null);
+  return {
+    vertexCount: manifest.mesh.vertexCount,
+    triangleCount: manifest.mesh.triangleCount,
+    positions: manifest.mesh.positions,
+    normals: manifest.mesh.normals,
+    uvs: manifest.mesh.uvs,
+    bones: manifest.mesh.bones,
+    triangles: manifest.mesh.triangles,
+    joints: manifest.mesh.joints,
+    weights: manifest.mesh.weights,
+    skeleton: manifest.bones.map((b) => ({ name: b.name, parent: b.parent, pivot: [...b.pivot], tail: [...b.tail] })),
+    animations: Object.entries(manifest.animations).map(([name, clip]) => ({
+      name,
+      fps: clip.fps,
+      frames: clip.frames,
+      loop: clip.loop,
+      tracks: clip.tracks.map((t) => ({ bone: t.bone, rot: keys(t.rot), move: keys(t.move), scale: keys(t.scale) })),
+    })),
+    states: Object.fromEntries(Object.entries(states).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
+    blendSeconds,
+    emissive: manifest.emissive ? { frames: manifest.emissive.frames, frametimeTicks: manifest.emissive.frametimeTicks, pulse: { ...manifest.emissive.pulse } } : null,
+    attach: { origin: manifest.attach ? [...manifest.attach.origin] : null, side: manifest.attach?.side ?? 'left' },
+    particles: manifest.particles.map((p) => ({ ...p, states: p.states ? [...p.states] : null })),
+  };
+}
+
 /** Geprüftes Manifest in die Form für die Oberfläche (Würfelflächen schon ausgerechnet, siehe core/cosmetics.ts) */
-export function toCosmeticItem(manifest: CosmeticManifest, envelopeSha: string): CosmeticItem {
+export function toCosmeticItem(manifest: AnyCosmeticManifest, envelopeSha: string): CosmeticItem {
+  if (manifest.format === COSMETIC_FORMAT_2) {
+    // Format 2: alles Weitere steht in mesh; die Felder von Format 1 bleiben leer
+    return {
+      id: manifest.id,
+      slot: manifest.slot,
+      format: manifest.format,
+      version: manifest.version,
+      name: manifest.name,
+      description: manifest.description,
+      teamOnly: manifest.access === 'team',
+      unlockOnly: manifest.access === 'unlock',
+      sha256: envelopeSha,
+      texture: manifest.texture,
+      glow: manifest.glow,
+      textureSize: [manifest.image.width, manifest.image.height],
+      bones: [],
+      modelScale: 1,
+      animations: [],
+      particles: null,
+      cape: null,
+      companion: null,
+      mesh: toMeshData(manifest),
+    };
+  }
   return {
     id: manifest.id,
     slot: manifest.slot,
+    format: manifest.format,
     version: manifest.version,
     name: manifest.name,
     description: manifest.description,
     teamOnly: manifest.access === 'team',
+    // ältere Formate kennen „unlock“ nicht: als Text vergleichen
+    unlockOnly: (manifest.access as string) === 'unlock',
     sha256: envelopeSha,
     texture: manifest.texture,
     glow: manifest.glow,
@@ -112,10 +185,12 @@ export function toCosmeticItem(manifest: CosmeticManifest, envelopeSha: string):
       rotation: bone.rotation,
       faces: bone.cubes.flatMap((cube) => cosmeticCubeFaces(cube).map(({ corners, uvs, normal }) => ({ corners, uvs, normal }))),
     })),
+    modelScale: manifest.model ? manifest.model.scale : 1,
     animations: manifest.animations.map((a) => ({ ...a })),
     particles: manifest.particles ? { ...manifest.particles } : null,
     cape: manifest.cape ? { ...manifest.cape } : null,
     companion: manifest.companion ? { offset: manifest.companion.offset, scale: manifest.companion.scale } : null,
+    mesh: null,
   };
 }
 
@@ -132,6 +207,8 @@ export class CosmeticCatalog {
   private entries: CatalogEntry[] | null = null;
   /** bekannte Team-Mitgliedschaft je Konto (siehe oben) */
   private readonly team = new Map<string, boolean>();
+  /** zuletzt gemeldete Freischaltungen je Konto (GET/PUT /v1/me/cosmetics) */
+  private readonly unlocked = new Map<string, string[]>();
 
   constructor(private readonly options: CosmeticCatalogOptions) {
     this.base = serviceBase(options.serviceUrl);
@@ -227,7 +304,7 @@ export class CosmeticCatalog {
   /** Prüft einen Umschlag (Bytes) gegen den Katalogeintrag. Wirft mit deutscher Meldung. */
   private verify(entry: CatalogEntry, bytes: Buffer): CosmeticItem {
     if (!this.key) throw new Error('Dieser Launcher kennt keinen Signatur-Schlüssel');
-    if (bytes.length > COSMETIC_LIMITS.envelopeBytes) throw new Error('Cosmetic ungültig: Der Umschlag ist zu groß');
+    if (bytes.length > COSMETIC_MAX_ENVELOPE_BYTES) throw new Error('Cosmetic ungültig: Der Umschlag ist zu groß');
     if (sha256(bytes) !== entry.sha256) throw new Error('Cosmetic ungültig: Prüfsumme passt nicht zum Katalog');
     const manifest = verifyCosmeticEnvelope(bytes, this.key);
     if (manifest.id !== entry.id) throw new Error(`Cosmetic ungültig: ID „${manifest.id}“ statt „${entry.id}“`);
@@ -258,7 +335,8 @@ export class CosmeticCatalog {
     try {
       const response = await this.get(`/v1/cosmetics/${encodeURIComponent(entry.id)}?v=${entry.sha256}`);
       if (!response.ok) throw new Error(`Der Heldix-Dienst antwortet mit ${response.status}`);
-      bytes = await CosmeticCatalog.body(response, COSMETIC_LIMITS.envelopeBytes);
+      // größte Grenze aller Formate (Format 2 bis 544 KB); die des Formats prüft verify()
+      bytes = await CosmeticCatalog.body(response, COSMETIC_MAX_ENVELOPE_BYTES);
     } catch (error) {
       // vorübergehend (Netz, 404 während einer Änderung): beim nächsten Laden noch einmal
       this.log(`Cosmetic „${entry.id}“ nicht geladen: ${message(error)}`);
@@ -341,11 +419,15 @@ export class CosmeticCatalog {
     const errors = [catalogError, 'error' in mine ? mine.error : null].filter((e): e is string => !!e);
     const selection = 'raw' in mine ? parseSelection(mine.raw) : null;
     const reported = 'raw' in mine && mine.raw && typeof mine.raw === 'object' ? (mine.raw as { team?: unknown }).team : undefined;
+    const unlocked = 'raw' in mine ? parseUnlocked(mine.raw) : null;
+    const account = (await this.options.auth?.accountId().catch(() => null)) ?? null;
+    if (account && unlocked) this.unlocked.set(account, unlocked);
     return {
       items,
       selection,
       canChoose: selection !== null,
       team: await this.teamFor(selection, items, reported),
+      unlocked,
       error: errors.length ? [...new Set(errors)].join(' ') : null,
     };
   }
@@ -381,6 +463,17 @@ export class CosmeticCatalog {
         if (item.teamOnly) {
           const account = await auth.accountId().catch(() => null);
           if (account && this.team.get(account) === false) throw new Error(TEAM_ONLY_MESSAGE);
+        }
+        if (item.unlockOnly) {
+          // laut letzter Antwort noch nicht freigeschaltet: frisch nachsehen (vielleicht gerade erst), sonst gar nicht
+          // erst versuchen; ohne bekannten Stand entscheidet der Dienst (403)
+          const account = await auth.accountId().catch(() => null);
+          const known = account ? this.unlocked.get(account) : undefined;
+          if (known && !known.includes(item.id)) {
+            const fresh = parseUnlocked(await auth.authed<unknown>('/v1/me/cosmetics', {}, { offlineMessage: OFFLINE_MESSAGE }));
+            if (account) this.unlocked.set(account, fresh);
+            if (!fresh.includes(item.id)) throw new Error(UNLOCK_MESSAGE);
+          }
         }
       }
     }

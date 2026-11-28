@@ -64,7 +64,7 @@ describe('Freundschaftsanfragen', () => {
     assert.deepEqual(accepted.body.incoming, []);
     assert.equal(accepted.body.friends.length, 1);
     const friend = accepted.body.friends[0];
-    assert.deepEqual(Object.keys(friend).sort(), ['name', 'online', 'server', 'since', 'state', 'uuid']);
+    assert.deepEqual(Object.keys(friend).sort(), ['badge', 'dnd', 'favorite', 'lastOnline', 'name', 'nickname', 'note', 'online', 'server', 'since', 'state', 'statusText', 'uuid']);
     assert.equal(friend.uuid, anna.uuid);
     assert.equal(friend.name, 'Anna');
     assert.equal(friend.online, false);

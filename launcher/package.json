@@ -1,7 +1,7 @@
 {
   "name": "heldixclient-launcher",
   "productName": "HeldixClient",
-  "version": "0.13.5",
+  "version": "0.13.8",
   "description": "Minecraft-Launcher mit eigenem Mod-Loader (Heldix Loader), Client-Mod und Addon-System",
   "license": "MIT",
   "author": "HeldixClient contributors",
@@ -21,9 +21,13 @@
     "mod": "node scripts/build-mod.mjs",
     "icon": "electron scripts/render-icon.mjs",
     "ui-assets": "electron scripts/render-ui-assets.mjs",
+    "installer-art": "electron scripts/render-installer.mjs",
     "dist": "npm run mod && npm run build && electron-builder --win",
     "test:launch": "npm run build && node dist/scripts/test-launch.js",
     "test:discord": "npm run build && node dist/scripts/test-discord.js",
+    "test:presence": "npm run build && node dist/scripts/test-presence.js",
+    "test:worlds": "npm run build && node dist/scripts/test-worlds.js",
+    "test:notifications": "npm run build && node dist/scripts/test-notifications.js",
     "capes": "electron scripts/render-capes.mjs",
     "update-key": "npm run build && node dist/scripts/release.js --init",
     "release": "npm run dist && node dist/scripts/release.js",
@@ -31,16 +35,22 @@
     "cosmetic": "npm run build && node dist/scripts/cosmetic-release.js",
     "cosmetic:preview": "npm run build && node dist/scripts/cosmetic-preview.js",
     "cosmetics-art": "node scripts/render-cosmetics.mjs",
+    "discord-art": "node scripts/render-discord-art.mjs",
+    "cosmetics-import": "node scripts/import-java-cosmetics.mjs",
+    "blender-import": "npm run build && node scripts/import-blender-cosmetics.mjs",
     "test:cosmetics": "npm run build && node dist/scripts/test-cosmetics.js",
     "test:cosmetics-client": "npm run build && node dist/scripts/test-cosmetics-client.js",
     "test:update": "npm run build && node dist/scripts/test-update.js",
     "test:crash": "npm run build && node dist/scripts/test-crash.js",
     "test:serverstatus": "npm run build && node dist/scripts/test-serverstatus.js",
     "test:social": "npm run build && node dist/scripts/test-social.js",
+    "test:freunde": "npm run build && node dist/scripts/test-friends2.js",
+    "test:invites": "npm run build && node dist/scripts/test-invites.js",
     "test:profile": "npm run build && node dist/scripts/test-profile.js",
     "test:store": "npm run build && node dist/scripts/test-store.js",
     "test:content": "npm run build && node dist/scripts/test-content.js",
     "test:accounts-ipc": "npm run build && node dist/scripts/test-accounts-ipc.js",
+    "test:setup": "npm run build && node dist/scripts/test-setup.js",
     "dist:mac": "npm run mod && npm run build && electron-builder --mac"
   },
   "build": {
@@ -85,6 +95,14 @@
       "en-US"
     ],
     "npmRebuild": false,
+    "protocols": [
+      {
+        "name": "HeldixClient-Einladung",
+        "schemes": [
+          "heldixclient"
+        ]
+      }
+    ],
     "win": {
       "target": [
         {
@@ -103,7 +121,16 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "HeldixClient",
-      "artifactName": "HeldixClient-Setup-${version}.exe"
+      "artifactName": "HeldixClient-Setup-${version}.exe",
+      "include": "build/installer.nsh",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/uninstallerSidebar.bmp",
+      "installerHeader": "build/installerHeader.bmp",
+      "installerLanguages": [
+        "de_DE"
+      ],
+      "language": "1031",
+      "runAfterFinish": true
     },
     "mac": {
       "target": [

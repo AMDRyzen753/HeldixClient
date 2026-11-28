@@ -1,0 +1,10 @@
+{
+	"_hinweis": "Angaben für den Addon-Store (nicht in der JAR). Name, Version, Kurzbeschreibung, Autoren und API kommen aus src/main/resources/heldix.addon.json.",
+	"icon": "map",
+	"kategorie": "hud",
+	"plattformen": [],
+	"beschreibung": "Eine Karte deiner Umgebung im HUD – auf jedem Server, ganz ohne Plugin.\n\n- Rund oder eckig, in drei Größen; auf Wunsch dreht sich die Karte mit dir (sonst ist Norden oben)\n- Echte Blockfarben aus den Texturen (auch mit Ressourcenpaketen), Wasser nach Tiefe, Höhen schattiert – oder klassisch in den Farben der Minecraft-Karten\n- Deine Wegpunkte und dein Todespunkt auf der Karte; liegen sie außerhalb, zeigt ein Punkt am Rand die Richtung\n- Himmelsrichtungen am Rand und Koordinaten darunter\n- Zoomen mit Plus und Minus auf dem Ziffernblock, Sichtweite von 16 bis 512 Blöcken\n- Höhlenansicht unter Tage und im Nether – nur in Einzelspieler-Welten\n\nFair Play: Auf Servern zeigt die Minimap nur, was von oben zu sehen ist – keine Höhlen, keine Spieler, keine Mobs.",
+	"hinweise": [
+		"Neu: Minimap im HUD mit echten Blockfarben, Wegpunkten und Himmelsrichtungen"
+	]
+}

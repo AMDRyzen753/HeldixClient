@@ -1,0 +1,33 @@
+Prüfbericht: Sprout, die Samenkapsel (sprout), Slot companion, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  companions/Sprout/Sprout.cosmetic.json  176,1 KB  sha256 b21f46b09cd4cce2513726b171fdbc13850248c1470bd45b3b1ef470d5d265f3
+  companions/Sprout/textures/Sprout_albedo.png  2,7 KB  sha256 27ed186d63ac80351c9212fd598e988a01587294cad996c820caf75421e2faee
+  companions/Sprout/textures/Sprout_emissive_anim.png  7,2 KB  sha256 afe7e901abc6735545541f1dee6ef9211b85ad5465a4530a308a4e3099f0c675
+
+Größe:
+  vorher: 186,0 KB (JSON 176,1 KB + Texturen)
+  nachher: Manifest 59,6 KB von höchstens 512,0 KB, Umschlag etwa 61,2 KB von 544,0 KB
+
+Mesh:
+  528 Vertices, 264 Dreiecke, 14 Knochen, größte Rundung der Positionen 0,0145 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+  Begleiter: Ursprung attach.origin = [15, -6, 1] px (Positionen relativ dazu), Seite links
+
+Animationen (7), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 72 Frames bei 24 fps, Schleife, 14 Spuren, 474 Keys
+  Fly: 24 Frames bei 24 fps, Schleife, 9 Spuren, 169 Keys
+  Emote: 96 Frames bei 24 fps, Schleife, 14 Spuren, 442 Keys
+  Sleep: 72 Frames bei 24 fps, Schleife, 9 Spuren, 74 Keys
+  Startle: 17 Frames bei 24 fps, einmalig, 13 Spuren, 206 Keys
+  Spawn: 33 Frames bei 24 fps, einmalig, 14 Spuren, 363 Keys
+  Celebrate: 41 Frames bei 24 fps, einmalig, 13 Spuren, 472 Keys
+  zusammen 2200 Keys statt 5598 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1498°, move 0,0190 px, scale 0,0000
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,0510 px (Celebrate, Frame 29, Vertex 244)
+
+Zustände: 14 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,3 s
+Partikel: 4 Vorschläge → 4 Einträge (.L-Knochen auch für .R)
+Leuchten: 8 Bilder, 3 Ticks je Bild, Puls 2,5 s zwischen 0,6 und 1
+Texturen: texture.png 128 × 128 (2,7 KB) = Sprout_albedo.png; glow.png 128 × 1024 (7,2 KB) = Sprout_emissive_anim.png

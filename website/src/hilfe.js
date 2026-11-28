@@ -74,7 +74,7 @@ async function search() {
   results.hidden = false;
   if (!found.length) {
     results.replaceChildren(
-      h('div', { class: 'empty' }, h('p', { text: `Keine Anleitung passt zu „${input.value.trim()}“.` }), h('a', { class: 'button small', href: '/konto#ziel=support' }, 'Support-Anfrage stellen')),
+      h('div', { class: 'empty' }, h('p', { text: `Keine Anleitung passt zu „${input.value.trim()}“.` }), h('a', { class: 'btn btn--primary btn--sm', href: '/konto#reiter=support' }, 'Support-Anfrage stellen')),
     );
     return;
   }

@@ -524,6 +524,7 @@ export async function loadHeldixCapes(file: string): Promise<HeldixCape[]> {
       frames: Number.isInteger(c.frames) && (c.frames as number) > 0 ? (c.frames as number) : 1,
       fps: Number.isInteger(c.fps) && (c.fps as number) > 0 ? (c.fps as number) : 10,
       glow: c.glow === true,
+      team: c.team === true,
     }));
 }
 

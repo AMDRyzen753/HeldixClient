@@ -1,0 +1,33 @@
+Prüfbericht: Bolt, die Roboter-Drohne (bolt), Slot companion, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  companions/Bolt/Bolt.cosmetic.json  108,1 KB  sha256 238699aad3ac1ecd59ec33243f691a56842ebf5691bfd92ae15919ab548a836d
+  companions/Bolt/textures/Bolt_albedo.png  1,8 KB  sha256 4e745c9de84c957a82a865b12db6d641c9fd2331fbdebf8f35ed18edd3669b58
+  companions/Bolt/textures/Bolt_emissive_anim.png  5,4 KB  sha256 c803ff53e07e9fd048703b605a4e79aad7e5abd9ef26a1a7730606c6125f6c0d
+
+Größe:
+  vorher: 115,3 KB (JSON 108,1 KB + Texturen)
+  nachher: Manifest 37,6 KB von höchstens 512,0 KB, Umschlag etwa 38,6 KB von 544,0 KB
+
+Mesh:
+  504 Vertices, 252 Dreiecke, 8 Knochen, größte Rundung der Positionen 0,0125 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+  Begleiter: Ursprung attach.origin = [14, -7, 0] px (Positionen relativ dazu), Seite links
+
+Animationen (7), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 48 Frames bei 24 fps, Schleife, 7 Spuren, 171 Keys
+  Fly: 24 Frames bei 24 fps, Schleife, 4 Spuren, 68 Keys
+  Emote: 96 Frames bei 24 fps, Schleife, 7 Spuren, 409 Keys
+  Sleep: 72 Frames bei 24 fps, Schleife, 6 Spuren, 22 Keys
+  Startle: 17 Frames bei 24 fps, einmalig, 4 Spuren, 72 Keys
+  Spawn: 25 Frames bei 24 fps, einmalig, 7 Spuren, 108 Keys
+  Celebrate: 33 Frames bei 24 fps, einmalig, 6 Spuren, 176 Keys
+  zusammen 1026 Keys statt 3408 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1495°, move 0,0196 px, scale 0,0000
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,0404 px (Emote, Frame 94, Vertex 386)
+
+Zustände: 14 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,3 s
+Partikel: 3 Vorschläge → 3 Einträge (.L-Knochen auch für .R)
+Leuchten: 8 Bilder, 2 Ticks je Bild, Puls 1,5 s zwischen 0,6 und 1
+Texturen: texture.png 128 × 128 (1,8 KB) = Bolt_albedo.png; glow.png 128 × 1024 (5,4 KB) = Bolt_emissive_anim.png

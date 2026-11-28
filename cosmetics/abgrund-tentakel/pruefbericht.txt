@@ -1,0 +1,35 @@
+Prüfbericht: Abgrund-Tentakel (abgrund-tentakel), Slot back, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  AbyssTendrils/AbyssTendrils.cosmetic.json  1196,2 KB  sha256 635baad12ba60022e5b232aa4495b2558fe57930bf6ce4fec7337e0a1cb114ae
+  AbyssTendrils/textures/AbyssTendrils_albedo.png  3,7 KB  sha256 185468f196c29df53a01b1a929f26393101c8db22eedb82b52b6aef491a2f584
+  AbyssTendrils/textures/AbyssTendrils_emissive_anim.png  32,3 KB  sha256 3c368d15b6af0256e089c08ce2fc11c02775453f8f601e7f6d2452b26170af67
+
+Größe:
+  vorher: 1232,2 KB (JSON 1196,2 KB + Texturen)
+  nachher: Manifest 352,1 KB von höchstens 512,0 KB, Umschlag etwa 360,1 KB von 544,0 KB
+
+Mesh:
+  4176 Vertices, 2088 Dreiecke, 61 Knochen, größte Rundung der Positionen 0,0156 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+
+Animationen (10), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 72 Frames bei 24 fps, Schleife, 60 Spuren, 976 Keys
+  Flap: 28 Frames bei 24 fps, Schleife, 60 Spuren, 1356 Keys
+  Glide: 48 Frames bei 24 fps, Schleife, 60 Spuren, 1432 Keys
+  Hover: 14 Frames bei 24 fps, Schleife, 60 Spuren, 814 Keys
+  Fold: 72 Frames bei 24 fps, Schleife, 60 Spuren, 470 Keys
+  Emote: 96 Frames bei 24 fps, Schleife, 60 Spuren, 4094 Keys
+  Celebrate: 37 Frames bei 24 fps, einmalig, 60 Spuren, 1548 Keys
+  Takeoff: 33 Frames bei 24 fps, einmalig, 60 Spuren, 1568 Keys
+  Land: 19 Frames bei 24 fps, einmalig, 60 Spuren, 776 Keys
+  Hurt: 13 Frames bei 24 fps, einmalig, 60 Spuren, 660 Keys
+  zusammen 13694 Keys statt 26352 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1499°, move 0,0000 px, scale 0,0000
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,1465 px (Land, Frame 15, Vertex 1202)
+
+Zustände: 15 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,25 s
+Partikel: 2 Vorschläge → 4 Einträge (.L-Knochen auch für .R)
+Leuchten: 8 Bilder, 2 Ticks je Bild, Puls 1,4 s zwischen 0,35 und 1
+Texturen: texture.png 256 × 256 (3,7 KB) = AbyssTendrils_albedo.png; glow.png 256 × 2048 (32,3 KB) = AbyssTendrils_emissive_anim.png

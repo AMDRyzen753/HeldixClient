@@ -38,22 +38,34 @@ function defaultSettings(): Settings {
     javaPath: '',
     discordPresence: true,
     discordShowServer: true,
+    discordInviteButtons: true,
+    discordShowDetails: true,
+    discordShowWorldName: false,
+    discordShowParty: true,
+    discordShowVoice: true,
+    discordShowHead: true,
+    discordMinimal: false,
+    closeToTray: true,
     autoUpdate: true,
     lastSeenVersion: null,
     graphicsApi: 'vulkan',
     jvmTuning: true,
     social: true,
     socialNotifications: true,
+    partyAutoFollow: false,
     addonUpdateNotifications: true,
     addonAutoUpdate: false,
     gameAccountSwitch: true,
+    // fehlt in älteren Dateien: entscheidet beim Start setupStart (core/setup.ts), bevor etwas anderes es liest
+    setupDone: false,
   };
 }
 
 /** Ältere Einstellungsdateien: fehlende oder ungültige Schalter bekommen den Standard. */
 function migrateSettings(stored: Partial<Settings>): Partial<Settings> {
   const next = { ...stored };
-  for (const key of ['social', 'socialNotifications', 'addonUpdateNotifications', 'addonAutoUpdate', 'gameAccountSwitch'] as const) {
+  for (const key of ['social', 'socialNotifications', 'partyAutoFollow', 'addonUpdateNotifications', 'addonAutoUpdate', 'gameAccountSwitch', 'discordInviteButtons', 'setupDone',
+    'discordShowDetails', 'discordShowWorldName', 'discordShowParty', 'discordShowVoice', 'discordShowHead', 'discordMinimal', 'closeToTray'] as const) {
     if (key in next && typeof next[key] !== 'boolean') delete next[key];
   }
   return next;
@@ -101,6 +113,19 @@ export class Store {
     const next = { ...(await this.getSettings()), ...patch };
     await writeJson(this.settingsFile, next);
     return next;
+  }
+
+  /**
+   * Für den Einrichtungs-Assistenten (core/setup.ts, vor ensureInstances): die gespeicherten Einstellungen ohne
+   * Standardwerte (null = keine Datei) und die Zahl der gespeicherten Konten (auch alte Offline-Konten).
+   */
+  async setupProbe(): Promise<{ stored: Record<string, unknown> | null; accounts: number }> {
+    const stored = await readJson<unknown>(this.settingsFile);
+    const accounts = (await this.readAccounts()).accounts;
+    return {
+      stored: stored && typeof stored === 'object' && !Array.isArray(stored) ? (stored as Record<string, unknown>) : stored === null ? null : {},
+      accounts: Array.isArray(accounts) ? accounts.length : 0,
+    };
   }
 
   private async readAccounts(): Promise<AccountsFile> {

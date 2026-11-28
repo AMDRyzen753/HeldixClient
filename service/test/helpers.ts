@@ -74,10 +74,12 @@ export interface TestService {
   wsUrl: string;
   logs: string[];
   dataDir: string;
+  /** Port des Welt-Relays (nur mit weltDomain, auf 127.0.0.1), sonst null. */
+  relayPort: number | null;
   close(): Promise<void>;
 }
 
-/** Startet den Dienst auf einem freien Port mit eigenem, temporärem Datenordner. */
+/** Startet den Dienst auf einem freien Port mit eigenem, temporärem Datenordner (Welt-Relay auf einem freien Port). */
 export async function startService(options: Partial<ServiceOptions> = {}): Promise<TestService> {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'heldix-dienst-test-'));
   const logs: string[] = [];
@@ -94,14 +96,18 @@ export async function startService(options: Partial<ServiceOptions> = {}): Promi
     totpRateLimit: 1000,
     exportRateLimit: 1000,
     skinRateLimit: 1000,
+    weltPort: 0,
+    weltBind: '127.0.0.1',
     ...options,
   });
   const url = await listen(service.server);
+  const relayPort = (await service.relayReady) ? (service.relay!.address() as AddressInfo).port : null;
   return {
     url,
     wsUrl: `${url.replace('http', 'ws')}/v1/ws`,
     logs,
     dataDir,
+    relayPort,
     async close() {
       await service.close();
       fs.rmSync(dataDir, { recursive: true, force: true });
@@ -133,6 +139,38 @@ export async function api(
   const text = await res.text();
   return { status: res.status, body: text === '' ? undefined : JSON.parse(text), headers: res.headers };
 }
+
+/** Macht Stufe 11 (Freunde 2.0, Community-Abzeichen) rückgängig, damit ältere Stufen getestet werden können. */
+export const UNDO_SCHEMA_11 = `
+DROP TABLE message_reactions; DROP TABLE community_badges; DROP INDEX friendships_friend;
+ALTER TABLE users DROP COLUMN status_text; ALTER TABLE users DROP COLUMN dnd; ALTER TABLE users DROP COLUMN show_last_online;
+ALTER TABLE users DROP COLUMN suggestable; ALTER TABLE users DROP COLUMN show_suggestions; ALTER TABLE users DROP COLUMN online_notify;
+ALTER TABLE users DROP COLUMN last_online;
+ALTER TABLE friendships DROP COLUMN favorite; ALTER TABLE friendships DROP COLUMN nickname; ALTER TABLE friendships DROP COLUMN note;
+ALTER TABLE messages DROP COLUMN reply_to; ALTER TABLE messages DROP COLUMN card;
+`;
+
+/** Felder, die `Me` ab 1.12.0 (Freunde 2.0, Abzeichen) zusätzlich hat, mit ihren Standardwerten. */
+export const ME_DEFAULTS = Object.freeze({
+  statusText: null,
+  dnd: false,
+  showLastOnline: true,
+  suggestable: false,
+  showSuggestions: true,
+  onlineNotify: 'all',
+  badge: null,
+});
+
+/** Felder, die `Friend` ab 1.12.0 zusätzlich hat (online gesehen, ohne eigene Angaben). */
+export const FRIEND_DEFAULTS = Object.freeze({
+  favorite: false,
+  nickname: null,
+  note: null,
+  statusText: null,
+  dnd: false,
+  lastOnline: null,
+  badge: null,
+});
 
 export function randomUuid(): string {
   return randomBytes(16).toString('hex');

@@ -13,6 +13,7 @@ import {
   upgradeStatus,
   type Player,
   type TestService,
+  ME_DEFAULTS,
 } from './helpers';
 
 const NOT_FOUND = 'Dieser Spieler nutzt HeldixClient nicht (oder war noch nie online).';
@@ -131,7 +132,7 @@ describe('Konto löschen', () => {
       const again = await api(service.url, 'POST', '/v1/auth/dev', { body: { name: 'Loeschmich', uuid: weg.uuid } });
       assert.equal(again.status, 200);
       const me = await api(service.url, 'GET', '/v1/me', { token: again.body.token });
-      assert.deepEqual(me.body, { uuid: weg.uuid, name: 'Loeschmich', cape: '', visible: true, presence: true, showServer: true, messages: true });
+      assert.deepEqual(me.body, { uuid: weg.uuid, name: 'Loeschmich', cape: '', visible: true, presence: true, showServer: true, messages: true, ...ME_DEFAULTS });
       const list = await api(service.url, 'GET', '/v1/friends', { token: again.body.token });
       assert.deepEqual(list.body, { friends: [], incoming: [], outgoing: [], unread: {} });
       // Die anderen Spieler sind davon unberührt.
@@ -186,7 +187,7 @@ describe('Konto löschen', () => {
 
       const fresh = await login();
       const me = await api(service.url, 'GET', '/v1/me', { token: fresh });
-      assert.deepEqual(me.body, { uuid, name: 'Wiederkehr', cape: '', visible: true, presence: true, showServer: true, messages: true });
+      assert.deepEqual(me.body, { uuid, name: 'Wiederkehr', cape: '', visible: true, presence: true, showServer: true, messages: true, ...ME_DEFAULTS });
     } finally {
       await service.close();
       await mojang.close();

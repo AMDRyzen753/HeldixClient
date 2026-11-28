@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { isLoopback, parseBearer } from '../src/auth';
-import { api, randomUuid, sleep, startFakeMojang, startService, upgradeStatus, type FakeMojang, type TestService } from './helpers';
+import { api, randomUuid, sleep, startFakeMojang, startService, upgradeStatus, type FakeMojang, type TestService, ME_DEFAULTS } from './helpers';
 
 describe('Anmeldung über Mojang', () => {
   let mojang: FakeMojang;
@@ -40,7 +40,7 @@ describe('Anmeldung über Mojang', () => {
 
     const me = await api(service.url, 'GET', '/v1/me', { token: res.body.token });
     assert.equal(me.status, 200);
-    assert.deepEqual(me.body, { uuid, name: 'Heldix_1', cape: '', visible: true, presence: true, showServer: true, messages: true });
+    assert.deepEqual(me.body, { uuid, name: 'Heldix_1', cape: '', visible: true, presence: true, showServer: true, messages: true, ...ME_DEFAULTS });
 
     // Parameter kommen URL-kodiert beim Session-Server an.
     const last = mojang.requests.at(-1)!;

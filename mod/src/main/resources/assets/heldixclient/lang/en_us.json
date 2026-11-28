@@ -8,6 +8,8 @@
 	"key.heldixclient.waypoint": "Set waypoint",
 	"key.heldixclient.hudInteract": "Use HUD (free mouse)",
 	"key.heldixclient.playerMenu": "Player menu (aim at a player)",
+	"key.heldixclient.knockAllow": "Prompt: allow / accept (share world, party)",
+	"key.heldixclient.knockDeny": "Prompt: deny (share world, party)",
 	"key.heldixclient.module.fps": "FPS on/off",
 	"key.heldixclient.module.cps": "CPS on/off",
 	"key.heldixclient.module.ping": "Ping on/off",

@@ -87,6 +87,7 @@
     "send",
     "ban",
     "flag",
+    "map",
     "mic",
     "mic-off",
     "volume",

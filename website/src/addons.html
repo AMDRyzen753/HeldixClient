@@ -1,32 +1,40 @@
-<!--seite {"titel": "Addon-Store", "beschreibung": "Heldix-Addons für HeldixClient: zusätzliche Module, HUD-Anzeigen und Änderungen am Spiel vom Team und aus der Community, vom Team geprüft und signiert. Mit Bewertungen und Screenshots. Installieren im Launcher, im Spiel oder per Download.", "bild": "/images/spiel-heldix-menue.png"}-->
+<!--seite {"titel": "Addon-Store", "beschreibung": "Heldix-Addons für HeldixClient: zusätzliche Module, HUD-Anzeigen und Änderungen am Spiel vom Team und aus der Community, vom Team geprüft und signiert. Mit Bewertungen und Screenshots. Installieren im Launcher, im Spiel oder per Download."}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
+<link rel="stylesheet" href="/addons.css">
 <script type="module" src="/addons.js"></script>
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="addons">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap store-page" data-api-base="https://__API_DOMAIN__">
-  <div class="page-hero" id="store-kopf">
-    <a class="back-link" id="store-zurueck" href="/addons" hidden>{{icon:chevron-left}}Alle Addons</a>
-    <span class="eyebrow" id="store-eyebrow">Addon-Store</span>
-    <h1 id="store-titel">Mehr Module mit <span class="gradient">Heldix-Addons</span></h1>
-    <p class="lead" id="store-lead">Addons erweitern HeldixClient um eigene Module, HUD-Anzeigen und Änderungen am Spiel – vom Team und aus der Community. Jedes Addon prüft und signiert das Team, bevor es hier erscheint.</p>
-  </div>
+<main id="inhalt" class="store-page" data-api-base="https://__API_DOMAIN__">
+  <section class="page-hero" aria-labelledby="store-titel">
+    <div class="container">
+      <div class="page-hero__inner" id="store-kopf">
+        <a class="link-arrow back-link" id="store-zurueck" href="/addons" hidden>{{icon:chevron-left}}Alle Addons</a>
+        <span class="eyebrow" id="store-eyebrow">{{icon:addons}}Addon-Store</span>
+        <h1 class="h1" id="store-titel">Mehr Funktionen mit <span class="text-gradient">Heldix-Addons</span></h1>
+        <p class="lead" id="store-lead">Addons erweitern HeldixClient um eigene Module, HUD-Anzeigen und Änderungen am Spiel – vom Team und aus der Community. Jedes Addon prüft und signiert das Team, bevor es hier erscheint.</p>
+        <div class="cluster"><span class="chip chip--online">{{icon:shield}}Vom Team signiert</span><span class="chip">{{icon:loader-heldix}}Heldix- und Fabric-Instanzen</span><span class="chip">{{icon:star}}Kostenlos</span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="container store-body">
 
   <noscript><p class="notice">Der Addon-Store braucht JavaScript. Ohne Browser geht es im Launcher: Instanzen → Instanz → Mods &amp; Addons → Hinzufügen → Addon-Store.</p></noscript>
 
-  <div class="module-tools glass store-tools" role="search" id="store-werkzeuge" hidden>
+  <div class="toolbar store-tools" role="search" id="store-werkzeuge" hidden>
     <label class="search-field">
-      <span class="visually-hidden">Addons durchsuchen</span>
+      <span class="sr-only">Addons durchsuchen</span>
       {{icon:search}}
       <input type="search" id="addon-suche" placeholder="Addon suchen, z. B. Musik" autocomplete="off">
     </label>
-    <div class="segmented" role="group" aria-label="Kategorie" id="addon-kategorien"></div>
-    <div class="segmented" role="group" aria-label="Herkunft" id="addon-herkunft" hidden></div>
+    <div class="filter-group" role="group" aria-label="Kategorie" id="addon-kategorien"></div>
+    <div class="filter-group" role="group" aria-label="Herkunft" id="addon-herkunft" hidden></div>
     <button class="filter-toggle" type="button" id="addon-nur-api" aria-pressed="false" title="Nur Addons, die ausschließlich die Heldix-API nutzen und nicht direkt in Minecraft eingreifen" hidden>{{icon:shield}}Nur API-Addons <span class="count-soft"></span></button>
     <label class="sort-field">
       <span>Sortieren</span>
@@ -47,101 +55,108 @@
   <div class="empty" id="addon-keine-treffer" hidden>{{icon:search}}<p>Kein Addon passt zu deiner Suche.</p></div>
 
   <!-- Noch keine Addons -->
-  <div class="store-state glass" id="store-leer" hidden>
-    <span class="badge">{{icon:addons}}</span>
+  <div class="card store-state" id="store-leer" hidden>
+    <span class="icon-tile icon-tile--lg">{{icon:addons}}</span>
     <h2>Noch keine Addons im Store</h2>
     <p>Sobald das Team ein Addon veröffentlicht, steht es hier – und im Launcher und im Spiel.</p>
-    <p class="store-state-actions"><a class="button small ghost" href="/entwickler/addons">Eigenes Addon schreiben{{icon:chevron-right}}</a></p>
+    <p class="store-state-actions"><a class="btn btn--secondary btn--sm" href="/entwickler/addons">Eigenes Addon schreiben{{icon:chevron-right}}</a></p>
   </div>
 
   <!-- Entwicklerseite ohne Addons -->
-  <div class="store-state glass" id="store-autor-fehlt" hidden>
-    <span class="badge">{{icon:user}}</span>
+  <div class="card store-state" id="store-autor-fehlt" hidden>
+    <span class="icon-tile icon-tile--lg">{{icon:user}}</span>
     <h2>Diesen Entwickler gibt es hier nicht</h2>
     <p>Vielleicht stehen seine Addons nicht mehr im Store, oder der Link ist unvollständig.</p>
-    <p class="store-state-actions"><a class="button small" href="/addons">{{icon:addons}}Zum Addon-Store</a></p>
+    <p class="store-state-actions"><a class="btn btn--primary btn--sm" href="/addons">{{icon:addons}}Zum Addon-Store</a></p>
   </div>
 
   <!-- Dienst nicht erreichbar -->
-  <div class="store-state glass warn" id="store-fehler" role="alert" hidden>
-    <span class="badge">{{icon:warning}}</span>
+  <div class="card store-state warn" id="store-fehler" role="alert" hidden>
+    <span class="icon-tile icon-tile--lg">{{icon:warning}}</span>
     <h2>Der Addon-Store ist gerade nicht erreichbar</h2>
     <p id="store-fehler-text">Der Heldix-Dienst antwortet nicht. Installierte Addons laufen trotzdem weiter.</p>
     <p class="store-state-actions">
-      <button class="button small" type="button" id="store-erneut">{{icon:refresh}}Erneut versuchen</button>
-      <a class="button small ghost" href="/status">Status ansehen</a>
+      <button class="btn btn--primary btn--sm" type="button" id="store-erneut">{{icon:refresh}}Erneut versuchen</button>
+      <a class="btn btn--secondary btn--sm" href="/status">Status ansehen</a>
     </p>
   </div>
 
+  </div>
+
   <!-- Installieren -->
-  <section id="installieren" aria-labelledby="installieren-titel">
+  <section class="section section--raised" id="installieren" aria-labelledby="installieren-titel">
+    <div class="container">
     <div class="section-head">
-      <span class="eyebrow">Installieren</span>
-      <h2 id="installieren-titel">So kommt ein Addon ins Spiel</h2>
-      <p>Addons gelten immer für eine Instanz mit HeldixClient. Beim nächsten Start der Instanz sind sie dabei.</p>
+      <span class="eyebrow">{{icon:download}}Installieren</span>
+      <h2 class="h2" id="installieren-titel">So kommt ein Addon ins Spiel</h2>
+      <p class="lead">Addons gelten immer für eine Instanz mit HeldixClient. Beim nächsten Start der Instanz sind sie dabei. Neu eingerichtet? Die Einrichtung beim ersten Start installiert empfohlene offizielle Addons gleich mit.</p>
     </div>
     <div class="install-ways">
-      <article class="install-way">
-        <span class="badge">{{icon:loader-heldix}}</span>
+      <article class="card install-way">
+        <span class="icon-tile icon-tile--lg">{{icon:loader-heldix}}</span>
         <h3>Im Launcher</h3>
         <p><strong>Instanzen</strong> → Instanz wählen → Reiter <strong>Mods &amp; Addons</strong> → <strong>Hinzufügen</strong> → <strong>Addon-Store</strong> → <strong>Installieren</strong>. Der Launcher zeigt dabei, ob das Addon zur Minecraft-Version und zum Loader der Instanz passt. Neue Versionen bekommst du mit <strong>Aktualisieren</strong>.</p>
       </article>
-      <article class="install-way">
-        <span class="badge">{{icon:modules}}</span>
+      <article class="card install-way">
+        <span class="icon-tile icon-tile--lg">{{icon:modules}}</span>
         <h3>Im Spiel</h3>
         <p>Heldix-Menü (rechte <kbd>Umschalt</kbd>-Taste) → <strong>Mods &amp; Addons</strong> → Reiter <strong>Store</strong> → <strong>Installieren</strong>. Das Addon lädt beim nächsten Spielstart.</p>
       </article>
-      <article class="install-way">
-        <span class="badge">{{icon:folder}}</span>
+      <article class="card install-way">
+        <span class="icon-tile icon-tile--lg">{{icon:folder}}</span>
         <h3>Von Hand</h3>
         <p>JAR herunterladen und in den Ordner <code>heldix-addons</code> der Instanz legen – nicht nach <code>mods</code>. Im Launcher: Instanz → <strong>Einstellungen</strong> → <strong>Ordner</strong> → <strong>Addons</strong>.</p>
       </article>
     </div>
+    </div>
   </section>
 
   <!-- Fragen -->
-  <section id="fragen" aria-labelledby="fragen-titel">
+  <section class="section" id="fragen" aria-labelledby="fragen-titel">
+    <div class="container faq-layout">
     <div class="section-head">
-      <span class="eyebrow">Fragen</span>
-      <h2 id="fragen-titel">Gut zu wissen</h2>
+      <span class="eyebrow">{{icon:help-circle}}Fragen</span>
+      <h2 class="h2" id="fragen-titel">Gut zu wissen</h2>
+      <p class="text-2">Mehr dazu im <a href="/hilfe/heldix-addons">Hilfe-Center</a> und für Entwickler unter <a href="/entwickler">Für Entwickler</a>.</p>
     </div>
-    <div class="faq">
+    <div class="accordion">
       <details>
         <summary>Sind Addons sicher?{{icon:chevron-down}}</summary>
-        <p>Addons sind Programmcode, der in deinem Spiel läuft. Deshalb kommen in den Store nur Addons, die das Team geprüft und mit seinem Schlüssel signiert hat – auch die aus der Community. Launcher und Spiel prüfen beim Installieren die Signatur und die SHA-256-Prüfsumme der Datei.</p>
+        <div class="accordion__body"><p>Addons sind Programmcode, der in deinem Spiel läuft. Deshalb kommen in den Store nur Addons, die das Team geprüft und mit seinem Schlüssel signiert hat – auch die aus der Community. Launcher und Spiel prüfen beim Installieren die Signatur und die SHA-256-Prüfsumme der Datei.</p></div>
       </details>
       <details>
         <summary>Was heißt „Offiziell“ und „Community“?{{icon:chevron-down}}</summary>
-        <p><strong>Offiziell</strong> sind Addons des HeldixClient-Teams. <strong>Community</strong>-Addons haben Spieler geschrieben und eingereicht; das Team hat sie geprüft und signiert. Welche Art ein Addon ist, steht im signierten Manifest und lässt sich nachträglich nicht ändern. Über den Namen des Entwicklers kommst du zu all seinen Addons.</p>
+        <div class="accordion__body"><p><strong>Offiziell</strong> sind Addons des HeldixClient-Teams. <strong>Community</strong>-Addons haben Spieler geschrieben und eingereicht; das Team hat sie geprüft und signiert. Welche Art ein Addon ist, steht im signierten Manifest und lässt sich nachträglich nicht ändern. Über den Namen des Entwicklers kommst du zu all seinen Addons.</p></div>
       </details>
       <details>
         <summary>Wie funktionieren die Bewertungen?{{icon:chevron-down}}</summary>
-        <p>Angemeldete Spieler vergeben 1 bis 5 Sterne – jeder einmal pro Addon, ändern oder entfernen geht jederzeit. Eigene Addons kann man nicht bewerten. Angemeldet bist du hier über den <a href="/konto">Konto-Bereich</a>, ganz ohne Passwort über den Launcher oder im Spiel.</p>
+        <div class="accordion__body"><p>Angemeldete Spieler vergeben 1 bis 5 Sterne – jeder einmal pro Addon, ändern oder entfernen geht jederzeit. Eigene Addons kann man nicht bewerten. Angemeldet bist du hier über den <a href="/konto">Konto-Bereich</a>, ganz ohne Passwort über den Launcher oder im Spiel.</p></div>
       </details>
       <details>
         <summary>Ein Addon macht Probleme?{{icon:chevron-down}}</summary>
-        <p>Öffne das Addon und wähle <strong>Melden</strong> – etwa wenn es nicht funktioniert, fremde Inhalte enthält oder sich verdächtig verhält. Das Team sieht die Meldung und kann das Addon aus dem Store nehmen. Der Entwickler erfährt nicht, wer gemeldet hat.</p>
+        <div class="accordion__body"><p>Öffne das Addon und wähle <strong>Melden</strong> – etwa wenn es nicht funktioniert, fremde Inhalte enthält oder sich verdächtig verhält. Das Team sieht die Meldung und kann das Addon aus dem Store nehmen. Der Entwickler erfährt nicht, wer gemeldet hat.</p></div>
       </details>
       <details>
         <summary>Was bedeutet „API-Stufe“?{{icon:chevron-down}}</summary>
-        <p>Die Stufe der Heldix-API, die ein Addon braucht. HeldixClient lädt derzeit Addons bis Stufe 7 (Stufe 3 ab Version 0.13.1, Stufe 4 ab 0.13.2, Stufe 5 ab 0.13.3, Stufe 6 ab 0.13.4, Stufe 7 ab 0.13.5). Braucht ein Addon mehr, aktualisiere den Launcher – HeldixClient kommt mit ihm.</p>
+        <div class="accordion__body"><p>Die Stufe der Heldix-API, die ein Addon braucht. HeldixClient lädt derzeit Addons bis Stufe 9 (Stufe 3 ab Version 0.13.1, Stufe 4 ab 0.13.2, Stufe 5 ab 0.13.3, Stufe 6 ab 0.13.4, Stufe 7 ab 0.13.5, Stufe 8 ab 0.13.7, Stufe 9 ab 0.13.7). Braucht ein Addon mehr, aktualisiere den Launcher – HeldixClient kommt mit ihm.</p></div>
       </details>
       <details>
         <summary>Was heißt „Greift in Minecraft ein“?{{icon:chevron-down}}</summary>
-        <p>Die meisten Addons nutzen nur die Heldix-API. Manche ändern Minecraft aber direkt – etwa wie Gegenstände auf dem Boden liegen. Solche Addons tragen den Hinweis <strong>Greift in Minecraft ein</strong> und nennen die Minecraft-Versionen, für die sie gebaut sind. Das Team sieht sich ihre Eingriffe beim Prüfen besonders genau an. Sie laufen meist nur in <strong>Heldix-Instanzen</strong> (mit dem Heldix Loader), und An oder Aus wirkt erst nach dem Neustart des Spiels. Willst du nur Addons ohne solche Eingriffe sehen, wähle <strong>Nur API-Addons</strong>.</p>
+        <div class="accordion__body"><p>Die meisten Addons nutzen nur die Heldix-API. Manche ändern Minecraft aber direkt – etwa wie Gegenstände auf dem Boden liegen. Solche Addons tragen den Hinweis <strong>Greift in Minecraft ein</strong> und nennen die Minecraft-Versionen, für die sie gebaut sind. Das Team sieht sich ihre Eingriffe beim Prüfen besonders genau an. Sie laufen meist nur in <strong>Heldix-Instanzen</strong> (mit dem Heldix Loader), und An oder Aus wirkt erst nach dem Neustart des Spiels. Willst du nur Addons ohne solche Eingriffe sehen, wähle <strong>Nur API-Addons</strong>.</p></div>
       </details>
       <details>
         <summary>Läuft ein Addon nach einem Minecraft-Update weiter?{{icon:chevron-down}}</summary>
-        <p>Addons, die nur die Heldix-API nutzen: ja – dieselbe Datei läuft weiter, solange es HeldixClient für die Minecraft-Version gibt. Addons, die in Minecraft eingreifen, laufen nur in den Versionen, die sie nennen; für neue Versionen braucht es ein Update des Addons. Hat ein Addon einen Fehler, schaltet HeldixClient nur das Addon ab – das Spiel läuft weiter.</p>
+        <div class="accordion__body"><p>Addons, die nur die Heldix-API nutzen: ja – dieselbe Datei läuft weiter, solange es HeldixClient für die Minecraft-Version gibt. Addons, die in Minecraft eingreifen, laufen nur in den Versionen, die sie nennen; für neue Versionen braucht es ein Update des Addons. Hat ein Addon einen Fehler, schaltet HeldixClient nur das Addon ab – das Spiel läuft weiter.</p></div>
       </details>
       <details>
         <summary>Was zählt der Download-Zähler?{{icon:chevron-down}}</summary>
-        <p>Nur, wie oft eine Datei vollständig geladen wurde. Dabei speichert der Dienst weder deine IP-Adresse noch andere Angaben über dich.</p>
+        <div class="accordion__body"><p>Nur, wie oft eine Datei vollständig geladen wurde. Dabei speichert der Dienst weder deine IP-Adresse noch andere Angaben über dich.</p></div>
       </details>
       <details>
         <summary>Kann ich ein eigenes Addon in den Store bringen?{{icon:chevron-down}}</summary>
-        <p>Ja. Im <a href="/konto#addons">Konto</a> unter <strong>Meine Addons</strong> lädst du die JAR hoch, füllst die Store-Angaben aus und reichst es zur Prüfung ein. Das Team sieht sich den Code an, signiert das Addon und stellt es als Community-Addon in den Store. Wie du ein Addon baust und was dabei erlaubt ist, steht unter <a href="/entwickler/addons#addon-einreichen">Für Entwickler</a>.</p>
+        <div class="accordion__body"><p>Ja. Im <a href="/konto#reiter=addons">Konto</a> unter <strong>Meine Addons</strong> lädst du die JAR hoch, füllst die Store-Angaben aus und reichst es zur Prüfung ein. Das Team sieht sich den Code an, signiert das Addon und stellt es als Community-Addon in den Store. Wie du ein Addon baust und was dabei erlaubt ist, steht unter <a href="/entwickler/addons#addon-einreichen">Für Entwickler</a>.</p></div>
       </details>
+    </div>
     </div>
   </section>
 </main>
@@ -155,7 +170,6 @@
 </dialog>
 
 {{ICONS_ALLE_HTML}}
-<div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 {{include:footer.html}}
 </body>
 </html>

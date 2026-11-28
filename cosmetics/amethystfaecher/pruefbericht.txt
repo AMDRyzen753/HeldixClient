@@ -1,0 +1,35 @@
+Prüfbericht: Amethyst-Fächer (amethystfaecher), Slot back, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  CrystalWings/CrystalWings.cosmetic.json  551,9 KB  sha256 065d5dd9732e20084a2633e202738d181ba827fc67fa65b6cda346c39a20c39b
+  CrystalWings/textures/CrystalWings_albedo.png  2,1 KB  sha256 ef6d5c1d954f25a12b1dea8fe1388e410d78bf24b96c16205903d23ec4d9102c
+  CrystalWings/textures/CrystalWings_emissive_anim.png  25,1 KB  sha256 c4f2f739239725ef23ccf8c93416e89e57c6f4719101be2e3d65712ee5b9f62c
+
+Größe:
+  vorher: 579,1 KB (JSON 551,9 KB + Texturen)
+  nachher: Manifest 168,2 KB von höchstens 512,0 KB, Umschlag etwa 171,1 KB von 544,0 KB
+
+Mesh:
+  3264 Vertices, 1632 Dreiecke, 21 Knochen, größte Rundung der Positionen 0,0156 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+
+Animationen (10), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 72 Frames bei 24 fps, Schleife, 20 Spuren, 257 Keys
+  Flap: 24 Frames bei 24 fps, Schleife, 20 Spuren, 319 Keys
+  Glide: 48 Frames bei 24 fps, Schleife, 20 Spuren, 288 Keys
+  Hover: 12 Frames bei 24 fps, Schleife, 20 Spuren, 192 Keys
+  Fold: 72 Frames bei 24 fps, Schleife, 20 Spuren, 148 Keys
+  Emote: 96 Frames bei 24 fps, Schleife, 20 Spuren, 867 Keys
+  Celebrate: 37 Frames bei 24 fps, einmalig, 20 Spuren, 538 Keys
+  Takeoff: 31 Frames bei 24 fps, einmalig, 20 Spuren, 518 Keys
+  Land: 19 Frames bei 24 fps, einmalig, 20 Spuren, 314 Keys
+  Hurt: 13 Frames bei 24 fps, einmalig, 20 Spuren, 228 Keys
+  zusammen 3669 Keys statt 8904 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1500°, move 0,0000 px, scale 0,0000
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,0823 px (Emote, Frame 19, Vertex 459)
+
+Zustände: 15 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,25 s
+Partikel: 2 Vorschläge → 4 Einträge (.L-Knochen auch für .R)
+Leuchten: 8 Bilder, 3 Ticks je Bild, Puls 2,4 s zwischen 0,45 und 1
+Texturen: texture.png 128 × 128 (2,1 KB) = CrystalWings_albedo.png; glow.png 128 × 1024 (25,1 KB) = CrystalWings_emissive_anim.png

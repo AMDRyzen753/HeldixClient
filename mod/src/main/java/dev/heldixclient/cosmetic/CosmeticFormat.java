@@ -32,11 +32,15 @@ public final class CosmeticFormat {
 	public static final int FORMAT = 1;
 	public static final List<String> SLOTS = List.of("head", "back", "aura", "companion", "cape");
 	public static final List<String> MODEL_SLOTS = List.of("head", "back", "companion");
-	public static final List<String> ACCESS = List.of("all", "team");
+	/**
+	 * Wer ein Cosmetic tragen darf: alle, nur das Team oder (ab 0.13.7) nur, wer es freigeschaltet hat ("unlock",
+	 * Belohnungen für Einladungen). HeldixClient bis 0.13.6 kennt "unlock" nicht und verwirft nur diese Einträge.
+	 */
+	public static final List<String> ACCESS = List.of("all", "team", "unlock");
 	public static final List<String> ANIMATION_TYPES = List.of("flap", "sway", "spin", "bob");
 	public static final List<String> ANIMATION_AXES = List.of("x", "y", "z");
 	public static final List<String> PARTICLE_MOTIONS = List.of("rise", "fall", "orbit", "spark", "float");
-	public static final List<String> BUILTIN_CAPE_IDS = List.of("heldix", "mitternacht", "aurora", "glut", "kristall", "neon", "sakura", "gewitter", "galaxie");
+	public static final List<String> BUILTIN_CAPE_IDS = List.of("heldix", "mitternacht", "aurora", "glut", "kristall", "neon", "sakura", "gewitter", "galaxie", "matrix", "matrix_rot", "matrix_tuerkis", "sakura_orange");
 
 	public static final Pattern ID_RE = Pattern.compile("^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$");
 	private static final Pattern BONE_NAME_RE = Pattern.compile("^[a-z0-9_]{1,24}$");
@@ -59,13 +63,18 @@ public final class CosmeticFormat {
 	private static final int NAME_MAX = 40;
 	private static final int DESCRIPTION_MAX = 300;
 	private static final int TEXTURE_MIN = 8;
-	private static final int TEXTURE_MAX = 256;
+	private static final int TEXTURE_MAX = 512;
 	private static final int TEXTURE_STEP = 8;
 	private static final int[] CAPE_WIDTHS = {64, 128, 256};
 	private static final int CAPE_FRAMES_MAX = 32;
 	private static final int CAPE_FPS_MAX = 20;
-	private static final int BONES_MAX = 32;
+	private static final int BONES_MAX = 64;
 	private static final int CUBES_MAX = 128;
+	/** Das PNG eines Modells ist model.textureSize mal 1, 2 oder 4 (UV und Box-UV zählen in Texeln von textureSize) */
+	private static final int[] TEXTURE_SCALES = {1, 2, 4};
+	/** model.scale (freiwillig, fehlt: 1): Größe des ganzen Modells um den Anker */
+	private static final double MODEL_SCALE_MIN = 0.25;
+	private static final double MODEL_SCALE_MAX = 1.5;
 	private static final int CUBE_EDGE_MAX = 32;
 	private static final int COORD_MAX = 48;
 	private static final int ROTATION_MAX = 180;
@@ -89,6 +98,53 @@ public final class CosmeticFormat {
 	private static final double SCALE_MIN = 0.25;
 	private static final double SCALE_MAX = 1.5;
 
+	// ---- Format 2: Meshes mit Knochen und Keyframe-Animationen (ab 0.13.8) ----
+	public static final int FORMAT_2 = 2;
+	/** Slots für Format 2 (Capes bleiben bei Format 1) */
+	public static final List<String> RIG_SLOTS = List.of("head", "back", "aura", "companion");
+	/** Zustände des Spielers (und Übergänge), denen ein Cosmetic eine Animation zuordnen kann; idle ist Pflicht */
+	public static final List<String> STATE_KEYS = List.of("idle", "walk", "sneak", "sit_or_ride", "swim", "sprint", "elytra", "jump", "fall",
+			"creative_fly", "start_flying", "land", "hurt", "emote", "celebrate", "afk", "sleep", "enable", "disable", "summon");
+	/** Minecraft-Partikel, die ein Cosmetic im Format 2 an Knochen erzeugen darf (ohne „minecraft:“; alle ohne Parameter außer dust) */
+	public static final List<String> RIG_PARTICLES = List.of("flame", "small_flame", "soul_fire_flame", "smoke", "end_rod", "electric_spark", "dust",
+			"heart", "note", "happy_villager", "cloud", "poof", "snowflake", "spore_blossom_air", "crit", "enchant", "portal", "witch", "glow",
+			"falling_water", "dripping_water", "firework", "cherry_leaves", "ash", "white_ash", "soul", "sculk_soul", "lava", "falling_spore_blossom",
+			"wax_on", "wax_off", "bubble_pop", "composter", "totem_of_undying", "reverse_portal");
+	private static final Pattern CLIP_NAME_RE = Pattern.compile("^[A-Za-z0-9_]{1,24}$");
+	/** Knochen in Format 2: 1–32 Zeichen aus A–Z, a–z, 0–9, _, . und - (Blender-Namen wie „wing.L“) */
+	private static final Pattern RIG_BONE_NAME_RE = Pattern.compile("^[A-Za-z0-9_.-]{1,32}$");
+	private static final List<String> MANIFEST_KEYS_2 = List.of("type", "format", "id", "version", "slot", "name", "description", "access", "date",
+			"texture", "glow", "emissive", "mesh", "bones", "animations", "states", "particles", "attach");
+	public static final int MANIFEST_BYTES_2 = 512 * 1024;
+	public static final int ENVELOPE_BYTES_2 = 544 * 1024;
+	private static final int RIG_TEXTURE_MIN = 16;
+	private static final int RIG_TEXTURE_MAX = 512;
+	private static final int RIG_VERTICES_MAX = 16384;
+	private static final int RIG_TRIANGLES_MAX = 16384;
+	private static final int RIG_BONES_MAX = 96;
+	private static final int RIG_BONE_NAME_MAX = 32;
+	/** pivot und tail der Knochen in Pixeln */
+	private static final double RIG_COORD_MAX = 1024;
+	/** attach.origin (Begleiter) in Pixeln */
+	private static final double RIG_ORIGIN_MAX = 64;
+	/** weiche Haut: Einflüsse je Vertex (mesh.joints, mesh.weights), Gewichte ÷ 255 */
+	public static final int RIG_INFLUENCES = 4;
+	private static final int WEIGHT_UNIT = 255;
+	private static final int ROTATION_UNIT = 32767;
+	/** Länge eines Quaternions (÷ 32767) darf so weit von 1 abweichen */
+	private static final double QUATERNION_TOLERANCE = 0.01;
+	private static final int RIG_ANIMATIONS_MAX = 16;
+	private static final int RIG_FPS_MAX = 60;
+	private static final int RIG_FRAMES_MAX = 1200;
+	private static final int RIG_PARTICLES_MAX = 16;
+	private static final double RIG_PER_SECOND_MIN = 0.1;
+	private static final double RIG_PER_SECOND_MAX = 20;
+	private static final int GLOW_FRAMES_MAX = 16;
+	private static final int FRAMETIME_MAX = 20;
+	private static final double PULSE_PERIOD_MIN = 0.1;
+	private static final double PULSE_PERIOD_MAX = 20;
+	private static final double BLEND_MAX = 1;
+
 	private CosmeticFormat() {
 	}
 
@@ -110,7 +166,11 @@ public final class CosmeticFormat {
 	public record Bone(String name, int parent, double[] pivot, double[] rotation, List<Cube> cubes) {
 	}
 
-	public record Model(int textureWidth, int textureHeight, List<Bone> bones) {
+	/**
+	 * textureWidth/textureHeight: model.textureSize in Texeln (UV-Raum; das PNG in {@link Manifest} ist 1-, 2- oder 4-mal so
+	 * groß). scale: Größe des ganzen Modells um den Anker (Ursprung), über den Bone-Matrizen; fehlt es, 1.
+	 */
+	public record Model(int textureWidth, int textureHeight, double scale, List<Bone> bones) {
 	}
 
 	/** axis: 0 = x, 1 = y, 2 = z */
@@ -126,12 +186,65 @@ public final class CosmeticFormat {
 	public record Companion(double[] offset, double scale) {
 	}
 
-	/** Das geprüfte Manifest; fehlende freiwillige Felder mit Standardwert. texture/glow als PNG-Bytes. */
+	// ---- Format 2 ----
+
+	/** Knochen (Format 2): parent = Index eines vorher stehenden Knochens oder -1; pivot und tail in Pixeln (Body-Modellraum) */
+	public record RigBone(String name, int parent, float[] pivot, float[] tail) {
+	}
+
+	/**
+	 * Eine Spur einer Animation: Frame-Nummern (aufsteigend, die erste 0) und Werte je Key – Drehung 4 (x, y, z, w,
+	 * normiert), Verschiebung 3 (Pixel), Größe 1 (Faktor).
+	 */
+	public record Channel(int[] keys, float[] values) {
+	}
+
+	/** Spuren eines Knochens in einer Animation (fehlende Spur = Ruhelage) */
+	public record Track(int bone, Channel rot, Channel move, Channel scale) {
+	}
+
+	public record Clip(String name, int fps, int frames, boolean loop, List<Track> tracks) {
+	}
+
+	/** Leucht-Streifen: Bilder untereinander, Ticks je Bild, Puls (Sekunden, Stärke von min bis max) */
+	public record Emissive(int frames, int frametimeTicks, double period, double min, double max) {
+	}
+
+	/** Partikel an einem Knochen; particle ohne „minecraft:“; color nur bei dust (sonst -1); states leer = immer */
+	public record RigParticle(int bone, boolean tail, String particle, double perSecond, int color, List<String> states) {
+	}
+
+	/** Anbringen eines Begleiters: Ursprung im Body-Raum (Pixel) und Seite (rechts = an x gespiegelt) */
+	public record Attach(double[] origin, boolean right) {
+	}
+
+	/**
+	 * Mesh, Knochen und Animationen eines Cosmetics im Format 2, wie im Manifest (Base64 schon in Felder gewandelt):
+	 * positions Int16 in 1/32 Pixel (×3), normals Int8 ×127 (×3), uvs Uint16 (÷65535, ×2), vertexBones Uint8 (ein Knochen je
+	 * Vertex; bei weicher Haut der mit dem größten Gewicht), triangles Uint16 (×3), weiche Haut freiwillig: joints und
+	 * weights je 4 Uint8 (Gewichte ÷ 255, Summe 255), sonst null. states: Schlüssel aus {@link #STATE_KEYS} → Name einer
+	 * Animation. attach nur beim Begleiter (ohne Angabe: Ursprung 0, links); Positionen, pivot und tail zählen relativ dazu.
+	 */
+	public record Rig(int vertexCount, int triangleCount, short[] positions, byte[] normals, char[] uvs, byte[] vertexBones, char[] triangles,
+			byte[] joints, byte[] weights, List<RigBone> bones, java.util.Map<String, Clip> animations, java.util.Map<String, String> states,
+			double blendSeconds, List<RigParticle> particles, Emissive emissive, Attach attach) {
+	}
+
+	/**
+	 * Das geprüfte Manifest; fehlende freiwillige Felder mit Standardwert. texture/glow als PNG-Bytes. Format 1: model,
+	 * animations, particles, cape, companion je nach Slot, rig null. Format 2: nur rig (Mesh, Knochen, Animationen,
+	 * Zustände, Partikel), glow ist dann ein Streifen aus emissive.frames Bildern untereinander.
+	 */
 	public record Manifest(String id, int version, String slot, String name, String description, String access, String date,
 			byte[] texture, int width, int height, byte[] glow, Model model, List<Animation> animations, Particles particles, Cape cape,
-			Companion companion) {
+			Companion companion, int format, Rig rig) {
 		public boolean teamOnly() {
 			return "team".equals(access);
+		}
+
+		/** nur für Spieler, die es freigeschaltet haben (Belohnung für Einladungen) */
+		public boolean unlockOnly() {
+			return "unlock".equals(access);
 		}
 	}
 
@@ -146,7 +259,7 @@ public final class CosmeticFormat {
 	 * @param envelopeText Inhalt von {@code GET /v1/cosmetics/<id>} bzw. einer {@code .cosmetic.json}
 	 */
 	public static Manifest verifyEnvelope(String envelopeText, PublicKey key) throws InvalidCosmeticException {
-		if (utf8Length(envelopeText) > 2 * ENVELOPE_BYTES) throw new InvalidCosmeticException("Der Umschlag ist zu groß (höchstens " + ENVELOPE_BYTES / 1024 + " KB)");
+		if (utf8Length(envelopeText) > 2 * MAX_ENVELOPE_BYTES) throw new InvalidCosmeticException("Der Umschlag ist zu groß (höchstens " + MAX_ENVELOPE_BYTES / 1024 + " KB)");
 		JsonElement value;
 		try {
 			value = parseStrict(envelopeText);
@@ -176,25 +289,46 @@ public final class CosmeticFormat {
 		if (manifest == null || manifest.isEmpty()) throw new InvalidCosmeticException("„manifest“ fehlt oder ist kein Text");
 		if (signature == null || signature.isEmpty()) throw new InvalidCosmeticException("„signature“ fehlt oder ist kein Text");
 		if (hasLoneSurrogate(manifest)) throw new InvalidCosmeticException("„manifest“ enthält ungültige Zeichen");
-		if (utf8Length(manifest) > MANIFEST_BYTES) throw new InvalidCosmeticException("„manifest“ ist zu groß (höchstens " + MANIFEST_BYTES / 1024 + " KB)");
+		// hier die größten Grenzen aller Formate; die engeren von Format 1 prüft parseManifest, sobald das Format bekannt ist
+		if (utf8Length(manifest) > MAX_MANIFEST_BYTES) throw new InvalidCosmeticException("„manifest“ ist zu groß (höchstens " + MAX_MANIFEST_BYTES / 1024 + " KB)");
 		if (!SIGNATURE_RE.matcher(signature).matches()) throw new InvalidCosmeticException("„signature“ muss eine Ed25519-Signatur als Base64 sein (88 Zeichen)");
-		if (utf8Length("{\"manifest\":" + jsonQuote(manifest) + ",\"signature\":" + jsonQuote(signature) + "}") > ENVELOPE_BYTES) {
-			throw new InvalidCosmeticException("Der Umschlag ist zu groß (höchstens " + ENVELOPE_BYTES / 1024 + " KB)");
+		if (envelopeLength(manifest, signature) > MAX_ENVELOPE_BYTES) {
+			throw new InvalidCosmeticException("Der Umschlag ist zu groß (höchstens " + MAX_ENVELOPE_BYTES / 1024 + " KB)");
 		}
 		return new String[] {manifest, signature};
+	}
+
+	/** Größte Grenzen über alle Formate (bevor das Format bekannt ist) */
+	public static final int MAX_MANIFEST_BYTES = Math.max(MANIFEST_BYTES, MANIFEST_BYTES_2);
+	public static final int MAX_ENVELOPE_BYTES = Math.max(ENVELOPE_BYTES, ENVELOPE_BYTES_2);
+
+	/** Länge des Umschlags in Byte, wie der Dienst ihn ausliefert (JSON.stringify) */
+	private static int envelopeLength(String manifest, String signature) {
+		return utf8Length("{\"manifest\":" + jsonQuote(manifest) + ",\"signature\":" + jsonQuote(signature) + "}");
 	}
 
 	private static String stringOrNull(JsonElement element) {
 		return element != null && element.isJsonPrimitive() && element.getAsJsonPrimitive().isString() ? element.getAsString() : null;
 	}
 
-	/** Manifest-Text lesen und prüfen (der Text muss vorher mit seiner Signatur geprüft sein). */
+	/**
+	 * Manifest-Text lesen und prüfen (der Text muss vorher mit seiner Signatur geprüft sein). Hier kommt auch die
+	 * Größengrenze des Formats dazu: Format 1 höchstens 160 KB Manifest bzw. 192 KB Umschlag, Format 2 512 KB bzw. 544 KB.
+	 */
 	public static Manifest parseManifest(String manifest) throws InvalidCosmeticException {
 		JsonElement parsed;
 		try {
 			parsed = parseStrict(manifest);
 		} catch (RuntimeException e) {
 			throw new InvalidCosmeticException("„manifest“ ist kein gültiges JSON");
+		}
+		Double format = parsed != null && parsed.isJsonObject() ? num(parsed.getAsJsonObject().get("format")) : null;
+		if (format != null && (format == FORMAT || format == FORMAT_2)) {
+			int f = (int) (double) format;
+			int manifestMax = f == FORMAT ? MANIFEST_BYTES : MANIFEST_BYTES_2;
+			int envelopeMax = f == FORMAT ? ENVELOPE_BYTES : ENVELOPE_BYTES_2;
+			if (utf8Length(manifest) > manifestMax) throw fail("„manifest“ ist zu groß (höchstens " + manifestMax / 1024 + " KB bei Format " + f + ")");
+			if (envelopeLength(manifest, "A".repeat(88)) > envelopeMax) throw fail("Der Umschlag ist zu groß (höchstens " + envelopeMax / 1024 + " KB bei Format " + f + ")");
 		}
 		return check(parsed);
 	}
@@ -403,8 +537,12 @@ public final class CosmeticFormat {
 	}
 
 	private static void onlyKeys(JsonObject o, String path, List<String> allowed) throws InvalidCosmeticException {
+		onlyKeys(o, path, allowed, FORMAT);
+	}
+
+	private static void onlyKeys(JsonObject o, String path, List<String> allowed, int format) throws InvalidCosmeticException {
 		for (String key : o.keySet()) {
-			if (!allowed.contains(key)) throw fail(q(sub(path, key)) + " ist kein bekanntes Feld (Format " + FORMAT + ")");
+			if (!allowed.contains(key)) throw fail(q(sub(path, key)) + " ist kein bekanntes Feld (Format " + format + ")");
 		}
 	}
 
@@ -612,15 +750,34 @@ public final class CosmeticFormat {
 
 	private static Model checkModel(JsonElement value, int width, int height) throws InvalidCosmeticException {
 		JsonObject o = object(value, "model");
-		onlyKeys(o, "model", List.of("textureSize", "bones"));
+		onlyKeys(o, "model", List.of("textureSize", "scale", "bones"));
+		// textureSize = Größe in Texeln (UV-Raum); das PNG hat die 1-, 2- oder 4-fache Auflösung davon
 		JsonElement textureSize = required(o, "textureSize", "model");
-		boolean sizeOk = textureSize != null && textureSize.isJsonArray() && textureSize.getAsJsonArray().size() == 2;
-		if (sizeOk) {
+		int k = 0;
+		if (textureSize != null && textureSize.isJsonArray() && textureSize.getAsJsonArray().size() == 2) {
 			Double tw = num(textureSize.getAsJsonArray().get(0));
 			Double th = num(textureSize.getAsJsonArray().get(1));
-			sizeOk = tw != null && th != null && tw == width && th == height;
+			for (int f : TEXTURE_SCALES) {
+				if (tw != null && th != null && tw == (double) width / f && th == (double) height / f) {
+					k = f;
+					break;
+				}
+			}
 		}
-		if (!sizeOk) throw fail("„model.textureSize“ muss genau die Größe der Textur sein ([" + width + ", " + height + "])");
+		if (k == 0) {
+			List<String> sizes = new ArrayList<>();
+			List<String> scales = new ArrayList<>();
+			for (int f : TEXTURE_SCALES) {
+				sizes.add("[" + fmt((double) width / f) + ", " + fmt((double) height / f) + "]");
+				scales.add(String.valueOf(f));
+			}
+			throw fail("„model.textureSize“ muss die Größe der Textur in Texeln sein (" + String.join(", ", sizes.subList(0, sizes.size() - 1)) + " oder "
+					+ sizes.getLast() + ": Textur in " + String.join("-, ", scales.subList(0, scales.size() - 1)) + "- oder " + scales.getLast()
+					+ "-facher Auflösung)");
+		}
+		int texW = width / k;
+		int texH = height / k;
+		double scale = o.has("scale") ? number(o.get("scale"), "model.scale", MODEL_SCALE_MIN, MODEL_SCALE_MAX) : 1;
 		JsonElement rawBones = required(o, "bones", "model");
 		if (rawBones == null || !rawBones.isJsonArray() || rawBones.getAsJsonArray().isEmpty() || rawBones.getAsJsonArray().size() > BONES_MAX) {
 			throw fail("„model.bones“ muss eine Liste mit 1 bis " + BONES_MAX + " Bones sein");
@@ -650,12 +807,12 @@ public final class CosmeticFormat {
 			cubeCount += cubeArray.size();
 			if (cubeCount > CUBES_MAX) throw fail("„model“ hat zu viele Würfel (höchstens " + CUBES_MAX + " insgesamt)");
 			List<Cube> cubes = new ArrayList<>();
-			for (int j = 0; j < cubeArray.size(); j++) cubes.add(checkCube(cubeArray.get(j), path + ".cubes[" + j + "]", width, height));
+			for (int j = 0; j < cubeArray.size(); j++) cubes.add(checkCube(cubeArray.get(j), path + ".cubes[" + j + "]", texW, texH));
 			names.add(name);
 			bones.add(new Bone(name, parent, pivot, rotation, List.copyOf(cubes)));
 		}
 		if (cubeCount == 0) throw fail("„model“ braucht mindestens einen Würfel");
-		return new Model(width, height, List.copyOf(bones));
+		return new Model(texW, texH, scale, List.copyOf(bones));
 	}
 
 	private static List<Animation> checkAnimations(JsonElement value, Model model) throws InvalidCosmeticException {
@@ -715,7 +872,8 @@ public final class CosmeticFormat {
 		JsonObject m = value.getAsJsonObject();
 		if (!TYPE.equals(stringOrNull(m.get("type")))) throw fail("„type“ muss „" + TYPE + "“ sein");
 		Double format = num(m.get("format"));
-		if (format == null || format != FORMAT) throw fail("„format“ muss " + FORMAT + " sein");
+		if (format != null && format == FORMAT_2) return checkRig(m);
+		if (format == null || format != FORMAT) throw fail("„format“ muss " + FORMAT + " oder " + FORMAT_2 + " sein");
 		onlyKeys(m, "", MANIFEST_KEYS);
 		String id = stringOrNull(m.get("id"));
 		if (id == null || !ID_RE.matcher(id).matches()) throw fail("„id“ ist ungültig (1–32 Zeichen aus a–z, 0–9 und -, ohne - am Anfang oder Ende)");
@@ -759,6 +917,342 @@ public final class CosmeticFormat {
 		Model model = needsModel ? checkModel(m.get("model"), image[0], image[1]) : null;
 		List<Animation> animations = model != null && m.has("animations") ? checkAnimations(m.get("animations"), model) : List.of();
 		return new Manifest(id, version, slot, name, description, access, date, texture, image[0], image[1], glow, model, animations, particles,
-				cape, companion);
+				cape, companion, FORMAT, null);
+	}
+
+	// ======================================================================================
+	// Format 2: Mesh mit Knochen und Keyframe-Animationen (wie checkFormat2 in cosmetics-format.ts)
+	// ======================================================================================
+
+	private static boolean powerOfTwo(int v) {
+		return v > 0 && (v & (v - 1)) == 0;
+	}
+
+	/** Base64 mit genau {@code count} Werten zu je {@code size} Byte (Länge passend, strenges Base64); liefert die Bytes. */
+	private static byte[] packed(JsonElement value, String path, long count, int size, String what) throws InvalidCosmeticException {
+		long bytes = count * size;
+		long chars = (bytes + 2) / 3 * 4;
+		String s = stringOrNull(value);
+		if (s == null) throw fail(q(path) + " fehlt oder ist kein Text (Base64)");
+		if (s.length() != chars) throw fail(q(path) + " muss genau " + count + " " + what + " als Base64 enthalten (" + chars + " Zeichen, nicht " + s.length() + ")");
+		byte[] decoded = decodeBase64(s);
+		if (decoded == null || decoded.length != bytes) throw fail(q(path) + " enthält kein gültiges Base64 (erwartet " + bytes + " Byte)");
+		return decoded;
+	}
+
+	private static short int16(byte[] b, int i) {
+		return (short) ((b[2 * i] & 0xFF) | (b[2 * i + 1] << 8));
+	}
+
+	private static char uint16(byte[] b, int i) {
+		return (char) ((b[2 * i] & 0xFF) | ((b[2 * i + 1] & 0xFF) << 8));
+	}
+
+	private static float[] toFloats(double[] v) {
+		return new float[] {(float) v[0], (float) v[1], (float) v[2]};
+	}
+
+	/** Format 2 (type und format sind schon geprüft). */
+	private static Manifest checkRig(JsonObject m) throws InvalidCosmeticException {
+		onlyKeys(m, "", MANIFEST_KEYS_2, FORMAT_2);
+		String id = stringOrNull(m.get("id"));
+		if (id == null || !ID_RE.matcher(id).matches()) throw fail("„id“ ist ungültig (1–32 Zeichen aus a–z, 0–9 und -, ohne - am Anfang oder Ende)");
+		if (BUILTIN_CAPE_IDS.contains(id)) throw fail("„id“ darf nicht die ID eines eingebauten Capes sein (" + String.join(", ", BUILTIN_CAPE_IDS) + ")");
+		int version = integer(m.get("version"), "version", 1, VERSION_MAX);
+		String slot = oneOf(m.get("slot"), "slot", RIG_SLOTS);
+		String name = text(m.get("name"), "name", 1, NAME_MAX);
+		String description = text(m.get("description"), "description", 0, DESCRIPTION_MAX);
+		String access = oneOf(m.get("access"), "access", ACCESS);
+		if (!isIsoDate(m.get("date"))) throw fail("„date“ ist kein gültiges Datum nach ISO 8601 (z. B. 2026-11-26T12:00:00.000Z)");
+		String date = m.get("date").getAsString();
+
+		if (!m.has("texture")) throw fail("„texture“ fehlt");
+		int[] image = new int[2];
+		byte[] texture = png(m.get("texture"), "texture", image);
+		if (!rigTextureFits(image[0]) || !rigTextureFits(image[1])) {
+			throw fail("„texture“ muss je eine Zweierpotenz von " + RIG_TEXTURE_MIN + " bis " + RIG_TEXTURE_MAX + " Pixel breit und hoch sein (ist " + image[0]
+					+ " × " + image[1] + ")");
+		}
+		// Leucht-Streifen: glow und emissive nur zusammen
+		if (m.has("glow") != m.has("emissive")) throw fail(m.has("glow") ? "„emissive“ fehlt (Pflicht mit „glow“)" : "„glow“ fehlt (Pflicht mit „emissive“)");
+		Emissive emissive = null;
+		byte[] glow = null;
+		if (m.has("emissive")) {
+			emissive = checkEmissive(m.get("emissive"));
+			int[] glowImage = new int[2];
+			glow = png(m.get("glow"), "glow", glowImage);
+			long height = (long) image[1] * emissive.frames();
+			if (glowImage[0] != image[0] || glowImage[1] != height) {
+				throw fail("„glow“ muss " + image[0] + " × " + height + " Pixel groß sein (so breit wie „texture“, " + emissive.frames() + " Bilder zu je " + image[1]
+						+ " Pixel untereinander; ist " + glowImage[0] + " × " + glowImage[1] + ")");
+			}
+		}
+
+		List<RigBone> bones = checkRigBones(required(m, "bones", ""));
+		MeshData mesh = checkMesh(required(m, "mesh", ""), bones.size());
+		java.util.Map<String, Clip> clips = checkClips(required(m, "animations", ""), bones.size());
+		JsonObject states = object(required(m, "states", ""), "states");
+		List<String> stateKeys = new ArrayList<>(STATE_KEYS);
+		stateKeys.add("blendSeconds");
+		onlyKeys(states, "states", stateKeys, FORMAT_2);
+		double blend = number(required(states, "blendSeconds", "states"), "states.blendSeconds", 0, BLEND_MAX);
+		java.util.Map<String, String> stateMap = new java.util.LinkedHashMap<>();
+		for (String key : STATE_KEYS) {
+			if (!states.has(key)) {
+				if (key.equals("idle")) throw fail("„states.idle“ fehlt");
+				continue;
+			}
+			String clip = stringOrNull(states.get(key));
+			if (clip == null || !clips.containsKey(clip)) throw fail("„states." + key + "“ muss der Name einer Animation sein (" + String.join(", ", clips.keySet()) + ")");
+			stateMap.put(key, clip);
+		}
+		List<RigParticle> particles = m.has("particles") ? checkRigParticles(m.get("particles"), bones.size(), clips) : List.of();
+		if (!slot.equals("companion") && m.has("attach")) throw fail("„attach“ gibt es nur beim Slot companion (nicht beim Slot " + slot + ")");
+		Attach attach = null;
+		if (slot.equals("companion")) {
+			JsonObject a = m.has("attach") ? object(m.get("attach"), "attach") : new JsonObject();
+			onlyKeys(a, "attach", List.of("origin", "side"), FORMAT_2);
+			double[] origin = a.has("origin") ? vec3(a.get("origin"), "attach.origin", around(RIG_ORIGIN_MAX)) : new double[3];
+			boolean right = a.has("side") && oneOf(a.get("side"), "attach.side", List.of("left", "right")).equals("right");
+			attach = new Attach(origin, right);
+		}
+		Rig rig = new Rig(mesh.n, mesh.t, mesh.positions, mesh.normals, mesh.uvs, mesh.bones, mesh.triangles, mesh.joints, mesh.weights, bones,
+				java.util.Collections.unmodifiableMap(clips), java.util.Collections.unmodifiableMap(stateMap), blend, particles, emissive, attach);
+		return new Manifest(id, version, slot, name, description, access, date, texture, image[0], image[1], glow, null, List.of(), null, null, null,
+				FORMAT_2, rig);
+	}
+
+	private static boolean rigTextureFits(int v) {
+		return powerOfTwo(v) && v >= RIG_TEXTURE_MIN && v <= RIG_TEXTURE_MAX;
+	}
+
+	private static Emissive checkEmissive(JsonElement value) throws InvalidCosmeticException {
+		JsonObject o = object(value, "emissive");
+		onlyKeys(o, "emissive", List.of("frames", "frametimeTicks", "pulse"), FORMAT_2);
+		int frames = integer(required(o, "frames", "emissive"), "emissive.frames", 1, GLOW_FRAMES_MAX);
+		int frametime = integer(required(o, "frametimeTicks", "emissive"), "emissive.frametimeTicks", 1, FRAMETIME_MAX);
+		JsonObject p = object(required(o, "pulse", "emissive"), "emissive.pulse");
+		onlyKeys(p, "emissive.pulse", List.of("period", "min", "max"), FORMAT_2);
+		double period = number(required(p, "period", "emissive.pulse"), "emissive.pulse.period", PULSE_PERIOD_MIN, PULSE_PERIOD_MAX);
+		double min = number(required(p, "min", "emissive.pulse"), "emissive.pulse.min", 0, 1);
+		double max = number(required(p, "max", "emissive.pulse"), "emissive.pulse.max", 0, 1);
+		if (min > max) throw fail("„emissive.pulse.min“ darf nicht größer sein als „emissive.pulse.max“");
+		return new Emissive(frames, frametime, period, min, max);
+	}
+
+	/** Knochen: Eltern zuerst (parent -1 oder ein kleinerer Index), Namen eindeutig. */
+	private static List<RigBone> checkRigBones(JsonElement value) throws InvalidCosmeticException {
+		if (value == null || !value.isJsonArray() || value.getAsJsonArray().isEmpty() || value.getAsJsonArray().size() > RIG_BONES_MAX) {
+			throw fail("„bones“ muss eine Liste mit 1 bis " + RIG_BONES_MAX + " Knochen sein");
+		}
+		JsonArray array = value.getAsJsonArray();
+		List<RigBone> bones = new ArrayList<>();
+		java.util.Set<String> names = new java.util.HashSet<>();
+		for (int i = 0; i < array.size(); i++) {
+			String path = "bones[" + i + "]";
+			JsonObject b = object(array.get(i), path);
+			onlyKeys(b, path, List.of("name", "parent", "pivot", "tail"), FORMAT_2);
+			String name = stringOrNull(required(b, "name", path));
+			if (name == null || !RIG_BONE_NAME_RE.matcher(name).matches()) {
+				throw fail(q(sub(path, "name")) + " ist ungültig (1–" + RIG_BONE_NAME_MAX + " Zeichen aus A–Z, a–z, 0–9, _, . und -)");
+			}
+			if (!names.add(name)) throw fail(q(sub(path, "name")) + ": Den Knochen „" + name + "“ gibt es schon");
+			Double parent = num(required(b, "parent", path));
+			if (parent == null || parent.isInfinite() || parent.isNaN() || parent != Math.rint(parent) || parent < -1 || parent >= i) {
+				throw fail(i == 0 ? q(sub(path, "parent")) + " muss -1 sein (der erste Knochen hat keinen Eltern-Knochen)"
+						: q(sub(path, "parent")) + " muss -1 (kein Eltern-Knochen) oder der Index eines Knochens davor sein (0 bis " + (i - 1) + ")");
+			}
+			float[] pivot = toFloats(vec3(required(b, "pivot", path), sub(path, "pivot"), around(RIG_COORD_MAX)));
+			float[] tail = toFloats(vec3(required(b, "tail", path), sub(path, "tail"), around(RIG_COORD_MAX)));
+			bones.add(new RigBone(name, (int) (double) parent, pivot, tail));
+		}
+		return List.copyOf(bones);
+	}
+
+	private record MeshData(int n, int t, short[] positions, byte[] normals, char[] uvs, byte[] bones, char[] triangles, byte[] joints, byte[] weights) {
+	}
+
+	/** Mesh: Längen passend zu N und T, Indizes < N, Knochen gültig; weiche Haut (joints/weights) freiwillig. */
+	private static MeshData checkMesh(JsonElement value, int boneCount) throws InvalidCosmeticException {
+		JsonObject o = object(value, "mesh");
+		onlyKeys(o, "mesh", List.of("vertexCount", "triangleCount", "positions", "normals", "uvs", "bones", "triangles", "joints", "weights"), FORMAT_2);
+		int n = integer(required(o, "vertexCount", "mesh"), "mesh.vertexCount", 1, RIG_VERTICES_MAX);
+		int t = integer(required(o, "triangleCount", "mesh"), "mesh.triangleCount", 1, RIG_TRIANGLES_MAX);
+		byte[] rawPositions = packed(required(o, "positions", "mesh"), "mesh.positions", 3L * n, 2, "Int16-Werte (3 je Vertex, " + n + " Vertices)");
+		byte[] normals = packed(required(o, "normals", "mesh"), "mesh.normals", 3L * n, 1, "Int8-Werte (3 je Vertex, " + n + " Vertices)");
+		byte[] rawUvs = packed(required(o, "uvs", "mesh"), "mesh.uvs", 2L * n, 2, "Uint16-Werte (2 je Vertex, " + n + " Vertices)");
+		byte[] bones = packed(required(o, "bones", "mesh"), "mesh.bones", n, 1, "Knochen-Indizes (Uint8, 1 je Vertex)");
+		for (int v = 0; v < n; v++) {
+			int bone = bones[v] & 0xFF;
+			if (bone >= boneCount) throw fail("„mesh.bones“: Vertex " + v + " nennt den Knochen " + bone + ", es gibt nur " + boneCount + " (0 bis " + (boneCount - 1) + ")");
+		}
+		byte[] rawTriangles = packed(required(o, "triangles", "mesh"), "mesh.triangles", 3L * t, 2, "Vertex-Indizes (Uint16, 3 je Dreieck, " + t + " Dreiecke)");
+		char[] triangles = new char[3 * t];
+		for (int i = 0; i < triangles.length; i++) {
+			triangles[i] = uint16(rawTriangles, i);
+			if (triangles[i] >= n) {
+				throw fail("„mesh.triangles“: Dreieck " + i / 3 + " nennt den Vertex " + (int) triangles[i] + ", es gibt nur " + n + " (0 bis " + (n - 1) + ")");
+			}
+		}
+		byte[] joints = null;
+		byte[] weights = null;
+		if (o.has("joints") != o.has("weights")) {
+			throw fail(o.has("joints") ? "„mesh.weights“ fehlt (Pflicht mit „mesh.joints“)" : "„mesh.joints“ fehlt (Pflicht mit „mesh.weights“)");
+		}
+		if (o.has("joints")) {
+			int k = RIG_INFLUENCES;
+			joints = packed(o.get("joints"), "mesh.joints", (long) k * n, 1, "Knochen-Indizes (Uint8, " + k + " je Vertex)");
+			weights = packed(o.get("weights"), "mesh.weights", (long) k * n, 1, "Gewichte (Uint8, " + k + " je Vertex)");
+			for (int v = 0; v < n; v++) {
+				int sum = 0;
+				int max = 0;
+				for (int i = v * k; i < v * k + k; i++) {
+					int joint = joints[i] & 0xFF;
+					if (joint >= boneCount) {
+						throw fail("„mesh.joints“: Vertex " + v + " nennt den Knochen " + joint + ", es gibt nur " + boneCount + " (0 bis " + (boneCount - 1) + ")");
+					}
+					sum += weights[i] & 0xFF;
+					max = Math.max(max, weights[i] & 0xFF);
+				}
+				if (sum != WEIGHT_UNIT) throw fail("„mesh.weights“: Die Gewichte von Vertex " + v + " ergeben " + sum + " statt " + WEIGHT_UNIT);
+				boolean main = false;
+				for (int i = v * k; i < v * k + k; i++) if ((joints[i] & 0xFF) == (bones[v] & 0xFF) && (weights[i] & 0xFF) == max) main = true;
+				if (!main) throw fail("„mesh.bones“: Vertex " + v + " muss den Knochen mit dem größten Gewicht aus „mesh.joints“ nennen");
+			}
+		}
+		short[] positions = new short[3 * n];
+		for (int i = 0; i < positions.length; i++) positions[i] = int16(rawPositions, i);
+		char[] uvs = new char[2 * n];
+		for (int i = 0; i < uvs.length; i++) uvs[i] = uint16(rawUvs, i);
+		return new MeshData(n, t, positions, normals, uvs, bones, triangles, joints, weights);
+	}
+
+	/** Animationen nach Namen: fps, frames, loop und höchstens eine Spur je Knochen. */
+	private static java.util.Map<String, Clip> checkClips(JsonElement value, int boneCount) throws InvalidCosmeticException {
+		JsonObject o = object(value, "animations");
+		if (o.isEmpty() || o.size() > RIG_ANIMATIONS_MAX) throw fail("„animations“ muss 1 bis " + RIG_ANIMATIONS_MAX + " Animationen enthalten");
+		java.util.Map<String, Clip> clips = new java.util.LinkedHashMap<>();
+		for (String name : o.keySet()) {
+			String path = "animations." + name;
+			if (!CLIP_NAME_RE.matcher(name).matches()) throw fail(q(path) + ": Der Name ist ungültig (1–24 Zeichen aus A–Z, a–z, 0–9 und _)");
+			JsonObject a = object(o.get(name), path);
+			onlyKeys(a, path, List.of("fps", "frames", "loop", "tracks"), FORMAT_2);
+			int fps = integer(required(a, "fps", path), sub(path, "fps"), 1, RIG_FPS_MAX);
+			int frames = integer(required(a, "frames", path), sub(path, "frames"), 1, RIG_FRAMES_MAX);
+			boolean loop = bool(required(a, "loop", path), sub(path, "loop"));
+			JsonElement rawTracks = required(a, "tracks", path);
+			if (rawTracks == null || !rawTracks.isJsonArray() || rawTracks.getAsJsonArray().size() > boneCount) {
+				throw fail(q(sub(path, "tracks")) + " muss eine Liste mit höchstens " + boneCount + " Spuren sein (eine je Knochen)");
+			}
+			JsonArray array = rawTracks.getAsJsonArray();
+			boolean[] seen = new boolean[boneCount];
+			List<Track> tracks = new ArrayList<>();
+			for (int i = 0; i < array.size(); i++) {
+				String tp = path + ".tracks[" + i + "]";
+				JsonObject tr = object(array.get(i), tp);
+				onlyKeys(tr, tp, List.of("bone", "rot", "move", "scale"), FORMAT_2);
+				int bone = integer(required(tr, "bone", tp), sub(tp, "bone"), 0, boneCount - 1);
+				if (seen[bone]) throw fail(q(sub(tp, "bone")) + ": Für den Knochen " + bone + " gibt es in dieser Animation schon eine Spur");
+				seen[bone] = true;
+				if (!tr.has("rot") && !tr.has("move") && !tr.has("scale")) throw fail(q(tp) + " braucht mindestens eins von „rot“, „move“ und „scale“");
+				Channel rot = tr.has("rot") ? checkKeys(tr.get("rot"), sub(tp, "rot"), frames, 4) : null;
+				Channel move = tr.has("move") ? checkKeys(tr.get("move"), sub(tp, "move"), frames, 3) : null;
+				Channel scale = tr.has("scale") ? checkKeys(tr.get("scale"), sub(tp, "scale"), frames, 1) : null;
+				tracks.add(new Track(bone, rot, move, scale));
+			}
+			clips.put(name, new Clip(name, fps, frames, loop, List.copyOf(tracks)));
+		}
+		return clips;
+	}
+
+	/** Keys einer Spur: Frame-Nummern (erste 0, streng aufsteigend, &lt; frames) und passend viele Werte (width je Key). */
+	private static Channel checkKeys(JsonElement value, String path, int frames, int width) throws InvalidCosmeticException {
+		JsonObject o = object(value, path);
+		onlyKeys(o, path, List.of("keys", "values"), FORMAT_2);
+		String keysPath = sub(path, "keys");
+		String keysText = stringOrNull(required(o, "keys", path));
+		byte[] keyBytes = keysText == null ? null : decodeBase64(keysText);
+		if (keyBytes == null || keyBytes.length % 2 != 0) throw fail(q(keysPath) + " muss Frame-Nummern (Uint16) als Base64 enthalten, mindestens eine");
+		int count = keyBytes.length / 2;
+		int[] keys = new int[count];
+		int previous = -1;
+		for (int i = 0; i < count; i++) {
+			int frame = uint16(keyBytes, i);
+			if (i == 0 && frame != 0) throw fail(q(keysPath) + " muss mit Frame 0 beginnen (ist " + frame + ")");
+			if (frame <= previous) throw fail(q(keysPath) + " muss streng aufsteigen (Key " + i + ": Frame " + frame + " nach " + previous + ")");
+			if (frame >= frames) throw fail(q(keysPath) + ": Frame " + frame + " liegt nicht in der Animation (0 bis " + (frames - 1) + ")");
+			keys[i] = frame;
+			previous = frame;
+		}
+		String what = width == 4 ? "Int16-Werte (x, y, z, w je Key)" : width == 3 ? "Int16-Werte (x, y, z je Key)" : "Uint16-Werte (einer je Key)";
+		byte[] raw = packed(required(o, "values", path), sub(path, "values"), (long) width * count, 2, what);
+		float[] values = new float[count * width];
+		if (width == 4) {
+			for (int k = 0; k < count; k++) {
+				double square = 0;
+				for (int c = 0; c < 4; c++) square += Math.pow(int16(raw, k * 4 + c) / (double) ROTATION_UNIT, 2);
+				double length = Math.sqrt(square);
+				if (Math.abs(length - 1) > QUATERNION_TOLERANCE) {
+					throw fail(q(sub(path, "values")) + ": Das Quaternion von Key " + k + " hat die Länge " + String.format(Locale.ROOT, "%.3f", length) + " (erlaubt "
+							+ fmt(1 - QUATERNION_TOLERANCE) + " bis " + fmt(1 + QUATERNION_TOLERANCE) + ")");
+				}
+				// für die Rechnung genau auf Länge 1
+				for (int c = 0; c < 4; c++) values[k * 4 + c] = (float) (int16(raw, k * 4 + c) / (double) ROTATION_UNIT / length);
+			}
+		} else if (width == 3) {
+			for (int i = 0; i < values.length; i++) values[i] = int16(raw, i) / 32f;
+		} else {
+			for (int i = 0; i < values.length; i++) values[i] = uint16(raw, i) / 1000f;
+		}
+		return new Channel(keys, values);
+	}
+
+	/** Partikel an Knochen: erlaubte IDs, perSecond, color nur bei dust, states = Animationen. */
+	private static List<RigParticle> checkRigParticles(JsonElement value, int boneCount, java.util.Map<String, Clip> clips) throws InvalidCosmeticException {
+		if (value == null || !value.isJsonArray() || value.getAsJsonArray().size() > RIG_PARTICLES_MAX) {
+			throw fail("„particles“ muss eine Liste mit höchstens " + RIG_PARTICLES_MAX + " Einträgen sein");
+		}
+		JsonArray array = value.getAsJsonArray();
+		String clipList = String.join(", ", clips.keySet());
+		List<RigParticle> result = new ArrayList<>();
+		for (int i = 0; i < array.size(); i++) {
+			String path = "particles[" + i + "]";
+			JsonObject p = object(array.get(i), path);
+			onlyKeys(p, path, List.of("bone", "at", "particle", "perSecond", "color", "states"), FORMAT_2);
+			int bone = integer(required(p, "bone", path), sub(path, "bone"), 0, boneCount - 1);
+			boolean tail = oneOf(required(p, "at", path), sub(path, "at"), List.of("pivot", "tail")).equals("tail");
+			String given = stringOrNull(required(p, "particle", path));
+			String particle = given != null && given.startsWith("minecraft:") ? given.substring("minecraft:".length()) : given;
+			if (particle == null || !RIG_PARTICLES.contains(particle)) {
+				throw fail(q(sub(path, "particle")) + " ist kein erlaubter Partikel (" + String.join(", ", RIG_PARTICLES) + "; mit oder ohne „minecraft:“)");
+			}
+			double perSecond = number(required(p, "perSecond", path), sub(path, "perSecond"), RIG_PER_SECOND_MIN, RIG_PER_SECOND_MAX);
+			int color = -1;
+			if (p.has("color")) {
+				if (!particle.equals("dust")) throw fail(q(sub(path, "color")) + " gibt es nur beim Partikel dust");
+				String c = stringOrNull(p.get("color"));
+				if (c == null || !COLOR_RE.matcher(c).matches()) throw fail(q(sub(path, "color")) + " muss eine Farbe wie #ffcc00 sein");
+				color = Integer.parseInt(c.substring(1), 16);
+			}
+			List<String> states = List.of();
+			if (p.has("states")) {
+				JsonElement raw = p.get("states");
+				if (raw == null || !raw.isJsonArray() || raw.getAsJsonArray().isEmpty() || raw.getAsJsonArray().size() > RIG_ANIMATIONS_MAX) {
+					throw fail(q(sub(path, "states")) + " muss eine Liste mit 1 bis " + RIG_ANIMATIONS_MAX + " Animationen sein");
+				}
+				List<String> list = new ArrayList<>();
+				JsonArray names = raw.getAsJsonArray();
+				for (int j = 0; j < names.size(); j++) {
+					String at = path + ".states[" + j + "]";
+					String clip = stringOrNull(names.get(j));
+					if (clip == null || !clips.containsKey(clip)) throw fail(q(at) + " muss der Name einer Animation sein (" + clipList + ")");
+					if (list.contains(clip)) throw fail(q(at) + ": „" + clip + "“ steht doppelt in der Liste");
+					list.add(clip);
+				}
+				states = List.copyOf(list);
+			}
+			result.add(new RigParticle(bone, tail, particle, perSecond, color, states));
+		}
+		return List.copyOf(result);
 	}
 }

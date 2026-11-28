@@ -110,6 +110,14 @@ public final class CosmeticRenderer {
 		long backFrame;
 		long companionFrame;
 		long auraFrame;
+		// Format 2 (RigRenderer): Zustand des Spielers, je Slot (head, back, aura, companion) das getragene Cosmetic und
+		// eines, das gerade seine Animation zum Ablegen spielt
+		RigMotion motion;
+		final RigAnimator[] rigs = new RigAnimator[4];
+		final RigAnimator[] leaving = new RigAnimator[4];
+		/** gerade erst gesehen: Cosmetics erscheinen ohne Animation zum Anlegen */
+		boolean fresh = true;
+		long rigSync;
 
 		Wearer(Object key) {
 			this.key = key;
@@ -164,6 +172,8 @@ public final class CosmeticRenderer {
 		}
 		wearer.seen = now;
 		advance(wearer, now);
+		// Format 2: Zustand des Spielers, Animationen je Slot
+		RigRenderer.sync(wearer, now, state.distanceToCameraSq);
 		cleanup(now);
 		return wearer;
 	}
@@ -229,9 +239,11 @@ public final class CosmeticRenderer {
 		Minecraft mc = Minecraft.getInstance();
 		long now = System.nanoTime();
 		Wearer wearer = wearer(state, now);
-		if (wearer == null || (wearer.head == null && wearer.back == null)) return;
+		if (wearer == null || (wearer.head == null && wearer.back == null && !RigRenderer.any(wearer))) return;
 		if (wearer.dress == null && hiddenByF1(mc)) return;
 		PlayerModel model = layer.getParentModel();
+		// Format 2 (Meshes mit Knochen): Kopf, Rücken und Begleiter im Body-Raum
+		RigRenderer.layer(model, pose, collector, light, state, wearer);
 		double t = time(now);
 		HeldixConfig.Data config = HeldixConfig.get();
 
@@ -331,6 +343,8 @@ public final class CosmeticRenderer {
 		}
 		if (!gui && hiddenByF1(mc)) return;
 		double t = time(now);
+		// Format 2: Aura zeichnen, Partikel und Messwerte der Cosmetics aus layer() bestätigen
+		if (RigRenderer.any(wearer)) RigRenderer.entity(pose, collector, state, wearer, gui, camera, now);
 
 		CosmeticCatalog.Item companion = wearer.companion;
 		if (companion != null && companion.mesh() != null && companion.manifest().companion() != null) {
@@ -399,6 +413,7 @@ public final class CosmeticRenderer {
 		pose.pushPose();
 		pose.translate((float) rx, (float) ry, (float) rz);
 		pose.rotate(Axis.YP, (float) Math.toRadians(-renderYaw));
+		// companion.scale; model.scale steckt schon in den Bone-Matrizen (CosmeticMesh), beide multiplizieren sich
 		float scale = (float) info.scale() * PX;
 		pose.scale(scale, scale, scale);
 		applyEffect(pose, wearer, "companion", t);
@@ -812,5 +827,37 @@ public final class CosmeticRenderer {
 	public static int guiParticles(Object key) {
 		Wearer w = WEARERS.get(key);
 		return w == null ? -1 : w.gui.count;
+	}
+
+	/**
+	 * Messwerte eines Cosmetics im Format 2 am Spieler mit dieser UUID bzw. an der Menüfigur mit dieser Kleidung (null =
+	 * nichts im Format 2 im Slot oder nie gezeichnet). Nur im Render-Thread.
+	 */
+	public static RigProbe rigProbe(Object key, String slot) {
+		Wearer w = WEARERS.get(key);
+		RigRenderer.Probe p = w == null ? null : RigRenderer.probe(w, RigRenderer.slotIndex(slot));
+		return p == null ? null : new RigProbe(p.id(), p.state(), p.clip(), p.blending(), p.oneShot(), p.anchor(), p.rootPivot(), p.pose(), p.frame(),
+				p.particles(), p.leaving());
+	}
+
+	/** Messwerte eines Cosmetics im Format 2 (siehe {@link #rigProbe}) */
+	public record RigProbe(String id, String state, String clip, boolean blending, boolean oneShot, double[] anchor, double[] rootPivot, float pose,
+			long frame, long particles, boolean leaving) {
+	}
+
+	/** Cosmetic und Animation (Format 2) der zuletzt gezeichneten Menüfigur im Slot: {id, Animation}, null = seit 1 s keine */
+	public static String[] menuRig(String slot) {
+		return RigRenderer.menu(slot);
+	}
+
+	/** Nur für Tests: Eigener Spieler gilt sofort als AFK (true) bzw. hat gerade etwas gedrückt (false) */
+	public static void testAfk(boolean afk) {
+		if (afk) RigMotion.forceAfk();
+		else RigMotion.markInput();
+	}
+
+	/** Nur für Tests: Eigener Spieler jubelt (wie bei einem neuen Fortschritt) */
+	public static void testCelebrate() {
+		RigMotion.celebrateOwn();
 	}
 }

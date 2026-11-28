@@ -1,13 +1,22 @@
 // HeldixClient – Webseite: Download-Seite (/download). Erkennt System und Prozessor, empfiehlt den passenden
-// Download, zeigt Version, Dateigrößen und SHA-256-Prüfsummen (GET /api/v1/launcher/files) und Hinweise aus dem
-// Versionsverlauf (GET /api/v1/launcher/versions). Die Knöpfe zeigen auf https://<API>/v1/launcher/download/latest/<ziel>
-// und funktionieren auch ohne Skript.
+// Download, zeigt Version, Dateigrößen und SHA-256-Prüfsummen (GET /api/v1/launcher/files) und das Datum der Version
+// (GET /api/v1/launcher/versions; die Neuerungen setzt der Bau aus launcher/release-notes.md ein). Die Knöpfe zeigen auf
+// https://<API>/v1/launcher/download/latest/<ziel> und funktionieren auch ohne Skript.
+// Einladung im Link (/download#einladung=<code>): Hinweis oben; unter Windows lädt der Knopf den Installer mit der
+// Einladung (…/latest/windows?einladung=<code>, wie auf /einladung) – sie öffnet sich nach der Installation im Launcher.
 import { copyText, formatBytes, formatDate, h, icon, setupTabs, toast } from './app-common.js';
 import { SYSTEME, detectSystem } from './system.js';
+import { publicGet } from './public-cards.js';
 
 const page = document.querySelector('.download-page');
 const apiBase = page.dataset.apiBase;
-const latest = (ziel) => `${apiBase}/v1/launcher/download/latest/${ziel}`;
+const INVITE_CODE_RE = /^[a-hjkmnp-z2-9]{10}$/;
+const inviteCode = (() => {
+  const match = /^#einladung=([a-z0-9]+)$/i.exec(location.hash);
+  const code = match ? match[1].toLowerCase() : null;
+  return code && INVITE_CODE_RE.test(code) ? code : null;
+})();
+const latest = (ziel) => `${apiBase}/v1/launcher/download/latest/${ziel}${ziel === 'windows' && inviteCode ? `?einladung=${encodeURIComponent(inviteCode)}` : ''}`;
 const fileUrl = (file) => `${apiBase}/v1/launcher/download/${encodeURIComponent(file)}`;
 const KIND = { exe: 'Installer (.exe)', dmg: 'Disk-Image (.dmg)', zip: 'ZIP-Archiv (.zip)' };
 
@@ -71,6 +80,7 @@ function setButton(link, ziel, text) {
 }
 
 function renderRecommendation(system, available, version) {
+  if (version) document.getElementById('empfohlen-version').textContent = version;
   const title = document.getElementById('empfohlen-titel');
   const meta = document.getElementById('empfohlen-meta');
   const hint = document.getElementById('empfohlen-hinweis');
@@ -123,13 +133,36 @@ function renderVersion(version, entry) {
   document.getElementById('version-datum').textContent = date ? `veröffentlicht am ${date}` : '';
   const notes = (Array.isArray(entry?.notes) ? entry.notes : []).filter((note) => typeof note === 'string' && note.trim());
   const box = document.getElementById('version-hinweise');
+  if (!entry || entry.version === page.dataset.bauVersion) return; // Neuerungen dieser Version stehen schon da (aus dem Bau)
   box.replaceChildren(
-    notes.length ? h('ul', { class: 'release-notes' }, notes.map((note) => h('li', { text: note }))) : h('p', { class: 'muted', text: 'Kleinere Verbesserungen und Fehlerbehebungen.' }),
-    h('p', { class: 'muted small' }, h('a', { href: '/neuigkeiten#versionen', text: 'Alle Versionen ansehen' })),
+    notes.length ? h('ul', { class: 'release-notes' }, notes.map((note) => h('li', { text: note }))) : h('p', { class: 'text-2', text: 'Kleinere Verbesserungen und Fehlerbehebungen.' }),
+    h('p', { class: 'small' }, h('a', { href: '/neuigkeiten#versionen', text: 'Alle Versionen ansehen' })),
   );
 }
 
+/** Einladung im Link: Hinweis mit dem Namen des Einladenden (GET /api/v1/public/invites/<code>). */
+async function renderInvite() {
+  if (!inviteCode) return;
+  const banner = document.getElementById('download-einladung');
+  document.getElementById('download-einladung-link').href = `/einladung#${inviteCode}`;
+  banner.hidden = false;
+  page.dataset.einladung = inviteCode;
+  try {
+    const data = await publicGet(`/v1/public/invites/${inviteCode}`);
+    const name = typeof data?.inviter?.name === 'string' ? data.inviter.name.slice(0, 32) : '';
+    if (name) document.getElementById('download-einladung-titel').textContent = `${name} hat dich eingeladen`;
+  } catch (error) {
+    if (error?.status === 404) {
+      document.getElementById('download-einladung-titel').textContent = 'Diese Einladung gilt nicht mehr';
+      document.getElementById('download-einladung-text').textContent = 'Lade HeldixClient trotzdem – und bitte deinen Freund um einen neuen Link.';
+      page.dataset.einladung = 'abgelaufen';
+    }
+  }
+}
+
 async function main() {
+  page.dataset.bauVersion = document.getElementById('version-nummer').textContent.trim();
+  renderInvite();
   const tabs = setupTabs(document.getElementById('anleitung-tabs'));
   const system = await detectSystem();
   page.dataset.system = system.os;
@@ -138,6 +171,7 @@ async function main() {
   tabs.select(system.os === 'mac' ? 'mac' : 'windows', { silent: true });
   if (system.ziel) document.getElementById(`system-${system.ziel}`)?.classList.add('recommended');
   renderRecommendation(system, null, null);
+  if (inviteCode) document.querySelector('#system-windows [data-knopf]').href = latest('windows');
 
   let files = null;
   let version = null;

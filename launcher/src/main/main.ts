@@ -2,22 +2,36 @@ import { readFileSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray, type MenuItemConstructorOptions } from 'electron';
 import type {
   AccountInfo,
   AppInfo,
   CrashAnalysis,
   CrashReportPreview,
   ContentKind,
+  DiscordPresenceOptions,
+  DiscordPreview,
   FolderKind,
   GameState,
   HeldixCape,
   InstanceInfo,
+  InviteAcceptView,
+  InviteEvent,
+  LauncherView,
+  MessageCard,
+  NotificationList,
+  PartyFollow,
+  PartyLocation,
+  PublicInviteView,
+  WorldJoinView,
   InstancePatch,
   LogLine,
   NewInstance,
   ProgressEvent,
   Settings,
+  SetupAddons,
+  SetupInstallResult,
+  SocialOverview,
   VersionListResult,
 } from '../shared/api';
 import { interactiveMicrosoftLogin } from './auth-window';
@@ -38,7 +52,7 @@ import { loginMinecraft, offlineUuid, refreshMicrosoft, sessionFromAccessToken, 
 import { AccountBridge, IPC_JVM_FLAG } from './core/accountipc';
 import { OFFLINE_LOCKED, SessionManager } from './core/sessions';
 import { addContentFiles, countEnabled, importContentFiles, listAllContent, listContent, removeContent, setContentEnabled, type ContentContext } from './core/content';
-import { applyPendingRemovals, installStoreAddon, storeForInstance, uninstallStoreAddon, type OverviewInstance } from './core/addonstore';
+import { applyPendingRemovals, installStoreAddon, storeForInstance, uninstallStoreAddon, type OverviewInstance, type StoreEntry } from './core/addonstore';
 import { AddonStoreService, noticeList, type StoreNotice } from './core/storeservice';
 import { DiscordRpc } from './core/discord';
 import { getFabricGameVersions } from './core/fabric';
@@ -51,7 +65,11 @@ import { createPaths, defaultDataRoot } from './core/paths';
 import { GraphicsWatch, graphicsArguments, tunedJvmArguments } from './core/performance';
 import { prepareGame } from './core/prepare';
 import { SHADERPACK_DIR, addShaderpackFiles, installShaderpack, listShaderpacks, removeShaderpack, searchShaderpacks, setActiveShaderpack } from './core/shaderpacks';
-import { buildActivity, parseStatusLine, type GameStatus } from './core/presence';
+import { DEFAULT_PRESENCE_OPTIONS, PresenceTracker, buildActivity, parseStatusLine, presenceButtons, presenceJoinServer, presenceJoinWorld, previewOf, sharedWorldAddress, type DiscordButton, type GameStatus, type PresenceInput } from './core/presence';
+import { PublicHeads } from './core/discordheads';
+import { WorldClient, findWorldLink, isWorldMissing, mapWorldInvite, normalizeWorldAddress, parsePastedWorld, parseWorldLink, planWorldJoin, worldCode, worldCodeOf, worldWebUrl, WORLD_MISSING, type WorldEvent } from './core/worlds';
+import { NOTIFICATION_FILE, NotificationStore, type NewNotification } from './core/notifications';
+import { DOWNLOAD_INVITE_FILE, INVITE_POLL_MS, INVITE_PROTOCOL, InviteService, acceptNotes, findInviteLink, inviteCode, inviteServer, isMissing, parseInviteLink, parsePastedInvite, pickInviteInstance, readDownloadInvite, finishDownloadInvite, rewardName, type PublicInvite } from './core/invites';
 import { listQuickPlay, validateQuickPlay } from './core/quickplay';
 import { serverStatus } from './core/serverstatus';
 import { loaderLogos } from './core/loaderlogos';
@@ -62,9 +80,30 @@ import { webLoginUrl } from './core/weblogin';
 import { isLoopback } from './core/heldixservice';
 import { MOJANG_API, MojangApi, ProfileService, loadHeldixCapes } from './core/profile';
 import { CosmeticCatalog } from './core/cosmeticcatalog';
-import { SocialClient, joinableServer, pickJoinInstance, type SocialNotice } from './core/social';
+import { SocialClient, cardFallbackText, checkCard, joinableServer, pickJoinInstance, type SocialNotice } from './core/social';
+import { PartyClient, followAction, locationText, type PartyEvent } from './core/party';
 import { allowTestTextureOrigin, skinFor } from './core/skins';
-import { Updater, compareVersions } from './core/updater';
+import { Updater, compareVersions, type UpdateState } from './core/updater';
+import {
+  GAME_MARKER_FILE,
+  STARTUP_CHECK_TIMEOUT_MS,
+  STARTUP_STALL_MS,
+  UPDATE_MEMO_FILE,
+  decideStartupUpdate,
+  pickWhatsNew,
+  previousGameRunning,
+  readGameMarker,
+  readUpdateMemo,
+  settleUpdateMemo,
+  splashText,
+  startupPlan,
+  writeUpdateMemo,
+  type GameMarker,
+  type ReleaseNotes,
+  type StartupDecision,
+} from './core/startup-update';
+import { SetupGate, installSetupAddon, loadSetupAddons, setupStart, setupTargets } from './core/setup';
+import { SplashWindow } from './splash-window';
 import { UPDATE_PUBLIC_KEY } from './update-public-key';
 import { Store, type StoredAccount } from './store';
 
@@ -128,52 +167,48 @@ function broadcast(channel: string, payload: unknown): void {
 function setGameState(state: GameState): void {
   gameState = state;
   send('game:state', state);
+  void updateTray();
 }
 
-/**
- * "Was ist neu": nach einem Update die Hinweise aller Versionen seit der zuletzt gesehenen (GET /v1/launcher/versions).
- * Bei der ersten Installation nichts zeigen, nur merken.
- */
-async function whatsNew(): Promise<import('../shared/api').WhatsNew | null> {
-  const current = app.getVersion();
-  const settings = await store.getSettings();
-  const last = settings.lastSeenVersion;
-  if (!last) {
-    await store.saveSettings({ lastSeenVersion: current });
-    return null;
-  }
-  try {
-    if (compareVersions(current, last) <= 0) return null;
-  } catch {
-    return null;
-  }
+/** Versionsverlauf des Dienstes (GET /v1/launcher/versions); null = nicht erreichbar */
+async function releaseHistory(): Promise<ReleaseNotes[] | null> {
   try {
     const response = await fetch(`${HELDIX_SERVICE_URL.replace(/\/+$/, '')}/v1/launcher/versions?limit=20`, { signal: AbortSignal.timeout(8000) });
     if (!response.ok) throw new Error(String(response.status));
     const data = (await response.json()) as { versions?: { version?: unknown; date?: unknown; notes?: unknown }[] };
-    const entries = (data.versions ?? [])
+    return (data.versions ?? [])
       .filter((v): v is { version: string; date: unknown; notes: unknown } => typeof v.version === 'string')
-      .filter((v) => {
-        try {
-          return compareVersions(v.version, last) > 0 && compareVersions(v.version, current) <= 0;
-        } catch {
-          return false;
-        }
-      })
       .map((v) => ({
         version: v.version,
         date: typeof v.date === 'string' ? v.date : '',
         notes: Array.isArray(v.notes) ? v.notes.filter((n): n is string => typeof n === 'string').slice(0, 30) : [],
       }));
-    if (entries.length === 0 || entries.every((e) => e.notes.length === 0)) {
-      await store.saveSettings({ lastSeenVersion: current });
-      return null;
-    }
-    return { version: current, entries };
   } catch {
-    // Dienst nicht erreichbar: beim nächsten Start noch einmal
     return null;
   }
+}
+
+/**
+ * „Neu in <Version>“: beim ersten Start nach einem Update einmal die Hinweise aller Versionen seit der zuletzt gesehenen
+ * (Versionsverlauf des Dienstes, sonst die beim Installieren gemerkten Hinweise aus dem Manifest, siehe pickWhatsNew).
+ * Bei der ersten Installation nichts zeigen, nur merken.
+ */
+async function whatsNew(): Promise<import('../shared/api').WhatsNew | null> {
+  const current = app.getVersion();
+  const last = (await store.getSettings()).lastSeenVersion;
+  let newer = false;
+  try {
+    newer = !!last && compareVersions(current, last) > 0;
+  } catch {
+    newer = false;
+  }
+  const memo = await readUpdateMemo(updateMemoFile);
+  const result = pickWhatsNew(current, last, newer ? await releaseHistory() : [], memo.notes);
+  if (result.markSeen) {
+    await store.saveSettings({ lastSeenVersion: current });
+    if (memo.notes) await writeUpdateMemo(updateMemoFile, { ...memo, notes: null }).catch(() => undefined);
+  }
+  return result.show;
 }
 
 function gameRunning(): boolean {
@@ -192,12 +227,158 @@ const updater = new Updater({
   // Der Installer im Update ist für Windows; auf dem Mac nur melden, laden geht über die Webseite
   downloadInstaller: process.platform === 'win32',
 });
-updater.onState = (state) => send('update:state', state);
-/** Einstellung "Updates automatisch" (für den Zeitgeber und das Installieren beim Beenden) */
+/** Einstellung "Updates automatisch" (Start, Zeitgeber, Installieren beim Beenden) */
 let autoUpdate = true;
 let quittingForUpdate = false;
+/** letzter Installationsversuch und Hinweise für „Neu in …“ (core/startup-update.ts) */
+const updateMemoFile = path.join(paths.root, UPDATE_MEMO_FILE);
+/** PID des laufenden Spiels, damit ein Start nach einem Absturz des Launchers nicht darunter installiert */
+const gameMarkerFile = path.join(paths.root, GAME_MARKER_FILE);
+/** Spiel aus einer früheren Sitzung (beim Start gelesen) */
+let previousGame: GameMarker | null = null;
+/** Startfenster (nur beim Update vor dem Start), bis das Hauptfenster sichtbar ist */
+let splash: SplashWindow | null = null;
+/** Startfenster zeigt den Fortschritt des Downloads */
+let splashFollowsUpdate = false;
+/** Hinweis „Update verfügbar“ vom Start (Einstellung aus bzw. macOS), bis die Oberfläche ihn abholt (update:notice) */
+let startupNotice: UpdateState | null = null;
+/** erst nach der Prüfung beim Start darf das Hauptfenster entstehen (z. B. durch einen zweiten Start mit Link) */
+let windowAllowed = false;
 
-// ---------- Discord-Status (Rich Presence) ----------
+updater.onState = (state) => {
+  send('update:state', state);
+  if ((state.phase === 'ready' || state.phase === 'available') && state.version) {
+    void remember({
+      kind: 'update',
+      title: state.phase === 'ready' ? `Update ${state.version} ist bereit` : `Update ${state.version} ist verfügbar`,
+      body: state.notes?.[0] ?? (state.phase === 'ready' ? 'Wird beim Beenden installiert – oder jetzt neu starten.' : 'Unter Einstellungen → Updates installieren.'),
+      target: { view: 'updates' },
+      key: `update:${state.version}`,
+      once: true,
+    }, false);
+  }
+  if (splash?.open && splashFollowsUpdate) splash.update({ ...splashText(state), skip: true });
+};
+
+/** Läuft ein Spiel – in dieser Sitzung oder noch aus einer früheren (dann nicht installieren)? */
+function anyGameRunning(): boolean {
+  if (gameRunning()) return true;
+  if (previousGame && !previousGameRunning(previousGame, Date.now())) previousGame = null;
+  return previousGame !== null;
+}
+
+/** Hinweise und Versuch merken (für „Neu in …“ und gegen eine Schleife beim Start), dann den Installer starten */
+async function launchInstaller(restart: boolean): Promise<boolean> {
+  const manifest = updater.found();
+  if (manifest) {
+    await writeUpdateMemo(updateMemoFile, {
+      attempt: { version: manifest.version, at: Date.now() },
+      notes: { version: manifest.version, date: manifest.date, notes: manifest.notes },
+    }).catch(() => undefined);
+  }
+  return updater.install(restart);
+}
+
+function logStartupDecision(decision: StartupDecision, state: UpdateState): void {
+  const texts: Record<string, string> = {
+    'start:current': 'Beim Start: Launcher ist aktuell',
+    'start:error': `Beim Start: keine Prüfung möglich (${state.error ?? 'unbekannt'}) – normal starten`,
+    'start:game': `Beim Start: Version ${state.version} gefunden, aber es läuft noch ein Spiel – später installieren`,
+    'start:retry-later': `Beim Start: Version ${state.version} – der letzte Installationsversuch ist eben erst gelaufen, später erneut`,
+    'notify:install': `Beim Start: Version ${state.version} verfügbar (automatische Updates sind aus) – nur Hinweis`,
+    'notify:download': `Beim Start: Version ${state.version} verfügbar – Hinweis mit Download über die Webseite`,
+    install: `Beim Start: Version ${state.version} wird installiert`,
+  };
+  console.log(`[Update] ${texts[decision.action === 'install' ? 'install' : `${decision.action}:${decision.reason}`]}`);
+}
+
+/** Download im Startfenster: fertig, „Später“, kein Fortschritt mehr oder Fehler (Laden läuft dann ggf. weiter) */
+function downloadWithSplash(): Promise<'ready' | 'skipped' | 'stalled' | 'failed'> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let lastProgress = -1;
+    let lastChange = Date.now();
+    const finish = (result: 'ready' | 'skipped' | 'stalled' | 'failed') => {
+      if (settled) return;
+      settled = true;
+      splashFollowsUpdate = false;
+      clearInterval(watch);
+      resolve(result);
+    };
+    const watch = setInterval(() => {
+      const progress = updater.state.progress ?? 0;
+      if (progress !== lastProgress) {
+        lastProgress = progress;
+        lastChange = Date.now();
+      } else if (Date.now() - lastChange > STARTUP_STALL_MS) finish('stalled');
+    }, 1000);
+    splashFollowsUpdate = true;
+    splash?.onceSkipped(() => finish('skipped'));
+    updater.download().then((state) => finish(state.phase === 'ready' ? 'ready' : 'failed'), () => finish('failed'));
+  });
+}
+
+/**
+ * Update vor dem Start (Windows, „Updates automatisch“ an; siehe core/startup-update.ts): Startfenster, kurz prüfen,
+ * ggf. laden, still installieren und neu starten. Gibt false zurück, wenn der Installer läuft und der Launcher sich
+ * gerade beendet; sonst startet er normal (retrySoon = Prüfung ging nicht, in einer Minute noch einmal).
+ */
+async function updateBeforeStart(): Promise<{ proceed: boolean; retrySoon: boolean }> {
+  splash = new SplashWindow(LAUNCHER_NAME);
+  splash.update({ title: 'Suche nach Updates …', progress: null, skip: false });
+  const starting = () => splash?.update({ title: 'HeldixClient wird gestartet …', progress: null, skip: false });
+  const state = await updater.check({ timeoutMs: STARTUP_CHECK_TIMEOUT_MS, download: false });
+  const decision = decideStartupUpdate({
+    platform: process.platform,
+    autoUpdate,
+    state,
+    gameRunning: anyGameRunning(),
+    attempt: (await readUpdateMemo(updateMemoFile)).attempt,
+    now: Date.now(),
+  });
+  logStartupDecision(decision, state);
+  if (decision.action !== 'install') {
+    // gefunden, aber jetzt nicht installieren: im Hintergrund laden, dann „Jetzt neu starten“ bzw. beim Beenden
+    if (decision.action === 'start' && decision.reason !== 'current' && decision.reason !== 'error') void updater.download();
+    starting();
+    return { proceed: true, retrySoon: decision.action === 'start' && decision.reason === 'error' };
+  }
+  splash.update({ ...splashText(updater.state), skip: true });
+  const outcome = await downloadWithSplash();
+  if (outcome !== 'ready' || anyGameRunning()) {
+    console.log(`[Update] Beim Start nicht installiert (${outcome === 'ready' ? 'Spiel läuft' : outcome === 'skipped' ? '„Später“ gewählt' : outcome === 'stalled' ? 'Download kommt nicht voran' : 'Download fehlgeschlagen'}) – normal starten`);
+    starting();
+    return { proceed: true, retrySoon: false };
+  }
+  splash.update({ ...splashText(updater.state, true), skip: false });
+  if (await launchInstaller(true)) {
+    // sofort beenden: der Installer wartet auf das Ende des Launchers, installiert still und startet ihn neu
+    quittingForUpdate = true;
+    closeSplash();
+    app.quit();
+    return { proceed: false, retrySoon: false };
+  }
+  console.log('[Update] Installer ließ sich nicht starten – normal starten');
+  starting();
+  return { proceed: true, retrySoon: false };
+}
+
+/** Ohne Startfenster (Einstellung aus, macOS): gleich im Hintergrund prüfen, eine neue Version nur melden */
+async function updateNoticeAtStart(): Promise<void> {
+  const state = await updater.check({ download: false });
+  const decision = decideStartupUpdate({ platform: process.platform, autoUpdate, state, gameRunning: anyGameRunning(), attempt: null, now: Date.now() });
+  logStartupDecision(decision, state);
+  if (decision.action !== 'notify') return;
+  startupNotice = state;
+  send('update:notice', null);
+}
+
+function closeSplash(): void {
+  splash?.close();
+  splash = null;
+}
+
+// ---------- Discord-Status (Rich Presence, siehe core/presence.ts und core/discord.ts) ----------
 
 const discord = new DiscordRpc(DISCORD_CLIENT_ID, (message) => console.log(`[Discord] ${message}`));
 discord.onStatus = (status) => send('discord:status', status);
@@ -206,33 +387,117 @@ interface PresenceState {
   phase: 'launcher' | 'preparing' | 'running';
   instance?: InstanceConfig;
   startedAt?: number;
-  /** Was die HeldixClient-Mod meldet (Hauptmenü, Einzelspieler, Server …) */
+  /** Was die HeldixClient-Mod meldet (Hauptmenü, Einzelspieler, Server, geteilte Welt …) */
   status: GameStatus | null;
 }
 let presence: PresenceState = { phase: 'launcher', status: null };
-let presenceSettings = { enabled: false, showServer: true };
+let presenceSettings: DiscordPresenceOptions & { enabled: boolean } = { enabled: false, ...DEFAULT_PRESENCE_OPTIONS };
+/** Seite im Launcher („Stöbert im Addon-Store“), von der Oberfläche gemeldet */
+let presenceView: LauncherView = 'home';
+const PRESENCE_VIEWS: readonly LauncherView[] = ['home', 'instances', 'store', 'friends', 'profile', 'settings', 'console', 'setup'];
+/** Zeit „seit“ ab Betreten des aktuellen Servers bzw. der Welt, zufällige Party-ID je Ziel */
+const presenceTracker = new PresenceTracker();
+/** eigener Spieler (aktives Konto) für das kleine Bild und Name/Cape im Hover-Text */
+let presencePlayer: { uuid: string; name: string } | null = null;
+let presenceCape: string | null = null;
+/** Bilder kommen von der Webseite (Discord lädt https-Links), sonst Asset-Schlüssel discord-logo */
+const DISCORD_IMAGE_BASE = /^https:\/\//i.test(WEBSITE_URL) ? WEBSITE_URL : null;
+const heads = new PublicHeads(HELDIX_SERVICE_URL, () => updatePresence());
+let discordPreview: DiscordPreview | null = null;
+/** nur der neueste Stand kommt nach Discord (die Links für die Knöpfe kommen asynchron) */
+let presenceSeq = 0;
+
+function presenceInput(): PresenceInput {
+  const status = presence.status;
+  const { since, partyId } = presenceTracker.next(presence.phase, status);
+  const worldAddress = presence.phase === 'running' ? sharedWorldAddress(status) : null;
+  const code = worldCodeOf(worldAddress);
+  // öffentliche Welt-Info (Name des Gastgebers, Zugang) aus dem Speicher; fehlt sie, kommt sie gleich nach
+  const info = code ? worlds.cachedPublicWorld(code, () => updatePresence()) : null;
+  const instance = presence.instance;
+  return {
+    phase: presence.phase,
+    view: anyWindowVisible() ? presenceView : null,
+    minecraft: instance?.minecraft,
+    loader: instance?.loader,
+    heldixClient: instance ? usesHeldixClient(instance) : undefined,
+    startedAt: presence.startedAt,
+    since,
+    status,
+    showServer: presenceSettings.showServer,
+    options: presenceSettings,
+    clientVersion: LAUNCHER_VERSION,
+    imageBase: DISCORD_IMAGE_BASE,
+    // Kopf nur prüfen, wenn der Status an ist (sonst fragt der Launcher den Dienst gar nicht erst)
+    player: presencePlayer ? { name: presencePlayer.name, head: presenceSettings.enabled && presenceSettings.showHead ? heads.url(presencePlayer.uuid) : null, cape: presenceCape } : null,
+    world: info && code ? { code, hostName: info.host.name, online: info.online, players: info.players, maxPlayers: info.maxPlayers, access: info.access } : null,
+    partyId,
+  };
+}
 
 function updatePresence(next?: PresenceState): void {
   if (next) presence = next;
-  if (!presenceSettings.enabled) {
-    discord.stop();
+  if (presenceSettings.enabled) discord.start();
+  else void discord.stop();
+  const input = presenceInput();
+  const seq = ++presenceSeq;
+  const publish = (buttons: DiscordButton[]) => {
+    if (seq !== presenceSeq) return;
+    const activity = buildActivity({ ...input, buttons });
+    if (presenceSettings.enabled) discord.setActivity(activity);
+    // Vorschau in den Einstellungen – auch, wenn der Status aus ist („so sähe er aus“)
+    discordPreview = previewOf(activity, presenceSettings.enabled, presencePlayer);
+    broadcast('discord:preview', discordPreview);
+  };
+  if (!presenceSettings.buttons || presenceSettings.minimal) {
+    publish([]);
     return;
   }
-  discord.start();
-  discord.setActivity(buildActivity({
-    phase: presence.phase,
-    minecraft: presence.instance?.minecraft,
-    loader: presence.instance?.loader,
-    startedAt: presence.startedAt,
-    status: presence.status,
-    showServer: presenceSettings.showServer,
-    clientVersion: LAUNCHER_VERSION,
-  }));
+  // Knöpfe „Mitspielen“ / „HeldixClient holen“: Einladungen aus dem Speicher (fehlende kommen im Hintergrund nach,
+  // dann ruft invites.onLinks diese Funktion noch einmal); ohne Anmeldung beim Dienst keine Einladungsknöpfe.
+  // Geteilte Welten mit Zugang „offen“ bekommen „Mitspielen“ mit dem Link zur Welt-Seite der Webseite.
+  const worldJoin = presenceJoinWorld(input);
+  void invites.presenceLinks(worldJoin ? null : presenceJoinServer(input))
+    .catch(() => ({ general: null, server: null }))
+    .then((links) => publish(presenceButtons(input, { ...links, world: worldJoin ? worldWebUrl(WEBSITE_URL, worldJoin) : null })));
 }
 
 function applyPresenceSettings(settings: Settings): void {
-  presenceSettings = { enabled: settings.discordPresence, showServer: settings.discordShowServer };
+  presenceSettings = {
+    enabled: settings.discordPresence,
+    showServer: settings.discordShowServer,
+    showDetails: settings.discordShowDetails,
+    showWorldName: settings.discordShowWorldName,
+    showParty: settings.discordShowParty,
+    showVoice: settings.discordShowVoice,
+    showHead: settings.discordShowHead,
+    buttons: settings.discordInviteButtons,
+    minimal: settings.discordMinimal,
+  };
   updatePresence();
+}
+
+/** Spieler für das kleine Bild neu bestimmen (Kontowechsel); Cape-Name für den Hover-Text kommt im Hintergrund */
+let presenceCapeLoad = 0;
+async function refreshPresencePlayer(loadCape = true): Promise<void> {
+  const account = await store.getActiveAccount().catch(() => null);
+  const uuid = account?.uuid.replace(/-/g, '').toLowerCase() ?? '';
+  const changed = presencePlayer?.uuid !== uuid;
+  presencePlayer = account && /^[0-9a-f]{32}$/.test(uuid) ? { uuid, name: account.name } : null;
+  if (changed) presenceCape = null;
+  updatePresence();
+  const token = ++presenceCapeLoad;
+  if (!loadCape || !presencePlayer || !presenceSettings.enabled || !presenceSettings.showHead || !(await social.canAuthenticate().catch(() => false))) return;
+  try {
+    const state = await cosmetics.state();
+    const cape = state.selection?.cape ?? null;
+    const name = cape ? (state.items.find((i) => i.id === cape)?.name ?? (await loadCapes()).find((c) => c.id === cape)?.name ?? null) : null;
+    if (token !== presenceCapeLoad || name === presenceCape) return;
+    presenceCape = name;
+    updatePresence();
+  } catch {
+    // ohne Cape im Hover-Text
+  }
 }
 
 /** Statuszeilen der Mod aus dem Log fischen (sie erscheinen nicht in der Konsole). */
@@ -387,12 +652,14 @@ function toAccountInfo(account: StoredAccount): AccountInfo {
 
 function focusWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
-    createWindow();
+    // während der Prüfung beim Start noch kein Hauptfenster (es kommt danach; Links holt es beim Laden ab)
+    if (windowAllowed) createWindow();
     return;
   }
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+  closedToTray = false;
 }
 
 /** Frühere Installation „HeldixClient“ im offiziellen Minecraft Launcher entfernen (Brücke gibt es nicht mehr) */
@@ -420,35 +687,220 @@ const social = new SocialClient<StoredAccount>({
   account: () => store.getActiveAccount(),
   accessToken: async (account) => (await sessionFor(account, false)).accessToken,
   visible: anyWindowVisible,
-  onUpdate: (overview) => broadcast('social:update', overview),
-  wantNotices: async () => (await store.getSettings()).socialNotifications && BrowserWindow.getFocusedWindow() === null,
+  onUpdate: (overview) => {
+    broadcast('social:update', overview);
+    watchFriends(overview);
+    watchParty(overview);
+    // bei Freunden tut sich etwas (online, Welt geöffnet …): offene Welten gleich nachsehen
+    worldsSoon();
+    void updateTray();
+  },
+  wantNotices: async () => (await store.getSettings()).socialNotifications && BrowserWindow.getFocusedWindow() === null && !heldixGameRunning(),
   onNotice: showSocialNotice,
+  onHistory: (notice) => void rememberSocialNotice(notice),
+  // Echtzeit-Begleiter (/v1/ws?client=launcher): zählt beim Dienst nicht als „online im Spiel“
+  onChatEvent: (event) => {
+    broadcast('social:chat', event);
+    if (event.kind === 'read') void markConversationRead(event.uuid);
+  },
+  onRealtime: handleRealtime,
+  onRealtimeOpen: () => {
+    void party.refresh().catch(() => undefined);
+    worldsSoon();
+    invites.pollNow();
+  },
   skinCacheDir: path.join(paths.cache, 'player-skins'),
   log: (line) => console.log(`[Launcher] ${line}`),
 });
+
+/** Echtzeit-Nachrichten, die nicht die Freundesliste oder Unterhaltungen betreffen */
+function handleRealtime(message: Record<string, unknown>): void {
+  if (party.handle(message)) return;
+  if (worlds.handleRealtime(message)) return;
+  switch (message.type) {
+    case 'world-invite':
+      showWorldInvite(message.world);
+      return;
+    case 'unlock':
+    case 'invite':
+      // Freischaltung bzw. angenommene/bestätigte Einladung: gleich vergleichen (Meldung genau einmal, siehe core/invites.ts)
+      invites.pollNow();
+      return;
+    default:
+      // support, addon-review, … zeigt der Launcher (noch) nicht
+      return;
+  }
+}
 
 /** Konto gewechselt, hinzugefügt oder entfernt: Freunde sofort neu laden, dem laufenden Spiel Bescheid sagen */
 function accountsChanged(): void {
   social.refresh().catch(() => undefined);
   gameBridge?.notifyChanged();
+  // Discord-Knöpfe und Kopf gehören zum Konto, die Benachrichtigungen auch
+  void refreshPresencePlayer();
+  worldsSoon();
+  void pushNotifications();
 }
 
 /** Benachrichtigungen bis zum Klick festhalten (sonst räumt der Garbage Collector sie samt Klick-Handler weg) */
 const notifications = new Set<Notification>();
+
+/** Systembenachrichtigung mit Klick; im laufenden HeldixClient-Spiel und bei „Nicht stören“ nicht (die Glocke sammelt weiter) */
+async function systemNotice(title: string, body: string, onClick: () => void): Promise<void> {
+  const settings = await store.getSettings().catch(() => null);
+  if (!settings?.socialNotifications || !Notification.isSupported() || heldixGameRunning() || social.doNotDisturb) return;
+  const notification = new Notification({ title, body });
+  notifications.add(notification);
+  notification.on('click', () => {
+    notifications.delete(notification);
+    onClick();
+  });
+  notification.on('close', () => notifications.delete(notification));
+  notification.show();
+}
 
 function showSocialNotice(notice: SocialNotice): void {
   if (!Notification.isSupported()) return;
   const notification =
     notice.kind === 'request'
       ? new Notification({ title: `${notice.name} möchte mit dir befreundet sein`, body: 'Unter Freunde annehmen oder ablehnen.' })
-      : new Notification({ title: `Neue Nachricht von ${notice.name}`, body: notice.text ?? '' });
+      : notice.kind === 'online'
+        ? new Notification({ title: `${notice.name} ist online`, body: 'Schreib ihm oder lade ihn in deine Party ein.' })
+        : new Notification({ title: `Neue Nachricht von ${notice.name}`, body: notice.text ?? '' });
   notifications.add(notification);
   notification.on('click', () => {
     notifications.delete(notification);
-    openSocial(notice.kind === 'message' ? notice.uuid : null);
+    openSocial(notice.kind === 'request' ? null : notice.uuid);
   });
   notification.on('close', () => notifications.delete(notification));
   notification.show();
+}
+
+/** Unterhaltung gelesen (hier oder in einem anderen Client): „Neue Nachricht von …“ in der Glocke gelesen */
+async function markConversationRead(uuid: string): Promise<void> {
+  try {
+    await notificationStore.markKeyRead(`message:${uuid}`, await activeAccountId());
+  } catch {
+    // egal
+  }
+}
+
+/** Nachricht senden; mit Karte ohne Text: Rückfall-Text für ältere Clients (z. B. „Komm auf mc.example.de“) */
+async function sendChatMessage(uuid: unknown, rawText: unknown, rawExtra: unknown) {
+  const extra = rawExtra && typeof rawExtra === 'object' ? (rawExtra as Record<string, unknown>) : {};
+  const card: MessageCard | null = extra.card ? checkCard(extra.card, inviteServer) : null;
+  let text = typeof rawText === 'string' ? rawText : '';
+  if (card && !text.trim()) {
+    const address = card.kind === 'world' ? worlds.ownWorlds().find((w) => w.code === card.target)?.address ?? null : null;
+    text = cardFallbackText(card, address);
+  }
+  return social.sendMessage(uuid, text, { replyTo: extra.replyTo, card });
+}
+
+/** Einladung in eine geteilte Welt (Echtzeit world-invite): Glocke und – im Hintergrund – Benachrichtigung */
+function showWorldInvite(raw: unknown): void {
+  const invite = mapWorldInvite(raw);
+  if (!invite) return;
+  const title = `${invite.host.name} lädt dich in eine Welt ein`;
+  const body = `„${invite.name}“ – beitreten kannst du, sobald sie geöffnet ist.`;
+  void remember({ kind: 'world-invite', title, body, target: { view: 'world', code: invite.code }, key: `world-invite:${invite.id}` }, true);
+  worldsSoon();
+  if (BrowserWindow.getFocusedWindow()) return;
+  void systemNotice(title, `${body} Klicken zum Ansehen.`, () => receiveWorld(invite.code));
+}
+
+// ---------- Party (Heldix-Dienst ab 1.12.0, siehe core/party.ts) ----------
+
+const party = new PartyClient({
+  auth: HELDIX_SERVICE_URL ? social : null,
+  enabled: async () => (await store.getSettings()).social,
+  onUpdate: (state) => {
+    broadcast('party:update', state);
+    void updateTray();
+  },
+  onEvent: (event) => void showPartyEvent(event),
+  log: (line) => console.log(`[Launcher] ${line}`),
+});
+
+/** angemeldeter Spieler, für den die Party zuletzt geladen wurde */
+let partyFor: string | null = null;
+
+/** Freunde verbunden, getrennt oder Kontowechsel: Party passend laden bzw. verwerfen */
+function watchParty(overview: SocialOverview): void {
+  const me = overview.status === 'online' ? overview.me?.uuid ?? null : null;
+  if (overview.status === 'connecting' || overview.status === 'error') return;
+  if (me === partyFor) return;
+  partyFor = me;
+  party.reset();
+  if (me) void party.refresh().catch(() => undefined);
+}
+
+// Rückfall ohne Echtzeit-Verbindung: Party alle 30 s, solange ein Fenster sichtbar ist
+setInterval(() => {
+  if (partyFor && social.realtime !== 'live' && anyWindowVisible()) void party.refresh().catch(() => undefined);
+}, 30_000).unref();
+
+async function showPartyEvent(event: PartyEvent): Promise<void> {
+  if (event.kind === 'invite') {
+    const { invite } = event;
+    const title = `${invite.from.name} lädt dich in die Party ein`;
+    const body = invite.members > 1 ? `${invite.members} sind schon dabei – annehmen unter Freunde.` : 'Annehmen unter Freunde.';
+    void remember({ kind: 'party-invite', title, body, target: { view: 'party' }, key: `party-invite:${invite.party}` }, true);
+    if (invite.quiet || BrowserWindow.getFocusedWindow()) return;
+    void systemNotice(title, body, () => sendWhenReady('party:open', null));
+    return;
+  }
+  if (event.kind !== 'follow') return;
+  const settings = await store.getSettings();
+  const action = followAction({ autoFollow: settings.partyAutoFollow, gameRunning: gameRunning(), here: party.myLocation()?.address ?? null, target: event.target });
+  if (action === 'none') return;
+  const follow: PartyFollow = { party: event.party, leader: event.leader, target: event.target, joined: false };
+  if (action === 'join') {
+    try {
+      const result = await joinPartyTarget(event.target);
+      follow.joined = true;
+      launcherLog(`Party: folge ${event.leader.name} (${result.instanceName})`);
+      void remember({ kind: 'party-follow', title: `Du folgst ${event.leader.name}`, body: `${locationText(event.target)} – ${result.instanceName} startet.`, target: { view: 'party' }, key: `party-follow:${event.party}` }, true);
+      broadcast('party:follow', follow);
+      return;
+    } catch (error) {
+      launcherLog(`Party: automatisch folgen ging nicht – ${error instanceof Error ? error.message : String(error)}`, 'WARN');
+    }
+  }
+  const title = `${event.leader.name} ist ${event.target.kind === 'world' ? 'in' : 'auf'} ${event.target.kind === 'world' ? `„${event.target.title}“` : event.target.title}`;
+  void remember({ kind: 'party-follow', title, body: 'Beitreten mit einem Klick unter Freunde → Party.', target: { view: 'party' }, key: `party-follow:${event.party}` }, true);
+  if (BrowserWindow.getFocusedWindow()) {
+    if (!social.doNotDisturb) broadcast('party:follow', follow);
+    return;
+  }
+  void systemNotice(title, 'Klicken zum Beitreten.', () => sendWhenReady('party:follow', follow));
+}
+
+/** Dem Leiter folgen (bzw. dem angegebenen Ort): geteilte Welt mit passender Instanz, Server per Quick Play */
+async function joinPartyTarget(target?: PartyLocation | null): Promise<{ instanceName: string; title: string }> {
+  const location = target ?? party.current.party?.target ?? null;
+  if (!location) throw new Error('Der Leiter der Party ist gerade auf keinem Server und in keiner geteilten Welt.');
+  if (location.kind === 'world') {
+    const result = await joinWorld(location.target);
+    return { instanceName: result.instanceName, title: location.title };
+  }
+  const result = await joinServerAddress(location.address);
+  return { instanceName: result.instanceName, title: location.title };
+}
+
+/**
+ * Einem Server beitreten (Server-Karte im Chat, Party): öffentliche Domain (inviteServer), zuletzt gespielte Instanz mit
+ * HeldixClient, Quick Play – auch wenn der Server nicht in der Serverliste steht (wie „Annehmen und beitreten“).
+ */
+async function joinServerAddress(raw: unknown): Promise<{ instanceId: string; instanceName: string; server: string }> {
+  const server = inviteServer(raw);
+  if (!server) throw new Error('Diesen Server kann der Launcher nicht direkt öffnen – nur öffentliche Adressen wie play.example.de.');
+  const checked = await inviteJoinTarget();
+  if (checked.problem || !checked.instance) throw new Error(checked.problem ?? 'Zum Beitreten brauchst du eine Instanz mit HeldixClient.');
+  launcherLog(`Beitreten: ${checked.instance.name} startet und verbindet mit ${server}`);
+  // Fortschritt und Fehler zeigt die Startseite (game:state)
+  void launch(checked.instance.id, { kind: 'server', id: server }).catch(() => undefined);
+  return { instanceId: checked.instance.id, instanceName: checked.instance.name, server };
 }
 
 /** Klick auf eine Benachrichtigung: Fenster nach vorn, Freunde öffnen (mit der Unterhaltung) */
@@ -465,6 +917,13 @@ function instanceBusy(id: string): boolean {
 async function joinFriend(rawUuid: unknown, rawInstanceId?: unknown): Promise<void> {
   const friend = await social.friend(rawUuid);
   if (!friend) throw new Error('Dieser Spieler ist nicht in deiner Freundesliste.');
+  // in einer geteilten Welt (als Gastgeber oder Mitspieler): Welt mit passender Minecraft-Version betreten
+  const hosted = worlds.worldOf(friend.uuid);
+  const guestIn = worldCodeOf(friend.server);
+  if (hosted || guestIn) {
+    await joinWorld(hosted?.code ?? guestIn);
+    return;
+  }
   const server = joinableServer(friend);
   if (!server) throw new Error(`${friend.name} spielt gerade auf keinem Server, dem du folgen kannst.`);
   if (gameRunning()) throw new Error('Es läuft schon ein Spiel – im Spiel über Freunde → Beitreten.');
@@ -473,6 +932,511 @@ async function joinFriend(rawUuid: unknown, rawInstanceId?: unknown): Promise<vo
   if (!instance) throw new Error('Zum Beitreten brauchst du eine Instanz mit HeldixClient.');
   launcherLog(`${friend.name} beitreten: ${server}`);
   await launch(instance.id, { kind: 'server', id: server });
+}
+
+// ---------- Einladungen und Beitreten-Links (siehe core/invites.ts) ----------
+
+const invites = new InviteService({
+  serviceUrl: HELDIX_SERVICE_URL,
+  auth: HELDIX_SERVICE_URL ? social : null,
+  enabled: async () => (await store.getSettings()).social,
+  cosmeticNames: async () => Object.fromEntries((await cosmetics.catalog()).items.map((item) => [item.id, item.name])),
+  onEvent: showInviteEvent,
+  onLinks: () => updatePresence(),
+  log: (line) => console.log(`[Launcher] ${line}`),
+});
+
+/** Freunde beim letzten Stand: kommt einer dazu, war es vielleicht eine angenommene Einladung */
+let knownFriends: { me: string; uuids: Set<string> } | null = null;
+
+function watchFriends(overview: SocialOverview): void {
+  if (overview.status !== 'online' || !overview.me) return;
+  const before = knownFriends;
+  knownFriends = { me: overview.me.uuid, uuids: new Set(overview.friends.map((f) => f.uuid)) };
+  if (!before || before.me !== overview.me.uuid) return;
+  invites.friendsAdded(overview.friends.filter((f) => !before.uuids.has(f.uuid)).map((f) => f.name));
+}
+
+/** Läuft gerade ein Spiel mit HeldixClient? Dann zeigt das Spiel Freischaltungen selbst (Realtime). */
+function heldixGameRunning(): boolean {
+  return gameRunning() && !!presence.instance && usesHeldixClient(presence.instance);
+}
+
+/** Neues bei den Einladungen: im Vordergrund als Hinweis in der Oberfläche, sonst als Benachrichtigung */
+function showInviteEvent(event: InviteEvent): void {
+  void rememberInviteEvent(event);
+  if (event.kind === 'unlock') broadcast('cosmetics:changed', null);
+  if (BrowserWindow.getFocusedWindow()) {
+    broadcast('invites:event', event);
+    return;
+  }
+  void store.getSettings().then((settings) => {
+    if (!settings.socialNotifications || !Notification.isSupported() || heldixGameRunning() || social.doNotDisturb) return;
+    let notification: Notification;
+    if (event.kind === 'unlock') {
+      notification = new Notification({ title: `Neues Cosmetic freigeschaltet: ${event.name}`, body: 'Belohnung für deine Einladungen – leg es unter Skins & Cosmetics an.' });
+    } else if (event.kind === 'accepted') {
+      const title = event.name ? `${event.name} hat deine Einladung angenommen` : event.count > 1 ? `${event.count} Freunde haben deine Einladung angenommen` : 'Deine Einladung wurde angenommen';
+      notification = new Notification({ title, body: 'Ihr seid jetzt Freunde. Nach 30 Minuten Spielzeit zählt die Einladung als bestätigt.' });
+    } else {
+      notification = new Notification({ title: event.count > 1 ? `${event.count} Einladungen bestätigt` : 'Einladung bestätigt', body: 'Ein eingeladener Freund hat 30 Minuten mit HeldixClient gespielt.' });
+    }
+    notifications.add(notification);
+    notification.on('click', () => {
+      notifications.delete(notification);
+      if (event.kind === 'unlock') sendWhenReady('cosmetics:open', event.cosmetic);
+      else sendWhenReady('invites:open', null);
+    });
+    notification.on('close', () => notifications.delete(notification));
+    notification.show();
+  }).catch(() => undefined);
+}
+
+/** Geöffneter Link heldixclient://einladung/<code>, bis die Oberfläche ihn abholt (invites:take) */
+let pendingInvite: string | null = findInviteLink(process.argv);
+
+/**
+ * Einladung aus dem Download, deren Datei noch liegt: Sie wird erst gelöscht, wenn die Oberfläche die Einladung abholt
+ * (Dialog) oder ein neuerer Link sie ersetzt – schließt man den Launcher mitten im Einrichtungs-Assistenten, kommt sie
+ * beim nächsten Start wieder.
+ */
+let downloadInviteFile: string | null = null;
+
+function dropDownloadInvite(): void {
+  if (!downloadInviteFile) return;
+  void finishDownloadInvite(downloadInviteFile).catch(() => undefined);
+  downloadInviteFile = null;
+}
+
+/** Link aus second-instance oder open-url: merken und die Oberfläche bitten, ihn abzuholen */
+function receiveInvite(code: string | null): void {
+  if (!code) return;
+  if (code !== pendingInvite) dropDownloadInvite();
+  pendingInvite = code;
+  launcherLog('Einladungslink geöffnet');
+  if (app.isReady()) sendWhenReady('invite:open', null);
+}
+
+/** zuletzt im Dialog gezeigte Einladungen, damit „beitreten“ genau zum gezeigten Server geht */
+const shownInvites = new Map<string, { server: string | null; inviter: { uuid: string; name: string } }>();
+
+async function inviteJoinTarget(): Promise<{ instance: InstanceConfig | null; problem: string | null }> {
+  const instance = pickInviteInstance(await instances.list(), await selectedInstance().catch(() => null), usesHeldixClient);
+  if (!instance) return { instance: null, problem: 'Zum Beitreten brauchst du eine Instanz mit HeldixClient. Leg unter „Instanzen“ eine an – danach klappt der Link.' };
+  if (gameRunning()) return { instance, problem: 'Es läuft schon ein Spiel. Beende es oder tritt im Spiel über Freunde bei.' };
+  return { instance, problem: null };
+}
+
+async function publicInviteView(rawCode: unknown): Promise<PublicInviteView> {
+  const code = inviteCode(rawCode);
+  const account = await store.getActiveAccount();
+  const view: PublicInviteView = {
+    code,
+    status: 'ok',
+    error: null,
+    inviter: null,
+    server: null,
+    voice: null,
+    expires: 0,
+    welcome: null,
+    account: account ? { name: account.name, type: account.type } : null,
+    acceptProblem: null,
+    join: null,
+    joinProblem: null,
+  };
+  let invite: PublicInvite;
+  try {
+    invite = await invites.publicInvite(code);
+  } catch (error) {
+    if (isMissing(error)) return { ...view, status: 'missing' };
+    return { ...view, status: 'error', error: error instanceof Error ? error.message : String(error) };
+  }
+  shownInvites.set(code, { server: invite.server, inviter: invite.inviter });
+  const names = await cosmetics.catalog().then((c) => c.items, () => []);
+  view.inviter = invite.inviter;
+  view.server = invite.server;
+  view.voice = invite.voice;
+  view.expires = invite.expires;
+  view.welcome = invite.welcome ? { id: invite.welcome, name: rewardName(invite.welcome, names.find((i) => i.id === invite.welcome)?.name) } : null;
+  if (!account) view.acceptProblem = 'Zum Annehmen brauchst du ein Microsoft-Konto im Launcher.';
+  else if (account.type === 'offline' && !SERVICE_DEV_AUTH) view.acceptProblem = 'Einladungen annehmen geht nur mit einem Microsoft-Konto.';
+  else if (account.uuid.replace(/-/g, '').toLowerCase() === invite.inviter.uuid) view.acceptProblem = 'Das ist deine eigene Einladung – schick den Link an deine Freunde.';
+  if (invite.server) {
+    const target = await inviteJoinTarget();
+    view.join = target.instance ? { instanceId: target.instance.id, instanceName: target.instance.name } : null;
+    view.joinProblem = target.problem;
+  }
+  return view;
+}
+
+/**
+ * Annehmen und auf Wunsch beitreten. Beitreten geht eigene Wege neben validateQuickPlay: der Server muss nicht in der
+ * Serverliste der Instanz stehen, aber eine öffentliche Domain sein (inviteServer) und zu dem passen, was der Dialog
+ * gezeigt hat. Erst wird geprüft, ob Beitreten geht, dann angenommen, dann gestartet.
+ */
+async function acceptInvite(rawCode: unknown, rawJoin: unknown): Promise<InviteAcceptView> {
+  const code = inviteCode(rawCode);
+  const join = rawJoin === true;
+  const before = shownInvites.get(code);
+  let shown = before?.server ?? null;
+  let inviter = before?.inviter;
+  if (!before || join) {
+    const invite = await invites.publicInvite(code).catch((error: unknown) => {
+      if (isMissing(error)) throw new Error('Diese Einladung gibt es nicht (mehr). Vielleicht ist sie abgelaufen oder wurde zurückgenommen.');
+      throw error;
+    });
+    if (join && before && before.server !== invite.server) throw new Error('Die Einladung hat sich geändert – bitte den Link noch einmal öffnen.');
+    shown = invite.server;
+    inviter = invite.inviter;
+    shownInvites.set(code, { server: invite.server, inviter: invite.inviter });
+  }
+  const account = await store.getActiveAccount();
+  if (account && inviter && account.uuid.replace(/-/g, '').toLowerCase() === inviter.uuid) throw new Error('Das ist deine eigene Einladung – schick den Link an deine Freunde.');
+  let target: InstanceConfig | null = null;
+  if (join) {
+    if (!shown) throw new Error('Diese Einladung hat keinen Server zum Beitreten.');
+    const checked = await inviteJoinTarget();
+    if (checked.problem) throw new Error(checked.problem);
+    target = checked.instance;
+  }
+  const result = await invites.accept(code, inviter);
+  launcherLog(`Einladung von ${result.inviter.name} angenommen`);
+  void social.refresh().catch(() => undefined);
+  let reward: InviteAcceptView['reward'] = null;
+  if (result.reward) {
+    reward = { id: result.reward, name: rewardName(result.reward, (await cosmetics.catalog().catch(() => ({ items: [] }))).items.find((i) => i.id === result.reward)?.name) };
+    broadcast('cosmetics:changed', null);
+  }
+  const view: InviteAcceptView = { ...result, reward, notes: acceptNotes(result, reward?.name ?? null), joined: null, joinError: null };
+  if (join && target) {
+    const server = inviteServer(result.server ?? shown);
+    if (!server || server !== inviteServer(shown)) {
+      view.joinError = 'Die Serveradresse der Einladung ist ungültig – beitreten geht nicht.';
+    } else if (gameRunning()) {
+      view.joinError = 'Es läuft schon ein Spiel. Beende es oder tritt im Spiel über Freunde bei.';
+    } else {
+      launcherLog(`Einladung: ${target.name} startet und verbindet mit ${server}`);
+      view.joined = { instanceId: target.id, instanceName: target.name, server };
+      // Fortschritt und Fehler zeigt die Startseite (game:state)
+      void launch(target.id, { kind: 'server', id: server }).catch(() => undefined);
+    }
+  }
+  return view;
+}
+
+// ---------- Welt teilen: offene Welten der Freunde und Beitreten (siehe core/worlds.ts) ----------
+
+const worlds = new WorldClient({
+  serviceUrl: HELDIX_SERVICE_URL,
+  auth: HELDIX_SERVICE_URL ? social : null,
+  enabled: async () => (await store.getSettings()).social,
+  visible: anyWindowVisible,
+  onUpdate: (overview) => {
+    broadcast('worlds:update', overview);
+    void updateTray();
+  },
+  onEvent: showWorldEvent,
+  log: (line) => console.log(`[Launcher] ${line}`),
+});
+
+/** Offene Welten bald neu laden (mehrere Anlässe kurz hintereinander = eine Abfrage) */
+let worldsTimer: NodeJS.Timeout | null = null;
+function worldsSoon(): void {
+  if (worldsTimer) return;
+  worldsTimer = setTimeout(() => {
+    worldsTimer = null;
+    void worlds.refresh().catch(() => undefined);
+  }, 1500);
+  worldsTimer.unref();
+}
+
+/** Ein Freund hat eine Welt geöffnet (bzw. dich eingeladen): Verlauf und – im Hintergrund – Benachrichtigung */
+function showWorldEvent(event: WorldEvent): void {
+  const world = event.world;
+  const title = `${world.host.name} hat eine Welt geöffnet`;
+  const body = `„${world.name}“ · ${world.players} von ${world.maxPlayers} Spielern${world.version ? ` · Minecraft ${world.version}` : ''}`;
+  void remember({ kind: 'world-open', title, body, target: { view: 'world', code: world.code }, key: `world:${world.id}` }, true);
+  if (BrowserWindow.getFocusedWindow()) return;
+  void store.getSettings().then((settings) => {
+    // im laufenden HeldixClient-Spiel meldet die Mod Welten selbst (Heldix-Welten, Freunde-Leiste); „Nicht stören“: nur Glocke
+    if (!settings.socialNotifications || !Notification.isSupported() || heldixGameRunning() || social.doNotDisturb) return;
+    const notification = new Notification({ title, body: `${body} – klicken zum Beitreten.` });
+    notifications.add(notification);
+    notification.on('click', () => {
+      notifications.delete(notification);
+      receiveWorld(world.code);
+    });
+    notification.on('close', () => notifications.delete(notification));
+    notification.show();
+  }).catch(() => undefined);
+}
+
+/** Geöffneter Link heldixclient://welt/<code>, bis die Oberfläche ihn abholt (worlds:take) */
+let pendingWorld: string | null = findWorldLink(process.argv);
+
+function receiveWorld(code: string | null): void {
+  if (!code) return;
+  pendingWorld = code;
+  launcherLog('Welt-Link geöffnet');
+  if (app.isReady()) sendWhenReady('world:open', null);
+}
+
+async function worldJoinView(rawCode: unknown): Promise<WorldJoinView> {
+  const code = worldCode(rawCode);
+  const view: WorldJoinView = { code, status: 'ok', error: null, world: null, join: null, joinProblem: null, friend: false };
+  let world;
+  try {
+    world = await worlds.publicWorld(code, true);
+  } catch (error) {
+    if (isWorldMissing(error)) return { ...view, status: 'missing' };
+    return { ...view, status: 'error', error: error instanceof Error ? error.message : String(error) };
+  }
+  const account = await store.getActiveAccount().catch(() => null);
+  const plan = planWorldJoin({
+    world,
+    instances: await instances.list(),
+    preferred: await selectedInstance().catch(() => null),
+    hasClient: usesHeldixClient,
+    gameRunning: gameRunning(),
+    self: account?.uuid.replace(/-/g, '').toLowerCase() ?? null,
+  });
+  view.world = world;
+  view.join = plan.instance ? { instanceId: plan.instance.id, instanceName: plan.instance.name, minecraft: plan.instance.minecraft } : null;
+  view.joinProblem = plan.problem;
+  view.friend = social.current.status === 'online' && social.current.friends.some((f) => f.uuid === world.host.uuid);
+  return view;
+}
+
+/**
+ * Einer geteilten Welt beitreten: frische Welt-Info, passende Instanz (Minecraft-Version der Welt, HeldixClient),
+ * dann Quick Play auf <code>.welt.<Domain>. Die Adresse kommt nur vom Dienst und muss zum Code passen.
+ */
+async function joinWorld(rawCode: unknown): Promise<{ instanceId: string; instanceName: string; address: string }> {
+  const code = worldCode(rawCode);
+  const world = await worlds.publicWorld(code, true).catch((error: unknown) => {
+    if (isWorldMissing(error)) throw new Error(WORLD_MISSING);
+    throw error;
+  });
+  const account = await store.getActiveAccount();
+  if (!account) throw new Error('Bitte zuerst ein Konto hinzufügen.');
+  const plan = planWorldJoin({
+    world,
+    instances: await instances.list(),
+    preferred: await selectedInstance().catch(() => null),
+    hasClient: usesHeldixClient,
+    gameRunning: gameRunning(),
+    self: account.uuid.replace(/-/g, '').toLowerCase(),
+  });
+  if (plan.problem || !plan.instance) throw new Error(plan.problem ?? 'Zum Beitreten brauchst du eine Instanz mit HeldixClient.');
+  const address = normalizeWorldAddress(world.address);
+  if (!address || worldCodeOf(address) !== code) throw new Error('Die Adresse dieser Welt ist ungültig – beitreten geht nicht.');
+  launcherLog(`Welt von ${world.host.name} beitreten: ${plan.instance.name} startet`);
+  // Fortschritt und Fehler zeigt die Startseite (game:state)
+  void launch(plan.instance.id, { kind: 'server', id: address }).catch(() => undefined);
+  return { instanceId: plan.instance.id, instanceName: plan.instance.name, address };
+}
+
+// ---------- Benachrichtigungen: Verlauf hinter der Glocke (siehe core/notifications.ts) ----------
+
+const notificationStore = new NotificationStore(path.join(paths.root, NOTIFICATION_FILE), {
+  onChange: () => pushNotifications(),
+});
+
+async function activeAccountId(): Promise<string | null> {
+  return (await store.getActiveAccount().catch(() => null))?.id ?? null;
+}
+
+function notificationList(): Promise<NotificationList> {
+  return activeAccountId().then((account) => notificationStore.list(account));
+}
+
+let notificationPush: NodeJS.Timeout | null = null;
+/** Stand an die Oberfläche und ins Menü im Infobereich (gebündelt) */
+function pushNotifications(): void {
+  if (notificationPush) return;
+  notificationPush = setTimeout(() => {
+    notificationPush = null;
+    void notificationList().then((list) => {
+      broadcast('notifications:update', list);
+      void updateTray(list);
+    }).catch(() => undefined);
+  }, 50);
+  notificationPush.unref();
+}
+
+/** In den Verlauf; forAccount = gehört zum aktiven Konto (Freunde, Einladungen), sonst für alle (Updates) */
+async function remember(input: NewNotification, forAccount: boolean): Promise<void> {
+  try {
+    await notificationStore.add({ ...input, account: forAccount ? await activeAccountId() : null });
+  } catch (error) {
+    console.warn('[Launcher] Benachrichtigung nicht gemerkt:', error instanceof Error ? error.message : error);
+  }
+}
+
+function rememberSocialNotice(notice: SocialNotice): Promise<void> {
+  if (notice.kind === 'request') {
+    return remember({ kind: 'friend-request', title: `${notice.name} möchte mit dir befreundet sein`, body: 'Unter Freunde annehmen oder ablehnen.', target: { view: 'friends' }, key: `request:${notice.uuid}` }, true);
+  }
+  // „ist online“ nur als Hinweis, nicht im Verlauf
+  if (notice.kind === 'online') return Promise.resolve();
+  return remember({
+    kind: 'message',
+    title: `Neue Nachricht von ${notice.name}`,
+    body: notice.text ?? (notice.count > 1 ? `${notice.count} neue Nachrichten` : ''),
+    target: { view: 'friends', uuid: notice.uuid },
+    key: `message:${notice.uuid}`,
+  }, true);
+}
+
+function rememberInviteEvent(event: InviteEvent): Promise<void> {
+  if (event.kind === 'unlock') {
+    return remember({ kind: 'unlock', title: `Neues Cosmetic freigeschaltet: ${event.name}`, body: 'Belohnung für deine Einladungen – leg es unter Skins & Cosmetics an.', target: { view: 'cosmetics', id: event.cosmetic }, key: `unlock:${event.cosmetic}`, once: true }, true);
+  }
+  if (event.kind === 'accepted') {
+    const title = event.name ? `${event.name} hat deine Einladung angenommen` : event.count > 1 ? `${event.count} Freunde haben deine Einladung angenommen` : 'Deine Einladung wurde angenommen';
+    return remember({ kind: 'invite-accepted', title, body: 'Ihr seid jetzt Freunde. Nach 30 Minuten Spielzeit zählt die Einladung als bestätigt.', target: { view: 'invites' } }, true);
+  }
+  return remember({ kind: 'invite-confirmed', title: event.count > 1 ? `${event.count} Einladungen bestätigt` : 'Einladung bestätigt', body: 'Ein eingeladener Freund hat 30 Minuten mit HeldixClient gespielt.', target: { view: 'invites' } }, true);
+}
+
+// ---------- Infobereich (Tray): Launcher läuft im Hintergrund weiter, solange ein Spiel läuft ----------
+
+let tray: Tray | null = null;
+/** Fenster wurde während des Spiels geschlossen und wartet im Infobereich */
+let closedToTray = false;
+/** Einstellung „Beim Schließen in den Infobereich“ */
+let closeToTraySetting = true;
+let appQuitting = false;
+let trayHintShown = false;
+
+function trayImage(): Electron.NativeImage {
+  // tray.png (16 px) und tray@2x.png (32 px) liegen neben der Oberfläche (scripts/render-discord-art.mjs)
+  return nativeImage.createFromPath(path.join(__dirname, '..', 'renderer', 'tray.png'));
+}
+
+/** Symbol im Infobereich, solange ein Spiel läuft (auch bei „Launcher beim Spielstart ausblenden“) */
+function ensureTray(): void {
+  if (tray) return;
+  try {
+    tray = new Tray(trayImage());
+  } catch (error) {
+    console.warn('[Launcher] Symbol im Infobereich nicht möglich:', error);
+    return;
+  }
+  tray.on('click', () => focusWindow());
+  tray.on('double-click', () => focusWindow());
+  void updateTray();
+}
+
+function destroyTray(): void {
+  tray?.destroy();
+  tray = null;
+}
+
+function friendActivity(friend: { activity: string | null; server: string | null }): string {
+  if (worldCodeOf(friend.server)) return 'In einer geteilten Welt';
+  switch (friend.activity) {
+    case 'multiplayer': return friend.server ? `Auf ${friend.server}` : 'Mehrspieler';
+    case 'singleplayer': return 'Einzelspieler';
+    case 'realms': return 'Realms';
+    case 'lan': return 'LAN-Welt';
+    case 'menu': return 'Im Menü';
+    default: return 'Online';
+  }
+}
+
+/** Menü im Infobereich: Spiel, Freunde online, Benachrichtigungen, Öffnen, Beenden */
+async function updateTray(list?: NotificationList): Promise<void> {
+  if (!tray) return;
+  const current = list ?? (await notificationList().catch((): NotificationList => ({ items: [], unread: 0 })));
+  if (!tray) return;
+  const overview = social.current;
+  const online = overview.status === 'online' ? overview.friends.filter((f) => f.online) : [];
+  const hosting = new Map(worlds.current.friends.map((w) => [w.host.uuid, w]));
+  const label = (text: string) => text.replace(/&/g, '&&');
+  const friendItems: MenuItemConstructorOptions[] = online.slice(0, 12).map((friend) => {
+    const world = hosting.get(friend.uuid);
+    return { label: label(`${friend.favorite ? '★ ' : ''}${friend.nickname || friend.name} – ${world ? `Teilt „${world.name}“` : friendActivity(friend)}`), click: () => sendWhenReady('social:open', friend.uuid) };
+  });
+  if (online.length > 12) friendItems.push({ label: `und ${online.length - 12} weitere`, enabled: false });
+  if (friendItems.length === 0) friendItems.push({ label: overview.status === 'online' ? 'Gerade ist niemand online' : 'Freunde nicht verbunden', enabled: false });
+  friendItems.push({ type: 'separator' }, { label: 'Alle Freunde', click: () => sendWhenReady('social:open', null) });
+  const noteItems: MenuItemConstructorOptions[] = current.items.slice(0, 6).map((n) => ({
+    label: label(`${n.read ? '' : '● '}${n.title}`),
+    click: () => sendWhenReady('notifications:open', n.id),
+  }));
+  if (noteItems.length === 0) noteItems.push({ label: 'Keine Benachrichtigungen', enabled: false });
+  noteItems.push({ type: 'separator' }, {
+    label: 'Alle als gelesen markieren',
+    enabled: current.unread > 0,
+    click: () => void activeAccountId().then((account) => notificationStore.markAllRead(account)),
+  }, { label: 'Alle anzeigen', click: () => sendWhenReady('notifications:open', null) });
+  const playing = gameState.state === 'running' ? gameState.label : gameState.state === 'preparing' ? 'Minecraft wird vorbereitet' : null;
+  const template: MenuItemConstructorOptions[] = [
+    { label: label(playing ? `${playing} läuft` : LAUNCHER_NAME), enabled: false },
+    { type: 'separator' },
+    { label: online.length ? `Freunde online (${online.length})` : 'Freunde online', submenu: friendItems },
+    { label: current.unread ? `Benachrichtigungen (${current.unread} neu)` : 'Benachrichtigungen', submenu: noteItems },
+    { type: 'separator' },
+    { label: `${LAUNCHER_NAME} öffnen`, click: () => focusWindow() },
+    { label: 'Beenden', click: () => void quitFromTray() },
+  ];
+  tray.setContextMenu(Menu.buildFromTemplate(template));
+  tray.setToolTip(playing ? `${LAUNCHER_NAME} – ${playing} läuft` : LAUNCHER_NAME);
+}
+
+async function quitFromTray(): Promise<void> {
+  if (gameRunning()) {
+    const { response } = await dialog.showMessageBox({
+      type: 'question',
+      title: LAUNCHER_NAME,
+      message: 'Minecraft läuft noch. Launcher trotzdem beenden?',
+      detail: 'Das Spiel läuft weiter, aber Discord-Status, Benachrichtigungen und der Kontowechsel im Spiel enden.',
+      buttons: ['Beenden', 'Abbrechen'],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    if (response !== 0) return;
+  }
+  app.quit();
+}
+
+/** Fenster schließen, während ein Spiel läuft: in den Infobereich statt beenden (Einstellung) */
+function closeIntoTray(event: Electron.Event): void {
+  if (appQuitting || !closeToTraySetting || !gameRunning() || !mainWindow) return;
+  event.preventDefault();
+  mainWindow.hide();
+  closedToTray = true;
+  ensureTray();
+  if (!trayHintShown && Notification.isSupported()) {
+    trayHintShown = true;
+    const hint = new Notification({ title: `${LAUNCHER_NAME} läuft im Infobereich weiter`, body: 'Solange Minecraft läuft. Danach beendet sich der Launcher von selbst.', silent: true });
+    notifications.add(hint);
+    hint.on('click', () => {
+      notifications.delete(hint);
+      focusWindow();
+    });
+    hint.on('close', () => notifications.delete(hint));
+    hint.show();
+  }
+}
+
+/**
+ * Spiel zu Ende: war das Fenster im Infobereich geschlossen, beendet sich der Launcher (true) – nach einem Absturz oder
+ * Fehler kommt stattdessen das Fenster mit der Absturz-Hilfe. Sonst verschwindet das Symbol im Infobereich.
+ */
+function afterGameTray(): boolean {
+  const problem = gameState.state === 'error' || (gameState.state === 'exited' && (!!gameState.crash || !!gameState.notice || (gameState.code !== 0 && gameState.code !== null)));
+  if (appQuitting) return true;
+  if (closedToTray && !problem) {
+    console.log('[Launcher] Spiel beendet – der Launcher war geschlossen und beendet sich jetzt.');
+    appQuitting = true;
+    app.quit();
+    return true;
+  }
+  closedToTray = false;
+  destroyTray();
+  return false;
 }
 
 // ---------- Addon-Store (siehe core/storeservice.ts) ----------
@@ -503,8 +1467,67 @@ function storeChanged(): void {
   addonStore.recount().catch(() => undefined);
 }
 
+// ---------- Einrichtungs-Assistent (siehe core/setup.ts) ----------
+
+/** offen beim ersten Start (entschieden vor ensureInstances) oder nach „Einrichtung erneut starten“ */
+const setupGate = new SetupGate(false);
+/** geprüfte Store-Liste aus dem Schritt „Addons“ (für setup:install) */
+let setupEntries: StoreEntry[] | null = null;
+
+/** Beim Start: Assistent zeigen? Bestehende Installationen bekommen setupDone = true, ganz neue false. */
+async function decideSetup(): Promise<void> {
+  const probe = await store.setupProbe();
+  const decision = setupStart({ stored: probe.stored, instances: (await instances.list()).length, accounts: probe.accounts });
+  if (decision.save !== null) await store.saveSettings({ setupDone: decision.save });
+  if (decision.show) {
+    setupGate.begin();
+    console.log('[Launcher] Erster Start: Einrichtungs-Assistent');
+  }
+}
+
+async function setupInstances(): Promise<OverviewInstance[]> {
+  return setupTargets(await heldixInstances());
+}
+
+async function setupAddons(): Promise<SetupAddons> {
+  const { view, entries } = await loadSetupAddons(HELDIX_SERVICE_URL, STORE_PUBLIC_KEY, await setupInstances());
+  setupEntries = entries;
+  return view;
+}
+
+async function setupInstall(addonId: unknown): Promise<SetupInstallResult> {
+  if (!setupEntries) await setupAddons();
+  if (!setupEntries) throw new Error('Der Addon-Store ist gerade nicht erreichbar. Addons kannst du später im Addon-Store installieren.');
+  const result = await installSetupAddon(addonId, {
+    serviceUrl: HELDIX_SERVICE_URL,
+    publicKey: STORE_PUBLIC_KEY,
+    entries: setupEntries,
+    targets: await setupInstances(),
+    busy: instanceBusy,
+    log: (line) => launcherLog(line),
+  });
+  if (result.installed.length > 0) storeChanged();
+  return result;
+}
+
+async function finishSetup(skipped: unknown): Promise<void> {
+  await store.saveSettings({ setupDone: true });
+  if (setupGate.active) launcherLog(skipped === true ? 'Einrichtung übersprungen' : 'Einrichtung abgeschlossen');
+  setupGate.end();
+  setupEntries = null;
+}
+
 function showStoreNotice(notice: StoreNotice): void {
-  if (!Notification.isSupported() || notice.items.length === 0) return;
+  if (notice.items.length === 0) return;
+  void remember({
+    kind: 'addons',
+    title: notice.kind === 'available' ? (notice.items.length === 1 ? 'Addon-Update verfügbar' : 'Addon-Updates verfügbar') : (notice.items.length === 1 ? 'Addon aktualisiert' : 'Addons aktualisiert'),
+    body: noticeList(notice.items),
+    target: { view: 'store' },
+    key: `addons:${notice.kind}:${noticeList(notice.items)}`,
+    once: true,
+  }, false);
+  if (!Notification.isSupported()) return;
   const notification =
     notice.kind === 'available'
       ? new Notification({ title: notice.items.length === 1 ? 'Addon-Update verfügbar' : 'Addon-Updates verfügbar', body: `${noticeList(notice.items)} – im Addon-Store aktualisieren.` })
@@ -521,6 +1544,7 @@ function showStoreNotice(notice: StoreNotice): void {
 /** Fenster nach vorn und dann eine Nachricht an die Oberfläche (auch wenn das Fenster erst entsteht) */
 function sendWhenReady(channel: string, payload: unknown): void {
   const existed = mainWindow !== null && !mainWindow.isDestroyed();
+  if (!existed && !windowAllowed) return;
   focusWindow();
   const window = mainWindow;
   if (!window) return;
@@ -725,9 +1749,12 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
     game = running;
     gameInstanceId = instance.id;
     const startedAt = Date.now();
+    // für den nächsten Start, falls der Launcher vor dem Spiel endet: dann nicht unter dem laufenden Spiel installieren
+    if (running.process.pid) void writeFile(gameMarkerFile, JSON.stringify({ pid: running.process.pid, startedAt })).catch(() => undefined);
     await instances.save({ ...instance, lastPlayed: startedAt });
     setGameState({ state: 'running', pid: running.process.pid ?? 0, instanceId: instance.id, label: instance.name });
     updatePresence({ ...presence, phase: 'running', startedAt });
+    ensureTray();
     if (settings.hideLauncherOnLaunch) mainWindow?.hide();
 
     running.exited
@@ -776,13 +1803,15 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
       })
       .catch((error: Error) => setGameState({ state: 'error', message: error.message }))
       .finally(() => {
+        void rm(gameMarkerFile, { force: true }).catch(() => undefined);
         bridge?.dispose();
         if (gameBridge === bridge) gameBridge = null;
         game = null;
         gameInstanceId = null;
         graphicsWatch = null;
+        // Discord: Spielstatus weg (auch nach einem Absturz), zurück zu „Im Launcher“
         updatePresence({ phase: 'launcher', status: null });
-        if (mainWindow && !mainWindow.isVisible()) mainWindow.show();
+        if (!afterGameTray() && mainWindow && !mainWindow.isVisible()) mainWindow.show();
         // Addon-Updates, die während des Spiels warten mussten, jetzt automatisch installieren
         void store.getSettings().then((s) => (s.addonAutoUpdate ? addonStore.check() : undefined)).catch(() => undefined);
       });
@@ -791,6 +1820,8 @@ async function launch(instanceId?: string, target?: { kind?: unknown; id?: unkno
     launcherLog(message, 'ERROR');
     setGameState({ state: 'error', message });
     updatePresence({ phase: 'launcher', status: null });
+    // Start fehlgeschlagen, während das Fenster im Infobereich wartete: Fenster mit der Meldung zurückholen
+    if (!afterGameTray() && mainWindow && !mainWindow.isVisible()) mainWindow.show();
     throw error;
   }
 }
@@ -867,7 +1898,13 @@ function registerIpc(): void {
     const next = await store.saveSettings(patch);
     applyPresenceSettings(next);
     autoUpdate = next.autoUpdate;
-    if (next.social !== before.social) social.refresh().catch(() => undefined);
+    closeToTraySetting = next.closeToTray;
+    if (next.social !== before.social) {
+      social.refresh().catch(() => undefined);
+      worldsSoon();
+    }
+    // Kopf eingeschaltet: Cape-Name für den Hover-Text nachladen
+    if ((next.discordShowHead && !before.discordShowHead) || (next.discordPresence && !before.discordPresence)) void refreshPresencePlayer();
     // das laufende Spiel lädt die Liste neu und sieht dabei „allowed“
     if (next.gameAccountSwitch !== before.gameAccountSwitch) gameBridge?.notifyChanged();
     return next;
@@ -878,12 +1915,65 @@ function registerIpc(): void {
     await shell.openExternal(`${WEBSITE_URL.replace(/\/+$/, '')}/download`);
   });
   ipcMain.handle('update:install', async () => {
-    if (gameRunning()) throw new Error('Erst das Spiel beenden, dann aktualisieren.');
-    if (!(await updater.install(true))) throw new Error(updater.state.error ?? 'Kein Update bereit.');
+    if (anyGameRunning()) throw new Error('Erst das Spiel beenden, dann aktualisieren.');
+    // nur gemeldet (Einstellung „Updates automatisch“ aus): jetzt laden und prüfen
+    if (updater.state.phase === 'available' && process.platform === 'win32') {
+      const state = await updater.download();
+      if (state.phase !== 'ready') throw new Error(state.error ?? 'Das Update ließ sich nicht laden.');
+      if (anyGameRunning()) throw new Error('Erst das Spiel beenden, dann aktualisieren.');
+    }
+    if (!(await launchInstaller(true))) throw new Error(updater.state.error ?? 'Kein Update bereit.');
     quittingForUpdate = true;
     app.quit();
   });
+  // Hinweis „Update verfügbar“ vom Start (einmal)
+  ipcMain.handle('update:notice', () => {
+    const notice = startupNotice;
+    startupNotice = null;
+    return notice;
+  });
   ipcMain.handle('discord:status', () => discord.connection);
+  ipcMain.handle('discord:preview', () => {
+    if (!discordPreview) updatePresence();
+    return discordPreview;
+  });
+  // Seite im Launcher für den Discord-Status (nur bekannte Namen)
+  ipcMain.on('presence:view', (_e, view: unknown) => {
+    if (typeof view !== 'string' || !PRESENCE_VIEWS.includes(view as LauncherView) || presenceView === view) return;
+    presenceView = view as LauncherView;
+    if (presence.phase === 'launcher') updatePresence();
+  });
+
+  // Welt teilen: offene Welten der Freunde, Links heldixclient://welt/<code>, Beitreten
+  ipcMain.handle('worlds:get', (_e, refresh?: unknown) => (refresh === true || worlds.current.status === 'off' ? worlds.refresh() : worlds.current));
+  ipcMain.handle('worlds:take', () => {
+    // während des Einrichtungs-Assistenten bleibt der Link liegen (danach holt die Oberfläche ihn ab)
+    if (setupGate.active) return null;
+    const code = pendingWorld;
+    pendingWorld = null;
+    return code;
+  });
+  ipcMain.handle('worlds:open', (_e, code: unknown) => {
+    pendingWorld = worldCode(code);
+    send('world:open', null);
+  });
+  ipcMain.handle('worlds:public', (_e, code: unknown) => worldJoinView(code));
+  ipcMain.handle('worlds:join', (_e, code: unknown) => joinWorld(code));
+
+  // Benachrichtigungen (Glocke)
+  ipcMain.handle('notifications:list', () => notificationList());
+  ipcMain.handle('notifications:read', async (_e, id: unknown) => {
+    await notificationStore.markRead(id);
+    return notificationList();
+  });
+  ipcMain.handle('notifications:readAll', async () => {
+    await notificationStore.markAllRead(await activeAccountId());
+    return notificationList();
+  });
+  ipcMain.handle('notifications:clear', async () => {
+    await notificationStore.clear(await activeAccountId());
+    return notificationList();
+  });
 
   ipcMain.handle('instances:list', async () => Promise.all((await instances.list()).map(toInstanceInfo)));
   ipcMain.handle('instances:create', async (_e, data: NewInstance) => {
@@ -1019,8 +2109,34 @@ function registerIpc(): void {
   ipcMain.handle('social:removeFriend', (_e, uuid: unknown) => social.removeFriend(uuid));
   ipcMain.handle('social:conversations', () => social.listConversations());
   ipcMain.handle('social:messages', (_e, uuid: unknown, before?: unknown) => social.getMessages(uuid, before));
-  ipcMain.handle('social:send', (_e, uuid: unknown, text: unknown) => social.sendMessage(uuid, text));
-  ipcMain.handle('social:read', (_e, uuid: unknown) => social.markRead(uuid));
+  ipcMain.handle('social:send', (_e, uuid: unknown, text: unknown, extra?: unknown) => sendChatMessage(uuid, text, extra));
+  ipcMain.handle('social:delete', (_e, uuid: unknown, id: unknown) => social.deleteMessage(uuid, id));
+  ipcMain.handle('social:react', (_e, uuid: unknown, id: unknown, reaction: unknown) => social.react(uuid, id, reaction));
+  ipcMain.handle('social:typing', (_e, uuid: unknown) => social.typing(uuid).catch(() => undefined));
+  ipcMain.handle('social:read', async (_e, uuid: unknown) => {
+    await social.markRead(uuid);
+    if (typeof uuid === 'string') void markConversationRead(uuid.replace(/-/g, '').toLowerCase());
+  });
+  ipcMain.handle('social:status', (_e, patch: unknown) => social.setStatus(patch));
+  ipcMain.handle('social:updateFriend', (_e, uuid: unknown, patch: unknown) => social.updateFriend(uuid, patch));
+  ipcMain.handle('social:profile', (_e, uuid: unknown) => social.friendProfile(uuid));
+  ipcMain.handle('social:suggestions', () => social.suggestions());
+  ipcMain.handle('social:suggest', (_e, uuid: unknown) => social.requestSuggestion(uuid));
+  ipcMain.handle('social:joinServer', (_e, address: unknown) => joinServerAddress(address));
+  ipcMain.handle('party:get', (_e, refresh?: unknown) => (refresh === true || party.current.status === 'off' ? party.refresh() : party.current));
+  ipcMain.handle('party:invite', (_e, uuid: unknown) => party.invite(uuid as string));
+  ipcMain.handle('party:cancelInvite', (_e, uuid: unknown) => party.cancelInvite(uuid as string));
+  ipcMain.handle('party:accept', (_e, id: unknown) => party.accept(id as string));
+  ipcMain.handle('party:decline', (_e, id: unknown) => party.decline(id as string));
+  ipcMain.handle('party:leave', () => party.leave());
+  ipcMain.handle('party:kick', (_e, uuid: unknown) => party.kick(uuid as string));
+  ipcMain.handle('party:transfer', (_e, uuid: unknown) => party.transfer(uuid as string));
+  ipcMain.handle('party:chat', (_e, text: unknown) => party.chat(text));
+  ipcMain.handle('party:join', () => joinPartyTarget());
+  ipcMain.handle('worlds:mine', async () => {
+    await worlds.refresh().catch(() => undefined);
+    return worlds.ownWorlds();
+  });
   ipcMain.handle('social:blocked', () => social.listBlocked());
   ipcMain.handle('social:block', (_e, uuid: unknown) => social.blockPlayer(uuid));
   ipcMain.handle('social:unblock', (_e, uuid: unknown) => social.unblockPlayer(uuid));
@@ -1029,6 +2145,37 @@ function registerIpc(): void {
   ipcMain.handle('social:setPrivacy', (_e, patch: unknown) => social.setPrivacy(patch));
   ipcMain.handle('social:join', (_e, uuid: unknown, instanceId?: unknown) => joinFriend(uuid, instanceId));
   ipcMain.handle('social:skin', (_e, uuid: unknown) => social.playerSkin(uuid));
+
+  // Einladungen und Beitreten-Links
+  ipcMain.handle('invites:take', () => {
+    // während des Einrichtungs-Assistenten bleibt der Code liegen (der Assistent zeigt ihn nur als Karte, setup:get)
+    const { code, keep } = setupGate.takeInvite(pendingInvite);
+    pendingInvite = keep;
+    // erst jetzt ist die Einladung aus dem Download gezeigt
+    if (code) dropDownloadInvite();
+    return code;
+  });
+  // Freunde → Einladen: „Link von einem Freund? Hier einfügen“ (Web-Link, heldixclient://-Link oder Code) öffnet
+  // denselben Dialog wie ein geöffneter Link (invite:open → invites:take)
+  ipcMain.handle('invites:paste', (_e, text: unknown) => {
+    const code = parsePastedInvite(text);
+    const world = code ? null : parsePastedWorld(text);
+    if (world) {
+      pendingWorld = world;
+      send('world:open', null);
+      return world;
+    }
+    if (!code) throw new Error('Das ist kein Einladungs- oder Welt-Link. Er sieht so aus: heldixclient.com/einladung#abc23def45 bzw. heldixclient.com/welt#k7m2xq');
+    if (code !== pendingInvite) dropDownloadInvite();
+    pendingInvite = code;
+    send('invite:open', null);
+    return code;
+  });
+  ipcMain.handle('invites:public', (_e, code: unknown) => publicInviteView(code));
+  ipcMain.handle('invites:accept', (_e, code: unknown, join: unknown) => acceptInvite(code, join));
+  ipcMain.handle('invites:get', () => invites.state());
+  ipcMain.handle('invites:create', (_e, server: unknown) => invites.create(server));
+  ipcMain.handle('invites:revoke', (_e, code: unknown) => invites.revoke(code));
 
   // Skins & Cosmetics
   ipcMain.handle('profile:get', (_e, refresh?: unknown) => profiles.state(refresh === true));
@@ -1126,7 +2273,18 @@ function registerIpc(): void {
     if (!known && !/^hilfe\/[a-z0-9-]{1,60}$/.test(String(page))) throw new Error('Unbekannte Seite');
     await shell.openExternal(`${WEBSITE_URL.replace(/\/+$/, '')}/${page}`);
   });
-  ipcMain.handle('whatsnew:get', () => whatsNew());
+  // „Neu in …“ erst nach dem Einrichtungs-Assistenten (die Oberfläche fragt danach noch einmal)
+  ipcMain.handle('whatsnew:get', () => (setupGate.whatsNewAllowed() ? whatsNew() : null));
+  // Einrichtungs-Assistent (core/setup.ts, renderer/setup.ts)
+  ipcMain.handle('setup:get', () => ({ show: setupGate.active, invite: setupGate.peekInvite(pendingInvite) }));
+  ipcMain.handle('setup:restart', () => {
+    setupGate.begin();
+    setupEntries = null;
+    return { show: true, invite: setupGate.peekInvite(pendingInvite) };
+  });
+  ipcMain.handle('setup:addons', () => setupAddons());
+  ipcMain.handle('setup:install', (_e, addonId: unknown) => setupInstall(addonId));
+  ipcMain.handle('setup:finish', (_e, skipped: unknown) => finishSetup(skipped));
   ipcMain.handle('whatsnew:seen', async () => {
     await store.saveSettings({ lastSeenVersion: app.getVersion() });
   });
@@ -1353,7 +2511,11 @@ function createWindow(): void {
     return { action: 'deny' };
   });
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show();
+    closeSplash();
+  });
+  mainWindow.once('show', closeSplash);
   mainWindow.on('closed', () => (mainWindow = null));
   // Freunde: wieder sichtbar = gleich im 20-s-Takt weiter (verborgen: alle 60 s)
   // Abzeichen am Addon-Store: Stand der letzten Prüfung gleich nach dem Laden der Oberfläche
@@ -1363,6 +2525,14 @@ function createWindow(): void {
   mainWindow.on('show', () => social.wake());
   mainWindow.on('restore', () => social.wake());
   mainWindow.on('focus', () => social.wake());
+  // Schließen während des Spiels: in den Infobereich (Einstellung „Beim Schließen in den Infobereich“)
+  mainWindow.on('close', closeIntoTray);
+  // Discord: im Launcher „Stöbert im Addon-Store“ nur bei sichtbarem Fenster
+  for (const event of ['show', 'hide', 'minimize', 'restore'] as const) {
+    mainWindow.on(event as 'show', () => {
+      if (presence.phase === 'launcher') updatePresence();
+    });
+  }
   void mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
   // Nur für automatische Tests im Entwicklungsmodus:
@@ -1386,6 +2556,13 @@ function createWindow(): void {
           setGameState({ state: 'exited', code: -1, crash: { id: analysis.id, title: analysis.title } });
         }
       }
+      // HELDIX_SCREENSHOT_STATUS=<JSON wie HELDIX-STATUS>: Discord-Vorschau wie im laufenden Spiel (ohne Spiel, ohne Discord)
+      const statusLine = process.env.HELDIX_SCREENSHOT_STATUS;
+      if (statusLine) {
+        const instance = await selectedInstance().catch(() => null);
+        const status = parseStatusLine(`HELDIX-STATUS ${statusLine}`);
+        if (instance && status) updatePresence({ phase: 'running', instance, startedAt: Date.now() - 42 * 60_000, status });
+      }
       const script = process.env.HELDIX_SCREENSHOT_SCRIPT;
       if (script) await mainWindow!.webContents.executeJavaScript(script).catch((e: Error) => console.error(e));
       setTimeout(async () => {
@@ -1398,10 +2575,21 @@ function createWindow(): void {
   }
 }
 
-// Nur ein Launcher gleichzeitig (in der Entwicklung egal): ein zweiter Start holt das offene Fenster nach vorn
+// Nur ein Launcher gleichzeitig (in der Entwicklung egal): ein zweiter Start holt das offene Fenster nach vorn und
+// reicht einen Einladungslink aus seiner Befehlszeile weiter (Windows/Linux)
 const singleInstance = !app.isPackaged || app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
-app.on('second-instance', () => focusWindow());
+app.on('second-instance', (_event, argv) => {
+  focusWindow();
+  receiveInvite(findInviteLink(argv));
+  receiveWorld(findWorldLink(argv));
+});
+// macOS: Links kommen als Ereignis (auch vor dem Start; dann holt die Oberfläche den Code beim Laden ab)
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  receiveInvite(parseInviteLink(url));
+  receiveWorld(parseWorldLink(url));
+});
 
 if (singleInstance) {
   app.whenReady().then(async () => {
@@ -1409,31 +2597,94 @@ if (singleInstance) {
     Menu.setApplicationMenu(process.platform === 'darwin' ? macMenu() : null);
     // Windows-Benachrichtigungen brauchen die App-ID (wie appId in package.json, die der Installer der Verknüpfung gibt)
     if (process.platform === 'win32') app.setAppUserModelId(app.isPackaged ? 'dev.heldixclient.launcher' : process.execPath);
+    // Einladungslinks heldixclient://… öffnen den Launcher (der Installer trägt das Protokoll auch ein). Beim Entwickeln
+    // nicht systemweit registrieren – dort kommen Links nur über die Befehlszeile (npm start -- heldixclient://…).
+    if (app.isPackaged && !app.isDefaultProtocolClient(INVITE_PROTOCOL)) app.setAsDefaultProtocolClient(INVITE_PROTOCOL);
+    // Einladung aus dem Download: der Windows-Installer hat den Code aus seinem Dateinamen abgelegt. Die Datei bleibt, bis
+    // die Einladung gezeigt wurde (invites:take); ein mitgegebener Link hat Vorrang und ersetzt sie.
+    const inviteFile = path.join(paths.root, DOWNLOAD_INVITE_FILE);
+    const downloadInvite = await readDownloadInvite(inviteFile).catch(() => null);
+    if (downloadInvite && !pendingInvite) {
+      pendingInvite = downloadInvite;
+      downloadInviteFile = inviteFile;
+      launcherLog('Einladung aus dem Download geöffnet');
+    } else {
+      if (downloadInvite) void finishDownloadInvite(inviteFile).catch(() => undefined);
+      if (pendingInvite) launcherLog('Einladungslink geöffnet');
+    }
+    if (pendingWorld) launcherLog('Welt-Link geöffnet');
     registerIpc();
+    const settings = await store.getSettings();
+    autoUpdate = settings.autoUpdate;
+    closeToTraySetting = settings.closeToTray;
+
+    // Update beim Start (siehe core/startup-update.ts)
+    const memo = await readUpdateMemo(updateMemoFile);
+    const settled = settleUpdateMemo(memo, app.getVersion());
+    if (settled !== memo) {
+      console.log(`[Update] Version ${app.getVersion()} ist installiert${process.argv.includes('--updated') ? ' (vom Installer neu gestartet)' : ''}`);
+      await writeUpdateMemo(updateMemoFile, settled).catch(() => undefined);
+    }
+    previousGame = await readGameMarker(gameMarkerFile);
+    if (previousGame && !anyGameRunning()) await rm(gameMarkerFile, { force: true }).catch(() => undefined);
+    const plan = startupPlan({ enabled: updater.enabled(), platform: process.platform, autoUpdate });
+    let retrySoon = false;
+    if (plan === 'splash') {
+      const result = await updateBeforeStart().catch((error: unknown) => {
+        console.error('[Update] Prüfung beim Start fehlgeschlagen', error);
+        return { proceed: true, retrySoon: true };
+      });
+      if (!result.proceed) return;
+      retrySoon = result.retrySoon;
+    }
+
+    // erst nach der Prüfung: beendet sich der Launcher für ein Update, soll nichts halb geschrieben sein
+    // Einrichtungs-Assistent vor ensureInstances entscheiden (danach gibt es immer eine Instanz)
+    await decideSetup().catch((error) => console.error('[Launcher] Einrichtung: Zustand nicht lesbar', error));
     await ensureInstances().catch((error) => console.error('[Launcher] Instanzen konnten nicht vorbereitet werden', error));
+    windowAllowed = true;
     createWindow();
     social.start();
     addonStore.start();
-    const settings = await store.getSettings();
+    // Einladungen: erster Stand bald nach dem Start (ohne Meldung), dann alle 5 Minuten vergleichen
+    setTimeout(() => void invites.poll(), 15_000).unref();
+    setInterval(() => void invites.poll(), INVITE_POLL_MS).unref();
     applyPresenceSettings(settings);
-    autoUpdate = settings.autoUpdate;
-    updater.start(() => autoUpdate);
+    // Kopf und Cape für den Discord-Status (Cape nach dem Start, damit die Anmeldung beim Dienst nicht doppelt läuft)
+    void refreshPresencePlayer(false);
+    setTimeout(() => void refreshPresencePlayer(), 20_000).unref();
+    worlds.start();
+    // ohne Startfenster gleich prüfen (nur Hinweis); danach alle 30 Minuten, nach einer gescheiterten Prüfung schon in einer Minute
+    if (plan === 'background') void updateNoticeAtStart().catch(() => undefined);
+    updater.start(() => autoUpdate, retrySoon ? 60_000 : undefined);
     void cleanupOfficialLauncher();
   });
 }
 
+/** Discord-Status beim Beenden gelöscht und Verlauf gespeichert */
+let quitPrepared = false;
 app.on('before-quit', (event) => {
-  // geladenes Update still installieren (nicht, solange das Spiel läuft – es nutzt Dateien des Launchers)
-  if (!quittingForUpdate && autoUpdate && updater.installerPath() && !gameRunning()) {
+  // geladenes Update still installieren (Rückfall, wenn nicht schon beim Start oder mit „Jetzt neu starten“; nicht,
+  // solange ein Spiel läuft – es nutzt Dateien des Launchers)
+  if (!quittingForUpdate && autoUpdate && updater.installerPath() && !anyGameRunning()) {
     event.preventDefault();
     quittingForUpdate = true;
-    updater.install(false).finally(() => app.quit());
+    launchInstaller(false).finally(() => app.quit());
     return;
   }
-  // Discord-Status löschen, Hintergrund-Abfragen beenden
-  discord.stop();
+  appQuitting = true;
+  // einmal: Discord-Status löschen (warten, bis die Nachricht raus ist – sonst bleibt er stehen, bis Discord das Ende
+  // bemerkt) und den Verlauf der Glocke speichern; höchstens 1,5 Sekunden
+  if (!quitPrepared) {
+    event.preventDefault();
+    quitPrepared = true;
+    void Promise.race([Promise.all([discord.stop(), notificationStore.flush()]), new Promise((resolve) => setTimeout(resolve, 1500))]).finally(() => app.quit());
+    return;
+  }
   social.stop();
   addonStore.stop();
+  worlds.stop();
+  destroyTray();
 });
 
 app.on('window-all-closed', () => {
@@ -1441,5 +2692,5 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  if (windowAllowed && BrowserWindow.getAllWindows().length === 0) createWindow();
 });

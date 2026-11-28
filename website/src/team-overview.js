@@ -1,53 +1,52 @@
-// HeldixClient – Webseite: Team-Bereich → Übersicht (Startseite des Team-Bereichs).
+// HeldixClient – Webseite: Team-Bereich → Übersicht (Dashboard, Heldix-Dienst ab 1.12.0).
 //
-// Was gerade ansteht, auf einen Blick: Zahlen (Meldungen, Support, Einreichungen, Addon-Meldungen, Sperren) als
-// Kacheln mit Link in den Bereich, darunter die neuesten offenen Einträge je Bereich (ein Klick öffnet den Eintrag),
-// für Admins die letzten Team-Aktionen und die Zahlen des Dienstes. Moderatoren sehen nichts, was nur Admins dürfen.
-//
-// Anfragen: Meldungen, Support, Einreichungen und Addon-Meldungen kommen aus dem Nachfragen, das team.js ohnehin
-// alle 30 Sekunden macht (getLive). Sperren, Protokoll und /v1/status lädt die Übersicht nur beim Öffnen und mit
-// „Aktualisieren“ – nicht bei jedem Nachfragen.
-import { avatar, formatDateTime, h, icon, reasonLabel, relativeTime, rerender, timeEl } from './app-common.js';
-import { accessChips, addonIcon, addonReasonLabel } from './addon-common.js';
+// - Gruß mit dem, was für deine Rolle ansteht, „Stand … Uhr“ und „Aktualisieren“.
+// - Kennzahlen aus GET /v1/team/dashboard: Spieler online, im Voice, offene Welten (genau, ohne Schwelle) und – nur
+//   mit dem passenden Recht – offene Meldungen, wartender Support, Einreichungen, Addon-Meldungen.
+// - „Als Nächstes zu tun“: die ältesten offenen Einträge, die deine Rolle bearbeiten darf (aus dem Nachfragen von
+//   team.js), mit Filter nach Art und Knopf direkt in den Eintrag.
+// - Letzte Aktivität (recent aus dem Dashboard, nur mit Recht „Protokoll“), Team und Abzeichen (team.view),
+//   Heldix-Dienst (öffentlicher Status).
+// Älterer Dienst ohne /v1/team/dashboard: Zahlen aus dem Nachfragen, Online/Voice/Welten als Strich.
+import { avatar, h, icon, relativeTime, rerender, timeEl } from './app-common.js';
+import { addonReasonLabel } from './addon-common.js';
 import { publicGet } from './public-cards.js';
+import { COMMUNITY_BADGES, ROLES, badgeIcon, roleIcon, roleShort } from './rollen.js';
 
-const LIST_MAX = 5;
 const NUMBER = new Intl.NumberFormat('de-DE');
+const TIME = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
+const TODO_MAX = 8;
 
 const plural = (count, one, many) => `${NUMBER.format(count)} ${count === 1 ? one : many}`;
 
-/** „1 Meldung, 2 Anfragen und 3 Einreichungen“ */
 function joinParts(parts) {
   if (parts.length <= 1) return parts.join('');
   return `${parts.slice(0, -1).join(', ')} und ${parts[parts.length - 1]}`;
 }
 
-function sinceText(ms) {
-  if (typeof ms !== 'number' || !Number.isFinite(ms)) return '–';
-  const days = Math.floor((Date.now() - ms) / 86_400_000);
-  if (days >= 2) return `seit ${NUMBER.format(days)} Tagen`;
-  const hours = Math.floor((Date.now() - ms) / 3_600_000);
-  if (hours >= 1) return hours === 1 ? 'seit 1 Stunde' : `seit ${hours} Stunden`;
-  return 'seit wenigen Minuten';
+function waitText(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) return '';
+  const minutes = Math.max(0, Math.round((Date.now() - ms) / 60_000));
+  if (minutes < 60) return `${minutes} Min.`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} Std.`;
+  return `${Math.round(hours / 24)} Tagen`;
 }
 
 /**
- * shell: Rahmen. teamCall(method, path): Team-Anfrage. isAdmin(), getMe(). getLive(): { reports, tickets,
- * submissions, addonReports, addonReportsForbidden, at } aus dem Nachfragen. refreshLive(): Zähler jetzt neu laden.
- * actionLabel(action): Text für Protokoll-Einträge.
+ * shell: Rahmen. teamCall(method, path): Team-Anfrage. can(recht): darf die Rolle das? getMe(). getLive(): { reports,
+ * tickets, submissions, addonReports, at } aus dem Nachfragen. refreshLive(): Zähler jetzt neu laden. actionLabel(action).
  */
-export function initTeamOverview({ shell, teamCall, isAdmin, getMe, getLive, refreshLive, actionLabel }) {
+export function initTeamOverview({ shell, teamCall, can, getMe, getLive, refreshLive, actionLabel }) {
   const root = document.getElementById('team-dashboard');
-  const extra = { bans: null, audit: null, status: null, loadedAt: 0 };
+  const extra = { dashboard: null, members: null, badges: null, status: null, loadedAt: 0, filter: 'alle', available: true };
   let loading = null;
 
-  /** Bereich wählen (mit Werten für den Eintrag), Seite hoch zum Titel. */
   function go(section, params = null) {
     shell.select(section, { history: 'push', params, scroll: true, source: 'user' });
     document.getElementById('shell-titel')?.focus({ preventScroll: true });
   }
 
-  /** Link in einen Bereich: echte Adresse (Mittelklick, neuer Tab), Klick wechselt ohne Neuladen. */
   function sectionLink(section, params, attrs, ...children) {
     const query = new URLSearchParams({ reiter: section });
     if (params) for (const [key, value] of Object.entries(params)) query.set(key, String(value));
@@ -65,19 +64,20 @@ export function initTeamOverview({ shell, teamCall, isAdmin, getMe, getLive, ref
   // -------------------------------------------------------------------------------------------------------
 
   async function loadExtra() {
-    const admin = isAdmin();
-    const [bans, audit, status] = await Promise.all([
-      teamCall('GET', '/v1/team/bans').catch(() => null),
-      admin ? teamCall('GET', '/v1/team/audit?limit=6').catch(() => null) : null,
+    const [dashboard, members, badges, status] = await Promise.all([
+      teamCall('GET', '/v1/team/dashboard').catch((error) => (error.status === 404 ? 'alt' : null)),
+      can('team.view') ? teamCall('GET', '/v1/team/members').catch(() => null) : null,
+      can('team.view') ? teamCall('GET', '/v1/team/badges').catch(() => null) : null,
       publicGet('/v1/status').catch(() => null),
     ]);
-    extra.bans = Array.isArray(bans?.bans) ? bans.bans : null;
-    extra.audit = admin && Array.isArray(audit?.entries) ? audit.entries.slice(0, 6) : null;
+    extra.available = dashboard !== 'alt';
+    extra.dashboard = dashboard && dashboard !== 'alt' ? dashboard : null;
+    extra.members = Array.isArray(members?.members) ? members.members : null;
+    extra.badges = Array.isArray(badges?.badges) ? badges.badges : null;
     extra.status = status && typeof status === 'object' ? status : null;
     extra.loadedAt = Date.now();
   }
 
-  /** Übersicht geöffnet (oder „Aktualisieren“): Zahlen, die nicht nachgefragt werden, und – wenn alt – die Zähler. */
   function load({ force = false } = {}) {
     if (loading) return loading;
     const live = getLive();
@@ -92,221 +92,221 @@ export function initTeamOverview({ shell, teamCall, isAdmin, getMe, getLive, ref
   }
 
   // -------------------------------------------------------------------------------------------------------
+  // Als Nächstes zu tun
+  // -------------------------------------------------------------------------------------------------------
+
+  function todoItems(live) {
+    const items = [];
+    if (can('support')) {
+      for (const ticket of live.tickets ?? []) {
+        if (ticket.status === 'closed' || !ticket.unread) continue;
+        const since = ticket.updatedAt ?? ticket.at;
+        items.push({ kind: 'support', at: since, title: ticket.subject, meta: `Support #${ticket.id} · ${ticket.player?.name ?? '?'} · wartet seit ${waitText(since)}`, chip: Date.now() - since > 2 * 3600_000 ? ['Dringend', 'danger'] : null, action: 'Antworten', section: 'support', params: { anfrage: ticket.id }, primary: true });
+      }
+    }
+    if (can('moderation')) {
+      const byPlayer = new Map();
+      for (const report of live.reports ?? []) {
+        const key = report.reported?.uuid ?? report.id;
+        byPlayer.set(key, [...(byPlayer.get(key) ?? []), report]);
+      }
+      for (const reports of byPlayer.values()) {
+        const first = [...reports].sort((a, b) => (a.at ?? 0) - (b.at ?? 0))[0];
+        items.push({ kind: 'flag', at: first.at, title: `${first.reported?.name ?? '?'} · ${reasonLabelOf(first.reason)}`, meta: `Meldung #${first.id} · von ${first.reporter?.name ?? '?'}${first.messages?.length ? ' · mit Chatverlauf' : ''} · ${relativeTime(first.at)}`, chip: reports.length > 1 ? [`${reports.length} Meldungen`, ''] : null, action: 'Prüfen', section: 'meldungen', params: { meldung: first.id }, primary: true });
+      }
+    }
+    if (can('addons')) {
+      for (const sub of live.submissions ?? []) {
+        const at = sub.submittedAt ?? sub.createdAt;
+        items.push({ kind: 'addon', at, title: `${sub.name || sub.addonId || 'Addon'}${sub.version ? ` ${sub.version}` : ''}`, meta: `Einreichung · ${sub.submitter?.name ?? '?'} · ${relativeTime(at)}`, chip: sub.access?.access === 'minecraft' ? ['Greift in Minecraft ein', 'voice'] : null, action: 'Prüfen', section: 'addons', params: { einreichung: sub.id }, primary: true });
+      }
+    }
+    if (can('addon-reports')) {
+      for (const report of live.addonReports ?? []) {
+        items.push({ kind: 'addon', at: report.at, title: `${report.addon?.name ?? report.addonId ?? 'Addon'} gemeldet`, meta: `Addon-Meldung · ${addonReasonLabel ? addonReasonLabel(report.reason) : report.reason} · ${relativeTime(report.at)}`, chip: null, action: 'Ansehen', section: 'addons', params: { unterreiter: 'meldungen' }, primary: false });
+      }
+    }
+    return items.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+  }
+
+  function reasonLabelOf(reason) {
+    return { spam: 'Spam', harassment: 'Belästigung', inappropriate: 'Unangemessen', other: 'Sonstiges' }[reason] ?? String(reason ?? '');
+  }
+
+  const TYPE_ICON = { support: 'help-circle', flag: 'flag', addon: 'addons', cosmetic: 'sparkles', update: 'download' };
+
+  function todoRow(item) {
+    return h(
+      'li',
+      { class: 'row todo__item', dataset: { art: item.kind } },
+      h('span', { class: `todo__type todo__type--${item.kind}`, 'aria-hidden': 'true' }, shellIconFallback(TYPE_ICON[item.kind])),
+      h('span', { class: 'row-main' }, h('span', { class: 'row-title', text: item.title }), h('span', { class: 'row-sub', text: item.meta })),
+      item.chip ? h('span', { class: `chip${item.chip[1] ? ` chip--${item.chip[1]}` : ''}`, text: item.chip[0] }) : null,
+      sectionLink(item.section, item.params, { class: `btn btn--sm ${item.primary ? 'btn--primary' : 'btn--secondary'}`, dataset: { focusKey: `todo:${item.section}:${JSON.stringify(item.params)}` } }, item.action),
+    );
+  }
+
+  function shellIconFallback(name) {
+    const node = icon(name);
+    return node.nodeType === 1 ? node : icon('info');
+  }
+
+  // -------------------------------------------------------------------------------------------------------
   // Zeichnen
   // -------------------------------------------------------------------------------------------------------
 
-  function waitingTickets(live) {
-    return (live.tickets ?? []).filter((ticket) => ticket.unread && ticket.status !== 'closed');
+  function kpi({ id, label, value, trend, tone = '', dot = null, iconName = null, section = null, params = null }) {
+    const known = typeof value === 'number';
+    const body = [h('span', { class: 'kpi__label' }, dot ? h('span', { class: `dot dot--${dot}` }) : iconName ? icon(iconName) : null, label), h('strong', { class: 'kpi__value', text: known ? NUMBER.format(value) : '–' }), trend ? h('span', { class: 'kpi__trend', text: trend }) : null];
+    const cls = `kpi${tone && known && value > 0 ? ` kpi--${tone}` : ''}`;
+    if (section) return h('li', { dataset: { kpi: id } }, sectionLink(section, params, { class: `${cls} kpi--link` }, ...body));
+    return h('li', { class: cls, dataset: { kpi: id } }, ...body);
   }
 
-  function statTile({ id, section, params, label, count, iconName, detail, tone }) {
-    const known = typeof count === 'number';
-    return sectionLink(
-      section,
-      params,
-      { class: `dash-stat${known && count > 0 ? ` ${tone}` : known ? ' calm' : ''}`, dataset: { stat: id, focusKey: `stat:${id}` } },
-      h('span', { class: 'dash-stat-icon', 'aria-hidden': 'true' }, icon(iconName)),
-      h('span', { class: 'dash-stat-body' }, h('span', { class: 'dash-stat-value', text: known ? NUMBER.format(count) : '–' }), h('span', { class: 'dash-stat-label', text: label }), h('span', { class: 'dash-stat-detail', text: detail })),
-    );
-  }
-
-  function listCard({ id, title, iconName, section, params, allLabel, items, empty, row }) {
-    const headId = `dash-${id}-titel`;
-    return h(
-      'section',
-      { class: 'app-card dash-list', dataset: { list: id }, 'aria-labelledby': headId },
-      h(
-        'div',
-        { class: 'dash-list-head' },
-        h('h3', { id: headId }, icon(iconName), h('span', { text: title }), items && items.length ? h('span', { class: 'count soft-count', text: String(items.length > 99 ? '99+' : items.length) }) : null),
-        sectionLink(section, params, { class: 'dash-all', dataset: { focusKey: `alle:${id}` } }, allLabel, icon('chevron-right')),
-      ),
-      items === null
-        ? h('p', { class: 'muted small dash-empty', text: 'Wird geladen …' })
-        : items.length
-          ? h('ul', { class: 'rows dash-rows' }, items.slice(0, LIST_MAX).map((item) => h('li', null, row(item))))
-          : h('p', { class: 'dash-empty' }, icon('check'), h('span', { text: empty })),
-      items && items.length > LIST_MAX ? h('p', { class: 'dash-more muted small', text: `und ${plural(items.length - LIST_MAX, 'weiterer Eintrag', 'weitere Einträge')}` }) : null,
-    );
-  }
-
-  function rowLink(section, params, key, ...children) {
-    return sectionLink(section, params, { class: 'row row-button dash-row', dataset: { focusKey: key } }, ...children, icon('chevron-right'));
-  }
-
-  const reportRow = (report) =>
-    rowLink(
-      'meldungen',
-      { meldung: report.id },
-      `meldung:${report.id}`,
-      avatar(report.reported?.name, report.reported?.uuid, { size: 'sm' }),
-      h(
-        'span',
-        { class: 'row-main' },
-        h('span', { class: 'row-title' }, h('span', { text: report.reported?.name ?? 'Unbekannt' }), h('span', { class: 'chip', text: reasonLabel(report.reason) })),
-        h('span', { class: 'row-meta' }, `#${report.id} · gemeldet von ${report.reporter?.name ?? '?'} · `, timeEl(report.at, relativeTime(report.at))),
-      ),
-    );
-
-  const ticketRow = (ticket) =>
-    rowLink(
-      'support',
-      { anfrage: ticket.id },
-      `anfrage:${ticket.id}`,
-      avatar(ticket.player?.name, ticket.player?.uuid, { size: 'sm' }),
-      h(
-        'span',
-        { class: 'row-main' },
-        h('span', { class: 'row-title' }, h('span', { class: 'dash-ellipsis', text: ticket.subject })),
-        h('span', { class: 'row-meta' }, `#${ticket.id} · ${ticket.player?.name ?? '?'} · wartet `, timeEl(ticket.updatedAt ?? ticket.at, sinceText(ticket.updatedAt ?? ticket.at))),
-      ),
-    );
-
-  const submissionRow = (sub) =>
-    rowLink(
-      'addons',
-      { einreichung: sub.id },
-      `einreichung:${sub.id}`,
-      addonIcon(sub.icon, 'addon-icon small'),
-      h(
-        'span',
-        { class: 'row-main' },
-        h('span', { class: 'row-title' }, h('span', { text: sub.name || sub.addonId || '?' }), h('span', { class: 'chip', text: sub.version || '?' }), sub.access ? accessChips(sub.access, { compact: true }) : null),
-        h('span', { class: 'row-meta' }, `von ${sub.submitter?.name ?? '?'} · `, timeEl(sub.submittedAt, relativeTime(sub.submittedAt))),
-      ),
-    );
-
-  const addonReportRow = (report) =>
-    rowLink(
-      'addons',
-      { unterreiter: 'meldungen' },
-      `addon-meldung:${report.id}`,
-      h('span', { class: 'row-icon', 'aria-hidden': 'true' }, icon('flag')),
-      h(
-        'span',
-        { class: 'row-main' },
-        h('span', { class: 'row-title' }, h('span', { text: report.addonName || report.addonId || '?' }), h('span', { class: `chip${report.reason === 'malware' ? ' danger' : ''}`, text: addonReasonLabel(report.reason) })),
-        h('span', { class: 'row-meta' }, `#${report.id} · von ${report.reporter?.name ?? '?'} · `, timeEl(report.at, relativeTime(report.at))),
-      ),
-    );
-
-  const auditRow = (entry) =>
-    h(
-      'div',
-      { class: 'row dash-audit' },
-      avatar(entry.actor?.name, entry.actor?.uuid, { size: 'xs' }),
-      h(
-        'span',
-        { class: 'row-main' },
-        h('span', { class: 'row-title' }, h('strong', { text: entry.actor?.name ?? '?' }), h('span', { class: 'muted', text: actionLabel(entry.action) ?? String(entry.action ?? '?') })),
-        h('span', { class: 'row-meta' }, entry.target ? `${entry.target} · ` : '', timeEl(entry.at, formatDateTime(entry.at))),
-      ),
-    );
-
-  function numbers() {
-    const status = extra.status;
-    if (!status) return h('p', { class: 'muted small', text: 'Die Zahlen des Dienstes sind gerade nicht abrufbar.' });
-    const facts = [
-      ['online', 'Spieler online', typeof status.online === 'number' ? NUMBER.format(status.online) : '–'],
-      ['spieler', 'Spieler gesamt', typeof status.players === 'number' ? NUMBER.format(status.players) : '–'],
-      ['addons', 'Addons im Store', typeof status.addons === 'number' ? NUMBER.format(status.addons) : '–'],
-      typeof status.cosmetics === 'number' ? ['cosmetics', 'Cosmetics im Katalog', NUMBER.format(status.cosmetics)] : null,
-      ['launcher', 'Launcher', status.launcher ? `Version ${status.launcher}` : 'noch keine'],
-      ['dienst', 'Heldix-Dienst', status.service ? `Version ${status.service}` : '–'],
-      ['seit', 'Läuft', typeof status.since === 'number' ? sinceText(status.since) : '–'],
-    ].filter(Boolean);
-    return h(
-      'dl',
-      { class: 'dash-kpis' },
-      facts.map(([key, label, value]) => h('div', { class: 'dash-kpi', dataset: { kpi: key } }, h('dt', { text: label }), h('dd', { text: value }))),
-    );
+  function summary(live, dashboard) {
+    const parts = [];
+    const reports = can('moderation') ? live.reports?.length ?? dashboard?.reports : null;
+    const support = can('support') ? (live.tickets ?? []).filter((ticket) => ticket.unread && ticket.status !== 'closed').length : null;
+    const submissions = can('addons') ? live.submissions?.length ?? dashboard?.submissions : null;
+    const addonReports = can('addon-reports') ? live.addonReports?.length ?? dashboard?.addonReports : null;
+    if (reports) parts.push(plural(reports, 'Meldung', 'Meldungen'));
+    if (support) parts.push(plural(support, 'Support-Anfrage', 'Support-Anfragen'));
+    if (submissions) parts.push(plural(submissions, 'Einreichung', 'Einreichungen'));
+    if (addonReports) parts.push(plural(addonReports, 'Addon-Meldung', 'Addon-Meldungen'));
+    if (!parts.length) {
+      if (getMe()?.role === 'tester') return 'Gerade gibt es für dich nichts zu tun. Vorab-Versionen erscheinen hier, sobald es sie gibt.';
+      return 'Gerade wartet nichts auf dich. Danke fürs Mitmachen!';
+    }
+    return `${joinParts(parts)} ${parts.length === 1 && /^1 /.test(parts[0]) ? 'wartet' : 'warten'} aufs Team.`;
   }
 
   function render() {
-    if (!root) return;
     const live = getLive();
-    const admin = isAdmin();
     const me = getMe();
-    const reports = live.reports;
-    const waiting = live.tickets ? waitingTickets(live) : null;
-    const submissions = live.submissions;
-    const addonReports = live.addonReportsForbidden ? null : live.addonReports;
-    const bans = extra.bans;
-    const oldest = (list, field) => (list && list.length ? Math.min(...list.map((item) => item[field] ?? Date.now())) : null);
-
-    const parts = [];
-    if (reports?.length) parts.push(plural(reports.length, 'Meldung', 'Meldungen'));
-    if (waiting?.length) parts.push(plural(waiting.length, 'Anfrage', 'Anfragen'));
-    if (submissions?.length) parts.push(plural(submissions.length, 'Einreichung', 'Einreichungen'));
-    if (addonReports?.length) parts.push(plural(addonReports.length, 'Addon-Meldung', 'Addon-Meldungen'));
-    const total = (reports?.length ?? 0) + (waiting?.length ?? 0) + (submissions?.length ?? 0) + (addonReports?.length ?? 0);
-    const summary = reports === null && waiting === null ? 'Die offenen Punkte werden geladen …' : total ? `${joinParts(parts)} ${total === 1 ? 'wartet' : 'warten'} auf das Team.` : 'Gerade wartet nichts auf das Team. Alles erledigt!';
-
-    const signature = JSON.stringify([admin, me?.name, reports, waiting, submissions, addonReports, live.addonReportsForbidden, bans, extra.audit, extra.status, Math.floor(Date.now() / 60_000)]);
+    const dashboard = extra.dashboard;
+    const todo = todoItems(live);
+    const kinds = [...new Set(todo.map((item) => item.kind))];
+    if (!kinds.includes(extra.filter)) extra.filter = 'alle';
+    const shown = (extra.filter === 'alle' ? todo : todo.filter((item) => item.kind === extra.filter)).slice(0, TODO_MAX);
+    const stand = Math.max(live.at || 0, extra.loadedAt || 0);
+    const signature = JSON.stringify([me?.name, me?.role, dashboard, todo.map((item) => [item.title, item.meta, item.chip]), extra.filter, extra.members?.length, extra.badges, extra.status?.service, Math.floor(stand / 60_000)]);
     rerender(root, signature, () => {
-      const refresh = h('button', { type: 'button', class: 'button tiny ghost', id: 'uebersicht-neu', dataset: { focusKey: 'uebersicht-neu' } }, icon('refresh'), 'Aktualisieren');
+      const refresh = h('button', { type: 'button', class: 'btn btn--secondary btn--sm', id: 'dash-aktualisieren', dataset: { focusKey: 'dash:aktualisieren' } }, icon('refresh'), 'Aktualisieren');
       refresh.addEventListener('click', async () => {
         refresh.disabled = true;
-        refresh.setAttribute('aria-busy', 'true');
         try {
           await load({ force: true });
         } finally {
           refresh.disabled = false;
-          refresh.removeAttribute('aria-busy');
         }
       });
-      const stand = Math.max(live.at || 0, extra.loadedAt || 0);
-      const stats = [
-        statTile({ id: 'meldungen', section: 'meldungen', label: 'offene Meldungen', count: reports?.length ?? null, iconName: 'flag', tone: 'warn', detail: reports?.length ? `älteste ${relativeTime(oldest(reports, 'at'))}` : 'nichts offen' }),
-        statTile({ id: 'support', section: 'support', label: 'Anfragen warten', count: waiting?.length ?? null, iconName: 'chat', tone: 'warn', detail: waiting?.length ? `älteste ${sinceText(oldest(waiting, 'updatedAt'))}` : 'alles beantwortet' }),
-        statTile({ id: 'einreichungen', section: 'addons', params: { unterreiter: 'einreichungen' }, label: 'Einreichungen zu prüfen', count: submissions?.length ?? null, iconName: 'addons', tone: 'accent', detail: submissions?.length ? `neueste ${relativeTime(Math.max(...submissions.map((sub) => sub.submittedAt ?? 0)))}` : 'nichts zu prüfen' }),
-        live.addonReportsForbidden ? null : statTile({ id: 'addon-meldungen', section: 'addons', params: { unterreiter: 'meldungen' }, label: 'Addon-Meldungen', count: addonReports?.length ?? null, iconName: 'warning', tone: 'warn', detail: addonReports?.length ? `älteste ${relativeTime(oldest(addonReports, 'at'))}` : 'nichts offen' }),
-        statTile({ id: 'sperren', section: 'sperren', label: 'aktive Sperren', count: bans?.length ?? null, iconName: 'ban', tone: 'neutral', detail: bans?.length ? `zuletzt ${[...bans].sort((a, b) => (b.at ?? 0) - (a.at ?? 0))[0].name}` : bans ? 'niemand gesperrt' : '–' }),
+      const waiting = can('support') ? (live.tickets ?? []).filter((ticket) => ticket.unread && ticket.status !== 'closed') : [];
+      const oldestWait = waiting.length ? Math.min(...waiting.map((ticket) => ticket.updatedAt ?? ticket.at ?? Date.now())) : null;
+      const oldestReport = (live.reports ?? []).length ? Math.min(...live.reports.map((report) => report.at ?? Date.now())) : null;
+      const kpis = [
+        kpi({ id: 'online', label: 'Spieler online', value: dashboard?.online ?? null, dot: 'online', trend: dashboard ? 'im Spiel verbunden' : extra.available ? '' : 'ab Dienst 1.12.0' }),
+        kpi({ id: 'voice', label: 'Im Voice', value: dashboard?.voice ?? null, dot: 'voice', trend: dashboard ? 'Spiel und Browser' : '' }),
+        kpi({ id: 'welten', label: 'Offene Welten', value: dashboard?.worlds ?? null, iconName: 'world', trend: dashboard && dashboard.worlds === null ? 'Welt teilen aus' : dashboard ? 'gerade geöffnet' : '' }),
+        can('moderation') ? kpi({ id: 'meldungen', label: 'Meldungen', value: live.reports?.length ?? dashboard?.reports ?? null, iconName: 'flag', tone: 'warn', trend: oldestReport ? `offen · älteste ${relativeTime(oldestReport)}` : 'nichts offen', section: 'meldungen' }) : null,
+        can('support') ? kpi({ id: 'support', label: 'Support', value: waiting.length, iconName: 'help-circle', tone: 'warn', trend: oldestWait ? `warten · älteste ${waitText(oldestWait)}` : 'alles beantwortet', section: 'support' }) : null,
+        can('addons') || can('addon-reports')
+          ? kpi({ id: 'pruefen', label: 'Zu prüfen', value: (can('addons') ? live.submissions?.length ?? dashboard?.submissions ?? 0 : 0) + (can('addon-reports') ? live.addonReports?.length ?? dashboard?.addonReports ?? 0 : 0), iconName: 'addons', tone: 'warn', trend: [can('addons') ? plural(live.submissions?.length ?? dashboard?.submissions ?? 0, 'Einreichung', 'Einreichungen') : null, can('addon-reports') ? plural(live.addonReports?.length ?? dashboard?.addonReports ?? 0, 'Addon-Meldung', 'Addon-Meldungen') : null].filter(Boolean).join(' · '), section: 'addons' })
+          : null,
       ].filter(Boolean);
+      const filterGroup =
+        kinds.length > 1
+          ? h(
+              'div',
+              { class: 'segmented segmented--sm card__head-end', role: 'radiogroup', 'aria-label': 'Nach Art filtern', id: 'todo-filter' },
+              [['alle', 'Alle'], ...kinds.map((kind) => [kind, { support: 'Support', flag: 'Meldungen', addon: 'Addons' }[kind] ?? kind])].map(([value, label]) => {
+                const input = h('input', { type: 'radio', name: 'todo-filter', value, checked: extra.filter === value || undefined });
+                input.addEventListener('change', () => {
+                  extra.filter = value;
+                  render();
+                });
+                return h('label', null, input, h('span', { text: label }));
+              }),
+            )
+          : null;
+      const recent = Array.isArray(dashboard?.recent) ? dashboard.recent.slice(0, 6) : null;
+      const roleCounts = extra.members ? ROLES.map((role) => [role.id, extra.members.filter((member) => member.role === role.id).length]) : null;
+      const badgeCounts = extra.badges ? COMMUNITY_BADGES.map((badge) => [badge.id, extra.badges.filter((entry) => entry.badge === badge.id).length]) : null;
+      const status = extra.status;
       return [
         h(
           'section',
-          { class: 'app-card dash-hello', 'aria-labelledby': 'dash-hallo' },
-          h('div', { class: 'dash-hello-text' }, h('h2', { id: 'dash-hallo', text: `Hallo, ${me?.name ?? ''}!` }), h('p', { id: 'dash-zusammenfassung', text: summary })),
-          h('div', { class: 'dash-hello-side' }, stand ? h('span', { class: 'muted small dash-stand' }, 'Stand ', timeEl(stand, new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' }).format(stand)), ' Uhr') : null, refresh),
+          { class: 'card team-hello', 'aria-labelledby': 'dash-hallo' },
+          h('div', null, h('h2', { class: 'h3', id: 'dash-hallo', text: `Hallo, ${me?.name ?? ''}!` }), h('p', { class: 'text-2', id: 'dash-zusammenfassung', text: summary(live, dashboard) })),
+          h('span', { class: 'team-hello__time' }, stand ? h('span', { class: 'dash-stand' }, 'Stand ', timeEl(stand, TIME.format(stand)), ' Uhr') : null, refresh),
         ),
-        h('div', { class: 'dash-stats', role: 'list', 'aria-label': 'Was ansteht' }, stats.map((tile) => h('div', { role: 'listitem', class: 'dash-stat-item' }, tile))),
+        h('ul', { class: 'kpis', 'aria-label': 'Kennzahlen', id: 'dash-kennzahlen' }, kpis),
         h(
           'div',
-          { class: 'dash-grid' },
-          listCard({ id: 'meldungen', title: 'Offene Meldungen', iconName: 'flag', section: 'meldungen', allLabel: 'Alle Meldungen', items: reports ? [...reports].sort((a, b) => (b.at ?? 0) - (a.at ?? 0)) : null, empty: 'Keine offenen Meldungen.', row: reportRow }),
-          listCard({ id: 'support', title: 'Support wartet', iconName: 'chat', section: 'support', allLabel: 'Zum Support', items: waiting ? [...waiting].sort((a, b) => (a.updatedAt ?? a.at ?? 0) - (b.updatedAt ?? b.at ?? 0)) : null, empty: 'Alle Anfragen sind beantwortet.', row: ticketRow }),
-          listCard({ id: 'einreichungen', title: 'Addons zur Prüfung', iconName: 'addons', section: 'addons', params: { unterreiter: 'einreichungen' }, allLabel: 'Alle Einreichungen', items: submissions ? [...submissions].sort((a, b) => (a.submittedAt ?? 0) - (b.submittedAt ?? 0)) : null, empty: 'Keine Einreichungen zu prüfen.', row: submissionRow }),
-          live.addonReportsForbidden
-            ? null
-            : listCard({ id: 'addon-meldungen', title: 'Addon-Meldungen', iconName: 'warning', section: 'addons', params: { unterreiter: 'meldungen' }, allLabel: 'Alle Addon-Meldungen', items: addonReports ? [...addonReports].sort((a, b) => (b.at ?? 0) - (a.at ?? 0)) : null, empty: 'Keine offenen Addon-Meldungen.', row: addonReportRow }),
-          admin && extra.audit !== null
-            ? h(
-                'section',
-                { class: 'app-card dash-list dash-wide', dataset: { list: 'protokoll' }, 'aria-labelledby': 'dash-protokoll-titel' },
-                h('div', { class: 'dash-list-head' }, h('h3', { id: 'dash-protokoll-titel' }, icon('clock'), h('span', { text: 'Letzte Team-Aktionen' })), sectionLink('protokoll', null, { class: 'dash-all', dataset: { focusKey: 'alle:protokoll' } }, 'Ganzes Protokoll', icon('chevron-right'))),
-                extra.audit.length ? h('div', { class: 'rows dash-rows' }, extra.audit.map(auditRow)) : h('p', { class: 'dash-empty' }, icon('check'), h('span', { text: 'Noch keine Einträge.' })),
-              )
-            : null,
+          { class: 'team-grid' },
+          h(
+            'section',
+            { class: 'card todo', 'aria-labelledby': 'todo-titel', id: 'dash-todo' },
+            h('div', { class: 'card__head' }, h('span', { class: 'icon-tile' }, icon('check')), h('div', null, h('h2', { class: 'card__title', id: 'todo-titel', text: 'Als Nächstes zu tun' }), h('p', { class: 'tiny text-3', text: 'Nach Wartezeit · nur, was deine Rolle darf' })), filterGroup),
+            shown.length
+              ? h('ul', { class: 'rows todo__list' }, shown.map(todoRow))
+              : h('ul', { class: 'rows todo__list' }, h('li', { class: 'row todo__empty' }, h('span', { class: 'todo__type' }, icon('check')), h('span', { class: 'row-main' }, h('span', { class: 'row-title', text: 'Nichts zu tun' }), h('span', { class: 'row-sub', text: me?.role === 'tester' ? 'Als Tester siehst du hier künftig Vorab-Versionen zum Ausprobieren.' : 'Alles erledigt – neue Einträge erscheinen hier von selbst.' })))),
+            todo.length > TODO_MAX ? h('p', { class: 'tiny text-3', text: `und ${todo.length - TODO_MAX} weitere` }) : null,
+          ),
+          h(
+            'div',
+            { class: 'team-side' },
+            recent
+              ? h(
+                  'section',
+                  { class: 'card', 'aria-labelledby': 'aktivitaet-titel', id: 'dash-aktivitaet' },
+                  h('div', { class: 'card__head' }, h('span', { class: 'icon-tile' }, icon('clock')), h('div', null, h('h2', { class: 'card__title', id: 'aktivitaet-titel', text: 'Letzte Aktivität' }), h('p', { class: 'tiny text-3', text: 'Aus dem Protokoll' })), sectionLink('protokoll', null, { class: 'btn btn--ghost btn--sm card__head-end' }, 'Alles')),
+                  recent.length
+                    ? h(
+                        'ol',
+                        { class: 'timeline' },
+                        recent.map((entry) =>
+                          h(
+                            'li',
+                            null,
+                            avatar(entry.actor?.name, entry.actor?.uuid, { size: 'sm' }),
+                            h('div', null, h('strong', { text: entry.actor?.uuid === me?.uuid ? 'Du' : entry.actor?.name ?? '?' }), ` · ${actionLabel(entry.action) ?? entry.action}${entry.target ? `: ${entry.target}` : ''}`, h('span', null, timeEl(entry.at, relativeTime(entry.at)))),
+                          ),
+                        ),
+                      )
+                    : h('p', { class: 'small text-3', text: 'Noch keine Einträge.' }),
+                )
+              : null,
+            roleCounts
+              ? h(
+                  'section',
+                  { class: 'card', 'aria-labelledby': 'rollen-titel', id: 'dash-team' },
+                  h('div', { class: 'card__head' }, h('span', { class: 'icon-tile' }, icon('friends')), h('div', null, h('h2', { class: 'card__title', id: 'rollen-titel', text: 'Team und Abzeichen' }), h('p', { class: 'tiny text-3', text: `${plural(extra.members.length, 'Mitglied', 'Mitglieder')}${extra.badges ? ` · ${plural(extra.badges.length, 'Community-Abzeichen', 'Community-Abzeichen')}` : ''}` })), sectionLink('team', null, { class: 'btn btn--ghost btn--sm card__head-end' }, can('team.manage') ? 'Verwalten' : 'Ansehen')),
+                  h('ul', { class: 'roles' }, roleCounts.map(([role, count]) => h('li', null, roleIcon(role), h('span', { text: roleShort(role) }), h('b', { text: String(count) })))),
+                  badgeCounts ? h('ul', { class: 'roles roles--community' }, badgeCounts.map(([badge, count]) => h('li', null, badgeIcon(badge, { label: false }), h('span', { text: COMMUNITY_BADGES.find((entry) => entry.id === badge).label }), h('b', { text: String(count) })))) : null,
+                )
+              : null,
+            h(
+              'section',
+              { class: 'card', 'aria-labelledby': 'dienst-titel', id: 'dash-dienst' },
+              h('div', { class: 'card__head' }, h('span', { class: `icon-tile${status?.ok ? ' icon-tile--online' : ''}` }, icon('server')), h('div', null, h('h2', { class: 'card__title', id: 'dienst-titel', text: 'Heldix-Dienst' }), h('p', { class: 'tiny text-3', text: status?.since ? `läuft seit ${relativeTime(status.since).replace(/^vor /, '')}` : 'Stand unbekannt' })), status?.ok ? h('span', { class: 'chip chip--online card__head-end' }, h('span', { class: 'dot dot--online' }), 'Online') : null),
+              h('dl', { class: 'mini-stats' }, h('div', null, h('dt', { text: 'Launcher' }), h('dd', { text: status?.launcher ?? '–' })), h('div', null, h('dt', { text: 'Dienst' }), h('dd', { text: status?.service ?? '–' })), h('div', null, h('dt', { text: 'Addons' }), h('dd', { text: typeof status?.addons === 'number' ? NUMBER.format(status.addons) : '–' }))),
+            ),
+          ),
         ),
-        h('section', { class: 'app-card dash-numbers', 'aria-labelledby': 'dash-zahlen-titel' }, h('h3', { id: 'dash-zahlen-titel' }, icon('performance'), h('span', { text: 'Heldix-Dienst in Zahlen' })), numbers()),
       ];
     });
   }
 
   return {
     load,
-    /** Neue Zähler aus dem Nachfragen: neu zeichnen, wenn die Übersicht offen ist. */
+    /** Neuer Stand aus dem Nachfragen. */
     update() {
-      if (shell.current() === 'uebersicht' && root.isConnected && !document.getElementById('team-app').hidden) render();
+      if (shell.current() === 'uebersicht' && root.firstChild) render();
     },
     reset() {
-      extra.bans = null;
-      extra.audit = null;
-      extra.status = null;
-      extra.loadedAt = 0;
+      Object.assign(extra, { dashboard: null, members: null, badges: null, status: null, loadedAt: 0 });
       root.replaceChildren();
-      root.dataset.signature = '';
+      delete root.dataset.signature;
     },
   };
 }

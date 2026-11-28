@@ -109,6 +109,47 @@ describe('Downloads für alle Systeme', () => {
     assert.deepEqual(Buffer.from(await followed.arrayBuffer()), files['HeldixClient-1.10.0-mac-arm64.dmg']);
   });
 
+  test('Einladung im Download: ?einladung=<code> ändert nur den Dateinamen des Windows-Installers', async () => {
+    const exe = '/v1/launcher/download/HeldixClient-Setup-0.12.1.exe';
+    const plain = await rawRequest(service.url, 'GET', exe);
+    const invited = await rawRequest(service.url, 'GET', `${exe}?einladung=abc23def45`);
+    assert.equal(invited.status, 200);
+    assert.equal(invited.headers['content-disposition'], 'attachment; filename="HeldixClient-Setup-0.12.1-einladung-abc23def45.exe"');
+    // Inhalt, Größe, Typ, Caching und ETag wie ohne Einladung
+    assert.deepEqual(invited.body, plain.body);
+    for (const header of ['content-type', 'content-length', 'cache-control', 'etag', 'last-modified', 'accept-ranges']) {
+      assert.equal(invited.headers[header], plain.headers[header], header);
+    }
+    // Range und HEAD gehen weiter
+    const part = await rawRequest(service.url, 'GET', `${exe}?einladung=abc23def45`, { Range: 'bytes=0-9' });
+    assert.equal(part.status, 206);
+    assert.deepEqual(part.body, plain.body.subarray(0, 10));
+    assert.equal(part.headers['content-disposition'], invited.headers['content-disposition']);
+    const head = await rawRequest(service.url, 'HEAD', `${exe}?einladung=abc23def45`);
+    assert.deepEqual([head.status, head.headers['content-disposition'], head.body.length], [200, invited.headers['content-disposition'], 0]);
+
+    // ungültige Codes fallen still weg: der normale Name
+    for (const bad of ['ABC23DEF45', 'abc23def4', 'abc23def456', 'abc23def4i', 'abc23def41', 'abc23def4o', '%2E%2E%2Fabc23def4', 'abc23def45%22x', '']) {
+      const res = await rawRequest(service.url, 'GET', `${exe}?einladung=${bad}`);
+      assert.equal(res.status, 200, bad);
+      assert.equal(res.headers['content-disposition'], 'attachment; filename="HeldixClient-Setup-0.12.1.exe"', bad);
+    }
+    // Mac-Dateien behalten ihren Namen
+    const dmg = await rawRequest(service.url, 'GET', '/v1/launcher/download/HeldixClient-1.2.0-mac-arm64.dmg?einladung=abc23def45');
+    assert.equal(dmg.headers['content-disposition'], 'attachment; filename="HeldixClient-1.2.0-mac-arm64.dmg"');
+
+    // Weiterleitungen nehmen den Code nur zum Windows-Installer mit
+    assert.equal((await rawRequest(service.url, 'GET', '/v1/launcher/download/latest/windows?einladung=abc23def45')).headers.location, `${exe}?einladung=abc23def45`);
+    assert.equal((await rawRequest(service.url, 'HEAD', '/v1/launcher/download/latest/windows?einladung=abc23def45')).headers.location, `${exe}?einladung=abc23def45`);
+    assert.equal((await rawRequest(service.url, 'GET', '/v1/launcher/download/latest?einladung=abc23def45')).headers.location, `${exe}?einladung=abc23def45`);
+    assert.equal((await rawRequest(service.url, 'GET', '/v1/launcher/download/latest/windows?einladung=bad')).headers.location, exe);
+    assert.equal((await rawRequest(service.url, 'GET', '/v1/launcher/download/latest/mac-arm64?einladung=abc23def45')).headers.location, '/v1/launcher/download/HeldixClient-1.10.0-mac-arm64.dmg');
+    // fetch folgt der Weiterleitung bis zur Datei mit dem Namen samt Code
+    const followed = await fetch(`${service.url}/v1/launcher/download/latest/windows?einladung=abc23def45`);
+    assert.equal(followed.headers.get('content-disposition'), 'attachment; filename="HeldixClient-Setup-0.12.1-einladung-abc23def45.exe"');
+    assert.deepEqual(Buffer.from(await followed.arrayBuffer()), plain.body);
+  });
+
   test('files: neueste je System, Prozessor und Art mit SHA-256; zwischengespeichert nach Name, Größe und Änderungszeit', async () => {
     // Änderungszeit auf ganze Sekunden, damit sie sich unten genau wiederherstellen lässt.
     const file = path.join(dir, 'HeldixClient-1.10.0-mac-arm64.dmg');

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import { Store, type AddonVersionRow } from '../src/db';
-import { api, connect, devPlayer, startService, upgradeStatus, waitFor, type Player, type TestService, type WsClient } from './helpers';
+import { api, connect, devPlayer, FRIEND_DEFAULTS, startService, upgradeStatus, waitFor, type Player, type TestService, type WsClient } from './helpers';
 
 /** Veröffentlichte Version eines Community-Addons (wie nach der Freigabe), direkt für die Datenbank. */
 function communityAddon(id: string, author: Player, manifest?: string): AddonVersionRow {
@@ -104,7 +104,7 @@ describe('WebSocket und Online-Status', () => {
     assert.equal(friends.friends[0].online, true);
 
     let msg = await benClient.next('friend');
-    assert.deepEqual(msg.friend, { uuid: anna.uuid, name: 'Anna', online: true, state: null, server: null, since: msg.friend.since });
+    assert.deepEqual(msg.friend, { uuid: anna.uuid, name: 'Anna', online: true, state: null, server: null, since: msg.friend.since, ...FRIEND_DEFAULTS });
 
     annaClient.send({ type: 'status', state: 'multiplayer', server: 'Mc.Hypixel.NET' });
     msg = await benClient.next('friend');
@@ -143,7 +143,9 @@ describe('WebSocket und Online-Status', () => {
     await annaClient.close();
     open.splice(open.indexOf(annaClient), 1);
     msg = await benClient.next('friend');
-    assert.deepEqual(msg.friend, { uuid: anna.uuid, name: 'Anna', online: false, state: null, server: null, since: msg.friend.since });
+    // Offline: „zuletzt online“ (gerundet), weil Online-Status und „Zuletzt online zeigen“ an sind
+    assert.equal(typeof msg.friend.lastOnline, 'number');
+    assert.deepEqual(msg.friend, { uuid: anna.uuid, name: 'Anna', online: false, state: null, server: null, since: msg.friend.since, ...FRIEND_DEFAULTS, lastOnline: msg.friend.lastOnline });
   });
 
   test('showServer aus: Status ja, Server nein', async () => {
@@ -181,7 +183,7 @@ describe('WebSocket und Online-Status', () => {
 
     await api(service.url, 'PUT', '/v1/me', { token: anna.token, body: { presence: false } });
     let msg = await benClient.next('friend');
-    assert.deepEqual(msg.friend, { uuid: anna.uuid, name: 'Anna', online: false, state: null, server: null, since: msg.friend.since });
+    assert.deepEqual(msg.friend, { uuid: anna.uuid, name: 'Anna', online: false, state: null, server: null, since: msg.friend.since, ...FRIEND_DEFAULTS });
 
     // Statusänderungen bleiben unsichtbar.
     annaClient.send({ type: 'status', state: 'realms', server: null });

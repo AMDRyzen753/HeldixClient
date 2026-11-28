@@ -1,7 +1,7 @@
 // Eigenes Profil (GET/PUT /v1/me) und allgemeine Prüfungen der Anfragen.
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { api, devPlayer, startService, type Player, type TestService } from './helpers';
+import { api, devPlayer, startService, type Player, type TestService, ME_DEFAULTS } from './helpers';
 
 describe('Eigenes Profil', () => {
   let service: TestService;
@@ -17,22 +17,22 @@ describe('Eigenes Profil', () => {
     const res = await api(service.url, 'GET', '/v1/me', { token: player.token });
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('content-type'), 'application/json; charset=utf-8');
-    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: '', visible: true, presence: true, showServer: true, messages: true });
+    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: '', visible: true, presence: true, showServer: true, messages: true, ...ME_DEFAULTS });
   });
 
   test('PUT ändert nur die angegebenen Felder', async () => {
     let res = await api(service.url, 'PUT', '/v1/me', { token: player.token, body: { cape: 'aurora' } });
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: 'aurora', visible: true, presence: true, showServer: true, messages: true });
+    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: 'aurora', visible: true, presence: true, showServer: true, messages: true, ...ME_DEFAULTS });
 
     res = await api(service.url, 'PUT', '/v1/me', { token: player.token, body: { visible: false, showServer: false } });
-    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: 'aurora', visible: false, presence: true, showServer: false, messages: true });
+    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: 'aurora', visible: false, presence: true, showServer: false, messages: true, ...ME_DEFAULTS });
 
     res = await api(service.url, 'PUT', '/v1/me', { token: player.token, body: { presence: false, cape: '' } });
-    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: '', visible: false, presence: false, showServer: false, messages: true });
+    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: '', visible: false, presence: false, showServer: false, messages: true, ...ME_DEFAULTS });
 
     res = await api(service.url, 'PUT', '/v1/me', { token: player.token, body: { messages: false } });
-    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: '', visible: false, presence: false, showServer: false, messages: false });
+    assert.deepEqual(res.body, { uuid: player.uuid, name: 'Profil', cape: '', visible: false, presence: false, showServer: false, messages: false, ...ME_DEFAULTS });
 
     // Leeres Objekt: nichts ändert sich.
     res = await api(service.url, 'PUT', '/v1/me', { token: player.token, body: {} });

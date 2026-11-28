@@ -98,7 +98,10 @@ describe('Addons von Spielern', () => {
   let addonsDir: string;
   let submissionsDir: string;
   let admin: string;
+  /** Prüft Einreichungen (ab 1.12.0 die Rolle Entwickler; Recht „Addons“) */
   let mod: string;
+  /** Moderator: darf ab 1.12.0 nur Meldungen zu Addons, keine Einreichungen */
+  let moderator: string;
   let chefin: Player;
   let anna: Player;
   let ben: Player;
@@ -155,7 +158,8 @@ describe('Addons von Spielern', () => {
     });
     chefin = await devPlayer(service.url, 'Chefin');
     admin = (await teamLogin(service, chefin, 'admin', clock)).cookie;
-    mod = (await teamLogin(service, await devPlayer(service.url, 'Moderator'), 'moderator', clock)).cookie;
+    mod = (await teamLogin(service, await devPlayer(service.url, 'Entwickler'), 'developer-team', clock)).cookie;
+    moderator = (await teamLogin(service, await devPlayer(service.url, 'Moderator'), 'moderator', clock)).cookie;
     anna = await devPlayer(service.url, 'Anna');
     ben = await devPlayer(service.url, 'Ben');
     carla = await devPlayer(service.url, 'Carla');
@@ -361,13 +365,17 @@ describe('Addons von Spielern', () => {
     const shot = await rawRequest(service.url, 'GET', `/v1/team/addon-submissions/${wetterSid}/screenshots/1`, { Cookie: `${SESSION_COOKIE}=${mod}` });
     assert.deepEqual([shot.status, shot.headers['content-type'], shot.body], [200, 'image/jpeg', shot2]);
 
-    // Ohne Team: Spieler-Cookie 403, Bearer 401; Freigeben nur Admin (Moderator 403, ohne bestätigte 2FA 403)
+    // Ohne Team: Spieler-Cookie 403, Bearer 401; Freigeben nur mit dem Recht „Addons“ (Moderator 403, ohne bestätigte 2FA 403)
     const player = await webLogin(service, anna);
     assert.equal((await webApi(service, 'GET', '/v1/team/addon-submissions', { cookie: player.cookie })).status, 403);
     assert.equal((await call('GET', '/v1/team/addon-submissions', anna)).status, 401);
     const signature = signManifest(sub.manifest, keys.privateKey);
-    res = await team('POST', `/v1/team/addon-submissions/${wetterSid}/approve`, { signature }, mod);
+    res = await team('POST', `/v1/team/addon-submissions/${wetterSid}/approve`, { signature }, moderator);
     assert.deepEqual([res.status, res.body.code], [403, 'forbidden']);
+    res = await team('GET', '/v1/team/addon-submissions', undefined, moderator);
+    assert.deepEqual([res.status, res.body.code], [403, 'forbidden'], 'Moderator sieht keine Einreichungen');
+    // Meldungen zu Addons darf der Moderator weiterhin bearbeiten.
+    assert.equal((await team('GET', '/v1/team/addon-reports', undefined, moderator)).status, 200);
     const fresh = await webLogin(service, chefin);
     res = await team('POST', `/v1/team/addon-submissions/${wetterSid}/approve`, { signature }, fresh.cookie);
     assert.deepEqual([res.status, res.body.code], [403, '2fa_required']);
@@ -495,7 +503,7 @@ describe('Addons von Spielern', () => {
     try {
       res = await reject({ note: 'Bitte ohne net/minecraft.\nNur die Heldix-API.' });
       assert.equal(res.status, 200, JSON.stringify(res.body));
-      assert.deepEqual([res.body.submission.status, res.body.submission.reviewer, res.body.submission.reviewNote], ['rejected', 'Moderator', 'Bitte ohne net/minecraft.\nNur die Heldix-API.']);
+      assert.deepEqual([res.body.submission.status, res.body.submission.reviewer, res.body.submission.reviewNote], ['rejected', 'Entwickler', 'Bitte ohne net/minecraft.\nNur die Heldix-API.']);
       assert.deepEqual(await ws.next('addon-review'), {
         type: 'addon-review',
         submission: sid,
@@ -772,7 +780,7 @@ describe('Addons von Spielern', () => {
     assert.equal((await team('GET', '/v1/team/addons')).body.openReports, 2);
     assert.equal((await team('GET', '/v1/team/addon-reports?status=kaputt', undefined, mod)).status, 400);
     res = await team('POST', `/v1/team/addon-reports/${benReport.id}/done`, undefined, mod);
-    assert.deepEqual([res.status, res.body.report.status, res.body.report.doneBy], [200, 'done', 'Moderator']);
+    assert.deepEqual([res.status, res.body.report.status, res.body.report.doneBy], [200, 'done', 'Entwickler']);
     assert.equal((await team('POST', `/v1/team/addon-reports/${benReport.id}/done`, undefined, mod)).body.report.status, 'done');
     assert.equal((await team('POST', '/v1/team/addon-reports/99999/done', undefined, mod)).status, 404);
     assert.equal((await team('GET', '/v1/team/addon-reports', undefined, mod)).body.reports.length, 1);
@@ -901,7 +909,7 @@ test('Aufräumen: abgelehnte und zurückgezogene Einreichungen und Meldungen nac
   });
   try {
     const dir = path.join(service.dataDir, 'addons', 'einreichungen');
-    const mod = (await teamLogin(service, await devPlayer(service.url, 'Moderator'), 'moderator', clock)).cookie;
+    const mod = (await teamLogin(service, await devPlayer(service.url, 'Entwickler'), 'developer-team', clock)).cookie;
     const anna = await devPlayer(service.url, 'Anna');
     const call = (method: string, p: string, body?: unknown) => api(service.url, method, p, { token: anna.token, body });
     const make = async (id: string) => {

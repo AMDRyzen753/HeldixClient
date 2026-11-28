@@ -92,10 +92,48 @@ public final class TransformCheck {
 		}
 		check(refused && Arrays.equals(before, write(changed, loader)), "umgebaute Minecraft-Klasse: Patch abgelehnt, Klasse unverändert");
 
+		worldShareChecks(out, loader);
 		mathChecks();
 
 		System.out.println(failures == 0 ? "ALLE PRUEFUNGEN BESTANDEN" : failures + " PRUEFUNG(EN) FEHLGESCHLAGEN");
 		if (failures > 0) System.exit(1);
+	}
+
+	/** Eingriffe für „Welt teilen“ (WorldSharePatches): an den echten Server-Klassen anwenden und prüfen */
+	private static void worldShareChecks(Path out, ClassLoader loader) throws Exception {
+		WorldSharePatches patches = new WorldSharePatches();
+		check(patches.targets().size() == 3, "Welt teilen: drei Ziel-Klassen: " + patches.targets());
+		String hooks = "dev/heldixclient/transform/WorldShareHooks";
+		for (String target : patches.targets()) {
+			ClassNode node = read(loader, target);
+			patches.transform(target, node);
+			byte[] patched = write(node, loader);
+			StringWriter errors = new StringWriter();
+			CheckClassAdapter.verify(new ClassReader(patched), loader, false, new PrintWriter(errors));
+			Path file = out.resolve(target + ".class");
+			Files.createDirectories(file.getParent());
+			Files.write(file, patched);
+			check(errors.toString().isBlank(), target + " Verifier: " + (errors.toString().isBlank() ? "ok" : "\n" + errors));
+			ClassNode result = new ClassNode();
+			new ClassReader(patched).accept(result, 0);
+			switch (target) {
+				case WorldSharePatches.INTEGRATED_PLAYER_LIST -> {
+					MethodNode login = result.methods.stream().filter(m -> m.name.equals("canPlayerLogin")).findFirst().orElseThrow();
+					long returns = Arrays.stream(login.instructions.toArray()).filter(i -> i.getOpcode() == Opcodes.ARETURN).count();
+					check(calls(login, hooks, "canPlayerLogin") == returns && returns > 0, "canPlayerLogin: Hook vor jedem return (" + returns + ")");
+				}
+				case WorldSharePatches.INTEGRATED_SERVER -> {
+					MethodNode permissions = result.methods.stream().filter(m -> m.name.equals("getProfilePermissions")).findFirst().orElseThrow();
+					MethodNode max = result.methods.stream().filter(m -> m.name.equals("getMaxPlayers") && m.desc.equals("()I")).findFirst().orElseThrow();
+					check(calls(permissions, hooks, "permissions") >= 1, "getProfilePermissions geht durch den Hook");
+					check(calls(max, hooks, "maxPlayers") == 1, "getMaxPlayers geht durch den Hook");
+				}
+				default -> {
+					MethodNode place = result.methods.stream().filter(m -> m.name.equals("placeNewPlayer")).findFirst().orElseThrow();
+					check(calls(place, hooks, "playerJoined") == 1, "placeNewPlayer ruft den Hook am Ende genau einmal auf");
+				}
+			}
+		}
 	}
 
 	/** Rechnungen des Item-Physics-Addons (wie im Prüfstand der ursprünglichen Mod) */

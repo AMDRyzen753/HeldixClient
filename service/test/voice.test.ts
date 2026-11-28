@@ -53,10 +53,11 @@ class VoiceClock {
 
 type Text = any;
 
-/** Eine `peers`-Nachricht: immer alle vier Felder, verglichen ohne Reihenfolge. */
+/** Eine `peers`-Nachricht: immer alle Felder (ab 1.11.0 auch guests und browser, ohne Browser leer), ohne Reihenfolge. */
 function peersOf(message: Text): Peers {
   assert.equal(message.type, 'peers');
-  assert.deepEqual(Object.keys(message).sort(), ['deafened', 'group', 'muted', 'type', 'uuids']);
+  assert.deepEqual(Object.keys(message).sort(), ['browser', 'deafened', 'group', 'guests', 'muted', 'type', 'uuids']);
+  assert.deepEqual([message.guests, message.browser], [{}, []]);
   return peers(message.uuids, message.group, message.muted, message.deafened);
 }
 
@@ -263,7 +264,7 @@ describe('Voice Chat: Verbindung', () => {
       assert.equal(await voiceCount(service), 0);
 
       const { client, ready } = await connect(anna);
-      assert.deepEqual(ready, { type: 'ready', range: 48, maxFrame: 1024, protocol: 1, features: ['state', 'groups'], maxGroup: 16 });
+      assert.deepEqual(ready, { type: 'ready', range: 48, maxFrame: 1024, protocol: 1, features: ['state', 'groups', 'guests'], maxGroup: 16 });
       client.send({ type: 'ping' });
       assert.deepEqual(await client.next('pong'), { type: 'pong' });
       assert.equal(await voiceCount(service), 1);
@@ -854,7 +855,7 @@ describe('Voice Chat: Status', () => {
 
       // leave: alles leer
       anna.send({ type: 'leave' });
-      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [], group: [], muted: [], deafened: [] });
+      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [], group: [], muted: [], deafened: [], guests: {}, browser: [] });
       assert.deepEqual(await ben.nextPeers(), peers());
 
       // über den Nether zurück: der Status ist noch da
@@ -1096,7 +1097,7 @@ describe('Voice Chat: Gruppen', () => {
       }
 
       anna.send({ type: 'leave' });
-      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [], group: [], muted: [], deafened: [] });
+      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [], group: [], muted: [], deafened: [], guests: {}, browser: [] });
       assert.deepEqual(await ben.nextPeers(), peers([c], [c, d]));
       assert.deepEqual(await carla.nextPeers(), peers([b], [b, d]));
       assert.deepEqual(await dirk.nextPeers(), peers([], [b, c]));
@@ -1133,7 +1134,7 @@ describe('Voice Chat: Gruppen', () => {
       const { client: carla } = await connect(carlaP!);
       assert.deepEqual(await anna.join(SERVER, OVERWORLD), []);
       assert.deepEqual(await ben.enter(SERVER, OVERWORLD, GROUP), peers([annaP!.uuid]));
-      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [benP!.uuid], group: [], muted: [], deafened: [] });
+      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [benP!.uuid], group: [], muted: [], deafened: [], guests: {}, browser: [] });
       assert.deepEqual(await carla.enter(SERVER, NETHER, GROUP), peers([], [benP!.uuid]));
       assert.deepEqual(await ben.nextPeers(), peers([annaP!.uuid], [carlaP!.uuid]));
       await anna.sync();
@@ -1334,10 +1335,10 @@ describe('Voice Chat: Verteilung (ohne Netz)', () => {
       join(late, GROUP);
       assert.deepEqual(late.takeTexts(), [
         { type: 'group', status: 'full' },
-        { type: 'peers', uuids: uuids.slice(0, 16), group: [], muted: [], deafened: [] },
+        { type: 'peers', uuids: uuids.slice(0, 16), group: [], muted: [], deafened: [], guests: {}, browser: [] },
       ]);
       // Die andere war mit ihr in Raum und Gruppe: eine Liste.
-      assert.deepEqual(other.takeTexts(), [{ type: 'peers', uuids: [], group: [], muted: [], deafened: [] }]);
+      assert.deepEqual(other.takeTexts(), [{ type: 'peers', uuids: [], group: [], muted: [], deafened: [], guests: {}, browser: [] }]);
       // Die Gruppe hat sie nicht aufgenommen; sie ist nur im Raum.
       assert.equal(sockets[0]!.lastPeersMessage().group.length, 15);
       assert.equal(sockets[0]!.lastPeersMessage().uuids.length, 16);

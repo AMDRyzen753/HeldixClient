@@ -3,9 +3,9 @@ titel: Capes auswählen und eigene Bilder nutzen
 beschreibung: Eins der animierten Heldix-Capes auswählen – eingebaut oder aus dem Cosmetics-Katalog –, eigene Bilder als Cape nutzen und einstellen, wer dein Cape sieht.
 kategorie: spiel
 reihenfolge: 4
-stichworte: cape, capes, umhang, heldix-cape, animiert, eigenes cape, eigenes bild, png, heldix-capes, elytra, sichtbar, cosmetics, katalog
+stichworte: cape, capes, umhang, heldix-cape, animiert, eigenes cape, eigenes bild, png, heldix-capes, elytra, sichtbar, cosmetics, katalog, matrix, sakura, team-cape, nur team
 ---
-HeldixClient bringt neun animierte Capes in hoher Auflösung mit: **Heldix, Mitternacht, Aurora, Glut, Kristall, Neon, Sakura, Gewitter** und **Galaxie**. Flammen flackern, Sterne funkeln, Blitze zucken – und leuchtende Teile strahlen auch nachts. Dazu kommen weitere animierte Capes aus dem Cosmetics-Katalog. Alle Motive siehst du in 3D auf der Seite [Cosmetics](/cosmetics#capes), zusammen mit Hüten, Flügeln, Auren und Begleitern – mehr dazu unter [Cosmetics](/hilfe/cosmetics).
+HeldixClient bringt 13 animierte Capes in hoher Auflösung mit: **Heldix, Mitternacht, Aurora, Glut, Kristall, Neon, Sakura, Gewitter, Galaxie** und **Matrix** für alle, dazu **Matrix Rot**, **Matrix Türkis** und **Sakura Orange** nur für das HeldixClient-Team (siehe [Team-Capes](#team-capes)). Flammen flackern, Sterne funkeln, Blitze zucken, Code rieselt – und leuchtende Teile strahlen auch nachts. Dazu kommen weitere animierte Capes aus dem Cosmetics-Katalog. Alle Motive siehst du in 3D auf der Seite [Cosmetics](/cosmetics#capes), zusammen mit Hüten, Flügeln, Auren und Begleitern – mehr dazu unter [Cosmetics](/hilfe/cosmetics).
 
 ![Cape-Auswahl im Heldix-Menü mit Vorschau der Spielfigur](/images/spiel-cape.png)
 
@@ -24,6 +24,9 @@ Andere HeldixClient-Spieler sehen dein Heldix-Cape, solange du mit dem Heldix-Di
 Umgekehrt kannst du unter **Freunde → Privatsphäre → Capes anderer Spieler** ausblenden, was andere tragen.
 
 Dein Heldix-Cape kannst du auch auf der Webseite in deinem [Konto](/konto) unter **Profil & Cosmetics** wählen – dort stehen auch die Capes aus dem Katalog.
+
+## Team-Capes
+**Matrix Rot**, **Matrix Türkis** und **Sakura Orange** gibt es nur für Mitglieder des HeldixClient-Teams – wie die Cosmetics mit dem Hinweis **Nur fürs Team**. Ansehen kann sie jeder, zum Beispiel auf der Seite [Cosmetics](/cosmetics#capes). Auswählen kann sie nur, wer im Team ist; für alle anderen sind sie gesperrt (Schloss-Symbol), und der Heldix-Dienst nimmt sie nicht an. Andere Spieler sehen ein Team-Cape nur, solange sein Träger im Team ist – so erkennt man Team-Mitglieder im Spiel.
 
 ## Eigene Bilder als Cape
 - **Per Drag & Drop:** Ziehe ein PNG-Bild ins Spielfenster, während die Cape-Seite offen ist. HeldixClient übernimmt es und legt es dir gleich an.

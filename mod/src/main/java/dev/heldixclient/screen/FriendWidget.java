@@ -86,7 +86,7 @@ public class FriendWidget extends AbstractButton {
 		visible = now != null;
 		active = now != null;
 		if (now == null) return;
-		setMessage(Component.literal(now.name() + ", " + now.activity()));
+		setMessage(Component.literal(now.shownName() + ", " + now.activity()));
 		hover += ((isHoveredOrFocused() ? 1f : 0f) - hover) * 0.35f;
 		int x = getX();
 		int y = getY();
@@ -103,9 +103,13 @@ public class FriendWidget extends AbstractButton {
 		}
 		int textX = fx + size + 9;
 		int textW = w - (textX - x) - 8;
-		Ui.text(g, Ui.ellipsize(now.name(), textW, Ui.Font.LABEL), textX, y + h / 2 - 10, Ui.withAlpha(Ui.TEXT, alpha), Ui.Font.LABEL);
-		Ui.text(g, Ui.ellipsize(now.activity(), textW, Ui.Font.SMALL), textX, y + h / 2 + 2,
-				Ui.withAlpha(now.online() ? Ui.SUCCESS : Ui.FAINT, alpha), Ui.Font.SMALL);
+		// Spitzname (nur für dich), Favorit mit Stern; „Nicht stören“ gelb
+		String name = Ui.ellipsize(now.shownName(), textW - (now.favorite() ? 12 : 0), Ui.Font.LABEL);
+		Ui.text(g, name, textX, y + h / 2 - 10, Ui.withAlpha(Ui.TEXT, alpha), Ui.Font.LABEL);
+		if (now.favorite()) Ui.icon(g, "star", textX + Ui.width(name, Ui.Font.LABEL) + 4, y + h / 2 - 10, 8, Ui.withAlpha(0xFFFACC15, alpha));
+		String line = now.statusText() != null && now.online() ? now.activity() + " · „" + now.statusText() + "“" : now.activity();
+		Ui.text(g, Ui.ellipsize(line, textW, Ui.Font.SMALL), textX, y + h / 2 + 2,
+				Ui.withAlpha(now.online() ? now.dnd() ? Ui.WARNING : Ui.SUCCESS : Ui.FAINT, alpha), Ui.Font.SMALL);
 	}
 
 	@Override

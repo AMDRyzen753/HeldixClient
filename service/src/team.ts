@@ -4,13 +4,16 @@ import type { KeyObject } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Addons } from './addons';
 import type { Cosmetics } from './cosmetics';
-import type { AuditRow, BanRow, NewsRow, ReportRow, ReportStatus, Store, TeamMemberRow, TeamProfilePatch, TeamRole, UserRow } from './db';
+import type { AuditRow, BanRow, CommunityBadge, NewsRow, ReportRow, ReportStatus, Store, TeamMemberRow, TeamProfilePatch, TeamRole, UserRow } from './db';
 import { UNKNOWN_PLAYER } from './friends';
 import { HttpError } from './http';
 import type { Realtime } from './realtime';
 import type { SnapshotMessage } from './reports';
+import { COMMUNITY_BADGES, hasPermission, isCommunityBadge, isTeamRole, rightsOverview, TEAM_ROLES, type Permission } from './roles';
 import type { Updates } from './updates';
 import { checkMultilineText, checkText, isName, isUuid, normalizeUuid, type TextProblem } from './validate';
+
+export { isTeamRole, TEAM_ROLES };
 
 /** Wer etwas tut: Team-Mitglied oder die Server-Konsole (uuid null, Name „CLI“). */
 export interface Actor {
@@ -20,7 +23,6 @@ export interface Actor {
 
 export const CLI_ACTOR: Actor = Object.freeze({ uuid: null, name: 'CLI' });
 
-export const TEAM_ROLES: readonly TeamRole[] = ['moderator', 'admin'];
 export const LAST_ADMIN = 'Es muss mindestens ein Admin bleiben.';
 const NOT_IN_TEAM = 'Dieser Spieler ist nicht im Team.';
 const NO_SUCH_PLAYER = 'Diesen Spieler gibt es beim Heldix-Dienst nicht.';
@@ -32,10 +34,6 @@ export const MAX_BAN_REASON = 300;
 /** Teamprofil: Aufgabe und kurzer Text, jeweils eine Zeile */
 export const MAX_PROFILE_TITLE = 40;
 export const MAX_PROFILE_ABOUT = 200;
-
-export function isTeamRole(value: unknown): value is TeamRole {
-  return value === 'moderator' || value === 'admin';
-}
 
 /** Schreibt einen Eintrag ins Protokoll (verfällt nach 365 Tagen). */
 export function writeAudit(store: Store, actor: Actor, action: string, target: string | null, detail: string | null = null): void {
@@ -219,11 +217,12 @@ export class Team {
         online: this.realtime.isConnected(u.uuid),
         banned: this.store.getBan(u.uuid) !== undefined,
         role: this.role(u.uuid),
+        communityBadge: (this.store.getCommunityBadge(u.uuid)?.badge ?? null) as CommunityBadge | null,
       })),
       // Gesperrte haben beim Dienst kein Konto mehr, nur den Eintrag der Sperre.
       ...bans
         .filter((b) => !known.has(b.uuid))
-        .map((b) => ({ uuid: b.uuid, name: b.name, lastSeen: null, online: false, banned: true, role: null })),
+        .map((b) => ({ uuid: b.uuid, name: b.name, lastSeen: null, online: false, banned: true, role: null, communityBadge: null })),
     ];
     return { players: players.slice(0, MAX_PLAYERS) };
   }
@@ -252,6 +251,7 @@ export class Team {
         ...reports,
         ban: this.banView(ban!),
         role: null,
+        communityBadge: null,
       };
     }
     return {
@@ -270,6 +270,7 @@ export class Team {
       ...reports,
       ban: ban ? this.banView(ban) : null,
       role: this.role(user.uuid),
+      communityBadge: this.store.getCommunityBadge(user.uuid)?.badge ?? null,
     };
   }
 
@@ -432,7 +433,7 @@ export class Team {
   }
 
   private requireRole(value: unknown): TeamRole {
-    if (!isTeamRole(value)) throw new HttpError(400, '„role“ muss moderator oder admin sein.');
+    if (!isTeamRole(value)) throw new HttpError(400, `„role“ muss eine dieser Rollen sein: ${TEAM_ROLES.join(', ')}.`);
     return value;
   }
 
@@ -482,6 +483,57 @@ export class Team {
     this.store.resetTotp(uuid);
     this.audit(actor, 'team.reset-2fa', playerLabel(member.name, uuid));
     return this.members();
+  }
+
+  // ---------- Rechte, Übersicht, Community-Abzeichen ----------
+
+  /** `GET /v1/team/permissions`: welche Rolle was darf (jede Rolle). */
+  permissions(member: TeamMemberRow) {
+    return rightsOverview(member.role);
+  }
+
+  /**
+   * `GET /v1/team/dashboard` (jede Rolle): Kennzahlen für die Übersicht. Zahlen zu Bereichen ohne Recht sind null, damit
+   * die Seite nur zeigt, was das Mitglied auch bearbeiten darf.
+   */
+  dashboard(member: TeamMemberRow, live: { online: number; voice: number; worlds: number | null }) {
+    const may = (permission: Permission) => hasPermission(member.role, permission);
+    return {
+      online: live.online,
+      voice: live.voice,
+      worlds: live.worlds,
+      reports: may('moderation') ? this.store.countOpenReports() : null,
+      support: may('support') ? this.store.countWaitingTickets() : null,
+      submissions: may('addons') ? this.store.countPendingSubmissions() : null,
+      addonReports: may('addon-reports') ? this.store.countOpenAddonReports() : null,
+      recent: may('audit')
+        ? this.store.listAudit(10).map((e: AuditRow) => ({ id: e.id, at: e.at, actor: { uuid: e.actorUuid, name: e.actorName }, action: e.action, target: e.target }))
+        : null,
+    };
+  }
+
+  /** `GET /v1/team/badges`: vergebene Community-Abzeichen. */
+  communityBadges() {
+    return {
+      badges: this.store.listCommunityBadges().map((b) => ({ uuid: b.uuid, name: b.name, badge: b.badge, addedAt: b.addedAt, addedBy: b.addedBy })),
+    };
+  }
+
+  /** `PUT /v1/team/badges/<uuid>` mit `{ badge }`: vergeben oder ersetzen (höchstens eines je Spieler). */
+  setCommunityBadge(actor: Actor, uuid: string, input: Record<string, unknown>) {
+    const user = this.store.getUser(uuid);
+    if (!user) throw new HttpError(404, NO_SUCH_PLAYER);
+    if (!isCommunityBadge(input.badge)) throw new HttpError(400, `„badge“ muss eines dieser Abzeichen sein: ${COMMUNITY_BADGES.join(', ')}.`);
+    const before = this.store.setCommunityBadge(uuid, input.badge, Date.now(), actor.name);
+    if (before !== input.badge) this.audit(actor, 'badge.set', playerLabel(user.name, uuid), before === null ? input.badge : `${before} → ${input.badge}`);
+    return this.communityBadges();
+  }
+
+  /** `DELETE /v1/team/badges/<uuid>`: entziehen (auch, wenn keins vergeben war). */
+  removeCommunityBadge(actor: Actor, uuid: string) {
+    const existing = this.store.getCommunityBadge(uuid);
+    if (existing && this.store.deleteCommunityBadge(uuid)) this.audit(actor, 'badge.remove', playerLabel(existing.name, uuid), existing.badge);
+    return this.communityBadges();
   }
 
   // ---------- Protokoll ----------

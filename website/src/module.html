@@ -1,60 +1,96 @@
-<!--seite {"titel": "Module", "beschreibung": "Alle Module von HeldixClient: HUD-Anzeigen wie FPS, CPS und Koordinaten, Funktionen wie Freelook, Zoom und Wegpunkte – mit Tasten und Einstellungen.", "bild": "/images/spiel-heldix-menue.png"}-->
+<!--seite {"titel":"Funktionen und Module","beschreibung":"Alle Funktionen von HeldixClient: Heldix-Menü, HUD-Editor, Vulkan und FPS-Boost, Heldix-Shader und {{MODULE_ANZAHL}} eingebaute Module wie Freelook, Zoom, Wegpunkte und Keystrokes – plus Module aus Addons."}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
 <script type="module" src="/module.js"></script>
 </head>
-<body>
-<div class="backdrop" aria-hidden="true"></div>
+<body data-seite="funktionen">
 {{include:nav.html}}
 
-<main id="inhalt" class="wrap module-page">
-  <div class="page-hero">
-    <span class="eyebrow">Module</span>
-    <h1>{{MODULE_ANZAHL}} Module, <span class="gradient">ein Menü</span></h1>
-    <p class="lead">Jedes Modul schaltest du im Heldix-Menü (rechte Umschalttaste) einzeln an und aus. HUD-Anzeigen ordnest du im HUD-Editor an.</p>
-  </div>
-
-  <div class="module-tools glass" role="search">
-    <label class="search-field">
-      <span class="visually-hidden">Module durchsuchen</span>
-      {{icon:search}}
-      <input type="search" id="modul-suche" placeholder="Modul suchen, z. B. Zoom oder Koordinaten" autocomplete="off">
-    </label>
-    <div class="segmented" role="group" aria-label="Art" id="modul-filter">
-      <button type="button" data-filter="alle" aria-pressed="true">Alle <span class="count-soft">{{MODULE_GESAMT}}</span></button>
-      <button type="button" data-filter="hud" aria-pressed="false">HUD-Anzeigen <span class="count-soft">{{MODULE_HUD_ANZAHL}}</span></button>
-      <button type="button" data-filter="funktion" aria-pressed="false">Funktionen <span class="count-soft">{{MODULE_FUNKTION_ANZAHL}}</span></button>
-      <button type="button" data-filter="addon" aria-pressed="false">Addons <span class="count-soft">{{MODULE_ADDON_ANZAHL}}</span></button>
-    </div>
-  </div>
-  <p class="result-line" id="modul-ergebnis" aria-live="polite"></p>
-
-  <div class="module-grid" id="module-liste">
-{{MODULE_KARTEN_HTML}}
-  </div>
-  <div class="empty" id="modul-leer" hidden>{{icon:search}}<p>Kein Modul passt zu deiner Suche.</p></div>
-
-  <aside class="support-box store-hint">{{icon:addons}}<div><h2>Mehr Module im Addon-Store</h2><p>Addon-Module wie Spotify installierst du einzeln – im Launcher, im Spiel oder per Download.</p></div><a class="button small" href="/addons">Zum Addon-Store</a></aside>
-
-  <section class="module-howto" aria-labelledby="howto-titel">
-    <div class="story">
-      <div class="story-text">
-        <span class="badge">{{icon:hud}}</span>
-        <h2 id="howto-titel">Alles an seinen Platz</h2>
-        <p>Im HUD-Editor verschiebst und vergrößerst du jede Anzeige, sie rasten an Kanten und aneinander ein. <kbd>Strg</kbd>+<kbd>Z</kbd> macht den letzten Schritt rückgängig.</p>
-        <a class="story-link" href="/hilfe/hud-editor">Zum HUD-Editor{{icon:chevron-right}}</a>
+<main id="inhalt" class="module-page">
+  <section class="page-hero" aria-labelledby="seite-titel">
+    <div class="container">
+      <div class="page-hero__inner">
+        <span class="eyebrow">{{icon:sparkles}}Funktionen</span>
+        <h1 class="h1" id="seite-titel">Dein Spiel, <span class="text-gradient">deine Regeln.</span></h1>
+        <p class="lead">Ein eigenes Menü statt Optionen-Wust, ein HUD, das du frei platzierst, mehr FPS per Schalter – und {{MODULE_ANZAHL}} eingebaute Module, die du einzeln an- und ausschaltest.</p>
+        <div class="page-hero__actions">
+          <a class="btn btn--primary" href="#module">{{icon:modules}}Alle Module ansehen</a>
+          <a class="btn btn--secondary" href="/warum">{{icon:help-circle}}Warum HeldixClient</a>
+        </div>
       </div>
-      <div class="shot"><div class="frame" data-tilt><img src="/images/spiel-hud-editor.png" alt="HUD-Editor im Spiel mit Werkzeugleiste und Elemente-Liste" loading="lazy" width="854" height="480"></div></div>
+    </div>
+  </section>
+
+  <section class="section section--tight" aria-labelledby="highlights-titel">
+    <div class="container">
+      <h2 class="sr-only" id="highlights-titel">Das Wichtigste</h2>
+      <div class="highlights">
+        <article class="card reveal">
+          <div class="card__media"><button class="frame--tight" type="button" data-full="/bilder/spiel-heldix-menue.webp" data-full-alt="Heldix-Menü mit Modulen als Kacheln, Reitern und Suche."><img src="/bilder/spiel-heldix-menue.webp" width="854" height="480" alt="Heldix-Menü mit Modulen als Kacheln, Reitern und Suche." loading="lazy"></button></div>
+          <span class="eyebrow">{{icon:modules}}Heldix-Menü</span>
+          <h3 class="h4">Alles an einem Ort</h3>
+          <p class="card__text">Die rechte Umschalttaste öffnet das Heldix-Menü: Module als Kacheln mit Suche, Einstellungen in Gruppen, Cape, Cosmetics, Freunde, Party und Heldix-Welten.</p>
+          <a class="link-arrow" href="/hilfe/heldix-menue">Das Heldix-Menü{{icon:chevron-right}}</a>
+        </article>
+        <article class="card reveal">
+          <div class="card__media"><button class="frame--tight" type="button" data-full="/bilder/spiel-hud-editor.webp" data-full-alt="HUD-Editor mit Werkzeugleiste und Elemente-Liste im Spiel."><img src="/bilder/spiel-hud-editor.webp" width="854" height="480" alt="HUD-Editor mit Werkzeugleiste und Elemente-Liste im Spiel." loading="lazy"></button></div>
+          <span class="eyebrow">{{icon:hud}}HUD-Editor</span>
+          <h3 class="h4">Jede Anzeige an ihren Platz</h3>
+          <p class="card__text">Verschieben, vergrößern, einrasten lassen – mit Raster, Pfeiltasten und Rückgängig (<kbd>Strg</kbd>+<kbd>Z</kbd>). Drei HUD-Stile: Heldix, Klassisch und Minimal.</p>
+          <a class="link-arrow" href="/hilfe/hud-editor">Zum HUD-Editor{{icon:chevron-right}}</a>
+        </article>
+        <article class="card reveal">
+          <div class="perf-mini" aria-hidden="true">
+            <span class="icon-tile icon-tile--lg">{{icon:performance}}</span>
+          </div>
+          <span class="eyebrow">{{icon:fps}}Leistung und Shader</span>
+          <h3 class="h4">Schnell, auch wenn es schön aussieht</h3>
+          <p class="card__text">Unter Windows startet HeldixClient mit Vulkan – in unseren Messungen rund 40 % mehr FPS; klappt es nicht, geht es mit OpenGL weiter. Dazu FPS-Boost per Schalter, weniger FPS im Hintergrund und die Heldix-Shader mit acht Farbstilen.</p>
+          <a class="link-arrow" href="/hilfe/mehr-fps">Mehr FPS{{icon:chevron-right}}</a>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight" id="module" aria-labelledby="module-titel">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">{{icon:modules}}Module</span>
+        <h2 class="h2" id="module-titel">{{MODULE_ANZAHL}} Module, ein Menü</h2>
+        <p class="lead">Jedes Modul schaltest du im Heldix-Menü einzeln an und aus. HUD-Anzeigen ordnest du im HUD-Editor an. Module aus Addons kommen aus dem Addon-Store dazu.</p>
+      </div>
+
+      <div class="toolbar module-toolbar" role="search">
+        <label class="search-field">
+          <span class="sr-only">Module durchsuchen</span>
+          {{icon:search}}
+          <input type="search" id="modul-suche" placeholder="Modul suchen, z. B. Zoom oder Koordinaten" autocomplete="off">
+        </label>
+        <div class="filter-group" role="group" aria-label="Art" id="modul-filter">
+          <button type="button" data-filter="alle" aria-pressed="true">Alle <span class="count-soft">{{MODULE_GESAMT}}</span></button>
+          <button type="button" data-filter="hud" aria-pressed="false">HUD-Anzeigen <span class="count-soft">{{MODULE_HUD_ANZAHL}}</span></button>
+          <button type="button" data-filter="funktion" aria-pressed="false">Funktionen <span class="count-soft">{{MODULE_FUNKTION_ANZAHL}}</span></button>
+          <button type="button" data-filter="addon" aria-pressed="false">Addons <span class="count-soft">{{MODULE_ADDON_ANZAHL}}</span></button>
+        </div>
+      </div>
+      <p class="result-line" id="modul-ergebnis" aria-live="polite"></p>
+
+      <div class="module-grid" id="module-liste">
+{{MODULE_KARTEN_HTML}}
+      </div>
+      <div class="empty" id="modul-leer" hidden>{{icon:search}}<p>Kein Modul passt zu deiner Suche.</p></div>
+
+      <aside class="support-box store-hint">
+        <span class="icon-tile icon-tile--lg">{{icon:addons}}</span>
+        <div><h2>Mehr Module im Addon-Store</h2><p>Addons wie Voice Chat, Minimap, Spotify oder Uhrzeit &amp; Spielzeit installierst du einzeln – im Launcher, im Spiel oder auf der Webseite. Alle sind vom Team geprüft und signiert.</p></div>
+        <a class="btn btn--primary" href="/addons">{{icon:addons}}Zum Addon-Store</a>
+      </aside>
     </div>
   </section>
 </main>
-
-<div class="lightbox" id="lightbox" hidden>
-  <button class="close" type="button" aria-label="Schließen">{{icon:close}}</button>
-  <figure><img alt=""><figcaption></figcaption></figure>
-</div>
 
 {{include:footer.html}}
 </body>

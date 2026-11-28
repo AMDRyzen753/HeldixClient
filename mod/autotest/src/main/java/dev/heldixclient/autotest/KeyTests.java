@@ -51,22 +51,22 @@ final class KeyTests {
 		t.click(center[0], center[1]);
 		t.check("Tasten: Klick auf den Chip wartet auf eine Taste", t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).capturingKey()));
 		t.screenshot("tasten-01-warten");
-		t.pressKey(InputConstants.KEY_J);
-		t.check("Tasten: J belegt („" + t.compute(mc -> fpsKey.saveString()) + "“)", t.compute(mc -> fpsKey.saveString()).equals("key.keyboard.j")
+		t.pressKey(InputConstants.KEY_M);
+		t.check("Tasten: M belegt („" + t.compute(mc -> fpsKey.saveString()) + "“)", t.compute(mc -> fpsKey.saveString()).equals("key.keyboard.m")
 				&& !t.compute(mc -> ((HeldixMenuScreen) mc.gui.screen()).capturingKey()));
 		t.moveMouse(5, 5);
 		t.screenshot("tasten-02-belegt");
 
-		// im Spiel: J schaltet FPS um
+		// im Spiel: M schaltet FPS um (J hat das Emote-Rad, O die Freunde)
 		t.setScreen(() -> null);
 		t.waitTicks(3);
 		boolean before = t.compute(mc -> fps.isEnabled());
-		t.pressKey(InputConstants.KEY_J);
+		t.pressKey(InputConstants.KEY_M);
 		t.waitTicks(3);
-		t.check("Tasten: J schaltet FPS im Spiel um", t.compute(mc -> fps.isEnabled()) != before);
-		t.pressKey(InputConstants.KEY_J);
+		t.check("Tasten: M schaltet FPS im Spiel um", t.compute(mc -> fps.isEnabled()) != before);
+		t.pressKey(InputConstants.KEY_M);
 		t.waitTicks(3);
-		t.check("Tasten: noch einmal J schaltet zurück", t.compute(mc -> fps.isEnabled()) == before);
+		t.check("Tasten: noch einmal M schaltet zurück", t.compute(mc -> fps.isEnabled()) == before);
 
 		// Esc bricht ab, Entf löscht die Belegung
 		t.setScreen(() -> HeldixMenuScreen.moduleSettings(null, fps, "Ein/Aus"));
@@ -74,8 +74,8 @@ final class KeyTests {
 		center = chip(t, "Ein/Aus");
 		t.click(center[0], center[1]);
 		t.pressKey(InputConstants.KEY_ESCAPE);
-		t.check("Tasten: Esc bricht ab, Menü bleibt offen, J bleibt", t.compute(mc -> mc.gui.screen() instanceof HeldixMenuScreen menu && !menu.capturingKey())
-				&& t.compute(mc -> fpsKey.saveString()).equals("key.keyboard.j"));
+		t.check("Tasten: Esc bricht ab, Menü bleibt offen, M bleibt", t.compute(mc -> mc.gui.screen() instanceof HeldixMenuScreen menu && !menu.capturingKey())
+				&& t.compute(mc -> fpsKey.saveString()).equals("key.keyboard.m"));
 		center = chip(t, "Ein/Aus");
 		t.click(center[0], center[1]);
 		t.pressKey(InputConstants.KEY_DELETE);

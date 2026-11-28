@@ -160,6 +160,13 @@ public final class HeldixConfig {
 		public boolean badgeNameTags = true;
 		/** Nachrichten von Freunden annehmen */
 		public boolean socialMessages = true;
+		/** Party: dem Leiter automatisch folgen – nur aus dem Hauptmenü bzw. Menüs ohne Welt, nie aus einer Welt */
+		public boolean partyAutoFollow;
+		/**
+		 * Freundesvorschläge aus der Nähe: HeldixClient-Spieler, mit denen man mindestens 10 Minuten in der Nähe gespielt hat
+		 * (nur auf diesem PC, 30 Tage, heldixclient-nearby.json); aus = nichts merken, Gemerktes löschen
+		 */
+		public boolean nearbySuggestions = true;
 		/** Schnellschalter auf der Übersicht und im Pausemenü (Modul-Ids); null = Standardauswahl */
 		public java.util.List<String> quickModules;
 		/** zuletzt betretener Server (für "Weiterspielen" im Hauptmenü) */

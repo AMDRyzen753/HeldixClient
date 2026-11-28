@@ -8,6 +8,12 @@
 // Aufteilung der Vorlage (Texel):
 //   Cape:   Außenseite (1,1) 10×16 · Innenseite (12,1) 10×16 · Ränder links/rechts (0,1)/(11,1) 1×16 · oben/unten (1,0)/(11,0) 10×1
 //   Elytra: Flügelflächen (24,2) und (36,2) je 10×20 · Ränder (22,2)/(34,2) 2×20 · oben/unten (24,0)/(34,0) 10×2
+//
+// Elytra (HeldixCapeFix 2): Minecraft zeichnet den Flügel als flachen Kasten 10×20×2 von beiden Seiten; seine Form
+// entsteht nur aus durchsichtigen Pixeln. Wie bei Vanilla bleibt die Vorderseite (24,2) leer, bemalt wird die Rückseite
+// (36,2) mit den Rändern, beschnitten auf eine Flügelform aus ELYTRA_FORMS (Feld `elytra` eines Motivs, sonst 'normal').
+// Neue Motive bekommen damit automatisch die normale Form. Der Client setzt die normale Form zusätzlich beim Laden über
+// jedes Bild, dessen Vorderseite bemalt ist (ElytraForm.java) – auch Bilder, die nicht aus diesem Generator kommen.
 import { app, BrowserWindow } from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -27,6 +33,91 @@ const f = (n) => Number(n.toFixed(3));
 const frac = (x) => x - Math.floor(x);
 /** 0…1, periodisch in t (eine Schleife pro Animation) */
 const wave = (t, phase = 0, speed = 1) => 0.5 + 0.5 * Math.sin(TAU * (t * speed + phase));
+
+/**
+ * Flügelformen der Elytra im Texel-Raster der Vorlage: Spalten u22…u45, Zeilen v0…v21; '#' sichtbar, '.' durchsichtig.
+ * Die Vorderseite u24…u33 (ab v2) bleibt immer leer. 'normal' ist der Umriss der Vanilla-Elytra (gleiche Maske wie in
+ * ElytraForm.java). Die übrigen sind eigene, abgewandelte Formen nach den Elytren offizieller Minecraft-Capes:
+ * polarlicht (nach Aurora: wellige Ränder wie Lichtvorhänge), krone (nach Hero: drei Zacken, gestufter Körper),
+ * ranke (nach Twisted: gekrümmt, unten zur Schlaufe eingerollt), feder (nach Moonlight Trail: schlank, spitz auslaufend).
+ */
+const ELYTRA_FORMS = {
+  normal: [
+    '.........#########......', '..........##............', '............########....', '............#########...',
+    '.............#########..', '.............#########..', '.............#########..', '.............##########.',
+    '.............##########.', '.............##########.', '.............##########.', '#.............##########',
+    '#.............##########', '#.............##########', '#.............##########', '#.............##########',
+    '#..............#########', '#..............#########', '#..............#########', '#...............########',
+    '#...............########', '#................#######',
+  ],
+  polarlicht: [
+    '........####....##......', '#.......................', '#...........##########..', '#...........###########.',
+    '#...........############', '#...........############', '#............###########', '#............###########',
+    '#.............##########', '#.............#########.', '...............########.', '...............#######..',
+    '................######..', '................#######.', '...............########.', '...............#######..',
+    '................#####...', '................######..', '................#######.', '.................#####..',
+    '..................###...', '..................##....',
+  ],
+  krone: [
+    '..........###..###..##..', '..........###..###......', '............#..#..#..#..', '............##.##.##.##.',
+    '............##########..', '.............#########..', '.............#########..', '.............#########..',
+    '.............#########..', '.............########...', '.............########...', '#.............#########.',
+    '#.............##########', '#..............########.', '...............#######..', '...............########.',
+    '##.............#########', '##..............#######.', '................######..', '...............########.',
+    '##............##########', '##...........###########',
+  ],
+  ranke: [
+    '.........###...#.#......', '..........##............', '............#######.....', '............#########...',
+    '.............#########..', '.............##########.', '..............#########.', '...............#########',
+    '...............#########', '................########', '................########', '#...............########',
+    '#...............#######.', '#..............#######..', '#.............#######...', '#.............######....',
+    '..............#####.##..', '#.............####.####.', '...............###..###.', '...............#######..',
+    '................#####...', '..................##....',
+  ],
+  feder: [
+    '.........###............', '..........##............', '............########....', '............#########...',
+    '.............#########..', '.............########...', '..............########..', '.............########...',
+    '..............#######...', '..............########..', '..............#######...', '...............#######..',
+    '...............######...', '...............#######..', '................#####...', '................######..',
+    '................#####...', '.................####...', '.................####...', '..................##....',
+    '..................##....', '...................#....',
+  ],
+};
+
+/** Form eines Motivs (unbekannte Namen fallen auf 'normal' zurück, damit nie Rechtecke entstehen) */
+const elytraForm = (design) => ELYTRA_FORMS[design.elytra] ?? ELYTRA_FORMS.normal;
+
+/** Sichtbare Texel als SVG-Pfad (zusammenhängende Läufe je Zeile), in Vorlagen-Koordinaten */
+function elytraPath(form) {
+  let d = '';
+  form.forEach((row, v) => {
+    for (let x = 0; x < row.length; ) {
+      if (row[x] !== '#') { x++; continue; }
+      let end = x;
+      while (end < row.length && row[end] === '#') end++;
+      d += `M${22 + x} ${v}h${end - x}v1h${x - end}z`;
+      x = end;
+    }
+  });
+  return d;
+}
+
+/** Umriss der Form (Kanten zwischen sichtbaren und durchsichtigen Texeln) als Linienpfad für die Zierkante */
+function elytraOutline(form) {
+  const on = (x, v) => v >= 0 && v < form.length && x >= 0 && x < form[v].length && form[v][x] === '#';
+  let d = '';
+  form.forEach((row, v) => {
+    for (let x = 0; x < row.length; x++) {
+      if (!on(x, v)) continue;
+      const u = 22 + x;
+      if (!on(x, v - 1)) d += `M${u} ${v}h1`;
+      if (!on(x, v + 1)) d += `M${u} ${v + 1}h1`;
+      if (!on(x - 1, v)) d += `M${u} ${v}v1`;
+      if (!on(x + 1, v)) d += `M${u + 1} ${v}v1`;
+    }
+  });
+  return d;
+}
 
 /** reproduzierbare Zufallszahlen, damit die Capes bei jedem Lauf gleich aussehen */
 function random(seed) {
@@ -82,6 +173,150 @@ function forest(w, h, top, color, seed) {
     trees += `<path d="M${f(x)} ${f(base - th)} L${f(x + half)} ${f(base)} L${f(x - half)} ${f(base)} Z" fill="${color}"/>`;
   }
   return `${trees}<rect x="0" y="${f(h * top + h * 0.025)}" width="${w}" height="${f(h)}" fill="${color}"/>`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Matrix-Capes: fallender Code (Binär, Hex, Programmier-Zeichen) in einer eigenen 3×5-Pixelschrift
+// ---------------------------------------------------------------------------------------------
+
+/** 3×5 Punkte je Zeichen, zeilenweise von oben links */
+const GLYPHS = {
+  0: '111101101101111', 1: '010110010010111', 2: '111001111100111', 3: '111001011001111', 4: '101101111001001',
+  5: '111100111001111', 7: '111001010010010', 8: '111101111101111', 9: '111101111001111',
+  A: '010101111101101', C: '011100100100011', E: '111100110100111', F: '111100110100100', M: '101111111101101',
+  T: '111010010010010', X: '101101010101101', '#': '101111101111101', '<': '001010100010001', '>': '100010001010100',
+  '/': '001001010100100', '{': '011010110010011', '}': '110010011010110', $: '011110010011110', '=': '000111000111000',
+  '+': '000010111010000',
+};
+/** Zeichenvorrat des Regens: 0 und 1 am häufigsten, dazu Hex und Zeichen aus Quelltext */
+const CODE = '0101100110100101' + '234578' + '9ACEF' + 'X#<>/{}$=+';
+
+/** reproduzierbare Zahl 0…1 aus ganzen Zahlen (gleiches Ergebnis bei jedem Lauf) */
+function hash(...values) {
+  let h = 0x9e3779b9;
+  for (const v of values) {
+    h = Math.imul(h ^ (v | 0), 0x85ebca6b);
+    h ^= h >>> 13;
+    h = Math.imul(h, 0xc2b2ae35);
+    h ^= h >>> 16;
+  }
+  return (h >>> 0) / 4294967296;
+}
+
+/** Pfad eines Zeichens, linke obere Ecke (x, y), Punktgröße dot */
+function glyphPath(code, x, y, dot) {
+  const bits = GLYPHS[code];
+  let d = '';
+  for (let i = 0; i < 15; i++) {
+    if (bits[i] !== '1') continue;
+    d += `M${f(x + (i % 3) * dot)} ${f(y + Math.floor(i / 3) * dot)}h${f(dot)}v${f(dot)}h${f(-dot)}Z`;
+  }
+  return d;
+}
+
+/**
+ * Matrix-Cape in einer Farbe. team: Heldix-Zeichen im Hintergrund und „TEAM“ unten auf der Außenseite
+ * (wählbar nur für Team-Mitglieder, siehe capes.json „team“ und den Heldix-Dienst).
+ */
+function matrixDesign({ id, name, description, team = false, seed, bg, dim, trail, bright, head, edge, lining, trim }) {
+  return {
+    id,
+    name,
+    description,
+    fps: 12,
+    team,
+    edge,
+    lining,
+    trim,
+    poster: 0.35,
+    /** Raster der Zeichen; jede Spalte hat ihre eigene Spur (Länge, Tempo, Wechseltakt der Zeichen) */
+    rain(w, h, cape, t) {
+      const cols = Math.round(w * 1.2);
+      const rows = Math.round(h / 1.15);
+      const cw = w / cols;
+      const ch = h / rows;
+      const dot = Math.min(cw * 0.26, ch * 0.17);
+      const step = Math.round(t * FRAMES) % FRAMES;
+      const face = cape ? 1 : 2;
+      const cells = [];
+      for (let c = 0; c < cols; c++) {
+        const trailLen = 6 + Math.floor(hash(seed, face, c, 2) * 7);
+        const speed = hash(seed, face, c, 3) < 0.3 ? 2 : 1;
+        const length = rows + trailLen;
+        // ganze Umläufe pro Schleife: das letzte Bild geht nahtlos ins erste über
+        const headRow = Math.floor((hash(seed, face, c, 1) * length + t * speed * length) % length);
+        const swap = [2, 3, 4][Math.floor(hash(seed, face, c, 4) * 3)];
+        for (let r = 0; r < rows; r++) {
+          const behind = headRow - r;
+          const k = behind >= 0 && behind < trailLen ? behind : -1;
+          const glyphStep = k === 0 ? step : Math.floor(step / swap);
+          const code = CODE[Math.floor(hash(seed, face, c, r, glyphStep, 5) * CODE.length)];
+          cells.push({ k, trailLen, code, x: c * cw + (cw - dot * 3) / 2, y: r * ch + (ch - dot * 5) / 2 });
+        }
+      }
+      return { cells, dot };
+    },
+    /** „TEAM“ in Punktgröße dot, unten mittig */
+    label(w, h, dot) {
+      const width = 4 * 3 * dot + 3 * dot;
+      let d = '';
+      [...'TEAM'].forEach((code, i) => {
+        d += glyphPath(code, (w - width) / 2 + i * 4 * dot, h - 1.35 - 5 * dot / 2, dot);
+      });
+      return d;
+    },
+    art(w, h, { cape, t }) {
+      const { cells, dot } = this.rain(w, h, cape, t);
+      const layers = new Map();
+      const add = (color, opacity, d) => {
+        const key = `${color}|${Math.round(opacity * 10) / 10}`;
+        layers.set(key, (layers.get(key) ?? '') + d);
+      };
+      for (const cell of cells) {
+        const d = glyphPath(cell.code, cell.x, cell.y, dot);
+        if (cell.k < 0) add(dim, 0.35, d);
+        else if (cell.k === 0) add(head, 1, d);
+        else if (cell.k <= 2) add(bright, 1, d);
+        else add(trail, 0.3 + 0.7 * (1 - (cell.k - 2) / (cell.trailLen - 2)), d);
+      }
+      let code = '';
+      for (const [key, d] of layers) {
+        const [color, opacity] = key.split('|');
+        code += `<path d="${d}" fill="${color}" opacity="${opacity}"/>`;
+      }
+      const band = uid('mb');
+      const scan = -2 + t * (h + 4);
+      const bandStops = `<stop offset="0" stop-color="${bright}" stop-opacity="0"/><stop offset="0.5" stop-color="${bright}" stop-opacity="0.14"/><stop offset="1" stop-color="${bright}" stop-opacity="0"/>`;
+      let mark = '';
+      let tag = '';
+      if (this.team && cape) {
+        const s = w * 0.7;
+        mark = `<g opacity="${f(0.3 + 0.15 * wave(t, 0, 1))}">${emblem((w - s) / 2, h * 0.36 - s / 2, s, { fill: bright, ring: bright, ringOpacity: 0.8, back: 0.1 })}</g>`;
+        tag = `<rect x="0" y="${f(h - 2.2)}" width="${w}" height="1.7" fill="${bg}" opacity="0.85"/><path d="${this.label(w, h, 0.2)}" fill="${head}"/>`;
+      }
+      return `<defs><linearGradient id="${band}" x1="0" y1="0" x2="0" y2="1">${bandStops}</linearGradient></defs>
+        <rect width="${w}" height="${h}" fill="${bg}"/>${mark}
+        <rect x="0" y="${f(scan)}" width="${w}" height="2" fill="url(#${band})"/>${code}${tag}`;
+    },
+    glow(w, h, { cape, t }) {
+      const { cells, dot } = this.rain(w, h, cape, t);
+      let heads = '';
+      let near = '';
+      for (const cell of cells) {
+        if (cell.k === 0) heads += glyphPath(cell.code, cell.x, cell.y, dot);
+        else if (cell.k === 1 || cell.k === 2) near += glyphPath(cell.code, cell.x, cell.y, dot);
+      }
+      const b = blur(0.28);
+      let tag = '';
+      if (this.team && cape) {
+        const label = this.label(w, h, 0.2);
+        tag = `<path d="${label}" fill="${bright}" opacity="0.9" filter="url(#${b.id})"/><path d="${label}" fill="${head}"/>`;
+      }
+      // nur ein Schein um die Spitzen: das Zeichen selbst bleibt aus dem Grundbild lesbar
+      return `<defs>${b.def}</defs><path d="${heads}" fill="${bright}" opacity="0.5" filter="url(#${b.id})"/>
+        <path d="${near}" fill="${bright}" opacity="0.28" filter="url(#${b.id})"/>${tag}`;
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -145,6 +380,7 @@ const DESIGNS = [
   },
   {
     id: 'mitternacht',
+    elytra: 'feder',
     name: 'Mitternacht',
     description: 'Funkelnder Sternenhimmel, Mondsichel und Sternschnuppe',
     fps: 10,
@@ -214,6 +450,7 @@ const DESIGNS = [
   },
   {
     id: 'aurora',
+    elytra: 'polarlicht',
     name: 'Aurora',
     description: 'Wogende Polarlichter über einem dunklen Wald',
     fps: 10,
@@ -267,6 +504,7 @@ const DESIGNS = [
   },
   {
     id: 'glut',
+    elytra: 'krone',
     name: 'Glut',
     description: 'Flackernde Flammen und aufsteigende Funken – leuchtet im Dunkeln',
     fps: 14,
@@ -445,9 +683,13 @@ const DESIGNS = [
     lining: '#3b0a20',
     trim: '#fbcfe8',
     poster: 0.3,
+    /** Farben (die Team-Variante sakura_orange nutzt dieselbe Zeichnung mit eigenen Farben) */
+    colors: { petal: '#fff1f7', stroke: '#f472b6', center: '#db2777', top: '#fdf2f8', mid: '#f9a8d4', bottom: '#be185d', branch: '#4a1d2e' },
+    seed: 59,
     art(w, h, { t }) {
+      const c = this.colors;
       const g = uid('g');
-      const rnd = random(59 + w * 3 + h);
+      const rnd = random(this.seed + w * 3 + h);
       const blossom = (x, y, r) => {
         let petals = '';
         for (let i = 0; i < 5; i++) {
@@ -455,9 +697,9 @@ const DESIGNS = [
           const px = x + Math.cos(a) * r * 0.52;
           const py = y + Math.sin(a) * r * 0.52;
           petals += `<ellipse cx="${f(px)}" cy="${f(py)}" rx="${f(r * 0.46)}" ry="${f(r * 0.36)}" transform="rotate(${f((a * 180) / Math.PI)} ${f(px)} ${f(py)})"
-            fill="#fff1f7" stroke="#f472b6" stroke-width="0.07"/>`;
+            fill="${c.petal}" stroke="${c.stroke}" stroke-width="0.07"/>`;
         }
-        return `${petals}<circle cx="${f(x)}" cy="${f(y)}" r="${f(r * 0.24)}" fill="#db2777"/>`;
+        return `${petals}<circle cx="${f(x)}" cy="${f(y)}" r="${f(r * 0.24)}" fill="${c.center}"/>`;
       };
       const sway = Math.sin(TAU * t) * 0.15;
       const branch = `M${f(-w * 0.05)} ${f(h * 0.2)} C ${f(w * 0.3)} ${f(h * 0.16)}, ${f(w * 0.5)} ${f(h * 0.3 + sway)}, ${f(w * 1.05)} ${f(h * 0.26 + sway)}
@@ -472,13 +714,13 @@ const DESIGNS = [
         const spin = 360 * t * speed + rnd() * 180;
         const flip = 0.55 + 0.45 * Math.abs(Math.cos(TAU * (t * speed + rnd())));
         petals += `<ellipse cx="${f(x)}" cy="${f(y)}" rx="${f(0.42 + rnd() * 0.2)}" ry="${f(0.22 * flip)}" transform="rotate(${f(spin)} ${f(x)} ${f(y)})"
-          fill="#fff1f7" opacity="${f(0.65 + rnd() * 0.3)}"/>`;
+          fill="${c.petal}" opacity="${f(0.65 + rnd() * 0.3)}"/>`;
       }
       return `<defs><linearGradient id="${g}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#fdf2f8"/><stop offset="0.5" stop-color="#f9a8d4"/><stop offset="1" stop-color="#be185d"/>
+          <stop offset="0" stop-color="${c.top}"/><stop offset="0.5" stop-color="${c.mid}"/><stop offset="1" stop-color="${c.bottom}"/>
         </linearGradient></defs>
         <rect width="${w}" height="${h}" fill="url(#${g})"/>
-        <path d="${branch}" fill="none" stroke="#4a1d2e" stroke-width="0.7" stroke-linecap="round"/>
+        <path d="${branch}" fill="none" stroke="${c.branch}" stroke-width="0.7" stroke-linecap="round"/>
         ${blossoms}${petals}`;
     },
   },
@@ -538,6 +780,7 @@ const DESIGNS = [
   },
   {
     id: 'galaxie',
+    elytra: 'ranke',
     name: 'Galaxie',
     description: 'Eine langsam drehende Spiralgalaxie im Nebel',
     fps: 10,
@@ -595,13 +838,72 @@ const DESIGNS = [
         <circle cx="${f(cx)}" cy="${f(cy)}" r="${f(w * 0.07)}" fill="#fde68a"/><g opacity="0.8">${out}</g>`;
     },
   },
+  matrixDesign({
+    id: 'matrix',
+    name: 'Matrix',
+    description: 'Fallender grüner Hacker-Code auf schwarzem Grund – leuchtet im Dunkeln',
+    seed: 101,
+    bg: '#010805',
+    dim: '#0b3d1d',
+    trail: '#16c85a',
+    bright: '#3dff7f',
+    head: '#e3ffec',
+    edge: '#0a3318',
+    lining: '#010402',
+    trim: '#4ade80',
+  }),
+  matrixDesign({
+    id: 'matrix_rot',
+    name: 'Matrix Rot',
+    description: 'Roter Hacker-Code mit Heldix-Zeichen – nur für das HeldixClient-Team',
+    team: true,
+    seed: 202,
+    bg: '#0a0103',
+    dim: '#45090f',
+    trail: '#d81e30',
+    bright: '#ff4a5a',
+    head: '#ffe3e6',
+    edge: '#3a080d',
+    lining: '#050102',
+    trim: '#ff6b78',
+  }),
+  matrixDesign({
+    id: 'matrix_tuerkis',
+    name: 'Matrix Türkis',
+    description: 'Türkiser Hacker-Code mit Heldix-Zeichen – nur für das HeldixClient-Team',
+    team: true,
+    seed: 303,
+    bg: '#010809',
+    dim: '#073d40',
+    trail: '#12c4b6',
+    bright: '#2ff5e4',
+    head: '#e0fffb',
+    edge: '#083436',
+    lining: '#010506',
+    trim: '#5eead4',
+  }),
 ];
+
+// Sakura in #FD482C, nur für das Team: dieselbe Zeichnung wie „Sakura“, eigene Farben und Blütenverteilung
+DESIGNS.push({
+  ...DESIGNS.find((design) => design.id === 'sakura'),
+  id: 'sakura_orange',
+  name: 'Sakura Orange',
+  description: 'Kirschblüten auf leuchtendem Orangerot (#FD482C) – nur für das HeldixClient-Team',
+  team: true,
+  seed: 83,
+  edge: '#b32a12',
+  lining: '#3d0f06',
+  trim: '#ffc4b5',
+  colors: { petal: '#fff4f0', stroke: '#fd482c', center: '#c22a12', top: '#ffe2d9', mid: '#fd482c', bottom: '#a3220e', branch: '#3a130b' },
+});
 
 // ---------------------------------------------------------------------------------------------
 // Zusammensetzen: Stoffstruktur, Schatten und Zierkante über jede Fläche
 // ---------------------------------------------------------------------------------------------
 
-function finish(design, w, h) {
+/** Stoff, Schatten und – nur mit {@code frame} – die rechteckige Zierkante (auf Elytra-Flügeln ohne, dort folgt sie der Form) */
+function finish(design, w, h, frame = true) {
   const noise = uid('no');
   const vig = uid('vi');
   const top = uid('to');
@@ -620,27 +922,34 @@ function finish(design, w, h) {
     </defs>
     <rect width="${w}" height="${h}" fill="url(#${noise})"/>
     <rect width="${w}" height="${h}" fill="url(#${vig})"/>
-    <rect width="${w}" height="${h}" fill="url(#${top})"/>
+    <rect width="${w}" height="${h}" fill="url(#${top})"/>${frame
+      ? `
     <rect x="0.22" y="0.22" width="${f(w - 0.44)}" height="${f(h - 0.44)}" fill="none" stroke="url(#${metal})" stroke-width="0.36"/>
-    <rect x="0.62" y="0.62" width="${f(w - 1.24)}" height="${f(h - 1.24)}" fill="none" stroke="${design.trim}" stroke-opacity="0.35" stroke-width="0.09"/>`;
+    <rect x="0.62" y="0.62" width="${f(w - 1.24)}" height="${f(h - 1.24)}" fill="none" stroke="${design.trim}" stroke-opacity="0.35" stroke-width="0.09"/>`
+      : ''}`;
 }
 
 /** Vollständige Textur (Cape und Elytra) eines Bildes der Animation, als SVG im 64×32-Raster */
 function capeSvg(design, t, glow, pixelScale) {
   const face = (x, y, w, h, cape) => {
     const ctx = { cape, t };
-    const body = glow ? (design.glow ? design.glow(w, h, ctx) : '') : design.art(w, h, ctx) + finish(design, w, h);
+    const body = glow ? (design.glow ? design.glow(w, h, ctx) : '') : design.art(w, h, ctx) + finish(design, w, h, cape);
     return `<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" overflow="hidden">${body}</svg>`;
   };
   const lining = (x, y, w, h) =>
     `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${design.lining}"/><svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${finish(design, w, h)}</svg>`;
+  // Elytra: nur die Rückseite (36,2) mit Rändern, beschnitten auf die Flügelform; die Vorderseite (24,2) bleibt leer
+  const form = elytraForm(design);
+  const clip = uid('ely');
+  const wing = glow
+    ? face(36, 2, 10, 20, false)
+    : `<rect x="22" y="0" width="24" height="22" fill="${design.edge}"/>${face(36, 2, 10, 20, false)}
+      <path d="${elytraOutline(form)}" fill="none" stroke="${design.trim}" stroke-width="0.5" stroke-linecap="square"/>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${64 * pixelScale}" height="${32 * pixelScale}" viewBox="0 0 64 32" style="display:block">
-    ${glow
-      ? ''
-      : `<rect x="0" y="0" width="22" height="17" fill="${design.edge}"/><rect x="22" y="0" width="24" height="22" fill="${design.edge}"/>${lining(12, 1, 10, 16)}`}
+    <defs><clipPath id="${clip}"><path d="${elytraPath(form)}"/></clipPath></defs>
+    ${glow ? '' : `<rect x="0" y="0" width="22" height="17" fill="${design.edge}"/>${lining(12, 1, 10, 16)}`}
     ${face(1, 1, 10, 16, true)}
-    ${face(24, 2, 10, 20, false)}
-    ${face(36, 2, 10, 20, false)}
+    <g clip-path="url(#${clip})">${wing}</g>
   </svg>`;
 }
 
@@ -752,7 +1061,16 @@ app.whenReady().then(async () => {
     await writeFile(path.join(out, `${design.id}.png`), png(64 * SCALE, 32 * SCALE * FRAMES, Buffer.concat(frames)));
     if (design.glow) await writeFile(path.join(out, `${design.id}_glow.png`), png(64 * GLOW_SCALE, 32 * GLOW_SCALE * FRAMES, Buffer.concat(glowFrames)));
     posters.push({ design, url: (await base.rgba(capeSvg(design, design.poster ?? 0, false, SCALE))).image.toDataURL() });
-    meta.push({ id: design.id, name: design.name, description: design.description, frames: FRAMES, fps: design.fps, glow: Boolean(design.glow) });
+    meta.push({
+      id: design.id,
+      name: design.name,
+      description: design.description,
+      frames: FRAMES,
+      fps: design.fps,
+      glow: Boolean(design.glow),
+      // nur für Team-Mitglieder wählbar (Client fragt den Heldix-Dienst, der Dienst prüft selbst)
+      ...(design.team ? { team: true } : {}),
+    });
     console.log(`${design.id}: ${FRAMES} Bilder${design.glow ? ' + Leuchten' : ''}`);
   }
   await writeFile(path.join(out, 'capes.json'), JSON.stringify({ capes: meta }, null, 2) + '\n');

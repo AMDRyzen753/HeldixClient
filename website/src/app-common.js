@@ -309,7 +309,10 @@ function paintHead(element, url) {
   element.prepend(image);
 }
 
-/** Eingebaute Heldix-Capes: dieselben IDs wie im Dienst, Namen wie im Spiel (capes.json der Mod). */
+/**
+ * Eingebaute Heldix-Capes: dieselben IDs wie im Dienst, Namen wie im Spiel (capes.json der Mod). Die mit `true` gibt
+ * es nur für das HeldixClient-Team (capes.json: "team": true; der Dienst lehnt sie für andere mit 403 ab).
+ */
 export const CAPES = [
   ['heldix', 'Heldix'],
   ['mitternacht', 'Mitternacht'],
@@ -320,7 +323,13 @@ export const CAPES = [
   ['sakura', 'Sakura'],
   ['gewitter', 'Gewitter'],
   ['galaxie', 'Galaxie'],
+  ['matrix', 'Matrix'],
+  ['matrix_rot', 'Matrix Rot', true],
+  ['matrix_tuerkis', 'Matrix Türkis', true],
+  ['sakura_orange', 'Sakura Orange', true],
 ];
+/** Eingebautes Cape nur fürs Team? */
+export const teamCape = (id) => CAPES.some(([capeId, , team]) => capeId === id && team === true);
 export const capeName = (id) => (id ? (CAPES.find(([capeId]) => capeId === id)?.[1] ?? id) : 'Kein Cape');
 
 export const ROLE_LABELS ={ moderator: 'Moderator', admin: 'Admin' };

@@ -71,6 +71,41 @@
       "frames": 24,
       "fps": 10,
       "glow": true
+    },
+    {
+      "id": "matrix",
+      "name": "Matrix",
+      "description": "Fallender grüner Hacker-Code auf schwarzem Grund – leuchtet im Dunkeln",
+      "frames": 24,
+      "fps": 12,
+      "glow": true
+    },
+    {
+      "id": "matrix_rot",
+      "name": "Matrix Rot",
+      "description": "Roter Hacker-Code mit Heldix-Zeichen – nur für das HeldixClient-Team",
+      "frames": 24,
+      "fps": 12,
+      "glow": true,
+      "team": true
+    },
+    {
+      "id": "matrix_tuerkis",
+      "name": "Matrix Türkis",
+      "description": "Türkiser Hacker-Code mit Heldix-Zeichen – nur für das HeldixClient-Team",
+      "frames": 24,
+      "fps": 12,
+      "glow": true,
+      "team": true
+    },
+    {
+      "id": "sakura_orange",
+      "name": "Sakura Orange",
+      "description": "Kirschblüten auf leuchtendem Orangerot (#FD482C) – nur für das HeldixClient-Team",
+      "frames": 24,
+      "fps": 10,
+      "glow": false,
+      "team": true
     }
   ]
 }

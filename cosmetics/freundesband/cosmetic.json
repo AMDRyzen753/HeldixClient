@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "id": "freundesband",
+  "version": 1,
+  "slot": "cape",
+  "name": "Freundesband",
+  "description": "Zwei Bänder in Türkis und Gold winden sich über den Nachthimmel – ab drei eingeladenen Freunden",
+  "access": "unlock",
+  "cape": {
+    "frames": 24,
+    "fps": 12
+  }
+}

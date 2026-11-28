@@ -5,7 +5,8 @@
 //   heldix-dienst-admin sperren <name|uuid> [grund]       Spieler sperren (Konto beim Dienst wird gelöscht)
 //   heldix-dienst-admin entsperren <name|uuid>            Sperre aufheben
 //   heldix-dienst-admin gesperrt                          alle Sperren
-//   heldix-dienst-admin team <name|uuid> admin|moderator  ins Team aufnehmen oder Rolle ändern
+//   heldix-dienst-admin team <name|uuid> <rolle>          ins Team aufnehmen oder Rolle ändern (admin, developer-team,
+//                                                         moderator, supporter, designer, tester)
 //   heldix-dienst-admin team-entfernen <name|uuid>        aus dem Team entfernen
 //   heldix-dienst-admin team-liste                        alle Team-Mitglieder
 //   heldix-dienst-admin team-2fa-reset <name|uuid>        Zwei-Faktor-Anmeldung zurücksetzen
@@ -46,7 +47,8 @@ const USAGE = [
   '                                     Nachrichten, Blockierungen und Anmeldungen beim Dienst',
   '  entsperren <name|uuid>             Sperre aufheben',
   '  gesperrt                           alle Sperren',
-  '  team <name|uuid> admin|moderator   ins Team aufnehmen oder Rolle ändern (Spieler muss schon angemeldet gewesen sein)',
+  '  team <name|uuid> <rolle>           ins Team aufnehmen oder Rolle ändern (Spieler muss schon angemeldet gewesen sein);',
+  '                                     Rollen: admin, developer-team (Entwickler), moderator, supporter, designer, tester',
   '  team-entfernen <name|uuid>         aus dem Team entfernen',
   '  team-liste                         alle Team-Mitglieder',
   '  team-2fa-reset <name|uuid>         Zwei-Faktor-Anmeldung zurücksetzen (neu einrichten beim nächsten Besuch)',
@@ -307,7 +309,7 @@ function existingUser(store: Store, raw: string | undefined, usage: string, io: 
 }
 
 function setTeam(store: Store, args: readonly string[], io: AdminOutput, now: number): number {
-  const usage = 'team <name|uuid> admin|moderator';
+  const usage = 'team <name|uuid> admin|developer-team|moderator|supporter|designer|tester';
   const [raw, role] = args;
   if (!isTeamRole(role)) {
     io.err(`Aufruf: ${PROGRAM} ${usage}`);
@@ -354,7 +356,7 @@ function listTeam(store: Store, io: AdminOutput): number {
   for (const m of members) {
     const twoFactor = m.totpSecret === null ? '2FA nicht eingerichtet' : '2FA aktiv';
     const by = m.addedBy === null ? 'CLI' : clean(m.addedBy);
-    io.out(`  ${m.role.padEnd(9)}  ${who(m.name, m.uuid)} · seit ${formatDate(m.addedAt)} (von ${by}) · ${twoFactor}`);
+    io.out(`  ${m.role.padEnd(14)}  ${who(m.name, m.uuid)} · seit ${formatDate(m.addedAt)} (von ${by}) · ${twoFactor}`);
   }
   return 0;
 }

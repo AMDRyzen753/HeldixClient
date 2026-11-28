@@ -19,7 +19,7 @@ Java musst du nicht installieren – die passende Version lädt der Launcher sel
 2. Starte die heruntergeladene Datei.
 3. Windows SmartScreen zeigt beim ersten Start eine Warnung. Klicke auf **Weitere Informationen** und dann auf **Trotzdem ausführen**.
 4. Folge dem Installationsassistenten. Den Zielordner kannst du dabei ändern.
-5. Fertig: HeldixClient findest du jetzt auf dem Desktop und im Startmenü.
+5. Fertig: HeldixClient findest du jetzt auf dem Desktop und im Startmenü. Ist am Ende **HeldixClient starten** angehakt (ab Werk ja), öffnet sich der Launcher gleich mit der [Einrichtung](/hilfe/einrichtung).
 
 > **Achtung:** Lade HeldixClient nur über die offizielle [Download-Seite](/download) herunter. Installer aus anderen Quellen können verändert sein.
 
@@ -29,5 +29,6 @@ HeldixClient hat (noch) keine kostenpflichtige Code-Signatur von Microsoft. Smar
 Spätere Versionen installiert der Launcher von selbst – mehr dazu unter [Updates des Launchers](/hilfe/launcher-updates).
 
 ## Wie geht es weiter?
-1. [Mit dem Microsoft-Konto anmelden](/hilfe/anmelden-microsoft).
+Beim ersten Start führt dich der Launcher durch die [Einrichtung](/hilfe/einrichtung): Anmeldung und offizielle Addons mit einem Klick. Danach:
+1. [Mit dem Microsoft-Konto anmelden](/hilfe/anmelden-microsoft) – falls du es in der Einrichtung übersprungen hast.
 2. [Das erste Spiel starten](/hilfe/erster-start).

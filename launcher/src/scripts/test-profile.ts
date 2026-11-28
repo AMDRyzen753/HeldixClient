@@ -116,7 +116,7 @@ async function main(): Promise<void> {
     const paths = createPaths(path.join(tmp, 'launcher'));
     const capesFile = path.resolve(__dirname, '..', '..', '..', 'mod', 'src', 'main', 'resources', 'assets', 'heldixclient', 'textures', 'cape', 'capes.json');
     const capes = await loadHeldixCapes(capesFile);
-    check('Heldix-Capes aus capes.json', capes.length === 9 && capes.find((c) => c.id === 'sakura')?.glow === false && capes.every((c) => c.frames === 24 && c.fps >= 10));
+    check('Heldix-Capes aus capes.json (13, drei nur fürs Team)', capes.length === 13 && capes.find((c) => c.id === 'sakura')?.glow === false && capes.every((c) => c.frames === 24 && c.fps >= 10) && capes.filter((c) => c.team).map((c) => c.id).join(',') === 'matrix_rot,matrix_tuerkis,sakura_orange');
     const owner = fake.addPlayer('Sammler', { skin: startSkin, capes: [{ alias: 'Migrator', png: capeA, active: true }, { alias: 'Vanilla', png: capeB }] });
     const msAccount: ProfileAccount & { token: string } = { id: 'konto-ms', type: 'microsoft', name: owner.name, uuid: owner.uuid, token: owner.token };
     const fallback: SkinInfo = { dataUrl: `data:image/png;base64,${makeSkin({ seed: 50, slim: true }).toString('base64')}`, slim: null, source: 'default' };
@@ -144,7 +144,7 @@ async function main(): Promise<void> {
     check('Microsoft-Konto: Skin änderbar, Skin von Mojang', state.canEditSkin && dataUrlBytes(state.skin?.dataUrl).equals(startSkin) && state.skin?.variant === 'classic' && state.error === null, { ...state, library: state.library.length, skin: state.skin?.variant });
     check('Mojang-Capes mit Bild und aktivem', state.mojangCapes.length === 2 && state.mojangCapes.every((c) => c.dataUrl?.startsWith('data:image/png;base64,')) && state.mojangCapes.find((c) => c.active)?.alias === 'Migrator');
     check('aktueller Skin automatisch in der Sammlung, aktiv', state.library.length === 1 && state.library[0].name === 'Aktueller Skin' && state.library[0].active, state.library.map((s) => [s.name, s.active]));
-    check('Heldix-Capes und Auswahl', state.heldixAvailable && state.heldixCape === null && state.heldixCapes.length === 9);
+    check('Heldix-Capes und Auswahl', state.heldixAvailable && state.heldixCape === null && state.heldixCapes.length === 13);
     state = await service.state(true);
     check('kein zweites „Aktueller Skin“', state.library.length === 1);
 
@@ -199,7 +199,7 @@ async function main(): Promise<void> {
     await expectReject('Offline-Konto: Skin anwenden geht nicht', () => service.applySkin(state.library[0].id), /nur mit einem Microsoft-Konto/);
     account = null;
     state = await service.state();
-    check('ohne Konto: leerer Stand mit Sammlung', state.account === null && state.skin === null && state.library.length === 2 && state.heldixCapes.length === 9);
+    check('ohne Konto: leerer Stand mit Sammlung', state.account === null && state.skin === null && state.library.length === 2 && state.heldixCapes.length === 13);
     check('Sammlung nach allem: Prüfsummen stimmen', (await new SkinLibrary(path.join(tmp, 'launcher', 'skins')).list()).every((s) => sha(dataUrlBytes(s.dataUrl)).length === 64));
   } finally {
     await fake.stop();

@@ -42,6 +42,10 @@ public final class Targets {
 	// HeldixClient (DroppedItemPatches, Addon-API 4: gedroppte Items)
 	public static final String ITEM_ENTITY_RENDERER = "net.minecraft.client.renderer.entity.ItemEntityRenderer";
 	public static final String ITEM_ENTITY_RENDER_STATE = "net.minecraft.client.renderer.entity.state.ItemEntityRenderState";
+	/** Welt teilen (0.13.8): Zugang mit echter UUID, Rechte und Höchstspieler des eingebauten Servers */
+	public static final String PLAYER_LIST = "net.minecraft.server.players.PlayerList";
+	public static final String INTEGRATED_SERVER = "net.minecraft.client.server.IntegratedServer";
+	public static final String INTEGRATED_PLAYER_LIST = "net.minecraft.client.server.IntegratedPlayerList";
 
 	public static final List<String> ALL = List.of(
 			MINECRAFT,
@@ -72,7 +76,10 @@ public final class Targets {
 			LEVEL_LOADING_SCREEN,
 			CONNECT_SCREEN,
 			ITEM_ENTITY_RENDERER,
-			ITEM_ENTITY_RENDER_STATE);
+			ITEM_ENTITY_RENDER_STATE,
+			PLAYER_LIST,
+			INTEGRATED_SERVER,
+			INTEGRATED_PLAYER_LIST);
 
 	private Targets() {
 	}

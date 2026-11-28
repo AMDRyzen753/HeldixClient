@@ -459,6 +459,19 @@ public final class Ui {
 		return true;
 	}
 
+	/** Eine registrierte Textur (z. B. ein Bild eines Addons) ohne Glätten auf diese Fläche, an Bildschirm-Pixeln ausgerichtet */
+	public static void texture(GuiGraphicsExtractor g, Identifier id, float x, float y, float w, float h, int textureWidth, int textureHeight) {
+		int s = scale();
+		int x0 = Math.round(x * s);
+		int y0 = Math.round(y * s);
+		int x1 = Math.round((x + w) * s);
+		int y1 = Math.round((y + h) * s);
+		g.pose().pushMatrix();
+		g.pose().scale(1f / s, 1f / s);
+		g.blit(RenderPipelines.GUI_TEXTURED, id, x0, y0, 0, 0, x1 - x0, y1 - y0, textureWidth, textureHeight, textureWidth, textureHeight, 0xFFFFFFFF);
+		g.pose().popMatrix();
+	}
+
 	/** Typische Farbe eines PNG aus einer Datei (lädt es wie {@link #image}); 0, wenn es fehlt oder ungültig ist */
 	public static int imageColor(Path file) {
 		FileTexture texture = fileTexture(file);

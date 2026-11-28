@@ -1,0 +1,35 @@
+Prüfbericht: Aegis-Mechflügel (mechfluegel), Slot back, Cosmetics-Format 2
+Erzeugt von launcher/scripts/import-blender-cosmetics.mjs (npm run blender-import) aus dem Blender-Export „heldix-cosmetic/1“.
+
+Quelle (Blender-Cosmatics/output, nur gelesen):
+  MechWings/MechWings.cosmetic.json  466,5 KB  sha256 51f69143100d56fd650f6b12a7198f7d8a3a4127f21dc8c69033f67987f298d8
+  MechWings/textures/MechWings_albedo.png  1,5 KB  sha256 eb6830b148bd43cdf9fb33ab001ea545654c53537c9994fe73a1fc0cada4f4ce
+  MechWings/textures/MechWings_emissive_anim.png  6,6 KB  sha256 13a15a95b50c8412ad0b08ae85d0b41a1755d11171373995c9854f209f52fa02
+
+Größe:
+  vorher: 474,6 KB (JSON 466,5 KB + Texturen)
+  nachher: Manifest 138,2 KB von höchstens 512,0 KB, Umschlag etwa 141,1 KB von 544,0 KB
+
+Mesh:
+  3080 Vertices, 1540 Dreiecke, 20 Knochen, größte Rundung der Positionen 0,0156 px
+  starr: alle Vertices mit Gewicht 1 an genau einem Knochen
+
+Animationen (10), Fehlergrenzen wie vorgegeben: Drehung 0,150°, move 0,020 px je Achse, scale 0,0020
+  Idle: 72 Frames bei 24 fps, Schleife, 19 Spuren, 355 Keys
+  Flap: 24 Frames bei 24 fps, Schleife, 17 Spuren, 273 Keys
+  Glide: 48 Frames bei 24 fps, Schleife, 19 Spuren, 276 Keys
+  Hover: 12 Frames bei 24 fps, Schleife, 19 Spuren, 178 Keys
+  Fold: 72 Frames bei 24 fps, Schleife, 19 Spuren, 222 Keys
+  Emote: 96 Frames bei 24 fps, Schleife, 19 Spuren, 920 Keys
+  Celebrate: 37 Frames bei 24 fps, einmalig, 19 Spuren, 503 Keys
+  Takeoff: 31 Frames bei 24 fps, einmalig, 19 Spuren, 435 Keys
+  Land: 19 Frames bei 24 fps, einmalig, 19 Spuren, 282 Keys
+  Hurt: 13 Frames bei 24 fps, einmalig, 19 Spuren, 213 Keys
+  zusammen 3657 Keys statt 8480 Frames (die Quelle hat je Knochen und Kanal einen Wert je Frame)
+  größter Fehler je Frame: Drehung 0,1495°, move 0,0000 px, scale 0,0000
+  Gegenprobe (alle Vertices, alle Frames, Quelle gegen Ergebnis): größte Abweichung 0,0635 px (Emote, Frame 34, Vertex 914)
+
+Zustände: 15 Zustände 1:1 (sleep_in_bed → sleep), Überblenden 0,25 s
+Partikel: 3 Vorschläge → 6 Einträge (.L-Knochen auch für .R)
+Leuchten: 8 Bilder, 1 Ticks je Bild, Puls 1,2 s zwischen 0,6 und 1
+Texturen: texture.png 64 × 64 (1,5 KB) = MechWings_albedo.png; glow.png 64 × 512 (6,6 KB) = MechWings_emissive_anim.png
