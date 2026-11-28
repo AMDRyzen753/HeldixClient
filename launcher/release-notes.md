@@ -12,7 +12,7 @@
 - Geteilte Welten werben in der Serverliste deiner Mitspieler für HeldixClient: „Geteilt mit HeldixClient“ unter dem Namen der Welt und das Heldix-Logo am Bild der Welt – auch wenn die Welt gerade zu ist
 - Minecrafts Hinweis „Chatnachrichten können nicht überprüft werden“ verdeckt die Menüs nicht mehr – er erscheint als Heldix-Einblendung
 
-# ---------- 0.13.8 (gebaut 28.11., steht in update-0.13.8.json – vor 0.13.9 veröffentlichen, nicht noch einmal ausliefern) ----------
+# ---------- 0.13.8 (veröffentlicht – nicht noch einmal ausliefern) ----------
 # - Neu: Welt teilen – öffne deine Einzelspielerwelt im Pausenmenü mit einem Klick für Freunde, kostenlos und ohne Portfreigabe. Jede Welt hat eine feste Adresse, und auch Freunde ohne HeldixClient können beitreten
 # - Neu im Hauptmenü: Heldix-Welten – offene Welten deiner Freunde mit „Beitreten“, deine eigenen Welten mit Mitgliedern und Rollen, Anklopfen (Erlauben mit H, Ablehnen mit N) und automatischen Sicherungen
 # - Neue animierte Cosmetics: 8 Flügel und Rückenteile, 9 Begleiter (Mochi in vier Fellfarben) und 6 Auren, die sich beim Laufen, Schleichen, Schwimmen und Fliegen mitbewegen und teils leuchten
