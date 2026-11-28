@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 import dev.heldixclient.config.HeldixConfig;
+import dev.heldixclient.render.IrisCompat;
 import dev.heldixclient.social.Social;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.player.PlayerModel;
@@ -324,7 +325,9 @@ public final class CosmeticRenderer {
 		Wearer wearer = wearer(state, now);
 		if (wearer == null) return;
 		boolean gui = camera == null || !camera.initialized || camera.pos == null;
-		if (!gui) {
+		if (!gui && IrisCompat.shadowPass()) {
+			// Iris-Schatten (aus Sicht der Sonne): nichts bestätigen, das übernimmt der eigentliche Durchgang
+		} else if (!gui) {
 			// Messwerte aus layer() bestätigen: das war die Welt
 			long frame = now;
 			if (wearer.headFrame == -1) {

@@ -311,7 +311,8 @@ final class ServerLinkTests {
 		t.check("Im Launcher: Untertitel „" + (launcher == null ? "?" : launcher.activity()) + "“", launcher != null && Social.LAUNCHER_TEXT.equals(launcher.activity()));
 		t.check("Im Launcher: Heldix-Türkis statt Grün", launcher != null && launcher.presenceColor() == Ui.LAUNCHER && game != null && game.presenceColor() == Ui.SUCCESS
 				&& off != null && off.presenceColor() == Ui.FAINT);
-		t.check("Im Launcher: „Nicht stören“ hat Vorrang", dnd != null && dnd.dnd() && dnd.presenceColor() == Ui.WARNING && dnd.activity().startsWith("Nicht stören"));
+		t.check("Im Launcher: „Nicht stören“ hat Vorrang (gelb, „Im Launcher · Nicht stören“ wie in Launcher und Webseite)", dnd != null && dnd.dnd() && dnd.presenceColor() == Ui.WARNING
+				&& "Im Launcher · Nicht stören".equals(dnd.activity()));
 		List<UUID> order = t.compute(mc -> Social.friends().stream().map(Social.Friend::uuid).filter(id -> List.of(inGame, inLauncher, offline).contains(id)).toList());
 		t.check("Im Launcher: nach „im Spiel“, vor „offline“", order.equals(List.of(inGame, inLauncher, offline)));
 		t.check("Im Launcher: kein „zuletzt online“", launcher != null && launcher.lastOnlineText() == null);

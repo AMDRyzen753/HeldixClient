@@ -68,7 +68,7 @@ function memberText(member: PartyMember): string {
   if (member.away) return member.awayUntil ? `Ohne Verbindung – bleibt bis ${clock(member.awayUntil)}` : 'Ohne Verbindung';
   if (member.location) return locationText(member.location);
   // Dienst 1.14.0 sagt ausdrücklich, ob der Launcher verbunden ist; sonst ist nur noch eine andere Verbindung da
-  if (!member.online) return member.launcher ? 'Im Launcher – bekommt Nachrichten sofort' : 'Nicht im Spiel';
+  if (!member.online) return member.launcher ? 'Im Launcher' : 'Nicht im Spiel';
   switch (member.state) {
     case 'singleplayer': return 'Einzelspieler';
     case 'multiplayer': return 'Mehrspieler';
@@ -297,7 +297,7 @@ function openInviteMenu(anchor: HTMLElement): void {
   h('span', { class: 'friends-row-text' },
     h('span', { class: 'friends-row-name', text: friend.nickname || friend.name }),
     h('span', { class: 'friends-row-meta', text: friend.online ? 'Im Spiel'
-      : friend.launcher ? 'Im Launcher – sieht die Einladung sofort, mitspielen nach dem Start'
+      : friend.launcher ? 'Im Launcher'
         : 'Offline – sieht die Einladung beim nächsten Start' }))));
   if (!items.length) items.push(h('div', { class: 'friends-party-menu-empty', text: ctx.friends().length ? 'Alle Freunde sind schon dabei oder eingeladen.' : 'Füge zuerst Freunde hinzu.' }));
   openMenu(anchor, [h('div', { class: 'friends-party-menu-title', text: 'In die Party einladen' }), ...items], 'wide');

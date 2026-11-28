@@ -108,7 +108,7 @@ export function initFriends(ctx) {
           friend.favorite ? h('span', { class: 'fav-mark', title: 'Favorit', 'aria-label': 'Favorit' }, shellIcon('star')) : null,
           friend.dnd && presenceOf(friend) !== 'offline' ? h('span', { class: 'chip chip--danger chip--xs', text: 'Nicht stören' }) : null,
         ),
-        h('div', { class: `row-sub${presenceClass(friend)}`, title: presenceOf(friend) === 'launcher' ? 'Im Launcher – bekommt Nachrichten sofort' : undefined, text: friendLine(friend, { worldName }) }),
+        h('div', { class: `row-sub${presenceClass(friend)}`, title: presenceOf(friend) === 'launcher' ? 'Im Launcher' : undefined, text: friendLine(friend, { worldName }) }),
         friend.statusText ? h('div', { class: 'row-status', text: `„${friend.statusText}“` }) : null,
       ),
       h(

@@ -262,6 +262,32 @@ public final class CosmeticRig {
 		computeBounds();
 	}
 
+	/**
+	 * Leuchtebene im Format 2 für Minecraft aufbereiten. Die Quelle ist additiv gedacht (deckend, Schwarz = kein Leuchten;
+	 * so zeigen es Blender, Launcher und Webseite), {@code RenderTypes.eyes} mischt in Minecraft 26.x aber transparent
+	 * (Farbe · Alpha + Untergrund · (1 − Alpha)). Ohne Umrechnung übermalt das deckende Schwarz die Textur in jedem
+	 * Leucht-Viereck, und die Cosmetics wirken dunkel und fleckig. Hier wird Alpha = hellster Kanal (mal Quell-Alpha) und
+	 * die Farbe entsprechend aufgehellt: Farbe · Alpha ist wieder genau die Quellfarbe, Schwarz wird durchsichtig.
+	 */
+	public static void glowToAlpha(NativeImage image) {
+		for (int y = 0; y < image.getHeight(); y++) {
+			for (int x = 0; x < image.getWidth(); x++) {
+				int argb = image.getPixel(x, y);
+				int r = (argb >> 16) & 0xFF;
+				int g = (argb >> 8) & 0xFF;
+				int b = argb & 0xFF;
+				int max = Math.max(r, Math.max(g, b));
+				int alpha = Math.round(max * (argb >>> 24) / 255f);
+				if (alpha == 0) {
+					image.setPixel(x, y, 0);
+					continue;
+				}
+				float up = 255f / max;
+				image.setPixel(x, y, alpha << 24 | Math.round(r * up) << 16 | Math.round(g * up) << 8 | Math.round(b * up));
+			}
+		}
+	}
+
 	public int vertexCount() {
 		return vertexCount;
 	}

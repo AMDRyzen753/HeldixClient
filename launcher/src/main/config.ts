@@ -2,7 +2,7 @@
 
 export const CLIENT_NAME = 'HeldixClient';
 export const LAUNCHER_NAME = 'HeldixClient';
-export const LAUNCHER_VERSION = '0.14.1';
+export const LAUNCHER_VERSION = '0.14.2';
 
 /** Ordnername für alle Spieldaten (Windows: %APPDATA%\.heldixclient) */
 export const DATA_DIR_NAME = '.heldixclient';

@@ -180,7 +180,7 @@ export function initParty(ctx) {
   function memberLine(member) {
     if (member.away) return member.awayUntil ? `Gerade nicht verbunden · bleibt bis ${formatTime(member.awayUntil)} Uhr` : 'Gerade nicht verbunden';
     // Ab Dienst 1.14.0 sagt launcher, ob das Mitglied den Launcher offen hat (älterer Dienst: Feld fehlt)
-    if (!member.online && member.launcher === true) return 'Im Launcher – bekommt Nachrichten sofort';
+    if (!member.online && member.launcher === true) return 'Im Launcher';
     if (!member.online && member.launcher === false) return 'Nicht im Spiel · über die Webseite dabei';
     if (!member.online) return 'Nicht im Spiel · mit Launcher oder Webseite dabei';
     if (member.location) return `${member.location.kind === 'world' ? 'In der Welt' : 'Auf'} ${member.location.title}`;
@@ -279,7 +279,7 @@ export function initParty(ctx) {
             'li',
             { class: 'row', dataset: { uuid: friend.uuid } },
             avatar(friend.name, friend.uuid, { online: presenceDot(friend) }),
-            h('div', { class: 'row-main' }, h('div', { class: 'row-title', text: displayName(friend) }), h('div', { class: `row-sub${presenceClass(friend)}`, text: { game: 'Online', launcher: 'Im Launcher – sieht die Einladung sofort', offline: 'Offline – sieht die Einladung im Launcher oder hier' }[presenceOf(friend)] })),
+            h('div', { class: 'row-main' }, h('div', { class: 'row-title', text: displayName(friend) }), h('div', { class: `row-sub${presenceClass(friend)}`, text: { game: 'Online', launcher: 'Im Launcher', offline: 'Offline – sieht die Einladung im Launcher oder hier' }[presenceOf(friend)] })),
             h('div', { class: 'row-actions' }, h('button', { type: 'button', class: 'btn btn--social btn--sm', dataset: { aktion: 'einladen' }, onClick: (event) => invite(friend, event.currentTarget) }, shellIcon('party'), 'Einladen')),
           ),
         ),

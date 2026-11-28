@@ -85,6 +85,8 @@ public final class CosmeticCatalog {
 			this.entry = entry;
 			this.manifest = manifest;
 			this.mesh = manifest.model() != null ? new CosmeticMesh(manifest.model(), manifest.animations()) : null;
+			// Format 2: Leuchten ist additiv gedacht, Minecraft mischt transparent → einmal umrechnen (vor Rig und Vorschaubild)
+			if (manifest.rig() != null && glowImage != null) CosmeticRig.glowToAlpha(glowImage);
 			this.rig = manifest.rig() != null ? new CosmeticRig(manifest, glowImage) : null;
 			this.textureImage = textureImage;
 			this.glowImage = glowImage;

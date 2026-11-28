@@ -107,7 +107,7 @@ public final class Social {
 		/** Was der Freund gerade macht, für die Anzeige */
 		public String activity() {
 			if (!online) {
-				if (launcher) return dnd ? "Nicht stören · im Launcher" : LAUNCHER_TEXT;
+				if (launcher) return dnd ? "Im Launcher · Nicht stören" : LAUNCHER_TEXT;
 				String last = lastOnlineText();
 				return last != null ? "Offline · " + last : "Offline";
 			}
@@ -157,7 +157,7 @@ public final class Social {
 
 	/** höchstens so viele Zeichen im eigenen Statustext, Spitznamen und in Notizen (wie beim Dienst) */
 	/** Zustand „Im Launcher“ (ab Dienst 1.14.0): Untertitel und Tooltip */
-	public static final String LAUNCHER_TEXT = "Im Launcher – bekommt Nachrichten sofort";
+	public static final String LAUNCHER_TEXT = "Im Launcher";
 	public static final int STATUS_MAX = 40;
 	public static final int NICKNAME_MAX = 24;
 	public static final int NOTE_MAX = 200;

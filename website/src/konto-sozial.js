@@ -52,7 +52,7 @@ export function worldCodeOf(address, worldDomain = null) {
 }
 
 /**
- * Was ein Freund gerade macht (eine Zeile): „Spielt auf … · Nicht stören“, „Im Launcher – bekommt Nachrichten sofort“
+ * Was ein Freund gerade macht (eine Zeile): „Spielt auf … · Nicht stören“, „Im Launcher“
  * (ab Dienst 1.14.0, launcher: true; mit „Nicht stören“ hat das Vorrang) bzw. „Offline · zuletzt online vor …“.
  */
 export function friendLine(friend, { worldName = null } = {}) {
@@ -62,7 +62,7 @@ export function friendLine(friend, { worldName = null } = {}) {
     if (worldName && friend.server) text = `In der Welt „${worldName}“`;
     return friend.dnd ? `${text} · Nicht stören` : text;
   }
-  if (friend.launcher === true) return friend.dnd ? 'Im Launcher · Nicht stören' : 'Im Launcher – bekommt Nachrichten sofort';
+  if (friend.launcher === true) return friend.dnd ? 'Im Launcher · Nicht stören' : 'Im Launcher';
   const last = lastOnlineText(friend.lastOnline);
   return last ? `Offline · ${last}` : 'Offline';
 }

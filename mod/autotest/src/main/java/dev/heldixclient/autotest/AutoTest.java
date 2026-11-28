@@ -119,6 +119,14 @@ public final class AutoTest implements HeldixModInitializer {
 			t.waitFor("Welt verlassen", mc -> mc.level == null, 60);
 			return;
 		}
+		// Nur beim Entwickeln: HELDIX_AUTOTEST_ONLY=format2 führt nur die Prüfungen der Cosmetics im Format 2 aus (Testwelt)
+		if ("format2".equals(System.getenv("HELDIX_AUTOTEST_ONLY"))) {
+			createFlatWorld(t);
+			Format2Tests.run(t);
+			t.run(mc -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));
+			t.waitFor("Welt verlassen", mc -> mc.level == null, 60);
+			return;
+		}
 		// Nur beim Entwickeln: HELDIX_AUTOTEST_ONLY=konten führt nur die Prüfungen zum Kontowechsel aus (mit Testwelt)
 		if ("konten".equals(System.getenv("HELDIX_AUTOTEST_ONLY"))) {
 			AccountTests.titleScreen(t);

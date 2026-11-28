@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
 import dev.heldixclient.config.HeldixConfig;
+import dev.heldixclient.render.IrisCompat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.model.player.PlayerModel;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -195,12 +196,14 @@ final class RigRenderer {
 	static void entity(PoseStack pose, SubmitNodeCollector collector, AvatarRenderState state, CosmeticRenderer.Wearer w, boolean gui, CameraRenderState camera,
 			long now) {
 		boolean particles = !gui && (w.own || HeldixConfig.get().cosmeticParticlesOthers) && state.distanceToCameraSq <= NEAR * NEAR;
+		// Iris-Schatten: nur zeichnen (Schatten werfen), nichts messen und keine Partikel – die Pose ist aus Sicht der Sonne
+		boolean measure = !gui && !IrisCompat.shadowPass();
 		for (int slot : BODY_SLOTS) {
 			for (int k = 0; k < 2; k++) {
 				RigAnimator a = k == 0 ? w.rigs[slot] : w.leaving[slot];
 				if (a == null || !a.pending) continue;
 				a.pending = false;
-				if (!gui) commit(a, camera, particles, now, slot);
+				if (measure) commit(a, camera, particles, now, slot);
 			}
 		}
 		for (int k = 0; k < 2; k++) {
@@ -218,7 +221,7 @@ final class RigRenderer {
 			pose.scale(PX, PX, PX);
 			applyEffect(pose, w, AURA);
 			submit(collector, pose, a, state.lightCoords);
-			if (!gui) {
+			if (measure) {
 				a.pendingPose.set(pose.last().pose());
 				commit(a, camera, particles, now, AURA);
 			}
@@ -334,15 +337,17 @@ final class RigRenderer {
 		collector.submitCustomGeometry(pose, RenderTypes.entityCutout(texture), draw);
 		Identifier glow = item.glow();
 		CosmeticRig rig = a.rig;
-		if (glow != null && rig.glowCount > 0) {
+		// Leuchten wirft keinen Schatten: im Iris-Schatten-Durchgang weglassen (spart die Hälfte der Vierecke dort)
+		if (glow != null && rig.glowCount > 0 && !IrisCompat.shadowPass()) {
 			double seconds = (System.nanoTime() - EPOCH) / 1e9;
 			long ticks = (long) (seconds * 20);
 			int frame = (int) ((ticks / rig.frametimeTicks) % rig.glowFrames);
 			double pulse = rig.pulseMin + (rig.pulseMax - rig.pulseMin) * (0.5 + 0.5 * Math.sin(2 * Math.PI * seconds / rig.pulsePeriod));
 			int c = Math.clamp((int) Math.round(pulse * 255), 0, 255);
 			RigDraw glowDraw = next();
-			// dieselbe Pose wie der Albedo-Durchgang
-			glowDraw.prepare(rig, a.world, LightCoordsUtil.FULL_BRIGHT, true, frame, 1f / rig.glowFrames, 0xFF000000 | c << 16 | c << 8 | c);
+			// dieselbe Pose wie der Albedo-Durchgang; der Puls steckt im Alpha (Leuchtebene ist umgerechnet, siehe
+			// CosmeticRig.glowToAlpha): Farbe · Puls + Textur · (1 − Alpha · Puls) – kommt dem additiven Leuchten am nächsten
+			glowDraw.prepare(rig, a.world, LightCoordsUtil.FULL_BRIGHT, true, frame, 1f / rig.glowFrames, c << 24 | 0xFFFFFF);
 			collector.submitCustomGeometry(pose, RenderTypes.eyes(glow), glowDraw);
 		}
 	}

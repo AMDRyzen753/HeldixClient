@@ -1,7 +1,7 @@
 {
   "name": "heldixclient-launcher",
   "productName": "HeldixClient",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "description": "Minecraft-Launcher mit eigenem Mod-Loader (Heldix Loader), Client-Mod und Addon-System",
   "license": "MIT",
   "author": "HeldixClient contributors",

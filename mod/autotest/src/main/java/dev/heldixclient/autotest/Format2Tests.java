@@ -438,6 +438,30 @@ final class Format2Tests {
 		check(t, "Format 2: Dreiecke paarweise zu Vierecken (höchstens so viele Vierecke wie Dreiecke)", rigs.stream()
 				.allMatch(i -> i.rig().quadCount() <= i.manifest().rig().triangleCount() && i.rig().quadCount() * 2 >= i.manifest().rig().triangleCount()));
 		check(t, "Format 2: Begleiter haben attach (Ursprung im Body-Raum)", rigs.stream().filter(i -> i.slot().equals("companion")).allMatch(i -> i.rig().origin() != null));
+		check(t, "Format 2: Leuchtebene umgerechnet (deckendes Schwarz wird durchsichtig, Farbe · Alpha bleibt die Quellfarbe)", t.compute(mc -> glowConversion()));
+	}
+
+	/**
+	 * {@link CosmeticRig#glowToAlpha}: Minecraft mischt die Leuchtebene transparent, die Quellen sind additiv gedacht (deckend,
+	 * Schwarz = aus). Ohne Umrechnung übermalte das Schwarz die Textur – die Cosmetics waren im Spiel dunkel und fleckig.
+	 */
+	private static boolean glowConversion() {
+		int[] source = {0xFF000000, 0xFFFF4C08, 0xFF163C3F, 0x80FFFFFF, 0x00FFFFFF, 0xFF050505};
+		try (com.mojang.blaze3d.platform.NativeImage image = new com.mojang.blaze3d.platform.NativeImage(source.length, 1, false)) {
+			for (int i = 0; i < source.length; i++) image.setPixel(i, 0, source[i]);
+			CosmeticRig.glowToAlpha(image);
+			for (int i = 0; i < source.length; i++) {
+				int in = source[i];
+				int out = image.getPixel(i, 0);
+				for (int shift = 0; shift <= 16; shift += 8) {
+					// Beitrag beim Mischen: Quelle additiv (Farbe · Quell-Alpha), Ergebnis transparent (Farbe · Alpha)
+					float want = ((in >> shift) & 0xFF) * (in >>> 24) / 255f;
+					float got = ((out >> shift) & 0xFF) * (out >>> 24) / 255f;
+					if (Math.abs(want - got) > 2) return false;
+				}
+			}
+			return image.getPixel(0, 0) == 0 && image.getPixel(1, 0) == 0xFFFF4C08 && (image.getPixel(2, 0) >>> 24) == 0x3F;
+		}
 	}
 
 	/** Je Slot ein Cosmetic im Format 2 anlegen (bevorzugt die bekannten aus der Übernahme) */
@@ -1004,7 +1028,11 @@ final class Format2Tests {
 		double vertices = (double) with[2] / Math.max(1, count);
 		t.log(String.format(Locale.ROOT, "Format 2: Leistung mit 20 Spielern: %d Bilder in 3 s; je Bild %.1f µs Einreichen + %.1f µs Vertices (%.0f Vertices)",
 				count, submit, emit, vertices));
-		check(t, "Format 2: 20 Spieler mit Meshes kosten weniger als 8 ms je Bild (" + Math.round(submit + emit) + " µs)", submit + emit < 8000);
+		// mit Iris-Shaderpack zeichnet der Schatten-Durchgang alle Spieler ein zweites Mal
+		boolean iris = t.compute(mc -> dev.heldixclient.render.IrisCompat.shaderPackActive());
+		int limit = iris ? 16 : 8;
+		check(t, "Format 2: 20 Spieler mit Meshes kosten weniger als " + limit + " ms je Bild" + (iris ? " (mit Iris-Schatten)" : "") + " ("
+				+ Math.round(submit + emit) + " µs)", submit + emit < limit * 1000);
 	}
 
 	// ======================================================================================

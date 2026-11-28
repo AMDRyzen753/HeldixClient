@@ -231,7 +231,7 @@ export function lastOnlineAgo(at: number, now = Date.now()): string {
 }
 
 /** „Im Launcher“ (Dienst 1.14.0): Launcher offen, nicht im Spiel – Nachrichten kommen sofort an */
-export const LAUNCHER_PRESENCE = 'Im Launcher – bekommt Nachrichten sofort';
+export const LAUNCHER_PRESENCE = 'Im Launcher';
 export const LAUNCHER_PRESENCE_DND = 'Im Launcher · Nicht stören';
 
 /** Was in der Liste unter dem Namen steht: Aktivität (im Spiel), „Im Launcher“ bzw. „Zuletzt online vor …“ */
