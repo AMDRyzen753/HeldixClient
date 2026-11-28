@@ -5,11 +5,10 @@ import dev.heldixclient.ui.Ui;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 
-import java.util.List;
-
 /**
  * Einblendung im Spiel, solange jemand an die geteilte Welt anklopft: „<Name> möchte beitreten“ mit den Tasten für
  * Erlauben und Ablehnen (Standard H und N, in der Steuerung änderbar). Im Pausemenü gibt es dieselben Knöpfe zum Klicken.
+ * Ab Heldix-Dienst 1.13.0 auch für dauerhafte Welten (Besitzer und Operatoren): „<Name> möchte in „<Welt>““.
  * Sitzt mittig über der Schnellleiste, damit sie nicht mit den Einblendungen oben rechts kollidiert.
  */
 public final class KnockPrompt {
@@ -21,18 +20,21 @@ public final class KnockPrompt {
 	public static void render(GuiGraphicsExtractor g) {
 		Minecraft mc = Minecraft.getInstance();
 		if (mc.player == null || mc.gui.screen() != null) return;
+		// zuerst die eigene geteilte Welt, dann dauerhafte Welten (Dienst 1.13.0) – dieselben Tasten
 		WorldShare.Knock knock = WorldShare.currentKnock();
-		if (knock == null) return;
-		List<WorldShare.Knock> all = WorldShare.knocks();
-		String title = knock.name() + " möchte beitreten";
+		Hosting.Knock hosted = knock == null ? Hosting.currentKnock() : null;
+		if (knock == null && hosted == null) return;
+		int count = WorldShare.knocks().size() + Hosting.knocks().size();
+		String title = knock != null ? knock.name() + " möchte beitreten" : hosted.name() + " möchte in „" + hosted.worldName() + "“";
 		String keys = "[" + HeldixClient.knockAllowKey.getTranslatedKeyMessage().getString() + "] Erlauben   ["
 				+ HeldixClient.knockDenyKey.getTranslatedKeyMessage().getString() + "] Ablehnen";
-		String more = all.size() > 1 ? "  ·  +" + (all.size() - 1) + " weitere" : "";
+		String more = count > 1 ? "  ·  +" + (count - 1) + " weitere" : "";
+		long at = knock != null ? knock.at() : hosted.at();
 		int textW = Math.max(Ui.width(title, Ui.Font.LABEL), Ui.width(keys + more, Ui.Font.SMALL));
 		int w = Math.clamp(34 + textW + 12, 180, Math.max(180, g.guiWidth() - 20));
 		int x = (g.guiWidth() - w) / 2;
 		int y = g.guiHeight() - 59 - 18 - HEIGHT;
-		long age = System.currentTimeMillis() - knock.at();
+		long age = System.currentTimeMillis() - at;
 		float in = Math.clamp(age / 200f, 0f, 1f);
 		float alpha = 0.4f + 0.6f * in;
 		Ui.shadow(g, x, y, w, HEIGHT, 0.45f * alpha);
@@ -49,6 +51,6 @@ public final class KnockPrompt {
 
 	/** Für den Autotest: wird die Einblendung gerade gezeigt? */
 	public static boolean visible(Minecraft mc) {
-		return mc.player != null && mc.gui.screen() == null && !mc.gui.hud.isHidden() && WorldShare.currentKnock() != null;
+		return mc.player != null && mc.gui.screen() == null && !mc.gui.hud.isHidden() && (WorldShare.currentKnock() != null || Hosting.currentKnock() != null);
 	}
 }

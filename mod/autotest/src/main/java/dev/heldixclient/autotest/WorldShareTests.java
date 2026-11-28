@@ -429,7 +429,8 @@ final class WorldShareTests {
 	// Minecraft-Protokoll (nur Handshake, Status, Login Start)
 	// ======================================================================================
 
-	private static final class McClient {
+	/** auch für HostingTests (Relay der dauerhaften Welten) */
+	static final class McClient {
 		/** erstes Paket der Antwort: Paket-ID und (bei Trennen/Status) der Text */
 		record Answer(int id, String text) {
 		}
@@ -546,7 +547,7 @@ final class WorldShareTests {
 	// ======================================================================================
 
 	/** Text einer Minecraft-Textkomponente (String, {text, extra} oder Liste) */
-	private static String text(JsonElement element) {
+	static String text(JsonElement element) {
 		if (element == null || element.isJsonNull()) return "";
 		if (element.isJsonPrimitive()) return element.getAsString();
 		StringBuilder text = new StringBuilder();

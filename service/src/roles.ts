@@ -59,6 +59,13 @@ export const PERMISSIONS = [
   'support',
   'audit',
   'team.view',
+  // ab 1.13.0: Dauerhafte Welten (Übersicht, anhalten, Grenzen) und Freischaltungen dafür, Entdecken moderieren
+  'hosting:manage',
+  'hosting:grant',
+  'discover:moderate',
+  // ab 1.13.0: Voice-Moderation (Meldungen mit Clips, Voice-Sperren, Liste „Voice aus“ ansehen) und deren Einstellungen
+  'voice:moderate',
+  'voice:admin',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -75,14 +82,23 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   support: 'Support-Anfragen',
   audit: 'Protokoll ansehen',
   'team.view': 'Team-Übersicht ansehen',
+  'hosting:manage': 'Dauerhafte Welten (Übersicht, anhalten, Grenzen ändern)',
+  'hosting:grant': 'Freischaltungen für dauerhafte Welten und Heldix+-Warteliste',
+  'discover:moderate': 'Entdecken moderieren (Meldungen, ausblenden, Besitzer sperren)',
+  'voice:moderate': 'Voice moderieren (Meldungen und Aufnahmen, Voice-Sperren, Liste „Voice aus“ ansehen)',
+  'voice:admin': 'Voice-Einstellungen (Voice-Regeln veröffentlichen, Aufnahmen an/aus, Liste „Voice aus“ ändern)',
 };
 
-/** Welche Rolle welches Recht hat (Tabelle aus rollen-spec.md; „Spieler-Daten löschen“ bleibt wie bisher nur Admin). */
+/**
+ * Welche Rolle welches Recht hat (Tabelle aus rollen-spec.md; „Spieler-Daten löschen“ bleibt wie bisher nur Admin). Ab
+ * 1.13.0: `hosting:manage` Admin und Entwickler, `hosting:grant` nur Admin, `discover:moderate` Admin, Moderator, Supporter;
+ * `voice:moderate` Admin, Moderator, Supporter, `voice:admin` nur Admin.
+ */
 export const ROLE_PERMISSIONS: Record<TeamRole, readonly Permission[]> = {
   admin: [...PERMISSIONS],
-  'developer-team': ['updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'players', 'audit', 'team.view'],
-  moderator: ['addon-reports', 'news', 'moderation', 'players', 'support', 'audit', 'team.view'],
-  supporter: ['players', 'support', 'team.view'],
+  'developer-team': ['updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'players', 'audit', 'team.view', 'hosting:manage'],
+  moderator: ['addon-reports', 'news', 'moderation', 'players', 'support', 'audit', 'team.view', 'discover:moderate', 'voice:moderate'],
+  supporter: ['players', 'support', 'team.view', 'discover:moderate', 'voice:moderate'],
   designer: ['cosmetics', 'team.view'],
   tester: ['team.view'],
 };

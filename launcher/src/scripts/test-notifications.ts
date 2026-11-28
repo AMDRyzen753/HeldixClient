@@ -56,11 +56,21 @@ async function main(): Promise<void> {
     const odd = await store.add({ kind: 'world-open', title: `Lena\u0000 hat eine Welt geöffnet ${'x'.repeat(300)}`, body: 'b'.repeat(500), target: { view: 'world', code: 'kaputt!' }, account: 'konto-1' });
     check('Texte gekürzt, Steuerzeichen weg, ungültiger Welt-Code weg', !!odd && [...odd.title].length <= 120 && !odd.title.includes('\u0000') && [...odd.body].length <= 240 && odd.target?.code === undefined, odd);
 
+    // dauerhafte Welten (Dienst 1.13.0): eigene Arten, Klick führt zur Webseite (Ziel „hosting“)
+    const knock = await store.add({ kind: 'hosting-knock', title: 'Gast_1 möchte in „Insel“', target: { view: 'hosting' }, account: 'konto-1', key: 'hosting-knock:x:gast_1' });
+    const granted = await store.add({ kind: 'hosting-granted', title: 'Du kannst jetzt dauerhafte Welten anlegen', target: { view: 'hosting' }, account: 'konto-1', key: 'hosting-granted', once: true });
+    const twice = await store.add({ kind: 'hosting-granted', title: 'Du kannst jetzt dauerhafte Welten anlegen', target: { view: 'hosting' }, account: 'konto-1', key: 'hosting-granted', once: true });
+    check('Dauerhafte Welten: Anklopfen und Freischaltung mit Ziel „hosting“, Freischaltung nur einmal', knock?.target?.view === 'hosting' && granted?.kind === 'hosting-granted' && twice === null);
+    await store.markRead(knock!.id);
+    await store.markRead(granted!.id);
+
     // Speichern und neu laden
     await store.flush();
     const reloaded = new NotificationStore(file, { now: () => now });
     const fromDisk = await reloaded.list('konto-1');
     check('Gespeichert und wieder geladen', fromDisk.items.length === (await store.list('konto-1')).items.length && fromDisk.unread === 1, fromDisk);
+    check('Gespeichert und wieder geladen: dauerhafte Welten bleiben erhalten', fromDisk.items.some((n) => n.kind === 'hosting-knock' && n.target?.view === 'hosting')
+      && fromDisk.items.some((n) => n.kind === 'hosting-granted'));
     const raw = await readFile(file, 'utf8');
     check('Datei enthält keine Tokens oder Nachrichten anderer Art (nur Verlauf)', raw.includes('"version": 1') && !/token/i.test(raw));
 

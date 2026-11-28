@@ -45,7 +45,10 @@ function defaultSettings(): Settings {
     discordShowVoice: true,
     discordShowHead: true,
     discordMinimal: false,
+    // „Im Hintergrund bereit für Nachrichten“: wer früher „Beim Schließen in den Infobereich“ ausgeschaltet hatte, behält aus
     closeToTray: true,
+    trayHintSeen: false,
+    startWithSystem: false,
     autoUpdate: true,
     lastSeenVersion: null,
     graphicsApi: 'vulkan',
@@ -65,7 +68,8 @@ function defaultSettings(): Settings {
 function migrateSettings(stored: Partial<Settings>): Partial<Settings> {
   const next = { ...stored };
   for (const key of ['social', 'socialNotifications', 'partyAutoFollow', 'addonUpdateNotifications', 'addonAutoUpdate', 'gameAccountSwitch', 'discordInviteButtons', 'setupDone',
-    'discordShowDetails', 'discordShowWorldName', 'discordShowParty', 'discordShowVoice', 'discordShowHead', 'discordMinimal', 'closeToTray'] as const) {
+    'discordShowDetails', 'discordShowWorldName', 'discordShowParty', 'discordShowVoice', 'discordShowHead', 'discordMinimal', 'closeToTray',
+    'trayHintSeen', 'startWithSystem'] as const) {
     if (key in next && typeof next[key] !== 'boolean') delete next[key];
   }
   return next;

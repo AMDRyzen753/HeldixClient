@@ -12,7 +12,7 @@
 //   Discord-Status (Name des Gastgebers), kurz zwischengespeichert.
 // - Dienst ohne Welt teilen (404 bzw. 503 „nicht eingerichtet“): Bereich aus, 30 Minuten Ruhe.
 
-import type { FriendWorld, PublicWorldView, WorldsOverview } from '../../shared/api';
+import type { FriendWorld, HostedState, PublicWorldView, WorldsOverview } from '../../shared/api';
 import { SERVICE_UNREACHABLE, ServiceError, serviceBase, serviceRequest } from './heldixservice';
 
 export const WORLD_PROTOCOL = 'heldixclient';
@@ -161,6 +161,7 @@ export function mapFriendWorld(raw: unknown): FriendWorld | null {
   const code = worldCodeOf(address);
   if (!host || !address || !code || typeof r.id !== 'string' || !/^[0-9a-f]{32}$/.test(r.id)) return null;
   const maxPlayers = Math.max(1, Math.min(20, count(r.maxPlayers, 20) || 8));
+  const hosted = mapHosted(r.hosted);
   return {
     id: r.id,
     code,
@@ -170,6 +171,7 @@ export function mapFriendWorld(raw: unknown): FriendWorld | null {
     players: Math.min(count(r.players), 1000),
     maxPlayers,
     version: typeof r.version === 'string' && VERSION_RE.test(r.version) ? r.version : null,
+    ...(hosted ? { hosted } : {}),
   };
 }
 
@@ -201,13 +203,24 @@ export interface OwnWorld {
   online: boolean;
 }
 
+const HOSTED_STATES: readonly HostedState[] = ['creating', 'sleeping', 'starting', 'running', 'stopping', 'error'];
+
+/** `hosted: { state }` (ab Dienst 1.13.0, nur bei dauerhaften Welten), sonst null */
+export function mapHosted(raw: unknown): { state: HostedState } | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const state = (raw as { state?: unknown }).state;
+  return { state: typeof state === 'string' && (HOSTED_STATES as readonly string[]).includes(state) ? (state as HostedState) : 'error' };
+}
+
 /** Antwort von GET /v1/public/worlds/<code> */
 export function mapPublicWorld(raw: unknown, code: string): PublicWorldView {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const host = player(r.host);
   if (!host) throw new ServiceError('Der Heldix-Dienst hat eine ungültige Antwort geschickt.', 200);
   const address = normalizeWorldAddress(r.address);
+  const hosted = mapHosted(r.hosted);
   return {
+    ...(hosted ? { hosted } : {}),
     code,
     name: worldName(r.name, host.name),
     // ältere Antworten ohne Adresse: nur der Code ist bekannt (Adresse kommt dann aus GET /v1/worlds bzw. bleibt leer)
@@ -240,9 +253,13 @@ export interface WorldJoinPlan<T> {
  * Instanz zum Beitreten: eine mit HeldixClient und derselben Minecraft-Version wie die Welt (die zuletzt gespielte,
  * sonst die bevorzugte bzw. erste). Kennt der Dienst die Version nicht, die zuletzt gespielte mit HeldixClient.
  * Keine passende: Hinweis. Läuft schon ein Spiel oder ist die Welt zu: Hinweis.
+ *
+ * Dauerhafte Welten (ab Dienst 1.13.0, {@code hosted}): Beitreten geht auch, wenn sie schläft (der Beitritt weckt sie,
+ * die Mod versucht es nach etwa 30 Sekunden von selbst erneut) – auch bei der eigenen Welt; nicht beim Einrichten und
+ * bei einem Fehler.
  */
 export function planWorldJoin<T extends WorldInstance>(input: {
-  world: Pick<PublicWorldView, 'online' | 'version' | 'host'> & { address: string | null };
+  world: Pick<PublicWorldView, 'online' | 'version' | 'host'> & { address: string | null; hosted?: { state: HostedState } | null };
   instances: readonly T[];
   preferred: T | null;
   hasClient: (instance: T) => boolean;
@@ -258,9 +275,12 @@ export function planWorldJoin<T extends WorldInstance>(input: {
   if (played.length) instance = played.reduce((best, i) => (i.lastPlayed! > best.lastPlayed! ? i : best));
   else instance = (input.preferred && matching.find((i) => i.id === input.preferred!.id)) || matching[0] || null;
 
-  if (input.self && world.host.uuid === input.self) return { instance, problem: 'Das ist deine eigene Welt – teilen und spielen geht im Spiel über das Pausenmenü.' };
+  const hosted = world.hosted ?? null;
+  if (!hosted && input.self && world.host.uuid === input.self) return { instance, problem: 'Das ist deine eigene Welt – teilen und spielen geht im Spiel über das Pausenmenü.' };
   if (!world.address) return { instance, problem: 'Die Adresse dieser Welt ist unbekannt – bitte den Link noch einmal öffnen.' };
-  if (!world.online) return { instance, problem: `Die Welt ist gerade nicht geöffnet. Sobald ${world.host.name} sie teilt, kannst du beitreten.` };
+  if (hosted?.state === 'creating') return { instance, problem: 'Die Welt wird gerade auf dem Heldix-Server eingerichtet. Versuch es später noch einmal.' };
+  if (hosted?.state === 'error') return { instance, problem: 'Die Welt hat gerade ein Problem. Der Besitzer kann sie auf der Webseite neu starten.' };
+  if (!hosted && !world.online) return { instance, problem: `Die Welt ist gerade nicht geöffnet. Sobald ${world.host.name} sie teilt, kannst du beitreten.` };
   if (!instance) {
     return {
       instance: null,
@@ -297,6 +317,11 @@ export interface WorldOptions {
   visible?(): boolean;
   onUpdate?(overview: WorldsOverview): void;
   onEvent?(event: WorldEvent): void;
+  /**
+   * Weitere Welten für die Liste (ab Dienst 1.13.0: dauerhafte Welten von Freunden bzw. als Operator, mit
+   * {@code hosted}); geöffnete Welten mit demselben Code gehen vor. Ändert sich etwas: {@link WorldClient.extrasChanged}.
+   */
+  extraWorlds?(): FriendWorld[];
   log?(line: string): void;
 }
 
@@ -322,6 +347,8 @@ export class WorldClient {
   private readonly publicCache = new Map<string, { until: number; value: PublicWorldView | null; error?: ServiceError }>();
   private readonly publicLoads = new Map<string, Promise<PublicWorldView>>();
   private mine: OwnWorld[] = [];
+  /** geöffnete Welten laut Dienst und Echtzeit (ohne die weiteren aus extraWorlds) */
+  private open: FriendWorld[] = [];
 
   constructor(private readonly options: WorldOptions) {
     this.base = serviceBase(options.serviceUrl ?? '');
@@ -349,6 +376,31 @@ export class WorldClient {
     const ms = delay ?? (this.options.visible?.() === false ? WORLD_POLL_HIDDEN_MS : WORLD_POLL_VISIBLE_MS);
     this.timer = setTimeout(() => void this.refresh().catch(() => undefined), ms);
     this.timer.unref?.();
+  }
+
+  /** geöffnete Welten plus die weiteren (dauerhafte Welten), ohne doppelte Codes */
+  private merged(open: FriendWorld[]): FriendWorld[] {
+    let extra: FriendWorld[] = [];
+    try {
+      extra = this.options.extraWorlds?.() ?? [];
+    } catch {
+      extra = [];
+    }
+    if (extra.length === 0) return open;
+    const codes = new Set(open.map((w) => w.code));
+    const list = [...open];
+    for (const world of extra) {
+      if (codes.has(world.code)) continue;
+      codes.add(world.code);
+      list.push(world);
+    }
+    return sortWorlds(list);
+  }
+
+  /** dauerhafte Welten haben sich geändert (hosting-state, Entdecken): Liste neu zusammensetzen */
+  extrasChanged(): void {
+    if (this.overview.status !== 'ok') return;
+    this.publish({ ...this.overview, friends: this.merged(this.open) });
   }
 
   private publish(next: WorldsOverview): WorldsOverview {
@@ -401,7 +453,8 @@ export class WorldClient {
     this.mine = mine.map(mapOwnWorld).filter((w): w is OwnWorld => w !== null);
     const account = await auth.accountId().catch(() => null);
     this.events(account, friends);
-    return this.publish({ status: 'ok', error: null, friends });
+    this.open = friends;
+    return this.publish({ status: 'ok', error: null, friends: this.merged(friends) });
   }
 
   /** eigene Welten aus der letzten Abfrage (für „Welt teilen“ im Chat) */
@@ -417,9 +470,9 @@ export class WorldClient {
     if (message.type === 'world-open') {
       const world = mapFriendWorld(message.world);
       if (!world || this.overview.status !== 'ok') return true;
-      const known = this.overview.friends.some((w) => w.id === world.id);
-      const friends = sortWorlds([...this.overview.friends.filter((w) => w.id !== world.id), world]);
-      this.publish({ ...this.overview, friends });
+      const known = this.open.some((w) => w.id === world.id);
+      this.open = sortWorlds([...this.open.filter((w) => w.id !== world.id), world]);
+      this.publish({ ...this.overview, friends: this.merged(this.open) });
       if (!known && this.baseline && !this.baseline.ids.has(world.id)) {
         this.baseline.ids.add(world.id);
         this.options.onEvent?.({ kind: 'open', world });
@@ -430,7 +483,10 @@ export class WorldClient {
       const id = message.world && typeof message.world === 'object' ? (message.world as { id?: unknown }).id : null;
       if (typeof id !== 'string') return true;
       this.baseline?.ids.delete(id);
-      if (this.overview.friends.some((w) => w.id === id)) this.publish({ ...this.overview, friends: this.overview.friends.filter((w) => w.id !== id) });
+      if (this.open.some((w) => w.id === id)) {
+        this.open = this.open.filter((w) => w.id !== id);
+        this.publish({ ...this.overview, friends: this.merged(this.open) });
+      }
       return true;
     }
     return false;

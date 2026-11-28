@@ -46,6 +46,23 @@ interface Connection {
   killTimer?: NodeJS.Timeout;
   windowStart: number;
   messages: number;
+  /** Abos dieser Verbindung (ab 1.13.0, z. B. `hosting:<Welt>` fürs Live-Log) */
+  topics?: Set<string>;
+}
+
+/** Höchstens so viele Abos je Verbindung. */
+export const MAX_TOPICS = 8;
+
+/**
+ * Eine Verbindung aus Sicht eines Hooks für Nachrichten vom Client (ab 1.13.0): antworten und Abos verwalten, ohne die
+ * Verbindung selbst zu kennen.
+ */
+export interface ClientHandle {
+  readonly uuid: string;
+  send(message: unknown): void;
+  /** false, wenn die Verbindung schon zu viele Abos hat */
+  subscribe(topic: string): boolean;
+  unsubscribe(topic: string): void;
 }
 
 /** Schickt ein langsamer Client nichts mehr ab, wird die Verbindung ab dieser Puffergröße getrennt. */
@@ -84,6 +101,8 @@ export class Realtime implements PresenceSource {
   private readonly connectionListeners: ((uuid: string, connected: boolean) => void)[] = [];
   /** `typing` vom Client (Nachrichten: „schreibt …“). */
   private readonly typingListeners: ((from: string, to: string) => void)[] = [];
+  /** Weitere Nachrichten vom Client nach Typ (ab 1.13.0, z. B. `hosting-subscribe`). */
+  private readonly clientListeners = new Map<string, (client: ClientHandle, message: Record<string, unknown>) => void>();
   private closing = false;
 
   constructor(
@@ -143,6 +162,61 @@ export class Realtime implements PresenceSource {
   /** `{ type: 'typing', to }` von einer Verbindung des Spielers `from`. */
   onTyping(listener: (from: string, to: string) => void): void {
     this.typingListeners.push(listener);
+  }
+
+  /**
+   * Eigene Nachrichten vom Client (ab 1.13.0): `{ type, … }` mit diesem Typ geht an den Hook. Die eingebauten Typen
+   * (ping, status, typing) lassen sich nicht ersetzen.
+   */
+  onClientMessage(type: string, listener: (client: ClientHandle, message: Record<string, unknown>) => void): void {
+    this.clientListeners.set(type, listener);
+  }
+
+  /** Nachricht an alle Verbindungen, die `topic` abonniert haben. */
+  publish(topic: string, message: unknown): void {
+    let text: string | null = null;
+    for (const set of this.connections.values()) {
+      for (const conn of set) {
+        if (!conn.topics?.has(topic)) continue;
+        text ??= JSON.stringify(message);
+        this.sendText(conn, text);
+      }
+    }
+  }
+
+  /** Hat irgendeine Verbindung `topic` abonniert? */
+  hasSubscribers(topic: string): boolean {
+    for (const set of this.connections.values()) for (const conn of set) if (conn.topics?.has(topic)) return true;
+    return false;
+  }
+
+  /** Abo beenden für alle, die es nicht mehr dürfen (z. B. Rolle in der Welt entzogen). */
+  unsubscribeWhere(topic: string, keep: (uuid: string) => boolean): void {
+    for (const [uuid, set] of this.connections) {
+      let allowed: boolean | undefined;
+      for (const conn of set) {
+        if (!conn.topics?.has(topic)) continue;
+        allowed ??= keep(uuid);
+        if (!allowed) conn.topics.delete(topic);
+      }
+    }
+  }
+
+  private handleOf(conn: Connection): ClientHandle {
+    return {
+      uuid: conn.uuid,
+      send: (message) => this.sendTo(conn, message),
+      subscribe: (topic) => {
+        conn.topics ??= new Set();
+        if (conn.topics.has(topic)) return true;
+        if (conn.topics.size >= MAX_TOPICS) return false;
+        conn.topics.add(topic);
+        return true;
+      },
+      unsubscribe: (topic) => {
+        conn.topics?.delete(topic);
+      },
+    };
   }
 
   private emit<T extends unknown[]>(listeners: ((...args: T) => void)[], what: string, ...args: T): void {
@@ -357,6 +431,12 @@ export class Realtime implements PresenceSource {
       this.emit(this.changeListeners, 'einer Statusänderung', conn.uuid);
     } else if (type === 'typing') {
       if (isUuid(to) && to !== conn.uuid) this.emit(this.typingListeners, '„schreibt …“', conn.uuid, to);
+    } else if (typeof type === 'string' && this.clientListeners.has(type) && !Array.isArray(message)) {
+      try {
+        this.clientListeners.get(type)!(this.handleOf(conn), message as Record<string, unknown>);
+      } catch (err) {
+        this.options.log(`Fehler bei einer Nachricht (${type}): ${(err as Error).message}`);
+      }
     }
     // Unbekannte Nachrichten werden ignoriert.
   }

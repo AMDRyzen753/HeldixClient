@@ -68,3 +68,5 @@ Solange der **Chat offen** ist, kannst du HUD-Elemente anklicken: Beim Überfahr
 Ohne Chat geht das mit der Taste **„HUD bedienen“**: Sie gibt die Maus frei, ohne den Chat zu öffnen. Kurz drücken lässt sie frei, bis du die Taste noch einmal oder [[Esc]] drückst; gedrückt halten gibt sie nur so lange frei. Ab Werk ist die Taste nicht belegt – du legst sie unter **Optionen → Steuerung → HeldixClient** fest. Beim normalen Spielen reagiert das HUD nie auf Klicks, und ein Klick auf ein Element trifft nichts im Spiel.
 
 > **Tipp:** Aus Versehen alles verschoben oder zurückgesetzt? [[Strg]]+[[Z]] holt den vorigen Stand zurück.
+
+> **Auf dem Mac:** [[⌘]] statt [[Strg]] – [[⌘]]+[[Z]] macht rückgängig, [[⇧]]+[[⌘]]+[[Z]] (oder [[⌘]]+[[Y]]) wiederholt, [[⌘]]+[[A]] wählt alle. Frei platzieren mit gedrückter [[⌘]]- oder [[⌥]]-Taste ([[ctrl]] + Klick ist auf dem Mac ein Rechtsklick).

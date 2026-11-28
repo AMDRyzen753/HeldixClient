@@ -20,11 +20,12 @@ Ab jetzt startet HeldixClient ohne Nachfrage.
 ## Weitere Tipps
 - **Richtige Version?** Für Macs mit M1 oder neuer brauchst du die Version **Apple Silicon**, für ältere Macs die Version **Intel**. Lade im Zweifel die passende Version neu von der [Download-Seite](/download).
 - **Aus dem Ordner Programme starten:** Ziehe HeldixClient aus der DMG in **Programme** und starte es dort – nicht direkt aus der DMG.
-- **Nach einem Update** kann macOS noch einmal nachfragen. Dann hilft wieder **Dennoch öffnen**.
+- **Nach einem Update von Hand** (neue DMG) kann macOS noch einmal nachfragen. Dann hilft wieder **Dennoch öffnen**. Automatische Updates ab 0.14.0 fragen normalerweise nicht erneut.
 
 ## Das ist auf dem Mac anders
 - **Grafik-API ausgegraut:** Auf dem Mac gibt es kein Vulkan. Minecraft wählt die Grafik-API selbst.
-- **Keine automatischen Updates:** Der Launcher meldet neue Versionen, geladen wird über die [Download-Seite](/download). Siehe [Updates des Launchers](/hilfe/launcher-updates).
-- **Spotify-Addon:** zeigt „Nur unter Windows verfügbar“, weil es die Windows-Mediensteuerung braucht.
+- **Automatische Updates ab 0.14.0:** nur, wenn HeldixClient in **Programme** liegt. Aus der DMG gestartet meldet der Launcher neue Versionen nur. Siehe [Updates des Launchers](/hilfe/launcher-updates).
+- **Spotify-Addon:** spricht mit der Spotify-App und – mit ausgeschaltetem **Nur Spotify** – mit Apple Music. Beim ersten Mal fragt macOS, ob Minecraft die App steuern darf.
+- **Kürzel:** [[⌘]] statt [[Strg]], z. B. [[⌘]] + [[K]] für die Schnellsuche im Spiel.
 
-Alles zur Installation steht unter [Auf dem Mac installieren](/hilfe/installation-mac).
+Alles zur Installation steht unter [Mac: Installieren und erster Start](/hilfe/installation-mac).

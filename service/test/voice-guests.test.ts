@@ -35,6 +35,7 @@ function frame(seq: number, payload: number[] = [1, 2, 3], flags = 0): Buffer {
 /** WebSocket-Client für /v1/voice: Textnachrichten und Sprach-Rahmen getrennt. */
 class VoiceClient {
   readonly texts: Text[] = [];
+  readonly rooms: Text[] = [];
   readonly frames: Buffer[] = [];
   private waiters: { match: (m: Text) => boolean; resolve: (m: Text) => void }[] = [];
   readonly closed: Promise<{ code: number; reason: string }>;
@@ -48,6 +49,8 @@ class VoiceClient {
       const message = JSON.parse(String(data));
       const index = this.waiters.findIndex((w) => w.match(message));
       if (index >= 0) this.waiters.splice(index, 1)[0]!.resolve(message);
+      // ab 1.13.0: `room` nach jedem join getrennt, damit die Prüfungen auf den Rest wie bisher bleiben
+      else if (message.type === 'room') this.rooms.push(message);
       else this.texts.push(message);
     });
     this.closed = new Promise((resolve) => ws.on('close', (code, reason) => resolve({ code, reason: String(reason) })));
@@ -57,6 +60,8 @@ class VoiceClient {
     const fn = typeof match === 'string' ? (m: Text) => m.type === match : match;
     const index = this.texts.findIndex(fn);
     if (index >= 0) return Promise.resolve(this.texts.splice(index, 1)[0]);
+    const room = this.rooms.findIndex(fn);
+    if (room >= 0) return Promise.resolve(this.rooms.splice(room, 1)[0]);
     return new Promise((resolve, reject) => {
       const waiter = {
         match: fn,
@@ -274,8 +279,10 @@ describe('Voice im Browser: Verbindung', () => {
         range: 48,
         maxFrame: 1024,
         protocol: 1,
-        features: ['state', 'groups', 'guests'],
+        features: ['state', 'groups', 'guests', 'moderation'],
         maxGroup: 16,
+        rules: null,
+        clips: null,
       });
       client.send({ type: 'ping' });
       assert.deepEqual(await client.next('pong'), { type: 'pong' });

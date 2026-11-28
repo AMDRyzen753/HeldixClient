@@ -10,7 +10,7 @@
 //   Addons:     .setup-addon[data-id] mit input.setup-addon-check, #setup-addons-all, #setup-addons-none,
 //               #setup-addons-count, #setup-addons-offline (+ #setup-addons-retry), #setup-addons-empty
 //   Fertig:     #setup-summary, #setup-install > .setup-install-row[data-id][data-state=wait|busy|done|error],
-//               #setup-progress (role=progressbar)
+//               #setup-progress (role=progressbar), #setup-autostart (Häkchen „Mit Windows starten“, sofort gespeichert)
 //
 // Solange der Assistent offen ist, hält der Main-Prozess Einladung und „Neu in …“ zurück. Nach dem Schließen
 // (finishSetup) ruft app.ts hooks.closed(): Einladungsdialog, „Neu in …“, Hinweis „Update verfügbar“.
@@ -595,6 +595,7 @@ function doneStep(current: Run): Node[] {
       h('h2', { class: 'setup-title', id: 'setup-title', tabindex: '-1', text: busy ? 'Fast fertig …' : 'Alles bereit!' }),
       h('p', { class: 'setup-sub', text: busy ? 'Deine Addons werden installiert – das dauert nur einen Moment.' : failed ? 'Fast alles hat geklappt. Was fehlt, installierst du später im Addon-Store.' : 'HeldixClient ist eingerichtet. Viel Spaß beim Spielen!' })),
     summary,
+    autostartRow(),
   ];
   if (total > 0) {
     const percent = total ? Math.round((finished / total) * 100) : 100;
@@ -607,6 +608,28 @@ function doneStep(current: Run): Node[] {
     nodes.push(list);
   }
   return nodes;
+}
+
+/** Häkchen „Mit Windows starten“ (Mac: „Bei der Anmeldung starten“) – Standard aus, wird sofort gespeichert */
+function autostartRow(): HTMLElement {
+  const mac = api.platform === 'darwin';
+  const box = h('input', { type: 'checkbox', class: 'setup-option-check', id: 'setup-autostart' }) as HTMLInputElement;
+  box.checked = state.settings?.startWithSystem ?? false;
+  box.addEventListener('change', () => {
+    const wanted = box.checked;
+    void api.saveSettings({ startWithSystem: wanted }).then((next) => {
+      state.settings = next;
+    }).catch((error: unknown) => {
+      box.checked = !wanted;
+      toast(errorMessage(error), 'error');
+    });
+  });
+  return h('label', { class: 'setup-option', for: 'setup-autostart' },
+    box,
+    h('span', { class: 'setup-tick', 'aria-hidden': 'true' }, uiIcon('check')),
+    h('span', { class: 'setup-summary-text' },
+      h('strong', { text: mac ? 'Bei der Anmeldung starten' : 'Mit Windows starten' }),
+      h('span', { text: mac ? 'Ohne Fenster im Dock – Nachrichten deiner Freunde kommen gleich an' : 'Unsichtbar im Infobereich – Nachrichten deiner Freunde kommen gleich an' })));
 }
 
 function installRow(current: Run, id: string): HTMLElement {

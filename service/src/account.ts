@@ -6,6 +6,7 @@ export function myReports(store: Store, user: UserRow) {
   return {
     reports: store.reportsBy(user.uuid).map((r) => ({
       id: r.id,
+      kind: r.kind,
       at: r.at,
       reported: { uuid: r.reported, name: r.reportedName },
       reason: r.reason,
@@ -43,6 +44,8 @@ export function exportData(store: Store, user: UserRow, profile: Record<string, 
     blocked: store.listBlocks(user.uuid),
     reports: store.reportsBy(user.uuid).map((r) => ({
       id: r.id,
+      // ab 1.13.0: „voice“ – Kontext und Lautstärke-Verlauf stehen unter voice.reports
+      kind: r.kind,
       at: r.at,
       reported: { uuid: r.reported, name: r.reportedName },
       reason: r.reason,

@@ -350,7 +350,7 @@ test('Schema 1 → aktuell: Daten bleiben, neue Einstellung „messages“ ist a
     }
 
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 11);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 13);
     check.close();
 
     // Ein zweiter Start ändert nichts mehr; der Dienst läuft auf der angehobenen Datenbank.
@@ -413,7 +413,7 @@ test('Schema 2 → 3 (Version 1.0.0 auf dem Server): Meldungen bekommen einen St
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 11);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 13);
     check.close();
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -463,7 +463,7 @@ test('Schema 3 → 4 (Version 1.1.0 auf dem Server): Team behält 2FA, Teamprofi
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 11);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 13);
     check.close();
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -527,7 +527,7 @@ test('Schema 4 → 5 (Version 1.3.0 auf dem Server): alle Daten bleiben, der Add
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 11);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 13);
     check.close();
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
@@ -613,7 +613,7 @@ test('Schema 5 → 6 (Version 1.4.0 auf dem Server): Addons, Versionen und Zähl
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 11);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 13);
     check.close();
 
     // Der Dienst zeigt das alte Addon weiter, als offiziell gewertet ist es nicht (ohne „official“ gilt false).
@@ -703,7 +703,7 @@ test('Schema 6 → 7 (Version 1.5.x auf dem Server): Spieler, Capes und Addons b
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 11);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 13);
     check.close();
 
     // Der Dienst läuft darauf: Katalog leer, das eingebaute Cape bleibt
@@ -768,7 +768,7 @@ test('Schema 7 → 8 (Version 1.6.0 auf dem Server): Einreichungen mit JAR gelte
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 11);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 13);
     check.close();
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });

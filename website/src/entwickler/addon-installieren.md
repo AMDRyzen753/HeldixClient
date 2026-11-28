@@ -25,7 +25,7 @@ Fertige Addons wie **Spotify**, **Uhrzeit & Spielzeit** und **Item Physics** kom
 
 Der Launcher sortiert jede Datei selbst ein: eine JAR mit `heldix.addon.json` in den Ordner `heldix-addons`, Fabric-Mods (`fabric.mod.json`) und ältere Heldix-Mods (`heldix.mod.json`) nach `mods`. In der Liste zeigen Chips, was eine Datei ist: „Fabric-Mod“, „Addon“ und bei Addons mit Eingriff „Greift in Minecraft ein“.
 
-> **Hinweis:** Das Spotify-Addon liest den laufenden Song über die Windows-Mediensteuerung. Es braucht keine Anmeldung, funktioniert aber nur unter Windows. Die Tasten sind [[Pos1]] (Abspielen/Pause), [[Bild ab]] (nächster Song) und [[Bild auf]] (vorheriger Song).
+> **Hinweis:** Das Spotify-Addon liest den laufenden Song über die Windows-Mediensteuerung, auf dem Mac über die Spotify-App bzw. Apple Music und unter Linux über MPRIS (`playerctl`). Es braucht keine Anmeldung. Die Tasten sind [[Pos1]] (Abspielen/Pause), [[Bild ab]] (nächster Song) und [[Bild auf]] (vorheriger Song).
 
 ## Von Hand in den Ordner legen
 

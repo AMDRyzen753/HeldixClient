@@ -136,6 +136,16 @@ export class Parties {
     return mates;
   }
 
+  /**
+   * Voice-Moderation (ab 1.13.0): Party von `uuid` mit Leiter und Mitgliedern; `inGroup`, wenn `group` (gemeldeter
+   * Prüfwert der Voice-Gruppe) die Gruppe dieser Party ist. Ohne Party: null.
+   */
+  voiceParty(group: string | null, uuid: string): { id: string; leader: string; members: ReadonlySet<string>; inGroup: boolean } | null {
+    const party = this.partyOfUser(uuid);
+    if (!party) return null;
+    return { id: party.id, leader: party.leader, members: new Set(party.members.keys()), inGroup: group !== null && group === this.voiceGroup(party) };
+  }
+
   /** Anzahl Parties (Tests, Übersicht). */
   count(): number {
     return this.parties.size;

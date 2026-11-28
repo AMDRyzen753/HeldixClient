@@ -162,7 +162,7 @@ describe('Team-Bereich', () => {
     assert.equal(res.status, 200);
     assert.deepEqual(res.body.reports.map((r: { reason: string }) => r.reason), ['spam', 'harassment'], 'neueste zuerst, nur offene');
     const report = res.body.reports[1];
-    assert.deepEqual(Object.keys(report).sort(), ['at', 'doneAt', 'doneBy', 'id', 'messages', 'note', 'reason', 'reported', 'reporter', 'status']);
+    assert.deepEqual(Object.keys(report).sort(), ['at', 'doneAt', 'doneBy', 'id', 'kind', 'messages', 'note', 'reason', 'reported', 'reporter', 'status']);
     assert.deepEqual(report.reporter, { uuid: anna.uuid, name: 'Anna_X' });
     assert.deepEqual(report.reported, { uuid: ben.uuid, name: 'Ben', banned: false });
     assert.deepEqual(report.messages.map((m: { from: string; fromName: string; text: string }) => [m.from, m.fromName, m.text]), [[ben.uuid, 'Ben', 'Du nervst']]);

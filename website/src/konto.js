@@ -8,13 +8,14 @@
 //   Freunde einladen ......................... konto-einladungen.js
 //   Profil, Privatsphäre, Benachrichtigungen . konto-einstellungen.js
 //   Cape & Cosmetics, Figur der Übersicht .... konto-cosmetics.js
-//   Meine Welten ............................. konto-welten.js
+//   Meine Welten ............................. konto-welten.js (dauerhafte Welten: konto-hosting.js)
 //   Meine Addons ............................. konto-addons.js
 //   Support, Blockierte, Meldungen, Sicherheit, Daten: hier
 //
 // Echtzeit über /api/v1/ws mit dem Web-Cookie (konto-live.js); klappt das nicht, fragt die Seite alle 15 Sekunden nach.
 // Rahmen mit Seitenleiste, unterer Leiste (Handy) und Link zum Team-Bereich: app-shell.js.
-// Ein Ziel im Link (#code=…&ziel=support) öffnet nach der Anmeldung den passenden Bereich, ziel=team die Seite /team;
+// Ein Ziel im Link (#code=…&ziel=support) öffnet nach der Anmeldung den passenden Bereich, ziel=team die Seite /team,
+// ziel=plus die Seite /plus (Heldix+-Warteliste);
 // ohne Anmeldung genügen #reiter=support (oder ältere Links wie #support und #ziel=support). Weitere Werte in der
 // Adresse: #reiter=nachrichten&mit=<uuid> öffnet den Chat, #reiter=support&anfrage=<id> die Anfrage,
 // #reiter=freunde&teil=einladen (alt) führt zu „Freunde einladen“. Kommt die Anmeldung von einer Einladung (/einladung
@@ -60,6 +61,7 @@ import { createLive } from './konto-live.js';
 import { initParty } from './konto-party.js';
 import { initOverview } from './konto-uebersicht.js';
 import { initWorlds } from './konto-welten.js';
+import { initVoiceAccount } from './konto-voice.js';
 import { badgeLabel, roleIcon, roleLabel } from './rollen.js';
 import { attachmentList, normalizeAttachments } from './support-attachments.js';
 
@@ -77,8 +79,9 @@ const state = {
  * Gemeinsamer Stand aller Bereiche (die Module lesen und schreiben ihn, Änderungen melden sie mit emit()).
  * friends: { friends, incoming, outgoing, unread } · conversations: [Conversation] · party: { party, invites, chat }
  * worlds: { available, mine, friends, domain } · invites: Stand aus GET /v1/invites
+ * hosting: { worlds, operated, knocks, granted } (dauerhafte Welten, ab Dienst 1.13.0; für Übersicht und Glocke)
  */
-const store = { me: null, friends: null, conversations: null, party: null, worlds: null, invites: null };
+const store = { me: null, friends: null, conversations: null, party: null, worlds: null, invites: null, hosting: null };
 const listeners = new Map();
 
 /** Bereich, wenn die Adresse keinen nennt. */
@@ -101,9 +104,10 @@ let party = null;
 let worlds = null;
 let settings = null;
 let live = null;
+let voiceAccount = null;
 const supportRefresher = poller(() => refreshSupport(), 15_000);
 /** Ziele aus dem Einmal-Link (#code=…&ziel=…). */
-const TARGETS = new Set(['uebersicht', 'profil', 'freunde', 'nachrichten', 'party', 'einladen', 'welten', 'privatsphaere', 'benachrichtigungen', 'sicherheit', 'daten', 'support', 'addons', 'team']);
+const TARGETS = new Set(['uebersicht', 'profil', 'freunde', 'nachrichten', 'party', 'einladen', 'welten', 'privatsphaere', 'benachrichtigungen', 'sicherheit', 'daten', 'support', 'addons', 'team', 'plus']);
 
 // ---------------------------------------------------------------------------------------------------------
 // Anfragen mit Sitzung: 401 heißt abgemeldet (abgelaufen, anderswo beendet oder Daten gelöscht)
@@ -128,7 +132,7 @@ function sessionEnded(message) {
   invites?.stop();
   overview?.reset();
   for (const module of [friends, chat, party, worlds]) module?.reset();
-  Object.assign(store, { me: null, friends: null, conversations: null, party: null, worlds: null, invites: null });
+  Object.assign(store, { me: null, friends: null, conversations: null, party: null, worlds: null, invites: null, hosting: null });
   for (const dialog of document.querySelectorAll('dialog.modal')) dialog.remove();
   showGuest(message);
 }
@@ -162,7 +166,7 @@ function updateBadges() {
 }
 
 function pushOverview() {
-  overview.update({ me: state.me, friends: store.friends, conversations: store.conversations, tickets: state.support.tickets, party: store.party, partyAvailable: party?.available(), worlds: store.worlds, invites: store.invites });
+  overview.update({ me: state.me, friends: store.friends, conversations: store.conversations, tickets: state.support.tickets, party: store.party, partyAvailable: party?.available(), worlds: store.worlds, invites: store.invites, hosting: store.hosting });
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -220,8 +224,9 @@ async function start() {
         location.replace(`/einladung#${invite.code}`);
         return;
       }
-      if (target === 'team') {
-        location.replace('/team');
+      // Ziele außerhalb des Kontos: Team-Bereich und Heldix+ (/plus, Warteliste)
+      if (target === 'team' || target === 'plus') {
+        location.replace(`/${target}`);
         return;
       }
       showApp(me, target);
@@ -239,11 +244,11 @@ async function start() {
   }
   try {
     const me = await api('GET', '/v1/web/me');
-    if (target === 'team' && !notice) {
-      location.replace('/team');
+    if ((target === 'team' || target === 'plus') && !notice) {
+      location.replace(`/${target}`);
       return;
     }
-    showApp(me, target === 'team' ? null : target);
+    showApp(me, target === 'team' || target === 'plus' ? null : target);
     if (notice) toast(notice, 'error');
   } catch (error) {
     if (error.status === 401) {
@@ -278,6 +283,7 @@ function showApp(me, target = null) {
   chat.refreshConversations().catch(() => {});
   party.refresh().catch(() => {});
   worlds.refresh().catch(() => {});
+  if (wanted !== 'welten') worlds.checkHosting().catch(() => {});
   if (wanted !== 'support') refreshSupportList().catch(() => {});
   if (wanted !== 'addons') myAddons.refreshInBackground().catch(() => {});
   if (wanted !== 'sicherheit') loadSessions().catch(() => {});
@@ -313,6 +319,7 @@ function onTab(name, { params = null } = {}) {
   if (name === 'privatsphaere') {
     loadBlocks().catch(showError);
     loadReports().catch(showError);
+    voiceAccount.load().catch(() => {});
   }
   if (name === 'sicherheit') {
     loadSessions().catch(showError);
@@ -323,6 +330,14 @@ function onTab(name, { params = null } = {}) {
   if (name === 'support') {
     const ticket = params?.anfrage !== undefined && /^[0-9]{1,12}$/.test(String(params.anfrage)) ? Number(params.anfrage) : null;
     refreshSupportList().catch(showError);
+    // Neue Anfrage mit Kategorie (z. B. Einspruch gegen eine Voice-Sperre: neu=konto)
+    if (ticket === null && ['hilfe', 'fehler', 'konto', 'sonstiges'].includes(String(params?.neu ?? ''))) {
+      openSupportForm();
+      $('#support-kategorie').value = params.neu;
+      if (typeof params.betreff === 'string' && !$('#support-betreff').value) $('#support-betreff').value = params.betreff.slice(0, 120);
+      $('#support-betreff').dispatchEvent(new Event('input', { bubbles: true }));
+      return;
+    }
     if (ticket !== null && state.support.ticket?.id !== ticket) openTicket(ticket);
     else if (state.support.ticket?.id) refreshOpenTicket().catch(() => {});
   }
@@ -762,6 +777,9 @@ async function onBlockSubmit(event) {
   }
 }
 
+/** Gründe der Voice-Meldungen (ab Dienst 1.13.0, kind: voice). */
+const VOICE_REASONS = { insult: 'Beleidigung', harassment: 'Belästigung', hate: 'Hassrede', noise: 'Anschreien/Lärm', other: 'Sonstiges' };
+
 async function loadReports() {
   const box = $('#meldungen');
   if (!box.firstChild) box.replaceChildren(loadingState());
@@ -779,8 +797,8 @@ async function loadReports() {
           h(
             'div',
             { class: 'row-main' },
-            h('div', { class: 'row-title' }, h('span', { text: report.reported?.name ?? 'Unbekannt' }), h('span', { class: report.status === 'done' ? 'chip success' : 'chip warning', text: report.status === 'done' ? 'Erledigt' : 'Offen' })),
-            h('div', { class: 'row-sub', text: `${reasonLabel(report.reason)} · ${formatDate(report.at)}` }),
+            h('div', { class: 'row-title' }, h('span', { text: report.reported?.name ?? 'Unbekannt' }), report.kind === 'voice' ? h('span', { class: 'chip chip--voice', text: 'Voice' }) : null, h('span', { class: report.status === 'done' ? 'chip success' : 'chip warning', text: report.status === 'done' ? 'Erledigt' : 'Offen' })),
+            h('div', { class: 'row-sub', text: `${report.kind === 'voice' ? VOICE_REASONS[report.reason] ?? report.reasonLabel ?? report.reason : reasonLabel(report.reason)} · ${formatDate(report.at)}` }),
             report.note ? h('p', { class: 'quote small', text: report.note }) : null,
           ),
         ),
@@ -1054,11 +1072,13 @@ function init() {
   chat = initChat(ctx);
   party = initParty(ctx);
   worlds = initWorlds(ctx);
+  voiceAccount = initVoiceAccount({ call });
   live = createLive({
     call,
     poll: pollAll,
     onEvent: onLiveEvent,
     onState: onLiveState,
+    onOpen: () => worlds?.onLiveOpen(),
     onSignedOut: () => sessionEnded('Du wurdest abgemeldet (auf einem anderen Gerät, abgelaufen oder die Sitzung wurde beendet).'),
   });
   overview = initOverview({ shell, onStatus: () => settings.focusStatus(), worldDomain: ctx.worldDomain, openChat: ctx.openChat });
@@ -1087,7 +1107,7 @@ function init() {
     },
   });
   // Jede Änderung am gemeinsamen Stand: Zähler und Übersicht
-  for (const name of ['friends', 'conversations', 'party', 'worlds']) {
+  for (const name of ['friends', 'conversations', 'party', 'worlds', 'hosting']) {
     on(name, () => {
       updateBadges();
       pushOverview();

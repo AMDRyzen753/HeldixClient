@@ -2,15 +2,36 @@
 # Jede Zeile mit "- " erscheint im Launcher unter „Was ist neu“ und im Versionsverlauf auf heldixclient.com.
 # Vor jedem "npm run release" anpassen. Zeilen mit # werden ignoriert.
 
-# ---------- 0.13.9 ----------
-- Neues Hauptmenü: „Weiterspielen“ zeigt den Live-Stand deines letzten Servers – wie viele Spieler online sind und deinen Ping
-- In kleinen Fenstern sind die Kacheln und Knöpfe im Hauptmenü nicht mehr abgeschnitten, alle Knöpfe sind beschriftet, und deine Spielfigur steht größer neben den Kacheln
-- Neu im Hauptmenü: Cosmetics mit einem Klick; die Freunde-Zeile lädt zum Einladen ein, wenn gerade niemand online ist
-- Pausemenü: oben Servername und Adresse, die Adresse mit einem Klick kopieren und der echte Ping – auch auf Servern, die in der Tab-Liste 0 ms melden
-- Pausemenü: „Freunde einladen“ groß in der Freunde-Karte – im Mehrspieler kommen deine Freunde damit direkt auf deinen Server; die Party ist einen Klick entfernt
-- Pausemenü: Mikrofon und Ton des Voice Chats direkt schalten, bis zu 12 Schnellschalter für Module und keine Lücke mehr unter den Knöpfen
-- Geteilte Welten werben in der Serverliste deiner Mitspieler für HeldixClient: „Geteilt mit HeldixClient“ unter dem Namen der Welt und das Heldix-Logo am Bild der Welt – auch wenn die Welt gerade zu ist
-- Minecrafts Hinweis „Chatnachrichten können nicht überprüft werden“ verdeckt die Menüs nicht mehr – er erscheint als Heldix-Einblendung
+# ---------- 0.14.0 ----------
+- Mac: HeldixClient aktualisiert sich jetzt selbst – beim Start und im laufenden Launcher, wie unter Windows. Läuft die App noch aus dem DMG, erinnert sie daran, sie in Programme zu ziehen
+- Mac: Kürzel zeigen ⌘ statt Strg – im Launcher und im Spiel (⌘K Schnellsuche, ⌘Z im HUD-Editor, ⌘-Klick kopiert eine Chat-Nachricht)
+- Mac: Das Dock zeigt ungelesene Nachrichten und Freundschaftsanfragen; per Rechtsklick aufs Dock-Symbol startest du deine zuletzt gespielten Instanzen; „Einstellungen …“ mit ⌘,
+- Mac: schöneres DMG mit Pfeil – einfach HeldixClient auf Programme ziehen
+- Windows: Im Hintergrund bereit für Nachrichten – schließt du das Fenster, bleibt HeldixClient im Infobereich und meldet Nachrichten, Anfragen und Einladungen als Windows-Benachrichtigung. Ein Klick öffnet direkt den Chat
+- Windows: Die Taskleiste zeigt die Zahl ungelesener Nachrichten und Anfragen am Symbol und blinkt kurz bei einer neuen Nachricht
+- Neu: Mit Windows starten (Mac: bei der Anmeldung) – unsichtbar im Hintergrund, damit Nachrichten gleich ankommen; einschaltbar in der Einrichtung und unter Einstellungen → Allgemein
+- Das Menü im Infobereich hat „Nicht stören“ zum Umschalten und führt direkt zu deinen Freunden
+- Spotify-Addon 2.3.0 im Store: auf dem Mac auch Apple Music (Einstellung „Nur Spotify“ ausschalten)
+- Voice Chat 1.3.0 im Store: Melden direkt aus dem Voice (mit Lautstärke-Verlauf), Lautstärke-Schutz gegen Anschreien und Dauerlärm, Gastgeber, Operatoren und Party-Leiter können für alle stummschalten oder für 10 Minuten entfernen
+- Voice-Regeln: Hat das Team sie veröffentlicht, stimmst du ihnen vor der ersten Voice-Verbindung zu – das Melden kann dann die letzten Minuten des Gemeldeten enthalten
+- Neu: Addon-API Stufe 10 für Entwickler – Moderation im Sprachkanal (Ereignisse, eigene Rechte im Raum, Melden)
+- Neu (Beta): Dauerhafte Welten – stell eine deiner Welten dauerhaft online. Sie läuft auf dem Heldix-Server weiter, auch wenn du offline bist, schläft, wenn niemand drin ist, und wacht beim Beitreten auf. Im Spiel unter Heldix-Welten → Deine Welten oder im Pausemenü bei „Welt teilen“
+- Dauerhafte Welten in Heldix-Welten mit Zustand und Spielerzahl, „Beitreten“, „Auf der Webseite verwalten“ (Plugins, Konsole, Sicherungen) und „Herunterladen“ als neue Einzelspielerwelt – deine Einzelspielerwelt bleibt dabei, wie sie ist
+- Schläft eine dauerhafte Welt, weckt sie dein Beitritt: HeldixClient wartet die etwa 30 Sekunden und tritt dann von selbst bei
+- Klopft jemand an deine dauerhafte Welt, kommt das im Spiel als Einblendung mit H/N – ohne laufendes Spiel in der Glocke des Launchers
+- Neu: Entdecken – öffentliche Welten in Heldix-Welten, sortiert nach beliebt, neu oder gerade aktiv, mit Tags, Suche, „Gefällt mir“ und „Melden“. Die beliebtesten drei stehen auf der Startseite des Launchers
+- Heldix+ – bald: Dauerhafte Welten sind gerade eine Beta. Trag dich in Heldix-Welten auf die Warteliste ein – sobald du freigeschaltet bist, sagen dir das Spiel und die Glocke Bescheid
+- Startseite: „Offene Welten deiner Freunde“ zeigt jetzt auch dauerhafte Welten mit ihrem Zustand; die Glocke meldet, wenn eine deiner dauerhaften Welten ein Problem hat
+
+# ---------- 0.13.9 (veröffentlicht – nicht noch einmal ausliefern) ----------
+# - Neues Hauptmenü: „Weiterspielen“ zeigt den Live-Stand deines letzten Servers – wie viele Spieler online sind und deinen Ping
+# - In kleinen Fenstern sind die Kacheln und Knöpfe im Hauptmenü nicht mehr abgeschnitten, alle Knöpfe sind beschriftet, und deine Spielfigur steht größer neben den Kacheln
+# - Neu im Hauptmenü: Cosmetics mit einem Klick; die Freunde-Zeile lädt zum Einladen ein, wenn gerade niemand online ist
+# - Pausemenü: oben Servername und Adresse, die Adresse mit einem Klick kopieren und der echte Ping – auch auf Servern, die in der Tab-Liste 0 ms melden
+# - Pausemenü: „Freunde einladen“ groß in der Freunde-Karte – im Mehrspieler kommen deine Freunde damit direkt auf deinen Server; die Party ist einen Klick entfernt
+# - Pausemenü: Mikrofon und Ton des Voice Chats direkt schalten, bis zu 12 Schnellschalter für Module und keine Lücke mehr unter den Knöpfen
+# - Geteilte Welten werben in der Serverliste deiner Mitspieler für HeldixClient: „Geteilt mit HeldixClient“ unter dem Namen der Welt und das Heldix-Logo am Bild der Welt – auch wenn die Welt gerade zu ist
+# - Minecrafts Hinweis „Chatnachrichten können nicht überprüft werden“ verdeckt die Menüs nicht mehr – er erscheint als Heldix-Einblendung
 
 # ---------- 0.13.8 (veröffentlicht – nicht noch einmal ausliefern) ----------
 # - Neu: Welt teilen – öffne deine Einzelspielerwelt im Pausenmenü mit einem Klick für Freunde, kostenlos und ohne Portfreigabe. Jede Welt hat eine feste Adresse, und auch Freunde ohne HeldixClient können beitreten

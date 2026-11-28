@@ -69,7 +69,7 @@ describe('Updates im Team-Bereich', () => {
   });
 
   test('Übersicht leer, Upload gestreamt mit Größe und SHA-512, keine Reste', async () => {
-    assert.deepEqual((await webApi(service, 'GET', '/v1/team/updates', { cookie })).body, { current: null, files: [] });
+    assert.deepEqual((await webApi(service, 'GET', '/v1/team/updates', { cookie })).body, { current: null, files: [], mac: null });
     const res = await upload(service, cookie, 'HeldixClient-Setup-1.0.0.exe', v1);
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.deepEqual(res.body, { file: 'HeldixClient-Setup-1.0.0.exe', size: v1.length, sha512: createHash('sha512').update(v1).digest('base64') });

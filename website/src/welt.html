@@ -1,9 +1,10 @@
-<!--seite {"titel":"Geteilte Welt","beschreibung":"Eine geteilte Minecraft-Welt: Gastgeber, ob sie geöffnet ist, Spieler, Minecraft-Version und Adresse – beitreten mit HeldixClient oder über die Serverliste.","noindex":true,"og":"zusammen"}-->
+<!--seite {"titel":"Geteilte Welt","beschreibung":"Eine geteilte Minecraft-Welt: Gastgeber, ob sie geöffnet ist oder dauerhaft läuft, Spieler, Minecraft-Version und Adresse – beitreten mit HeldixClient oder über die Serverliste.","noindex":true,"og":"zusammen"}-->
 <!doctype html>
 <html lang="de">
 <head>
 {{include:head.html}}
 <link rel="stylesheet" href="/seiten.css">
+<link rel="stylesheet" href="/entdecken.css">
 <script type="module" src="/welt.js"></script>
 </head>
 <body data-seite="welt">
@@ -32,10 +33,20 @@
             <div><dt>Minecraft</dt><dd id="welt-version" data-welt-wert>–</dd></div>
             <div><dt>Zugang</dt><dd id="welt-zugang" data-welt-wert>–</dd></div>
           </dl>
+          <!-- Eintrag im Verzeichnis (Entdecken, ab Dienst 1.13.0): Beschreibung, Tags, Gefällt mir, Melden -->
+          <div class="world-listing" id="welt-eintrag" hidden>
+            <p class="world-listing__text" id="welt-beschreibung"></p>
+            <div class="world-listing__tags" id="welt-tags"></div>
+          </div>
           <p class="text-2" id="welt-hinweis" hidden></p>
           <div class="btn-group">
             <a class="btn btn--primary btn--lg" id="welt-beitreten" href="/download">{{icon:play}}Mit HeldixClient beitreten</a>
             <a class="btn btn--secondary btn--lg" href="/download" data-download id="welt-download">{{icon:download}}<span data-download-label>{{t:download.knopf}}</span></a>
+          </div>
+          <div class="world-social" id="welt-sozial" hidden>
+            <button class="btn btn--secondary btn--sm world-like" type="button" id="welt-gefaellt" aria-pressed="false">{{icon:heart}}<span id="welt-gefaellt-text">Gefällt mir</span><span class="count count--muted" id="welt-likes">0</span></button>
+            <button class="btn btn--ghost btn--sm" type="button" id="welt-melden">{{icon:flag}}Melden</button>
+            <p class="tiny text-3 world-social__hint" id="welt-sozial-hinweis" hidden></p>
           </div>
           <div class="world-address" id="welt-adresse-box">
             <p class="small text-2"><strong>Ohne HeldixClient?</strong> Trag diese Adresse in Minecraft unter Mehrspieler → Server hinzufügen ein (gleiche Minecraft-Version):</p>
@@ -54,6 +65,7 @@
           <div class="btn-group">
             <button class="btn btn--secondary" type="button" id="welt-erneut" hidden>{{icon:refresh}}Erneut versuchen</button>
             <a class="btn btn--secondary" href="/zusammen#welt">{{icon:world}}Was ist Welt teilen?</a>
+            <a class="btn btn--secondary" href="/entdecken">{{icon:compass}}Welten entdecken</a>
           </div>
         </article>
 
@@ -69,7 +81,7 @@
           <div class="card">
             <span class="icon-tile">{{icon:shield}}</span>
             <h2 class="h4">Sicher verbunden</h2>
-            <p class="card__text">Der Heldix-Dienst leitet die Verbindung nur weiter – der Gastgeber sieht deine IP-Adresse nicht. Die Welt selbst läuft auf seinem PC.</p>
+            <p class="card__text" id="welt-sicher-text">Der Heldix-Dienst leitet die Verbindung nur weiter – der Gastgeber sieht deine IP-Adresse nicht. Die Welt selbst läuft auf seinem PC.</p>
             <a class="link-arrow" href="/hilfe/welt-teilen">Welt teilen erklärt{{icon:chevron-right}}</a>
           </div>
         </aside>
@@ -78,7 +90,7 @@
   </section>
 </main>
 
-{{include:icons.html}}
+{{ICONS_ALLE_HTML}}
 {{include:footer.html}}
 </body>
 </html>

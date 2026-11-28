@@ -2,9 +2,9 @@
 titel: Addon-API im Detail
 beschreibung: Module, HUD-Elemente, Einstellungen, Tasten, Einblendungen, Ereignisse und gedroppte Items – mit echten Beispielen aus den Addons Spotify, Uhrzeit & Spielzeit und Item Physics.
 reihenfolge: 2
-stichworte: api, heldixapi, addkey, showkey, voice, voicechat, sprachkanal, nearbyplayers, spielermenü, playermenuentry, playermarkers, tasten, keybind, tastenbelegung, hudclick, hudhover, hudstyle, hotspot, iconbutton, anklickbar, hud bedienen, stil-optionen, cosmetics, cosmeticinfo, preview, animate, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate, api 4, api 5, api 6, api 7, showabove, gruppe, voice-gruppe, setstate, playername, api 8, worldmap, minimap, karte, hudimage, createimage, pixel, waypointinfo, wegpunkte, api 9, gast, gäste, browser, browser-link, createbrowserlink, isguest, inbrowser, removeguest, guestsavailable, copytoclipboard, zwischenablage, droppeditems, droppeditemrenderer, droppeditem, droppeditempose, item physics, gedroppte items
+stichworte: api, heldixapi, addkey, showkey, voice, voicechat, sprachkanal, nearbyplayers, spielermenü, playermenuentry, playermarkers, tasten, keybind, tastenbelegung, hudclick, hudhover, hudstyle, hotspot, iconbutton, anklickbar, hud bedienen, stil-optionen, cosmetics, cosmeticinfo, preview, animate, modul, hud, hudcanvas, einstellungen, tasten, keybind, notify, einblendung, events, config, api 3, scheduler, befehl, chat-befehl, regler, farbe, gameinfo, playerstate, api 4, api 5, api 6, api 7, showabove, gruppe, voice-gruppe, setstate, playername, api 8, worldmap, minimap, karte, hudimage, createimage, pixel, waypointinfo, wegpunkte, api 9, gast, gäste, browser, browser-link, createbrowserlink, isguest, inbrowser, removeguest, guestsavailable, copytoclipboard, zwischenablage, api 10, moderation, melden, openreport, reportattachments, showrules, voice-regeln, zustimmung, sperre, stummschalten für alle, gastgeber, party-leiter, roomrights, issilenced, clipsactive, aufnahme, lautstärke-verlauf, droppeditems, droppeditemrenderer, droppeditem, droppeditempose, item physics, gedroppte items
 ---
-Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **9** (Stand HeldixClient 0.13.8). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3`, alles unter [Ab API 4](#ab-api-4) den Eintrag `"api": 4`, alles unter [Ab API 5](#ab-api-5) den Eintrag `"api": 5`, alles unter [Ab API 6](#ab-api-6) den Eintrag `"api": 6`, alles unter [Ab API 7](#ab-api-7) den Eintrag `"api": 7`, alles unter [Ab API 8](#ab-api-8) den Eintrag `"api": 8` und alles unter [Ab API 9](#ab-api-9) den Eintrag `"api": 9`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Addons entwickeln](/entwickler/addons).
+Alle Klassen der Heldix-API liegen im Paket `dev.heldixclient.api`. Diese Seite beschreibt API-Stufe **10** (Stand HeldixClient 0.14.0). Funktionen mit dem Vermerk „ab API 2“ brauchen in der `heldix.addon.json` den Eintrag `"api": 2`, alles unter [Ab API 3](#ab-api-3) den Eintrag `"api": 3`, alles unter [Ab API 4](#ab-api-4) den Eintrag `"api": 4`, alles unter [Ab API 5](#ab-api-5) den Eintrag `"api": 5`, alles unter [Ab API 6](#ab-api-6) den Eintrag `"api": 6`, alles unter [Ab API 7](#ab-api-7) den Eintrag `"api": 7`, alles unter [Ab API 8](#ab-api-8) den Eintrag `"api": 8`, alles unter [Ab API 9](#ab-api-9) den Eintrag `"api": 9` und alles unter [Ab API 10](#ab-api-10) den Eintrag `"api": 10`. Wie ein Addon grundsätzlich aufgebaut ist, steht unter [Addons entwickeln](/entwickler/addons).
 
 > **Hinweis:** Die Heldix-API reicht für die meisten Addons und läuft über Minecraft-Updates hinweg. Was sie nicht kann, darf ein Addon auch direkt in Minecraft ändern – mit Transformern des Heldix Loaders, siehe [Weg 2: Eingriff in Minecraft](/entwickler/addons#weg-2-eingriff-in-minecraft). Mit der API-Stufe hat das nichts zu tun.
 
@@ -28,6 +28,7 @@ In `onEnable(HeldixApi api)` bekommst du ein Objekt, über das alles läuft:
 - ab API 7: `playerName(uuid)`, Symbole über dem Kopf (`playerMarkers().showAbove(...)`), Status und Gruppen im Sprachkanal – siehe [Ab API 7](#ab-api-7).
 - ab API 8: `worldMap()` – die Welt von oben für Karten –, `createImage(...)` für selbst gefüllte Bilder im HUD und `waypoints()` – siehe [Ab API 8](#ab-api-8).
 - ab API 9: Gäste und Browser-Teilnehmer im Sprachkanal, `voice().createBrowserLink(...)` und `copyToClipboard(text)` – siehe [Ab API 9](#ab-api-9).
+- ab API 10: Moderation im Sprachkanal (Sperren, Gastgeber und Party-Leiter), Melden und Voice-Regeln über Dialoge von HeldixClient – siehe [Ab API 10](#ab-api-10).
 
 ## Ereignisse
 
@@ -659,6 +660,52 @@ for (UUID member : api.voice().groupMembers()) {
 ```
 
 Das offizielle Addon **Voice Chat** (ab Version 1.2.0) zeigt Gäste und Browser-Teilnehmer in seiner Liste, kopiert den Browser-Link und entfernt Gäste. Funktionen der Stufe 9 sind in den API-Klassen mit `@since 9` gekennzeichnet.
+
+## Ab API 10
+
+Mit `"api": 10` (ab HeldixClient 0.14.0) kennt der Sprachkanal die Voice-Moderation des Heldix-Dienstes (ab Dienst 1.13.0): Sperren durch das Team, Server ohne Voice, Gastgeber und Party-Leiter, die andere für alle stummschalten oder entfernen, Meldungen mit Lautstärke-Verlauf und – wenn das Team es eingeschaltet hat – der Aufnahme der letzten Minuten, und die Voice-Regeln, denen jeder vor dem Sprechen zustimmt. Fertige Addons für API 1 bis 9 laufen unverändert weiter.
+
+> **Wichtig:** Zustimmen und Melden laufen über **Dialoge von HeldixClient**. Ein Addon kann die Voice-Regeln nicht selbst annehmen und keine Meldung selbst abschicken – es öffnet nur den Dialog. So sieht der Spieler immer denselben, vollständigen Text und entscheidet selbst.
+
+### Moderations-Stand und Ereignisse
+
+- `voice().moderation()` – der eigene Stand: `available()` (kann der Dienst Moderation?), `banned()` mit `bannedUntil()` (0 = dauerhaft), `banReason()`, `banMessage()` und `banAppeal()`, `serverOff()` (Voice ist auf diesem Server aus), `mutedBy()` (wer dich hier für alle stumm geschaltet hat), `kickedUntil()` und `rulesRequired()`. Nur im Haupt-Thread.
+- `voice().onModeration(event -> …)` meldet Änderungen im Haupt-Thread – jeweils mit fertigem deutschen Text in `message()`, z. B. „Tom hat dich in dieser Welt stummgeschaltet.“. Arten (`kind()`): `BANNED`, `MUTED`, `UNMUTED`, `KICKED`, `UNKICKED`, `SERVER_OFF`, `RULES_REQUIRED` und `CLIPS_CHANGED`; dazu `scope()` (`"world"` oder `"party"`), `byName()` und `until()`.
+
+```java
+api.voice().onModeration(event -> {
+    switch (event.kind()) {
+        case RULES_REQUIRED -> api.voice().showRules(ok -> { });
+        case CLIPS_CHANGED -> { if (!api.voice().clipsActive()) buffer.clear(); }
+        default -> api.notify("Voice Chat", event.message());
+    }
+});
+```
+
+### Rechte im Raum
+
+- `voice().rights()` – `worldName()` und `worldRole()` (`"host"`, `"operator"` oder `"player"`; `null` außerhalb einer Heldix-Welt), `partyLeader()` und `canModerate(uuid)` für deine Knöpfe (Gäste nie).
+- `voice().isSilenced(uuid)` – ist jemand im geltenden Bereich für alle stumm geschaltet? Gut für ein Symbol über dem Kopf.
+- `voice().moderate(uuid, aktion, ergebnis -> …)` mit `ModerationAction.MUTE`, `UNMUTE`, `KICK` (10 Minuten kein Zutritt) oder `UNKICK`. Den Bereich wählt HeldixClient: Ist der Spieler in deiner Party und du leitest ihre Voice-Gruppe, gilt es für die Party, sonst für die Heldix-Welt (Gastgeber und Operatoren). Das Ergebnis kommt als deutscher Text im Haupt-Thread. **Nur auf Wunsch des Spielers** – in einer Taste, einem Knopf, einem Klick im HUD, einem Befehl oder einem Eintrag im Spielermenü; sonst wirft der Aufruf eine `IllegalStateException`.
+
+### Melden mit Lautstärke-Verlauf und Aufnahme
+
+`voice().openReport(uuid, anhänge, ergebnis -> …)` öffnet den Melde-Dialog von HeldixClient: Grund (Beleidigung, Belästigung, Hassrede, Anschreien/Lärm, Sonstiges), Notiz (höchstens 300 Zeichen) und – nur wenn Aufnahmen aktiv sind – der Schalter „Die letzten X Minuten seiner Stimme werden angehängt“. Server, Dimension, Zeitpunkt, Gruppe und wer in Hörweite war fügt HeldixClient selbst hinzu. Wie `moderate` nur auf Wunsch des Spielers; Gäste lassen sich nicht melden.
+
+Die Anhänge lieferst du über `ReportAttachments` – erst, wenn der Spieler auf „Melden“ klickt:
+
+- `collect(uuid, mitAufnahme)` gibt `ReportData` zurück: den **Lautstärke-Verlauf** (je Sekunde Effektivwert und Spitze in dBFS, älteste zuerst, höchstens 600; `Float.NaN` = nichts gehört; gemessen nach dem Dekodieren, vor jeder Begrenzung) und – nur mit `mitAufnahme` – die gepufferten **Pakete** des Gemeldeten als `ReceivedPacket` (Empfangszeit, Folgenummer, Satzende, Opus-Daten), älteste zuerst.
+- `bufferedMillis(uuid)` sagt dem Dialog, wie viel gepuffert ist.
+
+Puffern darfst du nur, solange `voice().clipsActive()` wahr ist: nur im Arbeitsspeicher, je Sprecher höchstens 10 Minuten, nie die eigene Stimme. Wird es falsch (oder wechselt der Server), leere den Puffer sofort. Aus den Paketen baut HeldixClient die Ogg/Opus-Datei und lädt sie hoch; der Heldix-Dienst speichert sie verschlüsselt, nur das Team kann sie anhören.
+
+### Voice-Regeln und Zustimmung
+
+- `voice().rules()` – `version()`, `accepted()`, `required()` und `clipsActive()`.
+- `voice().showRules(ok -> …)` zeigt den Dialog „Voice-Regeln“ von HeldixClient: den aktuellen Text vom Heldix-Dienst zum Scrollen, den Hinweis auf die Aufnahme der letzten 10 Minuten beim Melden, „Annehmen“ (erst nach dem Lesen bis zum Ende) und „Ablehnen“. `ok` ist `true`, wenn angenommen oder keine Zustimmung nötig ist. Nach dem Annehmen verbindet HeldixClient den Sprachkanal sofort neu.
+- Ohne Aktion des Spielers öffnet sich der Dialog nur, solange die Zustimmung nötig ist, und einmal je Fassung, nachdem dein Addon den Kanal eingeschaltet hat (z. B. bei `RULES_REQUIRED`). Steht gerade ein anderes Fenster offen, wartet HeldixClient damit.
+
+Das offizielle Addon **Voice Chat** (ab Version 1.3.0) nutzt alles auf dieser Stufe: Melden aus Spielermenü und Anzeige, Ringpuffer und Lautstärke-Verlauf, Lautstärke-Schutz, Knöpfe für Gastgeber und Party-Leiter und den Regeln-Dialog vor der ersten Verbindung. `Moderation`, `ModerationEvent`, `RoomRights` und `Rules` stellt HeldixClient bereit, deshalb sind es Schnittstellen; `ReportAttachments` schreibst du selbst, `ReportData` und `ReceivedPacket` sind Records. Funktionen der Stufe 10 sind in den API-Klassen mit `@since 10` gekennzeichnet.
 
 ## Threads und Fehler
 

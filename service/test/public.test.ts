@@ -225,15 +225,17 @@ describe('Neuigkeiten-Archiv', () => {
 
 describe('Einmal-Link mit Ziel', () => {
   test('target: erlaubte Werte hängen &ziel= an, andere 400; ohne Körper wie bisher', async () => {
-    const service = await startService({ dev: true, website: WEBSITE });
+    // mehr Links als die übliche Grenze (10 pro Minute), die hier nicht geprüft wird
+    const service = await startService({ dev: true, website: WEBSITE, webLinkRateLimit: 100 });
     try {
       const player = await devPlayer(service.url, 'Anna');
-      for (const target of ['profil', 'freunde', 'nachrichten', 'privatsphaere', 'daten', 'support', 'team']) {
+      // ab 1.13.0 auch welten (Konto → Meine Welten) und plus (Seite /plus)
+      for (const target of ['profil', 'freunde', 'nachrichten', 'privatsphaere', 'daten', 'support', 'team', 'welten', 'plus']) {
         const res = await api(service.url, 'POST', '/v1/web/link', { token: player.token, body: { target } });
         assert.equal(res.status, 200, target);
         assert.match(res.body.url, new RegExp(`^https://heldix\\.example/konto#code=[A-Za-z0-9_-]{43}&ziel=${target}$`));
       }
-      for (const target of ['admin', 'Profil', '', 42, ['team']]) {
+      for (const target of ['admin', 'Profil', 'Plus', 'plus/', '/plus', 'https://evil.example/', '', 42, ['team']]) {
         const res = await api(service.url, 'POST', '/v1/web/link', { token: player.token, body: { target } });
         assert.equal(res.status, 400, JSON.stringify(target));
         assert.equal(typeof res.body.error, 'string');
@@ -242,10 +244,13 @@ describe('Einmal-Link mit Ziel', () => {
       const bare = await api(service.url, 'POST', '/v1/web/link', { token: player.token, headers: { 'Content-Type': 'application/json' } });
       assert.match(bare.body.url, /#code=[A-Za-z0-9_-]{43}$/);
       assert.match((await api(service.url, 'POST', '/v1/web/link', { token: player.token, body: { target: null } })).body.url, /#code=[^&]+$/);
-      // Der Code aus dem Link mit Ziel funktioniert wie jeder andere.
-      const linked = await api(service.url, 'POST', '/v1/web/link', { token: player.token, body: { target: 'support' } });
-      const code = /#code=([^&]+)&/.exec(linked.body.url)![1];
-      assert.equal((await api(service.url, 'POST', '/v1/web/session', { body: { code } })).status, 200);
+      // Der Code aus dem Link mit Ziel funktioniert wie jeder andere (auch mit plus: Weiterleitung macht die Webseite).
+      for (const target of ['support', 'plus']) {
+        const linked = await api(service.url, 'POST', '/v1/web/link', { token: player.token, body: { target } });
+        assert.ok(linked.body.url.startsWith('https://heldix.example/konto#'), linked.body.url);
+        const code = /#code=([^&]+)&/.exec(linked.body.url)![1];
+        assert.equal((await api(service.url, 'POST', '/v1/web/session', { body: { code } })).status, 200, target);
+      }
     } finally {
       await service.close();
     }

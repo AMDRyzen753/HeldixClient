@@ -8,7 +8,8 @@
 // Gast-IDs sind 16 zufällige Byte im selben Feld wie die UUID eines Spielers (beide als 32 hex).
 //
 // Exporte: Konstanten, packFrame, unpackFrame, bytesToHex, nextSeq, SequenceTracker, SentenceFramer,
-// PcmJitterBuffer, LinearResampler, rmsLevel, meterLevel, VoiceActivation, frameTimestamp, gapSamples.
+// PcmJitterBuffer, LinearResampler, rmsLevel, meterLevel, VoiceActivation, frameTimestamp, gapSamples,
+// LIMITER, compressorMakeupGain (Lautstärke-Schutz), dbfs, LevelHistory (Lautstärke-Verlauf für Meldungen).
 
 export const VOICE_PROTOCOL = 1;
 export const SAMPLE_RATE = 48_000;
@@ -365,4 +366,125 @@ export function gapSamples(expectedUs, timestampUs, { maxFrames = 5, rate = SAMP
   if (expectedUs === null || expectedUs === undefined || !(timestampUs > expectedUs)) return 0;
   const samples = Math.round(((timestampUs - expectedUs) * rate) / 1e6);
   return Math.min(samples, maxFrames * Math.round((FRAME_US * rate) / 1e6));
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Lautstärke-Schutz (DynamicsCompressorNode im Ausgabeweg, voice-browser.js)
+// ---------------------------------------------------------------------------------------------------------
+
+/**
+ * Einstellungen des Begrenzers: weiche Kompression ab −18 dBFS (Übergang über 10 dB), danach 12:1, schnelle Attack,
+ * langsame Release – wie der Lautstärke-Schutz im Spiel (Voice Chat 1.3.0), nur ohne den Schutz gegen Dauerlärm.
+ */
+export const LIMITER = Object.freeze({ threshold: -18, knee: 10, ratio: 12, attack: 0.003, release: 0.25 });
+
+const toLinear = (db) => 10 ** (db / 20);
+const toDb = (linear) => 20 * Math.log10(linear);
+
+/**
+ * Aufholverstärkung, die ein DynamicsCompressorNode von sich aus auf das Ergebnis legt (Web Audio: „makeup gain“ =
+ * (1 / Kurve(1,0))^0,6, Kurve mit exponentiellem Übergang wie in Chromium, Firefox und WebKit). Der Lautstärke-Schutz
+ * gleicht sie mit einem GainNode wieder aus (1 / Ergebnis) – sonst würde er leise Stimmen und Rauschen lauter machen.
+ */
+export function compressorMakeupGain({ threshold, knee, ratio } = LIMITER) {
+  const linearThreshold = toLinear(threshold);
+  const kneeCurve = (x, k) => (x < linearThreshold ? x : linearThreshold + (1 - Math.exp(-k * (x - linearThreshold))) / k);
+  const slopeAt = (x, k) => {
+    if (x < linearThreshold) return 1;
+    const x2 = x * 1.001;
+    return (toDb(kneeCurve(x2, k)) - toDb(kneeCurve(x, k))) / (toDb(x2) - toDb(x));
+  };
+  // k so wählen, dass die Kurve am Ende des Übergangs die Steigung 1/ratio hat (Bisektion wie im Browser)
+  const kneeEnd = toLinear(threshold + knee);
+  let minK = 0.1;
+  let maxK = 10_000;
+  let k = 5;
+  for (let i = 0; i < 15; i++) {
+    if (slopeAt(kneeEnd, k) < 1 / ratio) maxK = k;
+    else minK = k;
+    k = Math.sqrt(minK * maxK);
+  }
+  const kneeEndDb = toDb(kneeCurve(kneeEnd, k));
+  const fullRange = 1 >= kneeEnd ? toLinear(kneeEndDb + (0 - (threshold + knee)) / ratio) : kneeCurve(1, k);
+  return (1 / fullRange) ** 0.6;
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Lautstärke-Verlauf eines Sprechers (für Meldungen: nur der Pegel je Sekunde, kein Inhalt)
+// ---------------------------------------------------------------------------------------------------------
+
+/** Pegel (linear, 0–1) als ganze dBFS-Zahl von −100 bis 0. */
+export function dbfs(value) {
+  if (!(value > 0)) return -100;
+  return Math.max(-100, Math.min(0, Math.round(toDb(value))));
+}
+
+/**
+ * Pegel je Sekunde (Effektivwert und Spitze in dBFS) der dekodierten Samples eines Sprechers – gemessen vor Lautstärke
+ * je Person und Lautstärke-Schutz. Behält höchstens `seconds` Sekunden; Sekunden ohne empfangene Rahmen sind null.
+ */
+export class LevelHistory {
+  constructor({ seconds = 600 } = {}) {
+    this.seconds = seconds;
+    /** Sekunde (ms / 1000, abgerundet) → { sum, count, peak } */
+    this.buckets = new Map();
+    this.lastAt = -Infinity;
+  }
+
+  /** Dekodierte Samples (Float32Array) zum Zeitpunkt nowMs (Date.now()). */
+  add(samples, nowMs) {
+    if (!samples || samples.length === 0) return;
+    const second = Math.floor(nowMs / 1000);
+    let bucket = this.buckets.get(second);
+    if (!bucket) {
+      bucket = { sum: 0, count: 0, peak: 0 };
+      this.buckets.set(second, bucket);
+      for (const key of this.buckets.keys()) {
+        if (key > second - this.seconds) break;
+        this.buckets.delete(key);
+      }
+    }
+    let sum = 0;
+    let peak = bucket.peak;
+    for (let i = 0; i < samples.length; i++) {
+      const x = samples[i];
+      sum += x * x;
+      const magnitude = x < 0 ? -x : x;
+      if (magnitude > peak) peak = magnitude;
+    }
+    bucket.sum += sum;
+    bucket.count += samples.length;
+    bucket.peak = peak;
+    this.lastAt = nowMs;
+  }
+
+  /**
+   * Verlauf bis zum Ende der letzten vollen Sekunde: { end (ms), rms: [...], peak: [...] } (älteste zuerst, höchstens
+   * `seconds` Werte, ab der ersten Sekunde mit Ton) oder null, wenn in dieser Zeit nichts zu hören war.
+   */
+  snapshot(nowMs) {
+    const current = Math.floor(nowMs / 1000);
+    const first = current - this.seconds;
+    let start = null;
+    for (const key of this.buckets.keys()) {
+      if (key >= first && key < current) {
+        start = key;
+        break;
+      }
+    }
+    if (start === null) return null;
+    const rms = [];
+    const peak = [];
+    for (let second = start; second < current; second++) {
+      const bucket = this.buckets.get(second);
+      if (!bucket || bucket.count === 0) {
+        rms.push(null);
+        peak.push(null);
+      } else {
+        rms.push(dbfs(Math.sqrt(bucket.sum / bucket.count)));
+        peak.push(dbfs(bucket.peak));
+      }
+    }
+    return { end: current * 1000, rms, peak };
+  }
 }

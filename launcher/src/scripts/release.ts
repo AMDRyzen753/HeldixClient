@@ -8,6 +8,7 @@
 // Für jede Version (vorher die Version in package.json und src/main/config.ts erhöhen):
 //   Hinweise in release-notes.md eintragen (Zeilen mit „- “), dann: npm run release
 //   baut den Installer, signiert release/update/update.json und zeigt den Befehl zum Hochladen auf den Server.
+// Mac: npm run release:mac -- <Ordner mit den Mac-Dateien aus GitHub Actions> (siehe release-mac.ts).
 
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
@@ -17,6 +18,7 @@ import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { LAUNCHER_VERSION } from '../main/config';
 import { verifyManifest, type UpdateManifest } from '../main/core/updater';
+import { readReleaseNotes } from './release-common';
 
 const UPDATE_KEY_PATH = path.join(os.homedir(), '.heldixclient-dev', 'update-key.pem');
 const ROOT = path.join(__dirname, '..', '..');
@@ -85,18 +87,8 @@ async function release(): Promise<void> {
   const file = `HeldixClient-Setup-${version}.exe`;
   const installer = path.join(ROOT, 'release', file);
   if (!existsSync(installer)) throw new Error(`${installer} fehlt. Zuerst "npm run dist".`);
-  // Hinweise: --note="…" (direkter Aufruf) oder die Zeilen „- …“ aus release-notes.md
-  // (npm reicht Argumente mit Leerzeichen unter Windows nicht sauber durch)
-  let notes = process.argv.filter((a) => a.startsWith('--note=')).map((a) => a.slice('--note='.length).trim()).filter(Boolean);
-  if (notes.length === 0) {
-    const file = await readFile(path.join(ROOT, 'release-notes.md'), 'utf8').catch(() => '');
-    notes = file
-      .split(/\r?\n/)
-      .filter((line) => /^\s*[-*] /.test(line))
-      .map((line) => line.replace(/^\s*[-*] /, '').trim())
-      .filter(Boolean)
-      .slice(0, 30);
-  }
+  // Hinweise: --note="…" (direkter Aufruf) oder die Zeilen „- …“ aus release-notes.md (siehe release-common.ts)
+  const notes = await readReleaseNotes(ROOT, process.argv);
   if (notes.length === 0) console.log('Hinweis: keine Versionshinweise (release-notes.md ist leer).');
   const manifest: UpdateManifest = {
     v: 1,

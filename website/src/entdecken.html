@@ -1,0 +1,89 @@
+<!--seite {"titel":"Entdecken","beschreibung":"Offene Minecraft-Welten anderer HeldixClient-Spieler: geteilte Welten, die gerade geöffnet sind, und dauerhafte Welten, die rund um die Uhr laufen – mit Filtern, Suche und Beitreten mit einem Klick.","og":"zusammen"}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
+<link rel="stylesheet" href="/entdecken.css">
+<script type="module" src="/entdecken.js"></script>
+</head>
+<body data-seite="entdecken">
+{{include:nav.html}}
+
+<main id="inhalt">
+  <section class="page-hero page-hero--tight" aria-labelledby="seite-titel">
+    <div class="container">
+      <div class="page-hero__inner">
+        <span class="eyebrow">{{icon:compass}}Entdecken</span>
+        <h1 class="h1" id="seite-titel">Welten <span class="text-gradient">entdecken</span></h1>
+        <p class="lead">Offene Welten anderer HeldixClient-Spieler: geteilte Welten, solange sie geöffnet sind, und dauerhafte Welten, die auf dem Heldix-Server rund um die Uhr laufen. Mit HeldixClient trittst du mit einem Klick bei, ohne Adresse abzutippen.</p>
+        <div class="page-hero__actions">
+          <a class="btn btn--primary" href="/konto#reiter=welten">{{icon:plus}}Eigene Welt eintragen</a>
+          <a class="btn btn--secondary" href="/hilfe/entdecken">{{icon:help-circle}}So funktioniert das Verzeichnis</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight" aria-labelledby="entdecken-titel">
+    <div class="container container--wide">
+      <h2 class="sr-only" id="entdecken-titel">Welten im Verzeichnis</h2>
+      <form class="discover-tools" id="entdecken-filter" role="search" novalidate>
+        <label class="search-field discover-tools__search">
+          <span class="sr-only">Welten durchsuchen</span>
+          {{icon:search}}
+          <input type="search" id="entdecken-suche" maxlength="64" placeholder="Name oder Beschreibung, z. B. Parkour" autocomplete="off">
+        </label>
+        <div class="filter-group discover-sort" role="group" aria-label="Sortierung" id="entdecken-sortierung">
+          <button type="button" data-sort="popular" aria-pressed="true">{{icon:star}}Beliebt</button>
+          <button type="button" data-sort="active" aria-pressed="false">{{icon:signal}}Gerade aktiv</button>
+          <button type="button" data-sort="new" aria-pressed="false">{{icon:sparkles}}Neu</button>
+        </div>
+        <div class="discover-tools__selects">
+          <label class="discover-select"><span class="sr-only">Tag</span>
+            <select class="select" id="entdecken-tag">
+              <option value="">Alle Tags</option>
+            </select>
+          </label>
+          <label class="discover-select"><span class="sr-only">Sprache</span>
+            <select class="select" id="entdecken-sprache">
+              <option value="">Alle Sprachen</option>
+              <option value="de">Deutsch</option>
+              <option value="en">Englisch</option>
+            </select>
+          </label>
+          <label class="discover-select"><span class="sr-only">Minecraft-Version</span>
+            <input class="input" type="search" id="entdecken-version" maxlength="32" placeholder="Version, z. B. 26.3" autocomplete="off" spellcheck="false">
+          </label>
+        </div>
+      </form>
+      <div class="discover-tags" id="entdecken-tags" role="group" aria-label="Schnell nach Tag filtern"></div>
+      <p class="result-line" id="entdecken-ergebnis" aria-live="polite"></p>
+
+      <div class="discover-grid" id="entdecken-liste" aria-busy="true"></div>
+      <div class="empty discover-empty" id="entdecken-leer" hidden>{{icon:compass}}<p id="entdecken-leer-text">Gerade passt keine Welt zu deiner Auswahl.</p></div>
+      <div class="card discover-error" id="entdecken-fehler" hidden>
+        <span class="icon-tile">{{icon:warning}}</span>
+        <div><h3 class="h4">Das Verzeichnis ist gerade nicht erreichbar</h3><p class="text-2 small" id="entdecken-fehler-text">Versuch es gleich noch einmal.</p></div>
+        <button class="btn btn--secondary btn--sm" type="button" id="entdecken-erneut">{{icon:refresh}}Erneut versuchen</button>
+      </div>
+      <nav class="discover-pager" id="entdecken-seiten" aria-label="Seiten" hidden>
+        <button class="btn btn--secondary btn--sm" type="button" id="entdecken-zurueck">{{icon:chevron-left}}Zurück</button>
+        <span class="discover-pager__info" id="entdecken-seite">Seite 1 von 1</span>
+        <button class="btn btn--secondary btn--sm" type="button" id="entdecken-weiter">Weiter{{icon:chevron-right}}</button>
+      </nav>
+
+      <aside class="support-box discover-own">
+        <span class="icon-tile icon-tile--lg">{{icon:world}}</span>
+        <div><h2>Deine Welt im Verzeichnis</h2><p>Teilst du eine Welt für „Jeder mit der Adresse“ oder läuft sie dauerhaft, trägst du sie im Konto unter Meine Welten → „Im Verzeichnis zeigen“ ein – mit kurzem Text, Tags und Sprache. Freiwillig und jederzeit wieder weg.</p></div>
+        <a class="btn btn--primary" href="/konto#reiter=welten">{{icon:user}}Zu Meine Welten</a>
+      </aside>
+      <p class="small text-3 discover-note">Öffentlich steht nur, was der Besitzer selbst einträgt, dazu sein Spielername mit Kopf. „Gefällt mir“ zählt nur als Zahl. Regeln: keine Beleidigungen oder Hetze, keine Werbung für fremde Dienste, nichts Jugendgefährdendes – Verstöße meldest du auf der Seite der Welt. Mehr in der <a href="/datenschutz#entdecken">Datenschutzerklärung</a>.</p>
+    </div>
+  </section>
+</main>
+
+{{ICONS_ALLE_HTML}}
+{{include:footer.html}}
+</body>
+</html>

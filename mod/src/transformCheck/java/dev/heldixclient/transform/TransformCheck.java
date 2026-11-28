@@ -102,7 +102,7 @@ public final class TransformCheck {
 	/** Eingriffe für „Welt teilen“ (WorldSharePatches): an den echten Server-Klassen anwenden und prüfen */
 	private static void worldShareChecks(Path out, ClassLoader loader) throws Exception {
 		WorldSharePatches patches = new WorldSharePatches();
-		check(patches.targets().size() == 3, "Welt teilen: drei Ziel-Klassen: " + patches.targets());
+		check(patches.targets().size() == 4, "Welt teilen: vier Ziel-Klassen: " + patches.targets());
 		String hooks = "dev/heldixclient/transform/WorldShareHooks";
 		for (String target : patches.targets()) {
 			ClassNode node = read(loader, target);
@@ -127,6 +127,10 @@ public final class TransformCheck {
 					MethodNode max = result.methods.stream().filter(m -> m.name.equals("getMaxPlayers") && m.desc.equals("()I")).findFirst().orElseThrow();
 					check(calls(permissions, hooks, "permissions") >= 1, "getProfilePermissions geht durch den Hook");
 					check(calls(max, hooks, "maxPlayers") == 1, "getMaxPlayers geht durch den Hook");
+				}
+				case WorldSharePatches.CONNECT_SCREEN -> {
+					MethodNode start = result.methods.stream().filter(m -> m.name.equals("startConnecting")).findFirst().orElseThrow();
+					check(calls(start, hooks, "connecting") == 1, "ConnectScreen.startConnecting ruft den Hook genau einmal auf");
 				}
 				default -> {
 					MethodNode place = result.methods.stream().filter(m -> m.name.equals("placeNewPlayer")).findFirst().orElseThrow();

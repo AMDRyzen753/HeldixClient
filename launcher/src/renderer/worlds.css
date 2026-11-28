@@ -7,6 +7,13 @@
 .world-empty strong { color: var(--muted); font-size: 12.5px; font-weight: 600; }
 .world-empty span { color: var(--faint); font-size: 12px; line-height: 1.4; }
 .row-item .row-badge.world-live { background: rgba(20, 184, 166, 0.18); color: #5eead4; padding: 0 7px; font-size: 10.5px; letter-spacing: 0.02em; }
+/* dauerhafte Welten (Dienst 1.13.0): Zustand als Plakette */
+.row-item .row-badge.world-hosted { background: rgba(59, 130, 246, 0.16); color: var(--accent-text); padding: 0 7px; font-size: 10.5px; letter-spacing: 0.02em; }
+.row-item .row-badge.world-hosted.state-running { background: rgba(52, 211, 153, 0.16); color: #a7f3d0; }
+.row-item .row-badge.world-hosted.state-starting { background: rgba(251, 191, 36, 0.16); color: #fde68a; }
+.row-item .row-badge.world-hosted.state-error { background: rgba(248, 113, 113, 0.16); color: #fecaca; }
+/* Beliebte Welten (Entdecken) */
+.row-item .row-badge.world-likes { background: rgba(255, 255, 255, 0.06); color: var(--muted); padding: 0 7px; font-size: 10.5px; }
 
 /* ---------- Welt-Dialog ---------- */
 .world-online { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); }

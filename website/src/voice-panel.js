@@ -2,12 +2,22 @@
 //
 // - Beitreten: als Gast mit Namen (POST /v1/public/invites/<code>/guest → Token, nur im Speicher dieser Seite) oder
 //   angemeldet „Als <Name> beitreten“ (Web-Cookie). Ohne WebCodecs-Opus ein klarer Hinweis.
+// - Voice-Regeln (ab Dienst 1.13.0): Sind sie veröffentlicht (GET /v1/public/voice/rules), kommt vor dem Beitreten
+//   ein eigener Dialog mit dem Text und dem Hinweis auf die Aufnahme beim Melden – „Annehmen“ oder „Ablehnen“, nichts
+//   vorausgewählt. Gast: Die angenommene Version geht als rulesVersion mit dem Gast-Zugang (409 voice-rules → Dialog
+//   mit dem neuen Text). Angemeldet: GET /v1/voice/me, bei rules.required der Dialog und POST /v1/voice/rules/accept
+//   { version }; eine Voice-Sperre (ban) zeigt die Seite gleich an. Schließt der Dienst mit 4012 (neue Version), kommt
+//   der Dialog, nach „Annehmen“ verbindet die Seite neu. 4013 (Voice-Sperre) zeigt Sperre, Grund und Einspruch.
 // - Im Gespräch: eigener Pegel mit Schwelle, Sprachaktivierung oder Push-to-Talk (Leertaste oder Knopf halten),
-//   Mikrofon stumm, Ton aus, Teilnehmerliste mit Sprech-Anzeige, Gast/Browser-Kennzeichen, Lautstärke je Person,
-//   Gäste entfernen (nur angemeldet), Verlassen. Verbindung und Audio: voice-browser.js.
-// Einstellungen (Sprechmodus, Schwelle, Lautstärken) bleiben nur, solange die Seite offen ist.
-import { ApiError, api, avatar, h, icon, toast, uid } from './app-common.js';
-import { CLOSE_TEXTS, VoiceSession, checkVoiceSupport } from './voice-browser.js';
+//   Mikrofon stumm, Ton aus, Lautstärke-Schutz, Teilnehmerliste mit Sprech-Anzeige, Gast/Browser-Kennzeichen,
+//   „vom Gastgeber stummgeschaltet“, Lautstärke je Person, Gäste entfernen (nur angemeldet), Spieler melden (ab 1.13.0:
+//   Gast → POST /v1/public/voice/guest-reports mit dem Token, angemeldet → POST /v1/voice/reports; Grund, Notiz,
+//   Kontext und Lautstärke-Verlauf, nie eine Aufnahme), Verlassen. Verbindung und Audio: voice-browser.js.
+// Einstellungen (Sprechmodus, Schwelle, Lautstärken) bleiben nur, solange die Seite offen ist; nur die Wahl
+// „Lautstärke-Schutz“ merkt sich der Browser (localStorage, ohne Bezug zur Person).
+import { ApiError, api, avatar, bindCounter, fallbackMessage, formatDate, formatDateTime, h, icon, openDialog, toast, uid } from './app-common.js';
+import { CLOSE_TEXTS, VoiceSession, checkVoiceSupport, normalizeBan } from './voice-browser.js';
+import { clipMinutes, loadVoiceRules, parseRules, renderRules } from './voice-regeln.js';
 
 /** Gast-Name wie beim Dienst: 3–16 Zeichen aus Buchstaben (auch ÄÖÜäöüß), Ziffern, Leerzeichen, _ . -, mindestens ein Buchstabe oder eine Ziffer */
 export const GUEST_NAME_RE = /^[A-Za-zÄÖÜäöüß0-9 _.-]{3,16}$/;
@@ -25,6 +35,20 @@ const MIC_TEXTS = {
   beendet: 'Das Mikrofon wurde getrennt – du hörst nur zu.',
   fehler: 'Das Mikrofon ließ sich nicht öffnen – du hörst nur zu.',
 };
+/** Gründe für Voice-Meldungen (wie im Spiel) */
+export const VOICE_REPORT_REASONS = [
+  ['insult', 'Beleidigung'],
+  ['harassment', 'Belästigung'],
+  ['hate', 'Hassrede'],
+  ['noise', 'Anschreien/Lärm'],
+  ['other', 'Sonstiges'],
+];
+const NOTE_MAX = 300;
+const MC_NAME_RE = /^[A-Za-z0-9_]{1,16}$/;
+const PROTECTION_KEY = 'heldix-voice-schutz';
+const DECLINED_TEXT = 'Ohne Zustimmung zu den Voice-Regeln kannst du nicht mitreden. Lesen kannst du sie jederzeit auf der Seite „Voice-Regeln“ – die Einladung annehmen und HeldixClient herunterladen geht trotzdem.';
+const RULES_CHANGED_TEXT = 'Die Voice-Regeln haben sich gerade geändert. Versuch es gleich noch einmal.';
+const APPEAL_TEXT = 'Einspruch: Support-Anfrage (Kategorie „Konto“) auf der Webseite oder im Launcher.';
 
 const isTextField = (element) => {
   if (!element || element === document.body) return false;
@@ -36,6 +60,31 @@ const isTextField = (element) => {
 };
 
 const shortName = (id) => `Spieler ${id.slice(0, 4)}`;
+
+/** Lautstärke-Schutz: Wahl des Besuchers (Standard an). Ohne localStorage (privates Fenster, gesperrt) einfach an. */
+function loadProtection() {
+  try {
+    return window.localStorage.getItem(PROTECTION_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function saveProtection(on) {
+  try {
+    window.localStorage.setItem(PROTECTION_KEY, on ? '1' : '0');
+  } catch {
+    // ohne localStorage gilt die Wahl nur, solange die Seite offen ist
+  }
+}
+
+/** Text zu einer Voice-Sperre (aus `banned` bzw. GET /v1/voice/me) mit Einspruch. */
+export function banText(ban) {
+  if (!ban) return `${CLOSE_TEXTS[4013]} ${APPEAL_TEXT}`;
+  const reason = ban.reason ? ` Grund: ${ban.reason}` : '';
+  const main = ban.message ?? (ban.until ? `Du bist bis ${formatDateTime(ban.until)} vom Voice Chat gesperrt.${reason}` : `Du bist dauerhaft vom Voice Chat gesperrt.${reason}`);
+  return `${main} ${ban.appeal ?? APPEAL_TEXT}`;
+}
 
 /**
  * Bereich in `root` einrichten. invite: Antwort von GET /v1/public/invites/<code>; me: Profil (angemeldet) oder null;
@@ -55,11 +104,24 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
     threshold: 0.4,
     muted: false,
     deafened: false,
+    protection: loadProtection(),
     status: 'idle',
     endMessage: null,
     endCode: null,
     microphone: { ok: false, reason: null },
     retryIn: 0,
+    /** zuletzt geladene Voice-Regeln (für die Hinweise vor dem Beitreten) */
+    rules: null,
+    /** vom Gast auf dieser Seite angenommene Version (gilt für neue Gast-Zugänge) */
+    guestRules: null,
+    guestToken: null,
+    joinedAsGuest: false,
+    /** Neuverbindungen nach 4012 ohne zwischendurch verbunden zu sein (Schutz vor einer Schleife) */
+    rulesRetries: 0,
+    moderation: false,
+    clips: null,
+    selfSilenced: false,
+    selfSilencedText: null,
   };
   const ids = { name: uid('gast-name'), error: uid('gast-fehler'), threshold: uid('schwelle') };
   const knownNames = new Map(names);
@@ -89,6 +151,7 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
       return;
     }
     if (state.endMessage) parts.push(h('p', { class: 'notice voice-notice', role: 'alert', text: state.endMessage }));
+    if (state.endCode === 4013) parts.push(supportLink());
 
     if (me && !state.asGuest) {
       const join = h('button', { type: 'button', class: 'button big voice-join', id: 'voice-beitreten', onClick: () => joinAsUser(join) }, icon('mic'), h('span', { text: `Als ${me.name} beitreten` }));
@@ -133,17 +196,44 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
       parts.push(form);
       if (me) parts.push(h('button', { type: 'button', class: 'link-button voice-switch', onClick: () => ((state.asGuest = false), renderForm()) }, `Doch als ${me.name} beitreten`));
     }
-    parts.push(
-      h(
-        'ul',
-        { class: 'voice-facts' },
-        h('li', null, icon('mic'), h('span', { text: 'Dein Browser fragt nach dem Mikrofon. Ohne Mikrofon hörst du nur zu.' })),
-        h('li', null, icon('headphones'), h('span', { text: 'Nimm am besten Kopfhörer – sonst hören die anderen sich selbst.' })),
-        h('li', null, icon('lock'), h('span', { text: 'Deine Stimme geht nur über den Heldix-Dienst an diese Gruppe. Niemand nimmt etwas auf, gespeichert wird nichts.' })),
-      ),
-    );
+    parts.push(factsList());
     parts.push(advert());
     root.replaceChildren(...parts);
+  }
+
+  /** Was beim Mitreden passiert – mit Voice-Regeln (sobald veröffentlicht) und Hinweis auf Aufnahmen beim Melden. */
+  function factsList() {
+    const rules = state.rules;
+    const items = [
+      h('li', null, icon('mic'), h('span', { text: 'Dein Browser fragt nach dem Mikrofon. Ohne Mikrofon hörst du nur zu.' })),
+      h('li', null, icon('headphones'), h('span', { text: 'Nimm am besten Kopfhörer – sonst hören die anderen sich selbst.' })),
+      h('li', null, icon('lock'), h('span', { text: rules?.clips ? 'Deine Stimme geht nur über den Heldix-Dienst an diese Gruppe. Dein Browser nimmt nichts auf und speichert nichts.' : 'Deine Stimme geht nur über den Heldix-Dienst an diese Gruppe. Niemand nimmt etwas auf, gespeichert wird nichts.' })),
+    ];
+    if (rules?.published) {
+      items.push(
+        h(
+          'li',
+          null,
+          icon('shield'),
+          h(
+            'span',
+            null,
+            'Es gelten die ',
+            h('a', { href: '/voice-regeln', target: '_blank', rel: 'noopener' }, 'Voice-Regeln'),
+            rules.clips ? `. Meldet dich ein Spieler im Spiel, kann seine Meldung die letzten ${clipMinutes(rules.limits)} Minuten deiner Stimme enthalten.` : ' – vor dem Beitreten fragen wir dich, ob du sie annimmst.',
+          ),
+        ),
+      );
+    }
+    return h('ul', { class: 'voice-facts', id: 'voice-fakten' }, items);
+  }
+
+  function refreshFacts() {
+    root.querySelector('#voice-fakten')?.replaceWith(factsList());
+  }
+
+  function supportLink() {
+    return h('div', { class: 'voice-join-box' }, h('a', { class: 'button small ghost', href: '/konto#reiter=support', id: 'voice-einspruch' }, icon('help-circle'), 'Support-Anfrage stellen'));
   }
 
   function advert() {
@@ -179,48 +269,191 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
     state.guestName = name;
     submit.disabled = true;
     submit.setAttribute('aria-busy', 'true');
-    let guest;
-    try {
-      guest = await requestGuest(name);
-    } catch (problem) {
-      submit.disabled = false;
-      submit.removeAttribute('aria-busy');
-      error.textContent = problem.status === 404 ? CLOSE_TEXTS[4006] : problem.message;
-      error.hidden = false;
-      return;
-    }
-    start({ protocols: ['heldix-voice', `gast.${guest.token}`], selfId: guest.id, selfName: guest.name || name, guest: true });
+    const problem = await beginGuest();
+    if (!problem) return;
+    submit.disabled = false;
+    submit.removeAttribute('aria-busy');
+    error.textContent = problem.text;
+    error.hidden = false;
   }
 
-  async function requestGuest(name) {
-    const data = await api('POST', `/v1/public/invites/${code}/guest`, { name });
+  /** Gast: Voice-Regeln (falls veröffentlicht), Gast-Zugang, Gespräch. → null (Gespräch beginnt) oder { text }. */
+  async function beginGuest({ changed = false } = {}) {
+    for (let round = 0; round < 3; round++) {
+      const consent = await consentRules({ guest: true, changed: changed || round > 0 });
+      if (consent.error) return { text: consent.error };
+      let guest;
+      try {
+        guest = await requestGuest(state.guestName, consent.version);
+      } catch (problem) {
+        // Regeln noch nicht oder in alter Version angenommen: Dialog mit dem aktuellen Text noch einmal
+        if (problem instanceof ApiError && problem.status === 409 && problem.code === 'voice-rules' && !consent.unavailable) {
+          state.guestRules = null;
+          continue;
+        }
+        return { text: problem.status === 404 ? CLOSE_TEXTS[4006] : problem.message };
+      }
+      start({ protocols: ['heldix-voice', `gast.${guest.token}`], selfId: guest.id, selfName: guest.name || state.guestName, guest: true, token: guest.token });
+      return null;
+    }
+    return { text: RULES_CHANGED_TEXT };
+  }
+
+  async function requestGuest(name, rulesVersion = null) {
+    const body = { name };
+    if (rulesVersion) body.rulesVersion = rulesVersion;
+    const data = await api('POST', `/v1/public/invites/${code}/guest`, body);
     if (!data || typeof data.token !== 'string' || !/^[A-Za-z0-9._~-]{16,200}$/.test(data.token) || !/^[0-9a-f]{32}$/.test(data.id ?? '')) throw new ApiError(500, 'Der Heldix-Dienst hat keinen gültigen Gast-Zugang geschickt.');
     return data;
   }
 
-  function joinAsUser(button) {
+  async function joinAsUser(button) {
     button.disabled = true;
-    start({ protocols: ['heldix-voice'], selfId: me.uuid, selfName: me.name, guest: false });
+    button.setAttribute('aria-busy', 'true');
+    const problem = await beginUser();
+    if (!problem) return;
+    state.endMessage = problem.text;
+    state.endCode = problem.code ?? null;
+    renderForm();
   }
 
-  async function start({ protocols, selfId, selfName, guest }) {
+  /** Angemeldet: Sperre und Voice-Regeln prüfen (GET /v1/voice/me), dann Gespräch. → null oder { text, code? }. */
+  async function beginUser({ changed = false } = {}) {
+    const consent = await consentRules({ guest: false, changed });
+    if (consent.ban) return { text: banText(consent.ban), code: 4013 };
+    if (consent.error) return { text: consent.error };
+    start({ protocols: ['heldix-voice'], selfId: me.uuid, selfName: me.name, guest: false });
+    return null;
+  }
+
+  /**
+   * Voice-Regeln vor dem Beitreten. → { version } (angenommen, schon angenommen oder nicht nötig; null = keine
+   * veröffentlicht bzw. älterer Dienst), { error } (abgelehnt oder nicht ladbar) oder { ban } (angemeldet und vom Voice
+   * Chat gesperrt). unavailable: Die Regeln ließen sich nicht laden (dann entscheidet der Dienst beim Beitreten).
+   */
+  async function consentRules({ guest, changed = false }) {
+    for (let round = 0; round < 3; round++) {
+      const rules = await loadVoiceRules();
+      if (rules) {
+        state.rules = rules;
+        refreshFacts();
+      }
+      if (guest) {
+        if (!rules) return { version: null, unavailable: true };
+        if (!rules.published) return { version: null };
+        if (state.guestRules === rules.version) return { version: rules.version };
+        const answer = await rulesDialog(rules, { changed: changed || round > 0 });
+        if (!answer) return { error: DECLINED_TEXT };
+        state.guestRules = rules.version;
+        return { version: rules.version };
+      }
+      let status = null;
+      try {
+        status = await api('GET', '/v1/voice/me');
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) return { error: 'Du bist auf dieser Seite nicht mehr angemeldet. Melde dich neu an oder tritt als Gast bei.' };
+        // Älterer Dienst (404) oder gerade nicht erreichbar: wie bisher verbinden – der Dienst prüft beim Verbinden selbst
+        status = null;
+      }
+      const ban = normalizeBan(status?.ban);
+      if (ban) return { ban };
+      if (status?.rules?.required !== true) return { version: Number.isInteger(status?.rules?.version) ? status.rules.version : null };
+      if (!rules?.published) return { error: 'Die Voice-Regeln lassen sich gerade nicht laden. Versuch es gleich noch einmal.' };
+      const answer = await rulesDialog(rules, {
+        changed: changed || round > 0,
+        onAccept: async () => {
+          try {
+            await api('POST', '/v1/voice/rules/accept', { version: rules.version });
+            return 'ok';
+          } catch (error) {
+            // Inzwischen gilt eine andere Version: Dialog mit dem neuen Text; nichts mehr veröffentlicht: einfach weiter
+            if (error instanceof ApiError && error.status === 409 && error.code === 'voice-rules-version') return 'neu';
+            if (error instanceof ApiError && error.status === 409 && error.code === 'voice-rules-none') return 'ok';
+            throw error;
+          }
+        },
+      });
+      if (!answer) return { error: DECLINED_TEXT };
+      if (answer === 'neu') continue;
+      return { version: rules.version };
+    }
+    return { error: RULES_CHANGED_TEXT };
+  }
+
+  /**
+   * Eigenständiger Dialog mit den Voice-Regeln: Hinweis auf die Aufnahme beim Melden, Text zum Scrollen, Link auf
+   * /voice-regeln, „Ablehnen“ und „Annehmen“ (der Fokus liegt auf dem Text, nicht auf „Annehmen“).
+   * → Ergebnis von onAccept (bzw. true) oder null (abgelehnt).
+   */
+  function rulesDialog(rules, { changed = false, onAccept = null } = {}) {
+    const minutes = clipMinutes(rules.limits);
+    const textId = uid('regeln-text');
+    const box = h('div', { class: 'voice-rules-text', id: textId, tabindex: '0', role: 'region', 'aria-label': 'Text der Voice-Regeln' }, renderRules(parseRules(rules.text), { level: 3 }).nodes);
+    const body = [
+      changed ? h('p', { class: 'notice', role: 'status', text: 'Die Voice-Regeln wurden geändert – bitte lies die neue Fassung.' }) : null,
+      h('p', { text: 'Bevor du mitredest, lies bitte die Voice-Regeln. Nur wenn du sie annimmst, kannst du den Voice Chat nutzen – im Spiel und hier im Browser.' }),
+      h(
+        'div',
+        { class: 'voice-rules-record' },
+        icon('warning'),
+        h(
+          'div',
+          null,
+          h('strong', { text: `Meldungen können die letzten ${minutes} Minuten deiner Stimme enthalten.` }),
+          h('p', {
+            text: `Hier im Browser wird nichts aufgenommen. Spieler im Spiel halten aber die Stimmen, die sie hören, bis zu ${minutes} Minuten im Arbeitsspeicher. Meldet dich einer von ihnen, kann diese Aufnahme deiner Stimme zur Meldung gehören – verschlüsselt gespeichert, nur für das Team, gelöscht ${rules.limits.deleteAfterDoneDays} Tage nach Abschluss der Meldung, spätestens nach ${rules.limits.deleteAfterDays} Tagen.`,
+          }),
+          h('p', { class: 'hint', text: rules.clips ? 'Aufnahmen beim Melden sind gerade eingeschaltet.' : 'Aufnahmen beim Melden sind gerade ausgeschaltet. Schaltet das Team sie ein, gilt deine Zustimmung auch dafür.' }),
+        ),
+      ),
+      box,
+      h('p', { class: 'hint voice-rules-meta' }, `Version ${rules.version}${rules.publishedAt ? ` vom ${formatDate(rules.publishedAt)}` : ''} · `, h('a', { href: '/voice-regeln', target: '_blank', rel: 'noopener' }, 'Voice-Regeln in neuem Tab öffnen')),
+    ];
+    return openDialog({ title: 'Voice-Regeln lesen und annehmen', body, confirmLabel: 'Annehmen', cancelLabel: 'Ablehnen', onConfirm: onAccept ?? undefined, focus: `#${textId}` });
+  }
+
+  /** Nach 4012 (neue Voice-Regeln während des Gesprächs): Dialog, nach „Annehmen“ gleich wieder verbinden. */
+  async function resumeAfterRules() {
+    if (++state.rulesRetries > 2) {
+      state.endMessage = 'Die Voice-Regeln ließen sich gerade nicht bestätigen. Versuch es gleich noch einmal.';
+      renderEnded();
+      return;
+    }
+    state.guestRules = null;
+    const problem = state.joinedAsGuest ? await beginGuest({ changed: true }) : await beginUser({ changed: true });
+    if (!problem || state.session) return;
+    state.endMessage = problem.text;
+    state.endCode = problem.code ?? null;
+    renderEnded();
+  }
+
+  async function start({ protocols, selfId, selfName, guest, token = null }) {
     const support = await ensureSupport();
     if (!support.ok) return renderForm();
     state.selfId = selfId;
     state.selfName = selfName;
     state.endMessage = null;
+    state.endCode = null;
     state.peers = [];
     state.status = 'connecting';
+    state.guestToken = guest ? token : null;
+    state.joinedAsGuest = guest;
+    state.moderation = false;
+    state.clips = null;
+    state.selfSilenced = false;
+    state.selfSilencedText = null;
     const session = new VoiceSession({
       code,
       protocols,
       selfId,
       guest,
       encoderConfig: support.encoderConfig,
+      protection: state.protection,
       renewGuest: guest
         ? async () => {
-            const next = await requestGuest(state.guestName);
+            const next = await requestGuest(state.guestName, state.guestRules);
             state.selfId = next.id;
+            state.guestToken = next.token;
             session.selfId = next.id;
             return ['heldix-voice', `gast.${next.token}`];
           }
@@ -251,12 +484,14 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
       state.retryIn = detail.retryIn ?? 0;
       if (detail.status === 'closed') {
         state.session = null;
-        state.endMessage = detail.message ?? null;
         state.endCode = detail.code ?? null;
+        state.endMessage = detail.code === 4013 ? banText(detail.ban) : (detail.message ?? null);
         stopKeys();
         renderEnded();
+        if (detail.code === 4012) resumeAfterRules();
         return;
       }
+      if (detail.status === 'connected') state.rulesRetries = 0;
       updateStatus();
     } else if (type === 'peers') {
       state.peers = detail;
@@ -267,6 +502,17 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
     } else if (type === 'microphone') {
       state.microphone = detail;
       updateMicrophone();
+    } else if (type === 'moderation') {
+      state.moderation = detail.moderation;
+      state.clips = detail.clips;
+      updateListHint();
+      renderPeers();
+    } else if (type === 'self') {
+      state.selfSilenced = detail.silenced;
+      state.selfSilencedText = detail.message ?? null;
+      updateModNotice();
+    } else if (type === 'notice' && detail?.message) {
+      toast(detail.message);
     }
   }
 
@@ -314,9 +560,21 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
     els.ptt.addEventListener('contextmenu', (event) => event.preventDefault());
     els.pttBox = h('div', { class: 'voice-ptt-box' }, els.ptt, h('p', { class: 'hint' }, 'Oder halte die ', h('kbd', { text: 'Leertaste' }), ' – solange kein Eingabefeld ausgewählt ist.'));
     els.micNotice = h('div', { class: 'voice-mic-notice', id: 'voice-mikrofon-hinweis', hidden: true });
+    els.modNotice = h('div', { class: 'voice-mod-notice', id: 'voice-stumm-hinweis', role: 'status', hidden: true });
     els.audioNotice = h('div', { class: 'voice-audio-notice', hidden: true }, h('p', { text: 'Dein Browser hat den Ton angehalten.' }), h('button', { type: 'button', class: 'button tiny', onClick: () => state.session?.resumeAudio() }, icon('volume'), 'Ton einschalten'));
+    // Lautstärke-Schutz (Standard an, Wahl bleibt im Browser)
+    const protectionId = uid('schutz');
+    els.protection = h('input', { type: 'checkbox', role: 'switch', id: protectionId, 'aria-describedby': `${protectionId}-hinweis` });
+    els.protection.checked = state.protection;
+    els.protection.addEventListener('change', () => setProtection(els.protection.checked));
+    els.protectionBox = h(
+      'div',
+      { class: 'voice-protection', id: 'voice-schutz' },
+      h('label', { class: 'switch', for: protectionId }, h('span', { class: 'switch__text' }, h('strong', { text: 'Lautstärke-Schutz' }), h('span', { class: 'hint', id: `${protectionId}-hinweis`, text: 'Dämpft Schreien, Lärm und sehr laute Stimmen, bevor sie bei dir ankommen. Normal laute Sprache ändert er kaum.' })), els.protection),
+    );
     els.peers = h('ul', { class: 'voice-peers', id: 'voice-teilnehmer', 'aria-label': 'Teilnehmer' });
     els.peersEmpty = h('p', { class: 'voice-empty', text: 'Gerade ist sonst niemand in der Gruppe. Sobald jemand dazukommt, siehst du ihn hier.' });
+    els.listHint = h('p', { class: 'hint', id: 'voice-liste-hinweis' });
 
     root.replaceChildren(
       h('div', { class: 'voice-head' }, h('span', { class: 'voice-badge', 'aria-hidden': 'true' }, icon('headphones')), h('div', null, h('h2', { id: 'voice-raum-titel', text: 'Im Gespräch' }), els.status)),
@@ -327,21 +585,25 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
           'div',
           { class: 'voice-controls' },
           els.self,
+          els.modNotice,
           els.micNotice,
           els.audioNotice,
           h('div', { class: 'voice-toggles', role: 'group', 'aria-label': 'Mikrofon und Ton' }, els.mic, els.deaf),
           h('fieldset', { class: 'voice-mode' }, h('legend', { text: 'Sprechen' }), h('div', { class: 'voice-mode-options' }, modeInput('vad', 'Sprachaktivierung'), modeInput('ptt', 'Push-to-Talk'))),
           els.vad,
           els.pttBox,
+          els.protectionBox,
           h('div', { class: 'voice-leave' }, els.leave),
         ),
-        h('div', { class: 'voice-list' }, h('h3', { class: 'voice-list-title', text: 'In der Gruppe' }), els.peers, els.peersEmpty, h('p', { class: 'hint', text: 'Lautstärke je Person gilt nur hier in diesem Browser. Deine Stimme geht nur an diese Gruppe; niemand nimmt etwas auf.' })),
+        h('div', { class: 'voice-list' }, h('h3', { class: 'voice-list-title', text: 'In der Gruppe' }), els.peers, els.peersEmpty, els.listHint),
       ),
     );
     startKeys();
     updateMode();
     updateToggles();
     updateMicrophone();
+    updateModNotice();
+    updateListHint();
     updateStatus();
     renderPeers();
     updateMeterMark();
@@ -375,6 +637,21 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
       els.micNotice.replaceChildren(h('p', { text: MIC_TEXTS[mic.reason] ?? MIC_TEXTS.fehler }), mic.reason === 'nicht-verfuegbar' ? null : retry);
     }
     updateToggles();
+  }
+
+  /** Vom Gastgeber bzw. Party-Leiter für alle stumm geschaltet: Hinweis über den Knöpfen. */
+  function updateModNotice() {
+    if (!els.modNotice) return;
+    els.modNotice.hidden = !state.selfSilenced;
+    root.dataset.stumm = state.selfSilenced ? 'ja' : 'nein';
+    if (state.selfSilenced) els.modNotice.replaceChildren(icon('mic-off'), h('p', { text: state.selfSilencedText ?? 'Du wurdest in dieser Gruppe für alle stummgeschaltet – die anderen hören dich gerade nicht.' }));
+  }
+
+  function updateListHint() {
+    if (!els.listHint) return;
+    els.listHint.textContent = state.clips
+      ? `Lautstärke je Person gilt nur hier in diesem Browser. Dein Browser nimmt nichts auf – Meldungen aus dem Spiel können aber die letzten ${Math.max(1, Math.round(state.clips.maxMs / 60_000))} Minuten enthalten, auch deine Stimme.`
+      : 'Lautstärke je Person gilt nur hier in diesem Browser. Deine Stimme geht nur an diese Gruppe; niemand nimmt etwas auf.';
   }
 
   function updateToggles() {
@@ -440,16 +717,23 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
     els.ptt?.setAttribute('aria-pressed', String(down));
   }
 
+  function setProtection(on) {
+    state.protection = Boolean(on);
+    saveProtection(state.protection);
+    state.session?.setProtection(state.protection);
+    root.dataset.schutz = state.protection ? 'an' : 'aus';
+  }
+
   // Leertaste als Push-to-Talk (nur ohne ausgewähltes Eingabefeld; Knöpfe lösen dabei nicht aus)
   let keysOn = false;
   const onKeyDown = (event) => {
-    if (state.mode !== 'ptt' || event.code !== 'Space' || isTextField(event.target)) return;
+    if (state.mode !== 'ptt' || event.code !== 'Space' || isTextField(event.target) || document.querySelector('dialog[open]')) return;
     event.preventDefault();
     if (!event.repeat) setPtt(true);
   };
   const onKeyUp = (event) => {
     if (event.code !== 'Space' || isTextField(event.target)) return;
-    if (state.mode === 'ptt') event.preventDefault();
+    if (state.mode === 'ptt' && !document.querySelector('dialog[open]')) event.preventDefault();
     setPtt(false);
   };
   const onBlur = () => setPtt(false);
@@ -481,8 +765,9 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
     const active = document.activeElement;
     const focusKey = active && els.peers.contains(active) ? active.dataset.focusKey : null;
     const canKick = Boolean(state.session && !state.session.guest);
+    const canReport = Boolean(state.session && state.moderation);
     const nodes = sorted.map((peer) => {
-      const signature = JSON.stringify([peerName(peer), peer.guest, peer.browser, peer.muted, peer.deafened, canKick]);
+      const signature = JSON.stringify([peerName(peer), peer.guest, peer.browser, peer.muted, peer.deafened, peer.silenced, canKick, canReport]);
       const cached = rows.get(peer.id);
       if (cached && cached.signature === signature) return cached.element;
       const element = peerRow(peer);
@@ -513,6 +798,7 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
     if (peer.id === invite.inviter.uuid) chips.push(h('span', { class: 'chip accent', text: 'lädt ein' }));
     if (peer.guest) chips.push(h('span', { class: 'chip', text: 'Gast' }));
     else if (peer.browser) chips.push(h('span', { class: 'chip', text: 'Browser' }));
+    if (peer.silenced) chips.push(h('span', { class: 'chip warning voice-silenced', title: 'Der Heldix-Dienst leitet die Stimme gerade an niemanden weiter.', text: 'vom Gastgeber stummgeschaltet' }));
     const status = [];
     if (peer.deafened) status.push(h('span', { class: 'voice-peer-icon', title: 'Ton aus' }, icon('headphones-off'), h('span', { class: 'visually-hidden', text: 'Ton aus' })));
     else if (peer.muted) status.push(h('span', { class: 'voice-peer-icon', title: 'Mikrofon stumm' }, icon('mic-off'), h('span', { class: 'visually-hidden', text: 'Mikrofon stumm' })));
@@ -533,13 +819,109 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
             h('span', { class: 'label', text: 'Entfernen' }),
           )
         : null;
+    // Melden geht nur bei Spielern (Gäste haben eine zufällige ID) und nur mit Dienst ab 1.13.0
+    const report =
+      !peer.guest && state.session && state.moderation
+        ? h(
+            'button',
+            { type: 'button', class: 'button tiny ghost quiet-danger voice-report', 'aria-label': `${name} melden`, title: `${name} beim HeldixClient-Team melden`, dataset: { focusKey: `melden:${peer.id}` }, onClick: () => reportPeer(peer.id) },
+            icon('flag'),
+            h('span', { class: 'label', text: 'Melden' }),
+          )
+        : null;
     return h(
       'li',
-      { class: `voice-peer${state.speaking.has(peer.id) ? ' speaking' : ''}`, dataset: { id: peer.id, gast: peer.guest ? 'ja' : 'nein' } },
+      { class: `voice-peer${state.speaking.has(peer.id) ? ' speaking' : ''}`, dataset: { id: peer.id, gast: peer.guest ? 'ja' : 'nein', stumm: peer.silenced ? 'ja' : 'nein' } },
       h('span', { class: 'voice-peer-avatar' }, avatar(name, peer.guest ? null : peer.id, { skin: !peer.guest && me ? 'auth' : null }), h('span', { class: 'voice-wave', 'aria-hidden': 'true' }, icon('volume-2'))),
       h('div', { class: 'voice-peer-main' }, h('div', { class: 'voice-peer-name' }, h('strong', { text: name }), chips, status), h('div', { class: 'voice-volume' }, icon('volume'), volume, volumeText)),
       kick,
+      report,
     );
+  }
+
+  // -------------------------------------------------------------------------------------------------------
+  // Melden
+  // -------------------------------------------------------------------------------------------------------
+
+  /** Dialog „<Name> melden“: Grund (Pflicht, nichts vorausgewählt) und Notiz (eine Zeile, höchstens 300 Zeichen). */
+  async function reportPeer(id) {
+    const session = state.session;
+    const peer = state.peers.find((entry) => entry.id === id);
+    if (!session || !peer || peer.guest) return;
+    const name = peerName(peer);
+    const radioName = uid('melden-grund');
+    const radios = VOICE_REPORT_REASONS.map(([value, label]) => h('label', { class: 'check voice-report-reason' }, h('input', { type: 'radio', name: radioName, value }), h('span', { text: label })));
+    const noteId = uid('melden-notiz');
+    const note = h('input', { class: 'input', id: noteId, name: 'notiz', maxlength: String(NOTE_MAX), autocomplete: 'off', placeholder: 'Was ist passiert?' });
+    const counter = h('output', { class: 'hint', for: noteId });
+    bindCounter(note, counter, NOTE_MAX);
+    const heard = Boolean(session.levelsFor(peer.id));
+    const body = [
+      h('p', { text: `Das HeldixClient-Team prüft deine Meldung. ${name} erfährt nicht, wer gemeldet hat.` }),
+      h('fieldset', { class: 'voice-report-reasons' }, h('legend', { text: 'Grund' }), h('div', { class: 'voice-report-grid' }, radios)),
+      h('div', { class: 'field' }, h('label', { class: 'field-row', for: noteId }, h('span', { text: 'Notiz (freiwillig)' }), counter), note),
+      h('p', {
+        class: 'hint',
+        text: `Mitgeschickt werden Grund und Notiz, der Zeitpunkt, ${invite.server ? `der Server (${invite.server}), ` : ''}wer gerade in der Gruppe ist${heard ? ` und ein Lautstärke-Verlauf von ${name} aus den letzten 10 Minuten (nur der Pegel je Sekunde, kein Inhalt)` : ''}. Eine Aufnahme schickt der Browser nicht – er nimmt nichts auf.`,
+      }),
+    ];
+    const selected = () => radios.map((label) => label.querySelector('input')).find((input) => input.checked)?.value ?? null;
+    const done = await openDialog({
+      title: `${name} melden`,
+      body,
+      confirmLabel: 'Melden',
+      canConfirm: () => Boolean(selected()),
+      focus: 'input[type="radio"]',
+      onConfirm: () => sendReport(session, peer, selected(), note.value),
+    });
+    if (done) toast(`Danke – deine Meldung zu ${name} ist beim Team.`, 'success');
+  }
+
+  /** Wer gerade in der Gruppe ist (nur Spieler, ohne den Gemeldeten und ohne mich), Server, Zeitpunkt. */
+  function reportContext(target) {
+    const nearby = [];
+    for (const peer of state.peers) {
+      if (peer.id === target.id || peer.guest || nearby.length >= 20) continue;
+      const name = peer.name ?? knownNames.get(peer.id) ?? null;
+      nearby.push(name && MC_NAME_RE.test(name) ? { uuid: peer.id, name } : { uuid: peer.id });
+    }
+    const context = { at: Date.now(), group: true, nearby };
+    if (invite.server) context.server = invite.server;
+    return context;
+  }
+
+  async function sendReport(session, peer, reason, rawNote) {
+    if (!VOICE_REPORT_REASONS.some(([value]) => value === reason)) throw new Error('Wähle einen Grund.');
+    const note = [...String(rawNote ?? '').replace(/\s+/g, ' ').trim()].slice(0, NOTE_MAX).join('');
+    const report = { uuid: peer.id, reason };
+    if (note) report.note = note;
+    report.context = reportContext(peer);
+    const levels = session.levelsFor(peer.id);
+    if (levels) report.levels = levels;
+    try {
+      if (session.guest) {
+        if (!state.guestToken) throw new ApiError(401, fallbackMessage(401));
+        await api('POST', '/v1/public/voice/guest-reports', { token: state.guestToken, ...report });
+      } else {
+        await api('POST', '/v1/voice/reports', report);
+      }
+    } catch (error) {
+      throw new Error(reportErrorText(error, session.guest));
+    }
+    return true;
+  }
+
+  function reportErrorText(error, guest) {
+    if (!(error instanceof ApiError)) return fallbackMessage(-2);
+    const own = error.message && error.message !== fallbackMessage(error.status) ? error.message : null;
+    if (error.status === 429) {
+      const minutes = error.retryAfter ? Math.max(1, Math.ceil(error.retryAfter / 60)) : null;
+      const base = own ?? (guest ? 'Als Gast kannst du höchstens 3 Meldungen in der Stunde schicken.' : 'Du hast gerade schon viele Meldungen geschickt – oder diesen Spieler in den letzten 24 Stunden schon gemeldet.');
+      return minutes ? `${base} Versuch es in ${minutes === 1 ? 'einer Minute' : `${minutes} Minuten`} noch einmal.` : base;
+    }
+    if (error.status === 401) return guest ? 'Deine Gast-Sitzung ist abgelaufen. Tritt neu bei, dann kannst du wieder melden.' : 'Du bist auf dieser Seite nicht mehr angemeldet. Melde dich neu an, dann kannst du melden.';
+    if (error.status === 404 && !own) return 'Der Heldix-Dienst nimmt Meldungen aus dem Browser gerade nicht an. Versuch es später noch einmal.';
+    return own ?? fallbackMessage(error.status);
   }
 
   // -------------------------------------------------------------------------------------------------------
@@ -554,17 +936,42 @@ export function mountVoicePanel(root, { code, invite, me, names = [], onChange =
     els.mic = null;
     els.vad = null;
     els.meterBar = null;
-    const final = [4001, 4003, 4006].includes(state.endCode);
-    const rejoin = final ? null : h('button', { type: 'button', class: 'button', id: 'voice-neu', onClick: () => ((state.endMessage = null), renderForm()) }, icon('refresh'), 'Wieder beitreten');
+    els.modNotice = null;
+    els.listHint = null;
+    // Endgültig: Konto weg/gesperrt, Einladung ungültig, Voice-Sperre, Voice auf dem Server aus
+    const final = [4001, 4003, 4006, 4013, 'aus'].includes(state.endCode);
+    const rejoin = final
+      ? null
+      : h(
+          'button',
+          {
+            type: 'button',
+            class: 'button',
+            id: 'voice-neu',
+            onClick: () => {
+              state.endMessage = null;
+              state.endCode = null;
+              renderForm();
+            },
+          },
+          icon('refresh'),
+          'Wieder beitreten',
+        );
     root.replaceChildren(
       h('div', { class: 'voice-head' }, h('span', { class: 'voice-badge', 'aria-hidden': 'true' }, icon('headphones')), h('div', null, h('h2', { id: 'voice-raum-titel', text: state.endMessage ? 'Nicht mehr im Gespräch' : 'Du hast das Gespräch verlassen' }), state.endMessage ? h('p', { class: 'voice-lead', id: 'voice-ende', text: state.endMessage }) : h('p', { class: 'voice-lead', text: 'Dein Mikrofon ist wieder frei.' }))),
       rejoin ? h('div', { class: 'voice-join-box' }, rejoin) : null,
+      state.endCode === 4013 ? supportLink() : null,
       advert(),
     );
   }
 
   ensureSupport().then(() => {
     if (!state.session) renderForm();
+  });
+  loadVoiceRules().then((rules) => {
+    if (!rules) return;
+    state.rules = rules;
+    refreshFacts();
   });
   renderForm();
 

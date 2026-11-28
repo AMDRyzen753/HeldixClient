@@ -5,6 +5,7 @@ import dev.heldixclient.hud.Notifications;
 import dev.heldixclient.module.Module;
 import dev.heldixclient.module.Setting;
 import net.minecraft.ChatFormatting;
+import dev.heldixclient.ui.Keys;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.ActiveTextCollector;
 import net.minecraft.client.gui.TextAlignment;
@@ -25,7 +26,7 @@ import java.util.regex.Pattern;
 
 /**
  * Chat-Verbesserungen: Uhrzeit vor jeder Nachricht, gleiche Nachrichten hintereinander zusammenfassen („(3×)“)
- * und Nachrichten mit Strg+Klick kopieren. Greift in ChatComponent.addMessage und ChatScreen.mouseClicked ein.
+ * und Nachrichten mit Strg+Klick (Mac: ⌘-Klick, Ctrl+Klick ist dort ein Rechtsklick) kopieren. Greift in ChatComponent.addMessage und ChatScreen.mouseClicked ein.
  */
 public class ChatModule extends Module {
 	private static final List<String> FORMATS = List.of("14:05", "14:05:09");
@@ -44,7 +45,14 @@ public class ChatModule extends Module {
 	private static boolean reflectionFailed;
 
 	public ChatModule() {
+		// Beschreibung als fester Text: der Webseiten-Bau liest sie aus dieser Zeile (website/build.mjs, readModules)
 		super("chat", "Chat", "Uhrzeit, gleiche Nachrichten stapeln, Strg+Klick kopiert", false, 0, 0);
+	}
+
+	/** Im Spiel mit der Taste des Systems (Mac: ⌘-Klick) */
+	@Override
+	public String description() {
+		return "Uhrzeit, gleiche Nachrichten stapeln, " + Keys.click() + " kopiert";
 	}
 
 	/** Hook ChatComponent.addMessage: Inhalt der neuen Nachricht (Uhrzeit, Zähler). */
@@ -105,9 +113,9 @@ public class ChatModule extends Module {
 		}
 	}
 
-	/** Hook ChatScreen.mouseClicked: Strg+Klick auf eine Nachricht kopiert sie. true = Klick verbraucht. */
+	/** Hook ChatScreen.mouseClicked: Strg+Klick (Mac: ⌘-Klick) auf eine Nachricht kopiert sie. true = Klick verbraucht. */
 	public boolean click(MouseButtonEvent event) {
-		if (!isEnabled() || !option("copy", true) || !Minecraft.getInstance().hasControlDown()) return false;
+		if (!isEnabled() || !option("copy", true) || !(Keys.shortcutClick(event) || Keys.shortcutHeld())) return false;
 		String text = messageAt(event.x(), event.y());
 		if (text == null) return false;
 		Minecraft.getInstance().keyboardHandler.setClipboard(text);
@@ -178,7 +186,7 @@ public class ChatModule extends Module {
 		settings.add(toggle("time", "Uhrzeit", "Zeit vor jeder Nachricht", true));
 		settings.add(choice("format", "Uhrzeit-Format", "", FORMATS, 0));
 		settings.add(toggle("stack", "Gleiche Nachrichten stapeln", "Wiederholungen direkt hintereinander als „(3×)“ zusammenfassen", true));
-		settings.add(toggle("copy", "Strg+Klick kopiert", "Mit gedrückter Strg-Taste auf eine Nachricht klicken kopiert ihren Text", true));
+		settings.add(toggle("copy", Keys.click() + " kopiert", "Mit gedrückter " + Keys.modifierKey() + " auf eine Nachricht klicken kopiert ihren Text", true));
 		return settings;
 	}
 }

@@ -20,7 +20,8 @@ import java.util.List;
  * Unterklassen legen in {@link #initContent()} ihre Widgets an und zeichnen in {@link #drawContent}.
  * Liefert {@link #subTabs()} Reiter, stehen sie links in der Werkzeugzeile (passen sie nicht neben die Knöpfe,
  * in einer eigenen Zeile darunter). Strg+K öffnet die Schnellsuche, Strg+Tab wechselt den Reiter bzw. die Seite,
- * Strg+1 bis Strg+4 den Bereich.
+ * Strg+1 bis Strg+4 den Bereich. Auf dem Mac ⌘K und ⌘1–4 (hasControlDownWithQuirk); der Reiterwechsel ist dort ⌃Tab,
+ * weil ⌘Tab dem System gehört (siehe ui/Keys).
  */
 public abstract class ShellScreen extends Screen {
 	/** Höhe der Werkzeugzeile über dem Inhalt */

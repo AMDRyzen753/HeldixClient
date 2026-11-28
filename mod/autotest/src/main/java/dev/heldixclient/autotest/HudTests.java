@@ -1048,7 +1048,8 @@ final class HudTests {
 	private static void spotify(TestContext t) {
 		Module found = t.compute(mc -> ModuleManager.all().stream().filter(m -> m.id().equals("spotify:spotify")).findFirst().orElse(null));
 		LoadedAddon addon = t.compute(mc -> AddonManager.addons().stream().filter(a -> "spotify".equals(a.id()) && a.isActive()).findFirst().orElse(null));
-		t.check("Spotify-Addon 2.2.0 aktiv (API 6)", found instanceof HudModule && addon != null && "2.2.0".equals(addon.version()));
+		t.check("Spotify-Addon ab 2.2.0 aktiv (" + (addon == null ? "fehlt" : addon.version()) + ")", found instanceof HudModule && addon != null
+				&& TestContext.versionAtLeast(addon.version(), "2.2.0"));
 		HudModule spotify = (HudModule) found;
 		int errors = t.compute(mc -> addon.errorCount());
 		Setting.Choice layout = t.compute(mc -> (Setting.Choice) spotify.settings().stream().filter(s -> s instanceof Setting.Choice && s.label().equals("Darstellung"))

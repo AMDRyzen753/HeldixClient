@@ -1,0 +1,102 @@
+<!--seite {"titel":"Voice-Regeln","beschreibung":"Die Regeln für den Voice Chat von HeldixClient – im Spiel und im Browser: Verhalten, Melden, Aufnahme der letzten 10 Minuten beim Melden, Sperren und Einspruch."}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
+<script type="module" src="/voice-regeln-seite.js"></script>
+</head>
+<body data-seite="voice-regeln">
+{{include:nav.html}}
+
+<main id="inhalt" class="article-page">
+  <div class="container section section--tight">
+    <div class="article-layout">
+      <article class="article">
+        <header class="article-head">
+          <nav class="breadcrumb" aria-label="Brotkrümel"><a href="/hilfe">Hilfe</a><span aria-hidden="true">/</span><a href="/hilfe/voice-regeln-melden">Voice Chat: Regeln und Melden</a></nav>
+          <h1 id="regeln-titel">Voice-Regeln von HeldixClient</h1>
+          <p class="lead">Verhalten, Melden, Aufnahme der letzten 10 Minuten beim Melden, Sperren und Einspruch – für den Voice Chat im Spiel und im Browser.</p>
+          <p class="hint" id="regeln-stand" role="status">Stand wird geladen …</p>
+        </header>
+
+        <!-- Standardtext wie im Heldix-Dienst (ohne JavaScript lesbar); voice-regeln-seite.js ersetzt ihn durch den Text vom Dienst -->
+
+        <div class="prose" id="regeln-text">
+          <p>Diese Regeln gelten für den Voice Chat von HeldixClient – im Spiel und im Browser. Bitte lies sie, bevor du sprichst. Ohne deine Zustimmung kannst du den Voice Chat nicht nutzen.</p>
+
+          <h2 id="verhalten">Verhalten</h2>
+          <ul>
+            <li>Sei respektvoll: keine Beleidigungen, Drohungen oder Belästigung.</li>
+            <li>Keine Hassrede: niemanden wegen Herkunft, Hautfarbe, Religion, Geschlecht, sexueller Orientierung, Behinderung oder Alter abwerten.</li>
+            <li>Kein Anschreien, keine Störgeräusche und keine laute Musik oder Soundboards gegen den Willen anderer.</li>
+            <li>Keine sexuellen Inhalte, keine Werbung, kein Spam.</li>
+            <li>Keine persönlichen Daten anderer weitergeben (Adresse, Telefonnummer, Fotos).</li>
+            <li>Halte dich an die Regeln des Servers oder der Welt, auf der du spielst. Gastgeber und Operatoren einer Heldix-Welt und der Leiter einer Party dürfen dich dort für alle stummschalten oder für 10 Minuten aus dem Voice entfernen.</li>
+          </ul>
+
+          <h2 id="melden">Melden</h2>
+          <ul>
+            <li>Stört dich jemand, melde ihn im Spielermenü (Mausrad-Klick auf den Spieler), in der Voice-Anzeige oder im Browser. Wähle einen Grund: Beleidigung, Belästigung, Hassrede, Anschreien/Lärm oder Sonstiges.</li>
+            <li>Zur Meldung gehören: wer wen gemeldet hat, Grund und Notiz, Server oder Welt, Dimension, Zeitpunkt, wer in Hörweite war, ob ihr in einer Gruppe wart, und ein Lautstärke-Verlauf des Gemeldeten (nur der Pegel je Sekunde, kein Inhalt).</li>
+          </ul>
+
+          <h2 id="aufnahme-der-letzten-10-minuten-beim-melden">Aufnahme der letzten 10 Minuten beim Melden</h2>
+          <ul>
+            <li>Dein Spiel hält die Stimmen der anderen, die du hörst, höchstens 10 Minuten lang im Arbeitsspeicher – nie auf der Festplatte. Deine eigene Stimme hält es nicht. Verlässt du den Server oder beendest du das Spiel, ist alles weg.</li>
+            <li>Nur wenn du jemanden meldest, lädt dein Spiel die Aufnahme genau dieses Spielers hoch (höchstens 10 Minuten, mit Zeitpunkten). Genauso können die letzten 10 Minuten deiner Stimme Teil einer Meldung gegen dich werden.</li>
+            <li>Der Heldix-Dienst speichert die Aufnahme verschlüsselt. Anhören kann sie nur das Team (Admins, Moderatoren und Supporter), um die Meldung zu prüfen.</li>
+            <li>Gelöscht wird sie 30 Tage nach Abschluss der Meldung, spätestens 90 Tage nach dem Hochladen. In der Datenauskunft des Gemeldeten steht sie nicht, damit der Meldende geschützt bleibt.</li>
+            <li>Im Browser wird nichts aufgenommen.</li>
+          </ul>
+
+          <h2 id="sperren">Sperren</h2>
+          <ul>
+            <li>Bei Verstößen kann das Team dich für 1 Stunde, 24 Stunden, 7 Tage oder dauerhaft vom Voice Chat sperren. Du erfährst den Grund und wie lange die Sperre gilt – im Spiel und auf der Webseite in deinem Konto.</li>
+            <li>Bei schweren Verstößen kann das Team dein Konto beim Heldix-Dienst ganz sperren.</li>
+          </ul>
+
+          <h2 id="einspruch">Einspruch</h2>
+          <ul>
+            <li>Bist du mit einer Entscheidung nicht einverstanden, schreib eine Support-Anfrage (Kategorie „Konto“) auf der Webseite, im Launcher oder im Spiel. Das Team prüft die Entscheidung erneut und antwortet dir.</li>
+          </ul>
+
+          <h2 id="zustimmung">Zustimmung</h2>
+          <ul>
+            <li>Mit „Annehmen“ stimmst du diesen Regeln zu – auch der Aufnahme der letzten 10 Minuten beim Melden. Du kannst die Zustimmung jederzeit in deinem Konto auf der Webseite widerrufen; dann ist der Voice Chat für dich aus.</li>
+            <li>Ändern sich die Regeln, fragen wir dich erneut.</li>
+          </ul>
+        </div>
+
+        <aside class="support-box">
+          <span class="icon-tile">{{icon:help-circle}}</span>
+          <div>
+            <h2>Einspruch oder Frage?</h2>
+            <p>Schreib dem Team über eine Support-Anfrage (Kategorie „Konto“). Wie Melden, Sperren und Aufnahmen genau funktionieren, erklärt <a href="/hilfe/voice-regeln-melden">Voice Chat: Regeln und Melden</a>; was dabei gespeichert wird, steht in der <a href="/datenschutz#voice-regeln">Datenschutzerklärung</a>.</p>
+          </div>
+          <a class="btn btn--primary btn--sm" href="/konto#reiter=support">Support-Anfrage stellen</a>
+        </aside>
+      </article>
+
+      <aside class="article-side">
+        <nav class="toc" aria-label="Auf dieser Seite">
+          <p>Auf dieser Seite</p>
+          <ol id="regeln-toc">
+            <li><a href="#verhalten">Verhalten</a></li>
+            <li><a href="#melden">Melden</a></li>
+            <li><a href="#aufnahme-der-letzten-10-minuten-beim-melden">Aufnahme der letzten 10 Minuten beim Melden</a></li>
+            <li><a href="#sperren">Sperren</a></li>
+            <li><a href="#einspruch">Einspruch</a></li>
+            <li><a href="#zustimmung">Zustimmung</a></li>
+          </ol>
+        </nav>
+        <a class="side-link" href="/hilfe/voice-regeln-melden">{{icon:chevron-left}}Regeln und Melden erklärt</a>
+      </aside>
+    </div>
+  </div>
+</main>
+
+{{ICONS_ALLE_HTML}}
+{{include:footer.html}}
+</body>
+</html>

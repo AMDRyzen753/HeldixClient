@@ -38,6 +38,9 @@ function show(data) {
   // Offene Welten: ab Dienst 1.12.0 (null = Welt teilen auf diesem Dienst aus)
   $('kachel-welten').hidden = !Number.isFinite(data?.worlds);
   $('wert-welten').textContent = Number.isFinite(data?.worlds) ? NUMBER.format(data.worlds) : '–';
+  // Laufende dauerhafte Welten: ab Dienst 1.13.0 (null = Hosting auf diesem Dienst aus)
+  $('kachel-dauerhaft').hidden = !Number.isFinite(data?.hosted);
+  $('wert-dauerhaft').textContent = Number.isFinite(data?.hosted) ? NUMBER.format(data.hosted) : '–';
   if (Number.isFinite(data?.since)) {
     $('wert-seit').textContent = duration(Date.now() - data.since);
     $('wert-seit-datum').textContent = `seit ${formatDateTime(data.since)}`;

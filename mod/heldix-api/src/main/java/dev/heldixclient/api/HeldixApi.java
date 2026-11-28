@@ -26,8 +26,11 @@ public interface HeldixApi {
 	 * Version 9: Gäste und Browser-Teilnehmer im Sprachkanal ({@link VoiceChannel#isGuest}, {@link VoiceChannel#inBrowser},
 	 * {@link VoiceChannel#removeGuest}), Browser-Link für die Voice-Gruppe ({@link VoiceChannel#createBrowserLink}) und
 	 * Text in die Zwischenablage ({@link #copyToClipboard}).
+	 * Version 10: Moderation im Sprachkanal ({@link VoiceChannel#moderation}, {@link VoiceChannel#onModeration}, Rechte von
+	 * Gastgeber und Party-Leiter mit {@link VoiceChannel#moderate}), Melden mit Lautstärke-Verlauf und Aufnahme
+	 * ({@link VoiceChannel#openReport}) und Voice-Regeln ({@link VoiceChannel#showRules}) – über Dialoge von HeldixClient.
 	 */
-	int API_VERSION = 9;
+	int API_VERSION = 10;
 
 	/** Informationen über das eigene Addon (aus heldix.addon.json). */
 	AddonInfo addon();

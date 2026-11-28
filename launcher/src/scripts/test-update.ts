@@ -3,6 +3,8 @@
 // (core/startup-update.ts): Plan und Entscheidung (Einstellung aus, Spiel läuft, macOS, fehlgeschlagener Versuch),
 // Zeitgrenze der Prüfung, wiederverwendeter Installer, Argumente für den stillen Start mit Neustart, „Neu in …“ nur
 // einmal, Merkdatei und Spiel aus einer früheren Sitzung.
+// Dazu der Mac (ab 0.14.0, scripts/test-mac-update.ts): Manifest Version 2, ZIP je Prozessor, Pfad und Hindernisse,
+// Austausch-Skript, Installieren mit nachgebauten Befehlen und das Release-Skript mit einem Test-Schlüssel.
 // Mit --service=<Adresse> zusätzlich gegen einen echten Heldix-Dienst (dessen update.json mit dem echten Schlüssel).
 //
 // Aufruf: npm run test:update [-- --service=http://127.0.0.1:8787 --current=0.10.0]
@@ -14,6 +16,7 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { UPDATE_PUBLIC_KEY } from '../main/update-public-key';
+import { macUpdateTests } from './test-mac-update';
 import { CHECK_INTERVAL_MS, Updater, compareVersions, installerArgs, type UpdateState } from '../main/core/updater';
 import {
   GAME_MARKER_MAX_MS,
@@ -49,10 +52,19 @@ interface Fake {
 
 /** Verhalten des Test-Servers: Antwort von /latest verzögern oder mit Fehler; Zähler der Downloads */
 const behavior = { latestDelayMs: 0, latestStatus: 200, downloads: 0 };
+/** weitere feste Antworten (Mac: /v1/launcher/latest/mac und die ZIPs) */
+const routes = new Map<string, () => { status: number; json?: unknown; data?: Buffer }>();
 
 async function serve(fake: () => Fake): Promise<{ server: Server; url: string }> {
   const server = createServer((req, res) => {
     const f = fake();
+    const route = routes.get(req.url ?? '');
+    if (route) {
+      const answer = route();
+      if (answer.json !== undefined) res.writeHead(answer.status, { 'content-type': 'application/json' }).end(JSON.stringify(answer.json));
+      else res.writeHead(answer.status, { 'content-length': answer.data?.length ?? 0 }).end(answer.data ?? Buffer.alloc(0));
+      return;
+    }
     if (req.url === '/v1/launcher/latest') {
       const answer = () => {
         if (res.destroyed) return;
@@ -269,6 +281,9 @@ async function main(): Promise<void> {
     } finally {
       await rm(startDir, { recursive: true, force: true });
     }
+
+    // ---------- Mac (ab 0.14.0) ----------
+    await macUpdateTests(check, { serve: (route, body) => routes.set(route, body), url });
 
     // gegen einen echten Heldix-Dienst mit dem eingebauten Schlüssel
     const service = process.argv.find((a) => a.startsWith('--service='))?.slice('--service='.length);

@@ -2485,6 +2485,10 @@ function renderPrivacy(): void {
   const notify = h('input', { type: 'checkbox', class: 'switch' });
   notify.checked = state.settings?.socialNotifications ?? true;
   notify.addEventListener('change', () => void saveSetting({ socialNotifications: notify.checked }, notify));
+  // „Im Hintergrund bereit für Nachrichten“ (dieselbe Einstellung wie unter Einstellungen → Allgemein)
+  const background = h('input', { type: 'checkbox', class: 'switch', id: 'privacy-background' });
+  background.checked = state.settings?.closeToTray ?? true;
+  background.addEventListener('change', () => void saveSetting({ closeToTray: background.checked }, background));
   const follow = h('input', { type: 'checkbox', class: 'switch', id: 'privacy-auto-follow' });
   follow.checked = state.settings?.partyAutoFollow ?? false;
   follow.addEventListener('change', () => void saveSetting({ partyAutoFollow: follow.checked }, follow));
@@ -2500,6 +2504,11 @@ function renderPrivacy(): void {
     h('label', { class: 'toggle-row' },
       h('span', {}, 'Benachrichtigungen', h('small', { class: 'toggle-sub', text: 'Bei neuen Nachrichten, Anfragen und Party-Einladungen, wenn der Launcher im Hintergrund ist' })),
       notify),
+    h('label', { class: 'toggle-row' },
+      h('span', {}, 'Im Hintergrund bereit für Nachrichten', h('small', { class: 'toggle-sub', text: api.platform === 'darwin'
+        ? 'Fenster schließen: HeldixClient bleibt im Dock und meldet weiter, was ankommt'
+        : 'Fenster schließen: Der Launcher läuft im Infobereich weiter, Nachrichten kommen als Windows-Benachrichtigung' })),
+      background),
     h('label', { class: 'toggle-row' },
       h('span', {}, 'Party: automatisch folgen', h('small', { class: 'toggle-sub', text: 'Wechselt der Leiter den Server oder die Welt, startet der Launcher dorthin – nur, wenn gerade kein Spiel läuft' })),
       follow),

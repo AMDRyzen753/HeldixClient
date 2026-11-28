@@ -75,13 +75,29 @@ public final class WorldService {
 		}
 	}
 
-	/** Eigene Welt, wie der Dienst sie speichert */
+	/**
+	 * Eigene Welt, wie der Dienst sie speichert. {@code hosted} (ab Dienst 1.13.0): Zustand, wenn sie dauerhaft auf dem
+	 * Heldix-Server läuft (creating, sleeping, starting, running, stopping, error), sonst null – dann ist {@code online}
+	 * „läuft“ und {@code players} die Spieler auf dem Server.
+	 */
 	public record World(String id, String code, String address, String name, Access access, int maxPlayers, Role defaultRole, long created,
-			long lastOnline, boolean online, int players) {
+			long lastOnline, boolean online, int players, String hosted) {
+		/** läuft sie dauerhaft auf dem Heldix-Server? (dann geht „Welt teilen“ mit ihr nicht) */
+		public boolean persistent() {
+			return hosted != null;
+		}
 	}
 
-	/** Gerade geöffnete Welt eines Freundes (oder eine, in der man Mitglied ist) */
-	public record FriendWorld(String id, String name, String address, UUID hostUuid, String hostName, int players, int maxPlayers, String version) {
+	/**
+	 * Gerade geöffnete Welt eines Freundes (oder eine, in der man Mitglied ist). Ab Dienst 1.13.0 auch dauerhafte Welten:
+	 * {@code hosted} ist dann ihr Zustand (z. B. "running", "sleeping"), {@code online} sagt, ob der Server gerade läuft.
+	 */
+	public record FriendWorld(String id, String name, String address, UUID hostUuid, String hostName, int players, int maxPlayers, String version,
+			String hosted, boolean online) {
+		/** Geöffnet im Sinne von „jetzt drin spielen“: geteilte Welt oder laufende dauerhafte Welt */
+		public boolean open() {
+			return hosted == null || online;
+		}
 	}
 
 	/** Mitglied einer Welt; uuid ist null, solange der Dienst nur den Namen kennt */
@@ -175,7 +191,9 @@ public final class WorldService {
 	private static CompletableFuture<JsonElement> call(String method, String path, JsonObject body) {
 		return Social.request(method, path, body, true).handle((json, error) -> {
 			if (error == null) return json;
-			Throwable cause = error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+			// CompletionException (join, thenApply) und ExecutionException (get) auspacken
+		Throwable cause = error;
+		while ((cause instanceof CompletionException || cause instanceof java.util.concurrent.ExecutionException) && cause.getCause() != null) cause = cause.getCause();
 			if (cause instanceof Social.ServiceException service && service.status() == 404 && path.equals("/v1/worlds")) {
 				throw new CompletionException(new Social.ServiceException(WORLDS_MISSING, 404));
 			}
@@ -185,7 +203,9 @@ public final class WorldService {
 
 	/** Text eines Fehlers für den Spieler */
 	public static String message(Throwable error) {
-		Throwable cause = error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+		// CompletionException (join, thenApply) und ExecutionException (get) auspacken
+		Throwable cause = error;
+		while ((cause instanceof CompletionException || cause instanceof java.util.concurrent.ExecutionException) && cause.getCause() != null) cause = cause.getCause();
 		return cause instanceof Social.ServiceException && cause.getMessage() != null ? cause.getMessage() : "Dienst nicht erreichbar";
 	}
 
@@ -211,9 +231,12 @@ public final class WorldService {
 		String address = string(object, "address");
 		if (id == null || !WORLD_ID.matcher(id).matches() || address == null || !isAddress(address)) return null;
 		String code = string(object, "code");
+		JsonObject hostedInfo = object.has("hosted") && object.get("hosted").isJsonObject() ? object.getAsJsonObject("hosted") : null;
+		String hosted = hostedInfo == null ? null : string(hostedInfo, "state");
+		if (hosted != null && !hosted.matches("^[a-z]{1,16}$")) hosted = "error";
 		return new World(id, code, address.toLowerCase(Locale.ROOT), name(string(object, "name")), Access.of(string(object, "access")),
 				maxPlayers(object), Role.of(string(object, "defaultRole")), number(object, "created"),
-				number(object, "lastOnline"), bool(object, "online"), (int) Math.max(0, number(object, "players")));
+				number(object, "lastOnline"), bool(object, "online"), (int) Math.max(0, number(object, "players")), hostedInfo == null ? null : hosted == null ? "error" : hosted);
 	}
 
 	static FriendWorld friendWorld(JsonElement element) {
@@ -224,8 +247,13 @@ public final class WorldService {
 		if (id == null || !WORLD_ID.matcher(id).matches() || address == null || !isAddress(address)) return null;
 		JsonObject host = object.has("host") && object.get("host").isJsonObject() ? object.getAsJsonObject("host") : new JsonObject();
 		String hostName = name(string(host, "name"));
+		JsonObject hostedInfo = object.has("hosted") && object.get("hosted").isJsonObject() ? object.getAsJsonObject("hosted") : null;
+		String hosted = hostedInfo == null ? null : string(hostedInfo, "state");
+		if (hostedInfo != null && (hosted == null || !hosted.matches("^[a-z]{1,16}$"))) hosted = "error";
+		// ohne hosted (geteilte Welt) gilt sie als offen, wie bisher
+		boolean online = hostedInfo == null || bool(object, "online");
 		return new FriendWorld(id, name(string(object, "name")), address.toLowerCase(Locale.ROOT), Social.uuid(string(host, "uuid")), hostName,
-				(int) Math.max(0, number(object, "players")), maxPlayers(object), string(object, "version"));
+				(int) Math.max(0, number(object, "players")), maxPlayers(object), string(object, "version"), hosted, online);
 	}
 
 	/** Höchstspieler 1–20 (fehlt die Angabe: 8 wie bei Minecraft) */

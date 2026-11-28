@@ -3,6 +3,7 @@ import { createPublicKey, type KeyObject } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { isIP, type Server as NetServer } from 'node:net';
+import os from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
@@ -16,22 +17,43 @@ import { COSMETIC_MAX_ENVELOPE_BYTES } from './cosmetics-format';
 import { ONLINE_NOTIFY, Store, type OnlineNotify, type SettingsPatch, type TeamMemberRow, type UserRow, type WebSessionRow } from './db';
 import { Friends } from './friends';
 import { HeadCache, isHeadSize, renderHead } from './heads';
-import { HttpError, readJsonObject, rejectUpgrade, sendCachedJson, sendError, sendJson } from './http';
+import { HttpError, readJsonObject, readRawBody, rejectUpgrade, sendCachedJson, sendError, sendJson } from './http';
 import { GUEST_EXPIRED, Invites } from './invites';
 import { RateLimiter, Slots } from './limits';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, Messages } from './messages';
 import { Parties, type Location } from './party';
 import { Realtime, type ConnectionKind } from './realtime';
 import { Reports } from './reports';
-import { badgesOf, permissionsOf, type Permission, type PlayerBadge } from './roles';
+import { badgesOf, hasPermission, permissionsOf, type Permission, type PlayerBadge } from './roles';
 import { DEFAULT_SKIN_HOSTS, Skins } from './skins';
 import { AddonSubmissions, SUBMISSION_BODY_LIMIT } from './submissions';
 import { Support } from './support';
 import { playerLabel, Team, writeAudit, type Actor } from './team';
-import { DOWNLOAD_TARGETS, MAX_SETUP_SIZE, NOTHING_PUBLISHED, Updates, downloadInvite, downloadName, type DownloadTarget } from './updates';
+import {
+  DOWNLOAD_TARGETS,
+  MAC_MANIFEST_FILE,
+  MAX_SETUP_SIZE,
+  NOTHING_PUBLISHED,
+  NOTHING_PUBLISHED_MAC,
+  Updates,
+  downloadInvite,
+  downloadName,
+  isMacUpdateObject,
+  type DownloadTarget,
+} from './updates';
 import { checkText, DEFAULT_CAPES, isName, isUuid, normalizeServer } from './validate';
-import { Voice, VOICE_MAX_PAYLOAD, VOICE_RANGE_DEFAULT, VOICE_RANGE_MAX, VOICE_RANGE_MIN, VOICE_SUBPROTOCOL, type VoiceAttachOptions } from './voice';
+import { Voice, VOICE_MAX_PAYLOAD, VOICE_RANGE_DEFAULT, VOICE_RANGE_MAX, VOICE_RANGE_MIN, VOICE_SUBPROTOCOL, type VoiceAttachOptions, type VoiceWorld } from './voice';
+import { CLIP_MAX_BYTES, VoiceModeration } from './voice-moderation';
 import { WorldRelay } from './world-relay';
+import { Discover } from './discover';
+import { HostingGrants } from './hosting/grants';
+import { exportHosting, Hosting, HOSTING_OFF, sendFileDownload } from './hosting/hosting';
+import { Modrinth } from './hosting/modrinth';
+import type { HostingRunner } from './hosting/runner';
+import { ServerJars } from './hosting/server-jars';
+import { HostingStore } from './hosting/store';
+import { Uploads } from './hosting/uploads';
+import { Plus } from './plus';
 import {
   exportWorlds,
   MAX_WORLDS,
@@ -115,6 +137,17 @@ export interface ServiceOptions {
   voiceIdleTimeoutMs?: number;
   /** Uhr des Voice Chats für Positionen und Begrenzungen (nur Tests stellen sie). */
   voiceNow?: () => number;
+  /**
+   * Voice-Moderation (ab 1.13.0): `false` schaltet Aufnahmen beim Melden hart ab (HELDIX_DIENST_VOICE_CLIPS=0). Sonst
+   * sind sie aktiv, sobald ein Admin die Voice-Regeln veröffentlicht (und den Schalter nicht ausschaltet).
+   */
+  voiceClips?: boolean;
+  /** Schlüssel für Clips (32 Byte, HELDIX_DIENST_VOICE_CLIP_KEY); ohne: `<dataDir>/voice-clips.key` (wird angelegt). */
+  voiceClipKey?: Buffer | null;
+  /** Voice-Meldungen je Meldendem: je Stunde (Standard 5), je 24 Stunden (10); Gäste je Stunde (3). */
+  voiceReportHourly?: number;
+  voiceReportDaily?: number;
+  voiceGuestReportHourly?: number;
   /** Einladungen: so lange muss ein Eingeladener im Spiel gewesen sein, bis sie bestätigt ist (Standard 30 Minuten). */
   inviteConfirmMs?: number;
   /** Neue Einladungen pro Spieler und Tag (Standard 20). */
@@ -247,6 +280,50 @@ export interface ServiceOptions {
   supportIdleTtlMs?: number;
   /** Abstand zum Aufräumen abgelaufener Tokens, Challenges, Nachrichten, Meldungen, Sitzungen und Zähler. */
   sweepIntervalMs?: number;
+
+  // ---------- Dauerhafte Welten, Entdecken, Heldix+ (ab 1.13.0) ----------
+  /**
+   * Betreibt die Server dauerhafter Welten: in Produktion der AgentRunner (Welten-Wächter), in der Entwicklung der
+   * ProcessRunner, in Tests ein FakeRunner. Ohne (oder ohne Welt-Domain): dauerhafte Welten aus (503).
+   */
+  hostingRunner?: HostingRunner | null;
+  /** Gleichzeitig laufende dauerhafte Welten (Standard aus dem RAM: (RAM − 6 GB) / 3 GB, mindestens 1). */
+  hostingMax?: number;
+  /** Grenzen je Welt: RAM (Standard 3072 MB), Speicher (6144 MB), Plugins (30), Schlafen nach (10 Minuten). */
+  hostingMemoryMb?: number;
+  hostingDiskMb?: number;
+  hostingMaxPlugins?: number;
+  hostingSleepMin?: number;
+  /** Nur Tests: Länge einer „Minute“ fürs Schlafen und Zeiten des Wachhunds. */
+  hostingMinuteMs?: number;
+  hostingTickMs?: number;
+  hostingReadyPollMs?: number;
+  hostingStartTimeoutMs?: number;
+  hostingStopTimeoutMs?: number;
+  hostingPingIntervalMs?: number;
+  hostingDailyBackupMs?: number;
+  hostingBackupCheckMs?: number;
+  /** Abgleich mit dem Runner (Grabsteine gelöschter Welten) alle so viel ms (Standard 5 Minuten). */
+  hostingReconcileMs?: number;
+  /** Upload in Teilen: Größe eines Teils (Standard 8 MiB) und der ganzen ZIP (Standard 2 GiB). */
+  hostingUploadChunkBytes?: number;
+  hostingUploadMaxBytes?: number;
+  /** Nur im Entwicklungsmodus (Tests): andere Adressen für Fill-API (Paper), Mojang-Manifest und Modrinth. */
+  paperApi?: string;
+  mojangManifest?: string;
+  modrinthApi?: string;
+  /** Plugin-Suche (Modrinth über den Dienst) pro Spieler und Zeitraum (rateWindowMs, Standard 60). */
+  pluginSearchRateLimit?: number;
+  /** Downloads von Welten und Sicherungen pro Spieler und Stunde (Standard 10). */
+  hostingDownloadRateLimit?: number;
+  /** Entdecken: Cache der öffentlichen Liste (Standard 30 s), Abfragen pro IP und Zeitraum (Standard 120). */
+  discoverCacheMs?: number;
+  publicDiscoverRateLimit?: number;
+  /** Gefällt mir pro Spieler und Zeitraum (Standard 60) und Meldungen zu Einträgen pro Spieler und 24 Stunden (10). */
+  discoverLikeRateLimit?: number;
+  discoverReportLimit?: number;
+  /** Heldix+-Warteliste: Zahl öffentlich erst ab so vielen Einträgen (Standard 50). */
+  plusCountMin?: number;
 }
 
 export interface Service {
@@ -435,6 +512,18 @@ export function createService(options: ServiceOptions): Service {
     normalizeServer: (value) => normalizeServer(value) ?? worldStatusAddress(value),
     sessionAlive: (id) => web.sessionAlive(id),
   });
+  // Voice-Moderation (ab 1.13.0): Regeln, Zustimmung, Sperren, Meldungen mit Clips, Liste „Voice aus“. Gibt es auch
+  // ohne Voice Chat (dann nur Team-Bereich und Meldungen), damit das Team weiter sperren kann.
+  const voiceMod = new VoiceModeration(store, {
+    clipDir: join(options.dataDir, 'voice-clips'),
+    clipKey: options.voiceClipKey ?? null,
+    clipKeyFile: join(options.dataDir, 'voice-clips.key'),
+    clipsAllowed: options.voiceClips !== false,
+    reportHourly: options.voiceReportHourly ?? 5,
+    reportDaily: options.voiceReportDaily ?? 10,
+    guestReportHourly: options.voiceGuestReportHourly ?? 3,
+    log,
+  });
   // Voice Chat und Einladungen kennen sich gegenseitig (Gruppe einer Einladung, Gäste entfernen): erst beide anlegen.
   let invites: Invites | undefined;
   const voice =
@@ -447,9 +536,48 @@ export function createService(options: ServiceOptions): Service {
           log,
           inviteGroup: (code) => invites?.voiceGroupOf(code) ?? null,
           onGuestRemoved: (id) => invites?.removeGuest(id),
+          // Adressen geteilter Welten gelten auch, wenn die Welt-Domain keine öffentliche Endung hat (wie beim Status).
+          normalizeServer: (value) => normalizeServer(value) ?? worldStatusAddress(value),
+          moderation: {
+            gate: (uuid, guest) => voiceMod.gate(uuid, guest !== null, guest?.rulesVersion ?? null),
+            rulesVersion: () => voiceMod.rulesVersion(),
+            clips: () => voiceMod.clipLimits(),
+            serverOff: (server) => voiceMod.serverOff(server),
+            world: (server, uuid) => voiceWorld(server, uuid),
+            party: (group, uuid) => parties?.voiceParty(group, uuid) ?? null,
+            name: (uuid) => store.getUser(uuid)?.name ?? '',
+          },
         });
   // Konto gelöscht oder gesperrt: auch die Voice-Verbindung schließen.
   if (voice) realtime.onDisconnectUser((uuid, code, reason) => voice.disconnectUser(uuid, code, reason));
+  if (voice) {
+    voiceMod.listener = {
+      banned: (uuid, gate) => {
+        voice.banUser(uuid, gate);
+        // Gast-Links des Gesperrten gelten nicht mehr: Gäste und Mitredende über seine Einladungen trennen.
+        for (const invite of store.openInvitesOf(uuid, Date.now())) if (invite.voiceGroup !== null) voice.disconnectInvite(invite.code);
+      },
+      rulesPublished: (version) => voice.rulesPublished(version),
+      consentWithdrawn: (uuid, version) => voice.consentWithdrawn(uuid, version),
+      clipsChanged: () => voice.clipsChanged(),
+      serversChanged: () => voice.serversChanged(),
+    };
+  }
+
+  /** Heldix-Welt zu einer Voice-Adresse und die Rolle des Spielers darin (Besitzer, Operator, sonst Spieler). */
+  function voiceWorld(server: string, uuid: string): VoiceWorld | null {
+    const world = worlds?.worldAt(server) ?? null;
+    if (world === null) return null;
+    let role: VoiceWorld['role'] = 'player';
+    if (world.owner === uuid) {
+      role = 'host';
+    } else {
+      const user = store.getUser(uuid);
+      const member = user ? store.getWorldMember(world.id, user.name) : undefined;
+      if (member && member.role === 'operator' && (member.uuid === null || member.uuid === uuid)) role = 'operator';
+    }
+    return { id: world.id, code: world.code, name: world.name, role };
+  }
   const maxFriends = options.maxFriends ?? 200;
   const friends = new Friends(
     store,
@@ -464,6 +592,9 @@ export function createService(options: ServiceOptions): Service {
     dailyLimiter: inviteLimiter,
     maxFriends,
     log,
+    // ab 1.13.0: Gäste nehmen die Voice-Regeln beim Beitreten an; Links gesperrter Spieler laden nicht in den Voice Chat
+    voiceRules: () => voiceMod.rulesVersion(),
+    voiceBlocked: (inviter) => voiceMod.isBanned(inviter),
   });
   const inviteService = invites;
   // Spielzeit für die Bestätigung von Einladungen; Konto gelöscht oder gesperrt: Gäste seiner Einladungen trennen.
@@ -582,6 +713,79 @@ export function createService(options: ServiceOptions): Service {
   );
   const startedAt = Date.now();
   const serviceVersion = readServiceVersion();
+
+  // Dauerhafte Welten (ab 1.13.0): nur mit Welt teilen (Relay) und einem Runner. Freischaltungen und Warteliste gibt es
+  // immer (auch wenn hier gerade kein Hosting läuft), damit das Team schon freischalten kann.
+  const hostingStore = new HostingStore(store);
+  const hostingGrants = new HostingGrants(store, hostingStore, realtime);
+  realtime.onConnection((uuid, connected) => {
+    if (connected) hostingGrants.connected(uuid);
+  });
+  if ((options.paperApi || options.mojangManifest || options.modrinthApi) && !dev) {
+    throw new Error('Andere Adressen für Paper, Mojang und Modrinth gibt es nur im Entwicklungsmodus (HELDIX_DIENST_DEV=1).');
+  }
+  const userAgent = `heldix-dienst/${serviceVersion} (${website === null ? 'heldixclient' : new URL(website).host})`;
+  const modrinth = new Modrinth({ api: options.modrinthApi, userAgent });
+  const hostingUploads = new Uploads({
+    // Im Upload-Ordner des Dienstes, den auch der Welten-Wächter liest (<Daten>/hosting-uploads, höchstens 4 Ebenen)
+    dir: join(options.dataDir, 'hosting-uploads', 'uploads'),
+    chunkBytes: options.hostingUploadChunkBytes,
+    maxBytes: options.hostingUploadMaxBytes,
+  });
+  const defaultHostingMax = Math.max(1, Math.floor((os.totalmem() / 1024 ** 3 - 6) / 3));
+  let hosting: Hosting | null = null;
+  if (options.hostingRunner && worlds === null) log('WARNUNG: Dauerhafte Welten brauchen Welt teilen (HELDIX_DIENST_WELT_DOMAIN). Sie sind aus.');
+  if (options.hostingRunner && worlds !== null) {
+    const hostingMax = options.hostingMax ?? defaultHostingMax;
+    if (!Number.isInteger(hostingMax) || hostingMax < 1) throw new Error('Die Zahl gleichzeitiger dauerhafter Welten muss eine ganze Zahl ab 1 sein.');
+    hosting = new Hosting(store, hostingStore, realtime, worlds, {
+      runner: options.hostingRunner,
+      dataDir: join(options.dataDir, 'hosting-uploads'),
+      site: website === null ? null : new URL(website).host,
+      maxRunning: hostingMax,
+      memoryMb: options.hostingMemoryMb ?? 3072,
+      diskMb: options.hostingDiskMb ?? 6144,
+      maxPlugins: options.hostingMaxPlugins ?? 30,
+      worldsPerPlayer: 1,
+      worldsPerTeam: 2,
+      sleepDefaultMin: options.hostingSleepMin ?? 10,
+      minuteMs: options.hostingMinuteMs ?? 60_000,
+      tickMs: options.hostingTickMs ?? 5_000,
+      readyPollMs: options.hostingReadyPollMs ?? 1_000,
+      startTimeoutMs: options.hostingStartTimeoutMs ?? 5 * 60_000,
+      stopTimeoutMs: options.hostingStopTimeoutMs ?? 60_000,
+      pingIntervalMs: options.hostingPingIntervalMs ?? 60_000,
+      dailyBackupMs: options.hostingDailyBackupMs ?? 24 * 60 * 60_000,
+      keepDaily: 7,
+      keepAuto: 5,
+      backupCheckMs: options.hostingBackupCheckMs ?? 60 * 60_000,
+      reconcileMs: options.hostingReconcileMs ?? 5 * 60_000,
+      jars: new ServerJars({ paperApi: options.paperApi, mojangManifest: options.mojangManifest, userAgent }),
+      modrinth,
+      grants: hostingGrants,
+      uploads: hostingUploads,
+      log,
+    });
+    worlds.hosting = hosting;
+    const hostingService = hosting;
+    // Konto gelöscht oder gesperrt: Server und Daten seiner dauerhaften Welten löschen (die Zeilen sind schon weg).
+    realtime.onDisconnectUser(() => hostingService.forgetUser());
+    void hostingService.init();
+    log(`Dauerhafte Welten: an (höchstens ${hostingMax} gleichzeitig)`);
+  }
+  const discover = new Discover(store, worlds, () => hosting, {
+    cacheMs: options.discoverCacheMs ?? 30_000,
+    reportLimit: options.discoverReportLimit ?? 10,
+    reportWindowMs: options.reportWindowMs ?? 24 * 60 * 60 * 1000,
+    log,
+  });
+  const plus = new Plus(store, hostingStore, hostingGrants, { countMin: options.plusCountMin ?? 50 });
+  const pluginSearchLimiter = new RateLimiter(options.pluginSearchRateLimit ?? 60, rateWindowMs);
+  const hostingDownloadLimiter = new RateLimiter(options.hostingDownloadRateLimit ?? 10, 60 * 60_000);
+  const publicDiscoverLimiter = new RateLimiter(options.publicDiscoverRateLimit ?? 120, rateWindowMs);
+  const discoverLikeLimiter = new RateLimiter(options.discoverLikeRateLimit ?? 60, rateWindowMs);
+  // Teile eines Uploads (je 8 MiB): eigene Grenze statt der allgemeinen, damit ein schneller Upload nicht abbricht
+  const uploadChunkLimiter = new RateLimiter(1200, rateWindowMs);
   /** Versionsverlauf: jede veröffentlichte Version einmal (Upload per scp oder Team-Bereich). */
   const recordVersion = (published: { manifest: string; version: string }) => {
     try {
@@ -875,6 +1079,13 @@ export function createService(options: ServiceOptions): Service {
         cosmetics: cosmetics.exportFor(user),
         invites: inviteService.exportFor(user),
         worlds: exportWorlds(store, user, weltDomain),
+        // ab 1.13.0
+        hosting: exportHosting(hostingStore, user),
+        // Voice-Moderation: Zustimmung, eigene Voice-Sperren und eigene Voice-Meldungen (ohne Aufnahmen und ohne
+        // Meldungen anderer über dich, zum Schutz der Meldenden)
+        voice: voiceMod.exportFor(user),
+        discover: discover.exportFor(user),
+        plus: plus.exportFor(user),
         addonStore: {
           submissions: submissions.exportFor(user),
           ...addonFeedback.exportFor(user),
@@ -1083,8 +1294,9 @@ export function createService(options: ServiceOptions): Service {
   /** `GET /v1/launcher/versions`: Versionsverlauf, neueste zuerst. */
   async function launcherVersions(ctx: Context) {
     const limit = intQuery(ctx, 'limit', 1, 50, '„limit“ muss zwischen 1 und 50 liegen.') ?? 20;
-    // Eine eben per scp hochgeladene update.json zählt sofort mit.
+    // Eine eben per scp hochgeladene update.json bzw. update-mac.json zählt sofort mit.
     await updates.latest();
+    await updates.latestMac();
     sendJson(ctx.res, 200, { versions: store.listVersions(limit) }, { 'Cache-Control': 'max-age=60' });
     return RESPONDED;
   }
@@ -1108,6 +1320,8 @@ export function createService(options: ServiceOptions): Service {
         cosmetics: cosmetics.visibleCount(),
         // Welt teilen: geöffnete Welten; null, wenn die Funktion hier aus ist
         worlds: worlds !== null && worlds.available ? worlds.openCount() : null,
+        // Dauerhafte Welten (ab 1.13.0): laufende; null, wenn die Funktion hier aus ist
+        hosted: hosting !== null ? hosting.runningCount() : null,
         since: startedAt,
       },
       { 'Cache-Control': 'max-age=30' },
@@ -1239,6 +1453,36 @@ export function createService(options: ServiceOptions): Service {
   }
 
   /**
+   * `GET /v1/launcher/latest/mac` (ab 1.13.0): update-mac.json, sobald beide ZIPs vollständig im Update-Ordner liegen;
+   * sonst 404.
+   */
+  async function launcherLatestMac(ctx: Context) {
+    const published = await updates.latestMac();
+    if (!published) throw new HttpError(404, NOTHING_PUBLISHED_MAC);
+    sendJson(ctx.res, 200, { manifest: published.manifest, signature: published.signature }, { 'Cache-Control': 'no-cache' });
+    return RESPONDED;
+  }
+
+  /** Übersicht im Team-Bereich mit dem Mac-Manifest (`mac`: Inhalt von update-mac.json oder null). */
+  async function withMacUpdate<T extends object>(overview: T): Promise<T & { mac: Record<string, unknown> | null }> {
+    const mac = await updates.publishedMac();
+    return { ...overview, mac: mac ? (JSON.parse(mac.manifest) as Record<string, unknown>) : null };
+  }
+
+  /**
+   * `PUT /v1/team/updates/manifest` mit dem Inhalt von update-mac.json: prüfen, atomar ersetzen, protokollieren.
+   * Ohne Update-Schlüssel 503 wie bei update.json.
+   */
+  async function publishMacUpdate(ctx: Context, input: Record<string, unknown>) {
+    if (!updateKey) {
+      throw new HttpError(503, 'Auf diesem Server ist kein Update-Schlüssel eingerichtet. Updates lassen sich hier nicht im Browser veröffentlichen.');
+    }
+    const result = await updates.publishMac(input, updateKey);
+    writeAudit(store, actor(ctx), 'update.publish', MAC_MANIFEST_FILE, `Mac-Version ${result.version}: ${result.files.join(', ')}`);
+    return { mac: result.manifest };
+  }
+
+  /**
    * Ziel der Weiterleitung auf eine Datei; ein gültiger `?einladung=<code>` geht beim Windows-Installer mit (der Name im
    * Download trägt dann den Code, siehe downloadName in updates.ts), sonst fällt er weg.
    */
@@ -1315,6 +1559,12 @@ export function createService(options: ServiceOptions): Service {
       await submissions.sweepFiles();
     } catch (err) {
       log(`Aufräumen der Einreichungen fehlgeschlagen: ${(err as Error).message}`);
+    }
+    // Ab 1.13.0 ebenso: Voice-Clips zu Meldungen, die es nicht mehr gibt (z. B. Meldungen eines gelöschten Kontos).
+    try {
+      await voiceMod.sweepClips();
+    } catch (err) {
+      log(`Aufräumen der Voice-Clips fehlgeschlagen: ${(err as Error).message}`);
     }
   }
 
@@ -1397,8 +1647,557 @@ export function createService(options: ServiceOptions): Service {
     return inviteService.createGuest(ctx.params[0] ?? '', await body(ctx));
   }
 
+  // ---------- Dauerhafte Welten, Entdecken, Heldix+ (ab 1.13.0) ----------
+
+  function hostingOn(): Hosting {
+    if (hosting === null) throw new HttpError(503, HOSTING_OFF);
+    return hosting;
+  }
+
+  /** `GET /v1/hosting`: auch ohne Hosting eine Antwort (aus), damit Webseite und Spiel den Hinweis zeigen. */
+  async function hostingOverview(ctx: Context) {
+    if (hosting === null) return { allowed: false, reason: 'off', team: hostingGrants.isTeam(ctx.user.uuid), limits: null, worlds: [], operated: [] };
+    return hosting.overview(ctx.user);
+  }
+
+  /** Datei (Welt oder Sicherung) als Download senden (eigene Grenze je Spieler); danach löschen. */
+  async function hostingDownload(ctx: Context, prepare: () => Promise<{ file: string; name: string }>) {
+    rateLimit(hostingDownloadLimiter, ctx.user.uuid, 'Höchstens 10 Downloads pro Stunde. Bitte später noch einmal.');
+    const { file, name } = await prepare();
+    await sendFileDownload(ctx.res, file, name);
+    return RESPONDED;
+  }
+
+  /** `GET /v1/hosting/plugins/search?q=&version=&offset=&limit=` (eigene Grenze je Spieler) */
+  async function pluginSearch(ctx: Context) {
+    hostingOn();
+    rateLimit(pluginSearchLimiter, ctx.user.uuid, 'Zu viele Suchen. Bitte kurz warten.');
+    const q = (textQuery(ctx, 'q') ?? '').trim();
+    if (q.length > 100) throw new HttpError(400, 'Die Suche darf höchstens 100 Zeichen lang sein.');
+    const version = textQuery(ctx, 'version');
+    if (version !== null && !/^[A-Za-z0-9._-]{1,32}$/.test(version)) throw new HttpError(400, 'Ungültige Minecraft-Version.');
+    const offset = intQuery(ctx, 'offset', 0, 1000, '„offset“ muss zwischen 0 und 1000 liegen.') ?? 0;
+    const limit = intQuery(ctx, 'limit', 1, 50, '„limit“ muss zwischen 1 und 50 liegen.') ?? 20;
+    return modrinth.search(q, version, offset, limit);
+  }
+
+  /** `GET /v1/public/discover…`: eigene Grenze je IP, 30 s Cache */
+  function publicDiscover(ctx: Context) {
+    rateLimit(publicDiscoverLimiter, clientIp(ctx.req));
+    const query = new URL(ctx.req.url ?? '/', 'http://heldix.invalid').searchParams;
+    sendJson(ctx.res, 200, discover.list(query), { 'Cache-Control': 'public, max-age=30' });
+    return RESPONDED;
+  }
+
+  function discoverIcon(ctx: Context) {
+    rateLimit(publicDiscoverLimiter, clientIp(ctx.req));
+    const png = discover.icon(ctx.params[0]);
+    ctx.res.writeHead(200, {
+      'Content-Type': 'image/png',
+      'Content-Length': String(png.length),
+      'Cache-Control': 'public, max-age=300',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    ctx.res.end(png);
+    return RESPONDED;
+  }
+
+  // ---------- Voice-Moderation (ab 1.13.0) ----------
+
+  /** Gast-Meldungen je IP (zusätzlich zur Grenze je Gast-Sitzung) */
+  const guestReportLimiter = new RateLimiter(20, 60 * 60_000);
+
+  /** Kontext einer Meldung aus der Voice-Verbindung des Meldenden (null ohne Voice Chat oder ohne Verbindung). */
+  const voiceContext = (reporter: string, reported: unknown) => (voice && typeof reported === 'string' ? voice.contextFor(reporter, reported) : null);
+  const isVoiceGuest = (id: string) => voice?.isGuest(id) === true;
+
+  /** `PUT /v1/voice/reports/<id>/clip`: roher Körper (Ogg/Opus, höchstens 3 MiB), eigene Zeitgrenze für langsame Leitungen. */
+  async function uploadVoiceClip(ctx: Context) {
+    const id = idParam(ctx.params[0]);
+    const data = await readRawBody(ctx.req, CLIP_MAX_BYTES, 120_000);
+    return voiceMod.uploadClip(ctx.user, id, ctx.req.headers['content-type'], data);
+  }
+
+  /** `POST /v1/public/voice/guest-reports { token, uuid, reason, note?, context?, levels? }` (Gast im Browser) */
+  async function guestVoiceReport(ctx: Context) {
+    if (website !== null) checkOrigin(ctx.req, website);
+    rateLimit(guestReportLimiter, clientIp(ctx.req), 'Zu viele Meldungen. Bitte später noch einmal.');
+    const input = await readJsonObject(ctx.req, 32 * 1024);
+    const session = typeof input.token === 'string' ? inviteService.guestSession(input.token) : null;
+    if (session === null) throw new HttpError(401, GUEST_EXPIRED);
+    const result = voiceMod.report({ uuid: session.id, name: session.name, guest: true }, input, voiceContext(session.id, input.uuid), isVoiceGuest);
+    return { reported: result.reported, id: result.id };
+  }
+
+  /** `GET /v1/team/voice/clips/<id>`: entschlüsselte Aufnahme zum Abspielen (nicht zwischenspeichern). */
+  async function teamVoiceClip(ctx: Context) {
+    const data = await voiceMod.readClip(actor(ctx), idParam(ctx.params[0]));
+    ctx.res.writeHead(200, {
+      'Content-Type': 'audio/ogg',
+      'Content-Length': String(data.length),
+      'Content-Disposition': `inline; filename="voice-meldung-${ctx.params[0]}.ogg"`,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Accept-Ranges': 'none',
+    });
+    ctx.res.end(data);
+    return RESPONDED;
+  }
+
+  /** Nur Entwicklungsmodus (Autotest): Voice-Regeln veröffentlichen bzw. zurückziehen, Sperre setzen und aufheben. */
+  const DEV_ACTOR = { uuid: null, name: 'Autotest' };
+
+  const voiceRoutes: Route[] = [
+    { method: 'GET', pattern: /^\/v1\/public\/voice\/rules$/, kind: 'public', handler: () => voiceMod.publicRules() },
+    { method: 'POST', pattern: /^\/v1\/public\/voice\/guest-reports$/, kind: 'public', handler: guestVoiceReport },
+    { method: 'GET', pattern: /^\/v1\/voice\/me$/, kind: 'user', handler: (ctx) => voiceMod.me(ctx.user) },
+    { method: 'POST', pattern: /^\/v1\/voice\/rules\/accept$/, kind: 'user', handler: async (ctx) => voiceMod.accept(ctx.user, await body(ctx)) },
+    { method: 'DELETE', pattern: /^\/v1\/voice\/rules\/accept$/, kind: 'user', handler: (ctx) => voiceMod.withdrawConsent(ctx.user) },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/voice\/reports$/,
+      kind: 'user',
+      handler: async (ctx) => {
+        const input = await readJsonObject(ctx.req, 32 * 1024);
+        return voiceMod.report({ uuid: ctx.user.uuid, name: ctx.user.name, guest: false }, input, voiceContext(ctx.user.uuid, input.uuid), isVoiceGuest);
+      },
+    },
+    { method: 'PUT', pattern: /^\/v1\/voice\/reports\/([^/]+)\/clip$/, kind: 'user', handler: uploadVoiceClip },
+    // Team: ansehen mit voice:moderate, Regeln, Aufnahmen-Schalter und Liste „Voice aus“ ändern nur mit voice:admin
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/voice$/,
+      kind: 'team',
+      permission: 'voice:moderate',
+      handler: () => voiceMod.overview({ connected: voice?.connectedCount() ?? 0 }),
+    },
+    { method: 'GET', pattern: /^\/v1\/team\/voice\/rules\/versions$/, kind: 'team', permission: 'voice:moderate', handler: () => voiceMod.rulesVersions() },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/team\/voice\/rules$/,
+      kind: 'team',
+      permission: 'voice:admin',
+      // Regeltext bis 12 000 Zeichen (mehr als BODY_LIMIT)
+      handler: async (ctx) => voiceMod.publishRules(actor(ctx), await readJsonObject(ctx.req, 64 * 1024)),
+    },
+    { method: 'DELETE', pattern: /^\/v1\/team\/voice\/rules$/, kind: 'team', permission: 'voice:admin', handler: (ctx) => voiceMod.withdrawRules(actor(ctx)) },
+    { method: 'PUT', pattern: /^\/v1\/team\/voice\/settings$/, kind: 'team', permission: 'voice:admin', handler: async (ctx) => voiceMod.setSettings(actor(ctx), await body(ctx)) },
+    { method: 'GET', pattern: /^\/v1\/team\/voice\/reports$/, kind: 'team', permission: 'voice:moderate', handler: (ctx) => voiceMod.teamReports(textQuery(ctx, 'status')) },
+    { method: 'GET', pattern: /^\/v1\/team\/voice\/reports\/([^/]+)$/, kind: 'team', permission: 'voice:moderate', handler: (ctx) => voiceMod.teamReport(idParam(ctx.params[0])) },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/team\/voice\/reports\/([^/]+)\/done$/,
+      kind: 'team',
+      permission: 'voice:moderate',
+      handler: async (ctx) => voiceMod.teamReportDone(actor(ctx), idParam(ctx.params[0]), await body(ctx)),
+    },
+    { method: 'GET', pattern: /^\/v1\/team\/voice\/clips\/([^/]+)$/, kind: 'team', permission: 'voice:moderate', handler: teamVoiceClip },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/team\/voice\/clips\/([^/]+)$/,
+      kind: 'team',
+      permission: 'voice:moderate',
+      handler: (ctx) => voiceMod.deleteClip(actor(ctx), idParam(ctx.params[0])),
+    },
+    { method: 'GET', pattern: /^\/v1\/team\/voice\/bans$/, kind: 'team', permission: 'voice:moderate', handler: () => voiceMod.teamBans() },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/team\/voice\/bans\/([^/]+)$/,
+      kind: 'team',
+      permission: 'voice:moderate',
+      handler: async (ctx) => voiceMod.ban(actor(ctx), uuidParam(ctx.params[0]), await body(ctx)),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/team\/voice\/bans\/([^/]+)$/,
+      kind: 'team',
+      permission: 'voice:moderate',
+      handler: (ctx) => voiceMod.unban(actor(ctx), uuidParam(ctx.params[0])),
+    },
+    { method: 'GET', pattern: /^\/v1\/team\/voice\/players\/([^/]+)$/, kind: 'team', permission: 'voice:moderate', handler: (ctx) => voiceMod.player(uuidParam(ctx.params[0])) },
+    { method: 'GET', pattern: /^\/v1\/team\/voice\/servers$/, kind: 'team', permission: 'voice:moderate', handler: () => voiceMod.teamServers() },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/team\/voice\/servers\/([^/]+)$/,
+      kind: 'team',
+      permission: 'voice:admin',
+      handler: async (ctx) => voiceMod.putServer(actor(ctx), ctx.params[0], await body(ctx)),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/team\/voice\/servers\/([^/]+)$/,
+      kind: 'team',
+      permission: 'voice:admin',
+      handler: (ctx) => voiceMod.deleteServer(actor(ctx), ctx.params[0]),
+    },
+    // Entwicklungsmodus (nur von diesem Rechner, wie /v1/auth/dev): für den Autotest im echten Spiel
+    {
+      method: 'POST',
+      pattern: /^\/v1\/dev\/voice\/rules$/,
+      kind: 'dev',
+      handler: async (ctx) => {
+        const input = await body(ctx);
+        if (typeof input.clips === 'boolean') voiceMod.setSettings(DEV_ACTOR, { clips: input.clips });
+        if (input.publish === false) {
+          if (voiceMod.rulesVersion() !== null) voiceMod.withdrawRules(DEV_ACTOR);
+          return { version: null };
+        }
+        return voiceMod.publishRules(DEV_ACTOR, typeof input.text === 'string' ? { text: input.text } : {});
+      },
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/dev\/voice\/ban$/,
+      kind: 'dev',
+      handler: async (ctx) => {
+        const input = await body(ctx);
+        const minutes = input.minutes === undefined ? 60 : input.minutes;
+        if (typeof minutes !== 'number' || !Number.isInteger(minutes) || minutes < 1 || minutes > 7 * 24 * 60) throw new HttpError(400, '„minutes“ muss 1 bis 10080 sein.');
+        return voiceMod.ban(DEV_ACTOR, uuidParam(typeof input.uuid === 'string' ? input.uuid : undefined), { reason: input.reason ?? 'Autotest' }, { minutes });
+      },
+    },
+    { method: 'DELETE', pattern: /^\/v1\/dev\/voice\/ban\/([^/]+)$/, kind: 'dev', handler: (ctx) => voiceMod.unban(DEV_ACTOR, uuidParam(ctx.params[0])) },
+  ];
+
+  const hostingRoutes: Route[] = [
+    { method: 'GET', pattern: /^\/v1\/hosting$/, kind: 'user', handler: hostingOverview },
+    { method: 'POST', pattern: /^\/v1\/hosting\/worlds$/, kind: 'user', handler: async (ctx) => hostingOn().create(ctx.user, await body(ctx)) },
+    // Plugin-Katalog (Modrinth über den Dienst): `search` steht vor dem Muster für Projekte.
+    { method: 'GET', pattern: /^\/v1\/hosting\/plugins\/search$/, kind: 'user', ownRateLimit: true, handler: pluginSearch },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/hosting\/plugins\/([^/]+)$/,
+      kind: 'user',
+      handler: async (ctx) => {
+        hostingOn();
+        return modrinth.project(ctx.params[0] ?? '');
+      },
+    },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/hosting\/plugins\/([^/]+)\/versions$/,
+      kind: 'user',
+      handler: async (ctx) => {
+        hostingOn();
+        const version = textQuery(ctx, 'version');
+        if (version !== null && !/^[A-Za-z0-9._-]{1,32}$/.test(version)) throw new HttpError(400, 'Ungültige Minecraft-Version.');
+        return { versions: await modrinth.versions(ctx.params[0] ?? '', version) };
+      },
+    },
+    { method: 'GET', pattern: /^\/v1\/hosting\/worlds\/([^/]+)$/, kind: 'user', handler: (ctx) => hostingOn().get(ctx.user, ctx.params[0]) },
+    {
+      method: 'PATCH',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)$/,
+      kind: 'user',
+      handler: async (ctx) => hostingOn().patch(ctx.user, ctx.params[0], await body(ctx)),
+    },
+    { method: 'DELETE', pattern: /^\/v1\/hosting\/worlds\/([^/]+)$/, kind: 'user', handler: (ctx) => hostingOn().remove(ctx.user, ctx.params[0]) },
+    { method: 'POST', pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/start$/, kind: 'user', handler: (ctx) => hostingOn().start(ctx.user, ctx.params[0]) },
+    { method: 'POST', pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/stop$/, kind: 'user', handler: (ctx) => hostingOn().stop(ctx.user, ctx.params[0]) },
+    { method: 'POST', pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/restart$/, kind: 'user', handler: (ctx) => hostingOn().restart(ctx.user, ctx.params[0]) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/console$/,
+      kind: 'user',
+      handler: (ctx) => hostingOn().console(ctx.user, ctx.params[0], intQuery(ctx, 'lines', 1, 500, '„lines“ muss zwischen 1 und 500 liegen.')),
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/command$/,
+      kind: 'user',
+      handler: async (ctx) => hostingOn().command(ctx.user, ctx.params[0], await body(ctx)),
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/knocks\/([^/]+)$/,
+      kind: 'user',
+      handler: async (ctx) => hostingOn().answerKnock(ctx.user, ctx.params[0], ctx.params[1], await body(ctx)),
+    },
+    { method: 'GET', pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/properties$/, kind: 'user', handler: (ctx) => hostingOn().properties(ctx.user, ctx.params[0]) },
+    {
+      method: 'PATCH',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/properties$/,
+      kind: 'user',
+      handler: async (ctx) => hostingOn().patchProperties(ctx.user, ctx.params[0], await body(ctx)),
+    },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/plugins$/,
+      kind: 'user',
+      handler: (ctx) => hostingOn().plugins(ctx.user, ctx.params[0], textQuery(ctx, 'updates') === '1'),
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/plugins$/,
+      kind: 'user',
+      handler: async (ctx) => hostingOn().installPlugin(ctx.user, ctx.params[0], await body(ctx)),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/plugins\/([^/]+)$/,
+      kind: 'user',
+      handler: (ctx) => hostingOn().removePlugin(ctx.user, ctx.params[0], ctx.params[1]),
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/plugins\/([^/]+)\/update$/,
+      kind: 'user',
+      handler: (ctx) => hostingOn().updatePlugin(ctx.user, ctx.params[0], ctx.params[1]),
+    },
+    { method: 'GET', pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/files$/, kind: 'user', handler: (ctx) => hostingOn().files(ctx.user, ctx.params[0], textQuery(ctx, 'path')) },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/files$/,
+      kind: 'user',
+      // Konfiguration bis 256 KB (als JSON-Text etwas mehr)
+      handler: async (ctx) => hostingOn().writeFile(ctx.user, ctx.params[0], textQuery(ctx, 'path'), await readJsonObject(ctx.req, 600 * 1024)),
+    },
+    { method: 'GET', pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/backups$/, kind: 'user', handler: (ctx) => hostingOn().backups(ctx.user, ctx.params[0]) },
+    { method: 'POST', pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/backups$/, kind: 'user', handler: (ctx) => hostingOn().createBackup(ctx.user, ctx.params[0]) },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/backups\/([^/]+)\/restore$/,
+      kind: 'user',
+      handler: (ctx) => hostingOn().restoreBackup(ctx.user, ctx.params[0], ctx.params[1]),
+    },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/backups\/([^/]+)\/download$/,
+      kind: 'user',
+      handler: (ctx) => hostingDownload(ctx, () => hostingOn().backupFile(ctx.user, ctx.params[0], ctx.params[1])),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/backups\/([^/]+)$/,
+      kind: 'user',
+      handler: (ctx) => hostingOn().deleteBackup(ctx.user, ctx.params[0], ctx.params[1]),
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/upload$/,
+      kind: 'user',
+      handler: async (ctx) => hostingOn().uploadStart(ctx.user, ctx.params[0], await body(ctx)),
+    },
+    { method: 'DELETE', pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/upload$/, kind: 'user', handler: (ctx) => hostingOn().uploadCancel(ctx.user, ctx.params[0]) },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/upload\/finish$/,
+      kind: 'user',
+      handler: async (ctx) => hostingOn().uploadFinish(ctx.user, ctx.params[0], await body(ctx)),
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/upload\/(\d{1,6})$/,
+      kind: 'user',
+      ownRateLimit: true,
+      // Roher Körper (ein Teil, höchstens 8 MiB): ohne BODY_LIMIT, ohne JSON.
+      handler: (ctx) => {
+        rateLimit(uploadChunkLimiter, ctx.user.uuid, 'Zu viele Teile auf einmal. Bitte kurz warten.');
+        return hostingOn().uploadChunk(ctx.user, ctx.params[0], ctx.params[1], ctx.req);
+      },
+    },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/hosting\/worlds\/([^/]+)\/download$/,
+      kind: 'user',
+      handler: (ctx) => hostingDownload(ctx, () => hostingOn().worldFile(ctx.user, ctx.params[0])),
+    },
+    // Entdecken: Eintrag der eigenen Welt
+    {
+      method: 'GET',
+      pattern: /^\/v1\/worlds\/([^/]+)\/listing$/,
+      kind: 'user',
+      handler: (ctx) => discover.getListing(ctx.user, ctx.params[0]),
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/worlds\/([^/]+)\/listing$/,
+      kind: 'user',
+      handler: async (ctx) => discover.putListing(ctx.user, ctx.params[0], await body(ctx)),
+    },
+    { method: 'DELETE', pattern: /^\/v1\/worlds\/([^/]+)\/listing$/, kind: 'user', handler: (ctx) => discover.deleteListing(ctx.user, ctx.params[0]) },
+    // Entdecken: Gefällt mir und Melden (angemeldet)
+    { method: 'GET', pattern: /^\/v1\/discover\/([^/]+)\/like$/, kind: 'user', handler: (ctx) => discover.getLike(ctx.user, ctx.params[0]) },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/discover\/([^/]+)\/like$/,
+      kind: 'user',
+      handler: (ctx) => {
+        rateLimit(discoverLikeLimiter, ctx.user.uuid);
+        return discover.like(ctx.user, ctx.params[0]);
+      },
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/discover\/([^/]+)\/like$/,
+      kind: 'user',
+      handler: (ctx) => {
+        rateLimit(discoverLikeLimiter, ctx.user.uuid);
+        return discover.unlike(ctx.user, ctx.params[0]);
+      },
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/discover\/([^/]+)\/report$/,
+      kind: 'user',
+      handler: async (ctx) => discover.report(ctx.user, ctx.params[0], await body(ctx)),
+    },
+    // Entdecken öffentlich (ohne Anmeldung, CORS, eigene Grenze je IP): `meta` steht vor dem Muster für Codes.
+    { method: 'GET', pattern: /^\/v1\/public\/discover$/, kind: 'public', handler: publicDiscover },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/public\/discover\/meta$/,
+      kind: 'public',
+      handler: (ctx) => {
+        sendJson(ctx.res, 200, discover.meta(), { 'Cache-Control': 'public, max-age=3600' });
+        return RESPONDED;
+      },
+    },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/public\/discover\/([^/]+)$/,
+      kind: 'public',
+      handler: (ctx) => {
+        rateLimit(publicDiscoverLimiter, clientIp(ctx.req));
+        sendJson(ctx.res, 200, discover.entry(ctx.params[0]), { 'Cache-Control': 'public, max-age=30' });
+        return RESPONDED;
+      },
+    },
+    { method: 'GET', pattern: /^\/v1\/public\/discover\/([^/]+)\/icon\.png$/, kind: 'public', handler: discoverIcon },
+    // Heldix+-Warteliste
+    { method: 'GET', pattern: /^\/v1\/plus$/, kind: 'user', handler: (ctx) => plus.get(ctx.user) },
+    { method: 'PUT', pattern: /^\/v1\/plus\/waitlist$/, kind: 'user', handler: (ctx) => plus.join(ctx.user) },
+    { method: 'DELETE', pattern: /^\/v1\/plus\/waitlist$/, kind: 'user', handler: (ctx) => plus.leave(ctx.user) },
+    { method: 'POST', pattern: /^\/v1\/plus\/seen$/, kind: 'user', handler: (ctx) => plus.seen(ctx.user) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/public\/plus$/,
+      kind: 'public',
+      handler: (ctx) => {
+        sendJson(ctx.res, 200, { count: plus.publicCount() }, { 'Cache-Control': 'public, max-age=60' });
+        return RESPONDED;
+      },
+    },
+    // Entwicklungsmodus (nur von diesem Rechner, wie /v1/auth/dev): Freischaltung für den Autotest im echten Spiel
+    { method: 'POST', pattern: /^\/v1\/dev\/hosting\/grant$/, kind: 'dev', handler: (ctx) => devHostingGrant(ctx, true) },
+    { method: 'DELETE', pattern: /^\/v1\/dev\/hosting\/grant$/, kind: 'dev', handler: (ctx) => devHostingGrant(ctx, false) },
+  ];
+
+  /**
+   * Nur Entwicklungsmodus (Autotest): Freischaltung „Beta: Dauerhafte Welten“ setzen (`POST`) bzw. entfernen (`DELETE`)
+   * für `{ uuid }` oder `{ name }` (im Körper oder als `?uuid=`/`?name=`), wie im Team-Bereich (Protokoll als „Autotest“,
+   * `hosting-granted`, Entzug hält laufende Welten an). Geht auch, wenn dauerhafte Welten hier aus sind.
+   */
+  async function devHostingGrant(ctx: Context, grant: boolean) {
+    const input = await body(ctx);
+    const uuid = input.uuid ?? textQuery(ctx, 'uuid') ?? undefined;
+    const name = input.name ?? textQuery(ctx, 'name') ?? undefined;
+    let target: UserRow | undefined;
+    if (uuid !== undefined) target = store.getUser(uuidParam(typeof uuid === 'string' ? uuid : undefined));
+    else if (name !== undefined) {
+      if (!isName(name)) throw new HttpError(400, 'Ungültiger Spielername.');
+      target = store.findUserByName(name);
+    } else throw new HttpError(400, '„uuid“ oder „name“ fehlt.');
+    if (!target) throw new HttpError(404, 'Diesen Spieler kennt der Heldix-Dienst nicht.');
+    const result = grant ? hostingGrants.grant(DEV_ACTOR, target.uuid, 'beta') : hostingGrants.revoke(DEV_ACTOR, target.uuid, 'beta');
+    return { uuid: target.uuid, name: target.name, ...result, allowed: hostingGrants.allowed(target.uuid), grants: hostingGrants.of(target.uuid) };
+  }
+
   // Team-Routen: Recht je Route (roles.ts). Ohne `permission` darf jedes Team-Mitglied (mit 2FA).
   const teamRoutes: Route[] = [
+    // Dauerhafte Welten (ab 1.13.0)
+    { method: 'GET', pattern: /^\/v1\/team\/hosting$/, kind: 'team', permission: 'hosting:manage', handler: () => hostingOn().teamOverview() },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/team\/hosting\/worlds\/([^/]+)\/stop$/,
+      kind: 'team',
+      permission: 'hosting:manage',
+      handler: (ctx) => hostingOn().teamStop(actor(ctx), ctx.params[0]),
+    },
+    {
+      method: 'PATCH',
+      pattern: /^\/v1\/team\/hosting\/worlds\/([^/]+)$/,
+      kind: 'team',
+      permission: 'hosting:manage',
+      handler: async (ctx) => hostingOn().teamPatch(actor(ctx), ctx.params[0], await body(ctx)),
+    },
+    { method: 'GET', pattern: /^\/v1\/team\/hosting\/grants$/, kind: 'team', permission: 'hosting:grant', handler: () => ({ grants: hostingGrants.list() }) },
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/hosting\/grants\/([^/]+)$/,
+      kind: 'team',
+      permission: 'hosting:grant',
+      handler: (ctx) => {
+        const uuid = uuidParam(ctx.params[0]);
+        return { uuid, team: hostingGrants.isTeam(uuid), allowed: hostingGrants.allowed(uuid), grants: hostingGrants.of(uuid) };
+      },
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/team\/hosting\/grants\/([^/]+)$/,
+      kind: 'team',
+      permission: 'hosting:grant',
+      handler: (ctx) => {
+        const uuid = uuidParam(ctx.params[0]);
+        const result = hostingGrants.grant(actor(ctx), uuid, 'beta');
+        return { ...result, grants: hostingGrants.of(uuid) };
+      },
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/team\/hosting\/grants\/([^/]+)$/,
+      kind: 'team',
+      permission: 'hosting:grant',
+      handler: (ctx) => {
+        const uuid = uuidParam(ctx.params[0]);
+        return { ...hostingGrants.revoke(actor(ctx), uuid, 'beta'), grants: hostingGrants.of(uuid) };
+      },
+    },
+    // Heldix+-Warteliste
+    { method: 'GET', pattern: /^\/v1\/team\/plus\/waitlist$/, kind: 'team', permission: 'hosting:grant', handler: () => plus.teamList() },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/team\/plus\/grant$/,
+      kind: 'team',
+      permission: 'hosting:grant',
+      handler: async (ctx) => plus.teamGrant(actor(ctx), await body(ctx)),
+    },
+    // Entdecken moderieren
+    {
+      method: 'GET',
+      pattern: /^\/v1\/team\/discover$/,
+      kind: 'team',
+      permission: 'discover:moderate',
+      handler: (ctx) => discover.teamOverview(textQuery(ctx, 'status')),
+    },
+    {
+      method: 'POST',
+      pattern: /^\/v1\/team\/discover\/reports\/([^/]+)\/done$/,
+      kind: 'team',
+      permission: 'discover:moderate',
+      handler: (ctx) => discover.teamReportDone(actor(ctx), idParam(ctx.params[0])),
+    },
+    {
+      method: 'PUT',
+      pattern: /^\/v1\/team\/discover\/bans\/([^/]+)$/,
+      kind: 'team',
+      permission: 'discover:moderate',
+      handler: async (ctx) => discover.teamBan(actor(ctx), uuidParam(ctx.params[0]), await body(ctx)),
+    },
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/team\/discover\/bans\/([^/]+)$/,
+      kind: 'team',
+      permission: 'discover:moderate',
+      handler: (ctx) => discover.teamUnban(actor(ctx), uuidParam(ctx.params[0])),
+    },
+    {
+      method: 'PATCH',
+      pattern: /^\/v1\/team\/discover\/([^/]+)$/,
+      kind: 'team',
+      permission: 'discover:moderate',
+      handler: async (ctx) => discover.teamSetHidden(actor(ctx), ctx.params[0], await body(ctx)),
+    },
     { method: 'GET', pattern: /^\/v1\/team\/me\/profile$/, kind: 'team', handler: (ctx) => team.profile(teamMember(ctx)) },
     {
       method: 'PUT',
@@ -1412,12 +2211,15 @@ export function createService(options: ServiceOptions): Service {
       method: 'GET',
       pattern: /^\/v1\/team\/dashboard$/,
       kind: 'team',
-      handler: (ctx) =>
-        team.dashboard(teamMember(ctx), {
+      handler: (ctx) => ({
+        ...team.dashboard(teamMember(ctx), {
           online: realtime.onlineCount(),
           voice: voice?.connectedCount() ?? 0,
           worlds: worlds !== null && worlds.available ? worlds.openCount() : null,
         }),
+        // ab 1.13.0: offene Voice-Meldungen (nur mit voice:moderate, sonst null)
+        voiceReports: hasPermission(teamMember(ctx).role, 'voice:moderate') ? voiceMod.countOpenReports() : null,
+      }),
     },
     { method: 'GET', pattern: /^\/v1\/team\/support$/, kind: 'team', permission: 'support', handler: (ctx) => support.teamList(textQuery(ctx, 'status')) },
     {
@@ -1520,7 +2322,7 @@ export function createService(options: ServiceOptions): Service {
       permission: 'news',
       handler: (ctx) => team.deleteNews(actor(ctx), idParam(ctx.params[0])),
     },
-    { method: 'GET', pattern: /^\/v1\/team\/updates$/, kind: 'team', permission: 'updates', handler: () => team.updatesOverview() },
+    { method: 'GET', pattern: /^\/v1\/team\/updates$/, kind: 'team', permission: 'updates', handler: async () => withMacUpdate(await team.updatesOverview()) },
     {
       method: 'PUT',
       pattern: /^\/v1\/team\/updates\/files\/([^/]+)$/,
@@ -1534,14 +2336,18 @@ export function createService(options: ServiceOptions): Service {
       pattern: /^\/v1\/team\/updates\/files\/([^/]+)$/,
       kind: 'team',
       permission: 'updates',
-      handler: (ctx) => team.deleteFile(actor(ctx), ctx.params[0] ?? ''),
+      handler: async (ctx) => withMacUpdate(await team.deleteFile(actor(ctx), ctx.params[0] ?? '')),
     },
     {
       method: 'PUT',
       pattern: /^\/v1\/team\/updates\/manifest$/,
       kind: 'team',
       permission: 'updates',
-      handler: async (ctx) => team.publish(actor(ctx), await body(ctx)),
+      // update.json (Windows) oder update-mac.json (Mac, erkannt an `platform` „mac“ im Manifest)
+      handler: async (ctx) => {
+        const input = await body(ctx);
+        return isMacUpdateObject(input) ? publishMacUpdate(ctx, input) : team.publish(actor(ctx), input);
+      },
     },
     // Addon-Store: `PUT …/manifest` und `PATCH …/<id>` treffen dasselbe Muster, die Methode entscheidet.
     { method: 'GET', pattern: /^\/v1\/team\/addons$/, kind: 'team', permission: 'addons', handler: () => team.addonsOverview() },
@@ -1990,9 +2796,12 @@ export function createService(options: ServiceOptions): Service {
     { method: 'GET', pattern: /^\/v1\/skins\/([^/]+)$/, kind: 'user', ownRateLimit: true, handler: userSkin },
     { method: 'GET', pattern: /^\/v1\/launcher\/versions$/, kind: 'public', handler: launcherVersions },
     { method: 'GET', pattern: /^\/v1\/status$/, kind: 'public', handler: status },
+    ...voiceRoutes,
+    ...hostingRoutes,
     ...teamRoutes,
     // Launcher-Updates (ohne Anmeldung); `latest` steht vor dem allgemeinen Muster für Dateien.
     { method: 'GET', pattern: /^\/v1\/launcher\/latest$/, kind: 'public', handler: launcherLatest },
+    { method: 'GET', pattern: /^\/v1\/launcher\/latest\/mac$/, kind: 'public', handler: launcherLatestMac },
     { method: 'GET', pattern: /^\/v1\/launcher\/download\/latest$/, kind: 'public', handler: downloadLatest },
     { method: 'HEAD', pattern: /^\/v1\/launcher\/download\/latest$/, kind: 'public', handler: downloadLatest },
     { method: 'GET', pattern: /^\/v1\/launcher\/download\/latest\/([^/]+)$/, kind: 'public', handler: downloadLatestFor },
@@ -2208,7 +3017,7 @@ export function createService(options: ServiceOptions): Service {
       return {
         uuid: session.id,
         key: `gast:${session.id}`,
-        attach: { browser: true, guest: { name: session.name, invite: session.invite, expiresAt: session.expiresAt } },
+        attach: { browser: true, guest: { name: session.name, invite: session.invite, expiresAt: session.expiresAt, rulesVersion: session.rulesVersion } },
       };
     }
     const value = readSessionCookie(req);
@@ -2356,6 +3165,13 @@ export function createService(options: ServiceOptions): Service {
     guestLimiter.sweep(now);
     publicWorldLimiter.sweep(now);
     headLimiter.sweep(now);
+    pluginSearchLimiter.sweep(now);
+    hostingDownloadLimiter.sweep(now);
+    publicDiscoverLimiter.sweep(now);
+    discoverLikeLimiter.sweep(now);
+    uploadChunkLimiter.sweep(now);
+    hostingUploads.sweep(now).catch((err: Error) => log(`Aufräumen der Uploads fehlgeschlagen: ${err.message}`));
+    hosting?.sweepDownloads(now).catch((err: Error) => log(`Aufräumen der Downloads fehlgeschlagen: ${err.message}`));
     messages.sweepTyping(now);
     relay?.sweep(now);
     worlds?.sweep(now);
@@ -2370,6 +3186,11 @@ export function createService(options: ServiceOptions): Service {
       store.deleteAddonReportsBefore(now - reportTtlMs);
       store.deleteExpiredInvites(now);
       inviteService.sweep(now);
+      discover.sweep(now - reportTtlMs);
+      // Voice-Moderation: alte Einträge im Sperr-Verlauf, abgelaufenes Entfernen und verwaiste Stummschaltungen
+      voiceMod.sweep(now);
+      voice?.sweep();
+      guestReportLimiter.sweep(now);
     } catch (err) {
       log(`Aufräumen fehlgeschlagen: ${(err as Error).message}`);
     }
@@ -2390,6 +3211,8 @@ export function createService(options: ServiceOptions): Service {
     // Geöffnete Welten: Zeitpunkt speichern, Steuerverbindungen, Datenströme und Spieler-Verbindungen trennen.
     worlds?.closeAll();
     const relayClosed = relay?.close() ?? Promise.resolve();
+    // Dauerhafte Welten: Zeitgeber aus; der ProcessRunner (Entwicklung) hält seine Java-Prozesse an.
+    const hostingClosed = hosting?.close() ?? Promise.resolve();
     realtime.closeAll();
     voice?.closeAll();
     closing = new Promise<void>((resolve) => {
@@ -2398,7 +3221,7 @@ export function createService(options: ServiceOptions): Service {
       worldHostWss?.close();
       worldStreamWss?.close();
       server.close(() => {
-        void relayClosed.then(() => {
+        void Promise.all([relayClosed, hostingClosed]).then(() => {
           store.close();
           resolve();
         });

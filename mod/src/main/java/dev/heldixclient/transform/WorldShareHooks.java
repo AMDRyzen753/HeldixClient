@@ -49,6 +49,15 @@ public final class WorldShareHooks {
 		}
 	}
 
+	/** ConnectScreen.startConnecting (am Anfang, Haupt-Thread): Adresse für den erneuten Versuch bei dauerhaften Welten */
+	public static void connecting(net.minecraft.client.multiplayer.ServerData data) {
+		try {
+			dev.heldixclient.share.HostedJoin.connecting(data);
+		} catch (RuntimeException e) {
+			logOnce(e);
+		}
+	}
+
 	/** PlayerList.placeNewPlayer (am Ende) */
 	public static void playerJoined(PlayerList list, ServerPlayer player) {
 		try {

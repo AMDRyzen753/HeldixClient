@@ -10,6 +10,7 @@ import type { RateLimiter } from './limits';
 import type { Realtime } from './realtime';
 import { isInviteCode, normalizeServer } from './validate';
 import { VOICE_MAX_GUESTS, type Voice } from './voice';
+import { VOICE_RULES_REQUIRED } from './voice-moderation';
 import { newSecret } from './web';
 
 /** Zeichen der Codes: a–z und 2–9 ohne i, l, o, 0 und 1. */
@@ -60,6 +61,10 @@ export interface InvitesOptions {
   /** Höchstzahl der Freunde (wie bei Anfragen). */
   maxFriends: number;
   log: (line: string) => void;
+  /** Ab 1.13.0: veröffentlichte Version der Voice-Regeln (null = keine); Gäste müssen sie beim Beitreten annehmen. */
+  voiceRules?: () => number | null;
+  /** Ab 1.13.0: Ist der Einladende vom Voice Chat gesperrt? Dann lädt seine Einladung nicht in den Voice Chat ein. */
+  voiceBlocked?: (inviter: string) => boolean;
 }
 
 /** Gast-Sitzung (nur im Arbeitsspeicher). */
@@ -72,6 +77,8 @@ export interface GuestSession {
   /** UUID des Einladenden (zum Aufräumen, wenn sein Konto gelöscht wird) */
   inviter: string;
   expiresAt: number;
+  /** Beim Beitreten angenommene Version der Voice-Regeln (ab 1.13.0; null = keine veröffentlicht) */
+  rulesVersion: number | null;
 }
 
 export type FriendResult = 'new' | 'already' | 'blocked' | 'limit';
@@ -290,13 +297,20 @@ export class Invites {
     };
   }
 
-  /** `POST /v1/public/invites/<code>/guest` mit `{ name }`: Gast-Sitzung für den Voice Chat im Browser. */
+  /**
+   * `POST /v1/public/invites/<code>/guest` mit `{ name, rulesVersion? }`: Gast-Sitzung für den Voice Chat im Browser. Ab
+   * 1.13.0 muss `rulesVersion` die veröffentlichte Version der Voice-Regeln sein, wenn es eine gibt (sonst 409 `voice-rules`).
+   */
   createGuest(code: string, input: Record<string, unknown>) {
     if (this.voice === null) throw new HttpError(503, VOICE_OFF);
     const invite = this.openInvite(code);
     if (!invite || this.groupOf(invite) === null) throw new HttpError(404, NO_VOICE_INVITE);
     const name = guestName(input.name);
     if (name === null) throw new HttpError(400, GUEST_NAME_INVALID);
+    const rulesVersion = this.options.voiceRules?.() ?? null;
+    if (rulesVersion !== null && input.rulesVersion !== rulesVersion) {
+      throw new HttpError(409, VOICE_RULES_REQUIRED, {}, 'voice-rules', { version: rulesVersion });
+    }
     if (this.voice.guestCount(invite.code) >= VOICE_MAX_GUESTS) throw new HttpError(409, GUESTS_FULL);
     this.trimGuests(invite.code);
     const now = Date.now();
@@ -307,6 +321,7 @@ export class Invites {
       invite: invite.code,
       inviter: invite.inviter,
       expiresAt: Math.min(invite.expiresAt, now + GUEST_TTL_MS),
+      rulesVersion,
     };
     this.guests.set(hashToken(token), session);
     return { token, id: session.id, name, expires: session.expiresAt };
@@ -335,7 +350,10 @@ export class Invites {
   // ---------- Voice Chat ----------
 
   private groupOf(invite: InviteRow): string | null {
-    return invite.voiceGroup !== null && invite.server !== null ? `${invite.server} ${invite.voiceGroup}` : null;
+    if (invite.voiceGroup === null || invite.server === null) return null;
+    // Ab 1.13.0: Links eines vom Voice Chat gesperrten Spielers laden nicht in den Voice Chat ein.
+    if (this.options.voiceBlocked?.(invite.inviter)) return null;
+    return `${invite.server} ${invite.voiceGroup}`;
   }
 
   /** Gruppe einer offenen Einladung mit Voice (`<server> <prüfwert>`) oder null. */

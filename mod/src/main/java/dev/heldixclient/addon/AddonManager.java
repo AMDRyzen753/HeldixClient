@@ -500,6 +500,12 @@ public final class AddonManager {
 		}
 	}
 
+	/** Läuft gerade eine Aktion des Spielers für dieses Addon (Taste, Befehl, Knopf, Klick im HUD, Spielermenü)? (API 10) */
+	static boolean inUserAction(LoadedAddon addon) {
+		Minecraft minecraft = Minecraft.getInstance();
+		return minecraft != null && minecraft.isSameThread() && actionAddon == addon;
+	}
+
 	/** Vor dem Senden: wirft, wenn gerade keine Aktion des Spielers für dieses Addon läuft */
 	static void requireUserAction(LoadedAddon addon) {
 		Minecraft minecraft = Minecraft.getInstance();

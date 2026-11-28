@@ -41,7 +41,11 @@ import java.util.function.Supplier;
  * nach Abstand, Richtung in Stereo, Rauschfilter und Signaltöne, Gruppen über den ganzen Server, Symbole über dem Kopf
  * (spricht, stumm, Ton aus), eine HUD-Anzeige mit Köpfen der Sprecher, Stummschalten und Lautstärke je Spieler im
  * Spielermenü (Mausrad-Klick auf einen Spieler). Ab 1.2.0 mit Browser-Link für die Gruppe: Gäste ohne HeldixClient reden auf
- * der Webseite mit, sind in der Anzeige gekennzeichnet und lassen sich entfernen. Opus kommt aus Concentus (reines Java).
+ * der Webseite mit, sind in der Anzeige gekennzeichnet und lassen sich entfernen. Ab 1.3.0 (Heldix-API 10, Dienst 1.13.0):
+ * Melden aus Spielermenü und Anzeige (Dialog von HeldixClient, mit Lautstärke-Verlauf und – bei aktiven Aufnahmen – den
+ * letzten Minuten des Gemeldeten), Lautstärke-Schutz je Sprecher, Knöpfe für Gastgeber, Operatoren und Party-Leiter (für
+ * alle stummschalten, aus dem Voice entfernen), Hinweise bei Sperre und Moderation und die Voice-Regeln vor der ersten
+ * Verbindung. Opus kommt aus Concentus (reines Java).
  */
 public final class VoiceChatAddon implements HeldixAddon {
 	static final int SPEAKING = HeldixColors.SUCCESS;
@@ -56,6 +60,16 @@ public final class VoiceChatAddon implements HeldixAddon {
 	/** Kennzeichen in der Anzeige: Gast ohne HeldixClient, Spieler im Browser */
 	static final String GUEST_TAG = "Gast";
 	static final String BROWSER_TAG = "Browser";
+	/** Einträge im Spielermenü und Knöpfe ab 1.3.0 */
+	static final String REPORT = "Melden …";
+	static final String MUTE_ALL = "Für alle stummschalten";
+	static final String UNMUTE_ALL = "Stumm für alle aufheben";
+	static final String KICK = "Aus dem Voice entfernen (10 Min.)";
+	static final String UNKICK = "Entfernen aufheben";
+	static final String RULES = "Voice-Regeln";
+	static final String CLIPS_HINT = "Meldungen können die letzten 10 Minuten enthalten";
+	/** so lange gilt ein Sprecher bei offenem Chat noch als „gerade gehört“ (für Melden) */
+	private static final long RECENT_MS = 60_000;
 	private static final List<Mixer.Info> MICROPHONES = new ArrayList<>();
 
 	private HeldixApi api;
@@ -78,6 +92,21 @@ public final class VoiceChatAddon implements HeldixAddon {
 	private IntSupplier hudLayout;
 	private BooleanSupplier hudHeads;
 	private BooleanSupplier hudOnlyActive;
+	private BooleanSupplier volumeGuard;
+	/** von dir aus dem Voice Entfernte (für „Entfernen aufheben“), bis wann */
+	private final Map<UUID, Long> kickedByMe = new HashMap<>();
+	/** Anhänge für Meldungen: Lautstärke-Verlauf und (bei aktiven Aufnahmen) die gepufferten Pakete */
+	private final VoiceChannel.ReportAttachments attachments = new VoiceChannel.ReportAttachments() {
+		@Override
+		public VoiceChannel.ReportData collect(UUID participant, boolean includeClip) {
+			return engine == null ? null : engine.report(participant, includeClip);
+		}
+
+		@Override
+		public long bufferedMillis(UUID participant) {
+			return engine == null ? 0 : engine.bufferedMillis(participant);
+		}
+	};
 	private volatile boolean muted;
 	private volatile boolean deafened;
 	private volatile long testUntil;
@@ -112,6 +141,8 @@ public final class VoiceChatAddon implements HeldixAddon {
 				value -> Math.round(value * 100) + " %");
 		noiseFilter = module.addToggle("noise-filter", "Rauschfilter", "Nimmt Brummen und leises Rauschen (Lüfter, Tastatur) zwischen deinen Worten weg", true);
 		volume = module.addSlider("volume", "Lautstärke", "Wie laut du die anderen hörst", 0, 2, 0.05, 1, value -> Math.round(value * 100) + " %");
+		volumeGuard = module.addToggle("volume-guard", "Lautstärke-Schutz",
+				"Begrenzt sehr laute Stimmen (Anschreien, laute Musik, Störgeräusche) – und senkt weiter ab, wenn jemand lange laut ist", true);
 		audience = module.addChoice("audience", "Sprechen und hören mit", "„Nur Freunde“ gilt in beide Richtungen (deine Gruppe hörst du immer)",
 				List.of("Allen in der Nähe", "Nur Freunden"), 0);
 		stereo = module.addToggle("stereo", "Richtung hören", "Stimmen kommen von links oder rechts, je nachdem, wo der Spieler steht", true);
@@ -125,6 +156,8 @@ public final class VoiceChatAddon implements HeldixAddon {
 				+ "(braucht den Heldix-Dienst 1.11.0)", BROWSER_LINK_BUTTON, this::copyBrowserLink);
 		module.addAction("Mikrofon testen", "Zehn Sekunden lang hörst du dich selbst (nichts wird gesendet)", "Testen",
 				() -> testUntil = System.currentTimeMillis() + 10_000);
+		module.addAction(RULES, "Regeln für den Voice Chat lesen und annehmen (ab Heldix-Dienst 1.13.0). Sind Aufnahmen für Meldungen aktiv, "
+				+ "können Meldungen die letzten 10 Minuten enthalten.", "Lesen", this::showRules);
 
 		talkKey = module.addKey("talk", "Sprechen (Push-to-Talk)", "Halten, um zu sprechen", 'V', () -> {
 		});
@@ -142,7 +175,13 @@ public final class VoiceChatAddon implements HeldixAddon {
 		deafened = api.config().getBoolean("deafened", false);
 		engine = new VoiceEngine(this, api.voice(), api.logger());
 		api.voice().onFrame(engine::receive);
+		api.voice().onModeration(this::onModeration);
 		api.events().onTick(this::tick);
+		// Server- oder Weltwechsel: gepufferte Pakete und Verläufe weg
+		api.events().onWorldJoin(engine::clearRecordings);
+		api.events().onWorldLeave(engine::clearRecordings);
+		api.events().onServerJoin(server -> engine.clearRecordings());
+		api.events().onServerLeave(server -> engine.clearRecordings());
 		addMenuEntries();
 	}
 
@@ -184,8 +223,13 @@ public final class VoiceChatAddon implements HeldixAddon {
 		Set<UUID> group = on ? voice.groupMembers() : Set.of();
 		boolean test = testing();
 		engine.update(new VoiceEngine.Settings(talkMode.getAsInt() == 0, threshold.getAsDouble(), microphone.getAsInt(), micGain.getAsDouble(),
-				volume.getAsDouble(), stereo.getAsBoolean(), muted, deafened, test, noiseFilter.getAsBoolean(), tones.getAsBoolean()), where, group,
-				on && (voice.status() == VoiceChannel.Status.CONNECTED || test), voice.range());
+				volume.getAsDouble(), stereo.getAsBoolean(), muted, deafened, test, noiseFilter.getAsBoolean(), tones.getAsBoolean(),
+				volumeGuard.getAsBoolean()), where, group, on && (voice.status() == VoiceChannel.Status.CONNECTED || test), voice.range());
+		// Aufnahmen für Meldungen: nur solange aktiv; Modul aus = auch die Verläufe weg
+		if (!on) engine.clearRecordings();
+		else if (!voice.clipsActive()) engine.clearClips();
+		else engine.expireClips(now);
+		kickedByMe.values().removeIf(until -> until <= now);
 		// Namen von Sprechern und Gruppenmitgliedern, die nicht in der Nähe sind
 		for (UUID speaker : engine.speaking()) if (!names.containsKey(speaker)) api.playerName(speaker).ifPresent(name -> names.put(speaker, name));
 		for (UUID member : group) {
@@ -211,6 +255,11 @@ public final class VoiceChatAddon implements HeldixAddon {
 			if (!peers.contains(id) && !group.contains(id) && !speaking.contains(id)) continue;
 			if (isMuted(id)) {
 				if (mode == 2) api.playerMarkers().showAbove(id, "volume-off", HeldixColors.MUTED, duration);
+				continue;
+			}
+			// ab 1.3.0: vom Gastgeber bzw. Party-Leiter für alle stumm geschaltet (gelb)
+			if (voice.isSilenced(id)) {
+				if (mode == 2) api.playerMarkers().showAbove(id, "volume-off", HeldixColors.WARNING, duration);
 				continue;
 			}
 			if (speaking.contains(id)) {
@@ -324,6 +373,63 @@ public final class VoiceChatAddon implements HeldixAddon {
 		String name = nameOf(guest);
 		api.voice().removeGuest(guest);
 		api.notify("Voice-Gruppe", name + " (Gast) ist entfernt");
+	}
+
+	// ======================================================================================
+	// Moderation, Melden, Voice-Regeln (ab 1.3.0, Heldix-API 10, Heldix-Dienst 1.13.0)
+	// ======================================================================================
+
+	/** Hinweise bei Sperre, Moderation durch Gastgeber/Leiter und Server ohne Voice; Regeln-Dialog, wenn nötig */
+	private void onModeration(VoiceChannel.ModerationEvent event) {
+		switch (event.kind()) {
+			case BANNED -> {
+				api.notify("Voice Chat gesperrt", event.message());
+				String appeal = api.voice().moderation().banAppeal();
+				api.chat(event.message() + (appeal != null ? " " + appeal : ""));
+			}
+			case MUTED, UNMUTED, KICKED, UNKICKED, SERVER_OFF -> api.notify("Voice Chat", event.message());
+			// vor der ersten Verbindung bzw. bei neuer Fassung: Dialog von HeldixClient (einmal je Fassung, solange das Modul an ist)
+			case RULES_REQUIRED -> {
+				if (module.isEnabled()) showRules();
+			}
+			case CLIPS_CHANGED -> {
+				if (!api.voice().clipsActive()) engine.clearClips();
+				api.notify("Voice Chat", event.message());
+			}
+		}
+	}
+
+	/** Knopf „Voice-Regeln“ bzw. automatisch: Dialog von HeldixClient; Ablehnen = Voice bleibt aus */
+	public void showRules() {
+		api.voice().showRules(accepted -> {
+			if (!accepted && api.voice().rules().required()) {
+				api.notify("Voice Chat", "Ohne Zustimmung zu den Voice-Regeln bleibt der Voice Chat aus. Lesen: Untermenü → " + RULES);
+			}
+		});
+	}
+
+	/** Melde-Dialog von HeldixClient (Spielermenü, Knopf in der Anzeige); das Ergebnis zeigt HeldixClient selbst an */
+	public void report(UUID player) {
+		if (!module.isEnabled()) {
+			api.notify("Voice Chat", "Schalte zuerst Voice Chat ein");
+			return;
+		}
+		api.voice().openReport(player, attachments, result -> api.logger().info("Voice-Meldung: " + result));
+	}
+
+	/** Gastgeber, Operatoren und Party-Leiter: für alle stummschalten bzw. entfernen (und aufheben) */
+	public void moderate(UUID player, VoiceChannel.ModerationAction action) {
+		String name = nameOf(player);
+		if (action == VoiceChannel.ModerationAction.KICK) kickedByMe.put(player, System.currentTimeMillis() + 10 * 60_000L);
+		if (action == VoiceChannel.ModerationAction.UNKICK) kickedByMe.remove(player);
+		api.voice().moderate(player, action, message -> api.notify("Voice Chat – " + name, message));
+	}
+
+	/** Ist der Spieler gerade im Voice dabei (im Raum, in der Gruppe oder kürzlich gehört)? */
+	private boolean inVoice(UUID player) {
+		VoiceChannel voice = api.voice();
+		return voice.peers().contains(player) || voice.groupMembers().contains(player)
+				|| engine.lastHeard(player) > System.currentTimeMillis() - ClipBuffer.MAX_AGE_MS;
 	}
 
 	boolean testing() {
@@ -466,6 +572,59 @@ public final class VoiceChatAddon implements HeldixAddon {
 				return true;
 			}
 		});
+		// ab 1.3.0: Melden (Dialog von HeldixClient), für Gastgeber/Leiter: für alle stummschalten und entfernen
+		api.addPlayerMenuEntry(new PlayerMenuEntry() {
+			@Override
+			public String label(NearbyPlayer player) {
+				if (!module.isEnabled() || !player.heldixPlayer() || !api.voice().moderation().available() || !inVoice(player.uuid())) return null;
+				return REPORT;
+			}
+
+			@Override
+			public String icon(NearbyPlayer player) {
+				return "flag";
+			}
+
+			@Override
+			public void select(NearbyPlayer player) {
+				report(player.uuid());
+			}
+		});
+		api.addPlayerMenuEntry(new PlayerMenuEntry() {
+			@Override
+			public String label(NearbyPlayer player) {
+				if (!module.isEnabled() || !api.voice().rights().canModerate(player.uuid()) || !inVoice(player.uuid())) return null;
+				return api.voice().isSilenced(player.uuid()) ? UNMUTE_ALL : MUTE_ALL;
+			}
+
+			@Override
+			public String icon(NearbyPlayer player) {
+				return api.voice().isSilenced(player.uuid()) ? "mic" : "mic-off";
+			}
+
+			@Override
+			public void select(NearbyPlayer player) {
+				moderate(player.uuid(), api.voice().isSilenced(player.uuid()) ? VoiceChannel.ModerationAction.UNMUTE : VoiceChannel.ModerationAction.MUTE);
+			}
+		});
+		api.addPlayerMenuEntry(new PlayerMenuEntry() {
+			@Override
+			public String label(NearbyPlayer player) {
+				if (!module.isEnabled() || !api.voice().rights().canModerate(player.uuid())) return null;
+				if (kickedByMe.containsKey(player.uuid())) return UNKICK;
+				return inVoice(player.uuid()) ? KICK : null;
+			}
+
+			@Override
+			public String icon(NearbyPlayer player) {
+				return kickedByMe.containsKey(player.uuid()) ? "undo" : "ban";
+			}
+
+			@Override
+			public void select(NearbyPlayer player) {
+				moderate(player.uuid(), kickedByMe.containsKey(player.uuid()) ? VoiceChannel.ModerationAction.UNKICK : VoiceChannel.ModerationAction.KICK);
+			}
+		});
 	}
 
 	// ======================================================================================
@@ -523,6 +682,44 @@ public final class VoiceChatAddon implements HeldixAddon {
 		}
 	}
 
+	/** Knöpfe einer Zeile bei offenem Chat (ab 1.3.0): Melden, für alle stummschalten, entfernen; Gäste nur entfernen */
+	private List<String[]> rowButtons(Speaker speaker) {
+		List<String[]> buttons = new ArrayList<>();
+		VoiceChannel voice = api.voice();
+		if (speaker.guest()) {
+			buttons.add(new String[] {"kick:" + speaker.uuid(), "close", "Gast entfernen\n" + speaker.name() + " fliegt aus der Gruppe (mit dem Link kann er neu beitreten)"});
+			return buttons;
+		}
+		if (voice.rights().canModerate(speaker.uuid())) {
+			boolean silenced = voice.isSilenced(speaker.uuid());
+			if (kickedByMe.containsKey(speaker.uuid())) {
+				buttons.add(new String[] {"unban:" + speaker.uuid(), "undo", UNKICK + "\n" + speaker.name() + " darf gleich wieder in den Voice"});
+			} else {
+				buttons.add(new String[] {"ban:" + speaker.uuid(), "ban", KICK + "\n" + speaker.name() + " kommt 10 Minuten nicht mehr in den Voice"});
+			}
+			buttons.add(new String[] {(silenced ? "unsilence:" : "silence:") + speaker.uuid(), silenced ? "mic" : "mic-off",
+					(silenced ? UNMUTE_ALL : MUTE_ALL) + "\nGilt für alle in dieser Welt bzw. Party"});
+		}
+		if (voice.moderation().available()) {
+			buttons.add(new String[] {"report:" + speaker.uuid(), "flag", "Melden\n" + speaker.name() + " beim Team von HeldixClient melden"});
+		}
+		return buttons;
+	}
+
+	/** zweite Infozeile zur Moderation: für alle stumm, entfernt oder (bei offenem Chat) der Hinweis auf Aufnahmen; sonst null */
+	private String moderationInfo(boolean interactive) {
+		VoiceChannel voice = api.voice();
+		if (!module.isEnabled() || voice.status() != VoiceChannel.Status.CONNECTED) return null;
+		VoiceChannel.Moderation moderation = voice.moderation();
+		if (moderation.mutedBy() != null) return "Für alle stumm (von " + moderation.mutedBy() + ")";
+		if (moderation.kickedUntil() > System.currentTimeMillis()) {
+			return "Aus dem Voice entfernt bis " + java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+					.format(java.time.Instant.ofEpochMilli(moderation.kickedUntil()).atZone(java.time.ZoneId.systemDefault()));
+		}
+		if (interactive && voice.clipsActive()) return CLIPS_HINT;
+		return null;
+	}
+
 	private final class Hud implements HudRenderer {
 		private static final int BADGE = 14;
 		private static final int FACE = 12;
@@ -537,14 +734,17 @@ public final class VoiceChatAddon implements HeldixAddon {
 			boolean preview = canvas.isPreview();
 			Head head = head(style);
 			boolean buttons = canvas.interactive() && module.isEnabled();
-			// bei offenem Chat: alle Mitglieder der Gruppe (auch Gäste, mit Knopf zum Entfernen), sonst nur wer gerade spricht
-			boolean memberList = buttons && api.voice().group() != null && api.voice().status() == VoiceChannel.Status.CONNECTED;
+			// bei offenem Chat: wer gerade spricht, wer kürzlich zu hören war, und alle Mitglieder der Gruppe (auch Gäste) – mit
+			// Knöpfen (Melden, für Gastgeber/Leiter Stummschalten und Entfernen, Gäste entfernen); sonst nur wer gerade spricht
+			boolean memberList = buttons && api.voice().status() == VoiceChannel.Status.CONNECTED;
 			List<Speaker> speakers = memberList ? members() : speakers(preview);
 			boolean linkButton = buttons && api.voice().group() != null && api.voice().guestsAvailable();
 			String info = info(preview);
 			int infoColor = infoColor();
+			String modInfo = moderationInfo(buttons);
+			int modColor = CLIPS_HINT.equals(modInfo) ? HeldixColors.FAINT : HeldixColors.WARNING;
 			boolean active = !speakers.isEmpty() || engine.transmitting() || testing() || muted || deafened || engine.problem() != null
-					|| api.voice().groupProblem() != null;
+					|| api.voice().groupProblem() != null || (modInfo != null && !CLIPS_HINT.equals(modInfo));
 			if (hudOnlyActive.getAsBoolean() && !active && !preview && !canvas.interactive()) return;
 
 			if (hudLayout.getAsInt() == 1) {
@@ -555,14 +755,19 @@ public final class VoiceChatAddon implements HeldixAddon {
 			int width = pad * 2 + BADGE + 5 + canvas.textWidth(head.label(), text) + (head.meter() ? 22 : 0) + (buttons ? 30 : 0)
 					+ (linkButton ? 15 : 0);
 			if (info != null) width = Math.max(width, pad * 2 + BADGE + 5 + canvas.textWidth(info, text));
+			if (modInfo != null) width = Math.max(width, pad * 2 + BADGE + 5 + canvas.textWidth(modInfo, text));
 			int shown = Math.min(speakers.size(), memberList ? 8 : 5);
+			List<List<String[]>> actions = new ArrayList<>();
 			for (int i = 0; i < shown; i++) {
 				Speaker speaker = speakers.get(i);
+				List<String[]> rowActions = buttons ? rowButtons(speaker) : List.of();
+				actions.add(rowActions);
+				boolean silenced = api.voice().isSilenced(speaker.uuid());
 				width = Math.max(width, pad * 2 + faces + canvas.textWidth(speaker.name(), text) + 6 + 14 + (speaker.group() ? 12 : 0)
-						+ (speaker.tag() != null ? canvas.textWidth(speaker.tag(), text) + 4 : 0) + (buttons && speaker.guest() ? 15 : 0));
+						+ (speaker.tag() != null ? canvas.textWidth(speaker.tag(), text) + 4 : 0) + (silenced ? 13 : 0) + rowActions.size() * 15);
 			}
 			String more = speakers.size() > shown ? "+" + (speakers.size() - shown) + " weitere" : null;
-			int rows = 1 + (info != null ? 1 : 0) + shown + (more != null ? 1 : 0);
+			int rows = 1 + (info != null ? 1 : 0) + (modInfo != null ? 1 : 0) + shown + (more != null ? 1 : 0);
 			int height = pad * 2 + rows * row - 4 + (shown > 0 ? 3 : 0);
 			canvas.panel(0, 0, width, height);
 
@@ -590,6 +795,10 @@ public final class VoiceChatAddon implements HeldixAddon {
 				canvas.text(info, pad + BADGE + 5, y + (row - 4 - lineHeight) / 2f, infoColor, text, style.shadow());
 				y += row;
 			}
+			if (modInfo != null) {
+				canvas.text(modInfo, pad + BADGE + 5, y + (row - 4 - lineHeight) / 2f, modColor, text, style.shadow());
+				y += row;
+			}
 			if (shown > 0) {
 				canvas.rect(pad, y - 2, width - pad * 2, 1, 0x22FFFFFF);
 				y += 3;
@@ -611,11 +820,15 @@ public final class VoiceChatAddon implements HeldixAddon {
 				}
 				if (speaker.group()) {
 					canvas.icon("friends", (int) x, y + (row - 4 - 9) / 2, 9, GROUP);
+					x += 12;
 				}
+				// vom Gastgeber bzw. Party-Leiter für alle stumm geschaltet
+				if (api.voice().isSilenced(speaker.uuid())) canvas.icon("volume-off", (int) x, y + (row - 4 - 9) / 2, 9, HeldixColors.WARNING);
 				float barsX = width - pad - 11;
-				if (buttons && speaker.guest()) {
-					canvas.iconButton("kick:" + speaker.uuid(), "close", barsX, y + (row - 4 - 11) / 2f, 11, STATUS_RED,
-							"Gast entfernen\n" + speaker.name() + " fliegt aus der Gruppe (mit dem Link kann er neu beitreten)");
+				for (String[] action : actions.get(i)) {
+					int iconColor = action[0].startsWith("kick:") || action[0].startsWith("ban:") ? STATUS_RED
+							: action[0].startsWith("report:") ? HeldixColors.MUTED : style.textColor();
+					canvas.iconButton(action[0], action[1], barsX, y + (row - 4 - 11) / 2f, 11, iconColor, action[2]);
 					barsX -= 15;
 				}
 				if (speaker.speaking()) bars(canvas, barsX, y + (row - 4) / 2f, speaker.level(), color);
@@ -631,11 +844,25 @@ public final class VoiceChatAddon implements HeldixAddon {
 				case "deafen" -> setDeafened(!deafened);
 				case "browser-link" -> copyBrowserLink();
 				default -> {
-					if (!click.hotspot().startsWith("kick:")) return false;
+					String spot = click.hotspot();
+					int colon = spot.indexOf(':');
+					if (colon < 0) return false;
+					UUID target;
 					try {
-						removeGuest(UUID.fromString(click.hotspot().substring(5)));
+						target = UUID.fromString(spot.substring(colon + 1));
 					} catch (IllegalArgumentException e) {
 						return false;
+					}
+					switch (spot.substring(0, colon)) {
+						case "kick" -> removeGuest(target);
+						case "report" -> report(target);
+						case "silence" -> moderate(target, VoiceChannel.ModerationAction.MUTE);
+						case "unsilence" -> moderate(target, VoiceChannel.ModerationAction.UNMUTE);
+						case "ban" -> moderate(target, VoiceChannel.ModerationAction.KICK);
+						case "unban" -> moderate(target, VoiceChannel.ModerationAction.UNKICK);
+						default -> {
+							return false;
+						}
 					}
 				}
 			}
@@ -703,6 +930,11 @@ public final class VoiceChatAddon implements HeldixAddon {
 			if (testing()) return new Head("headphones", "Test: du hörst dich selbst", style.accent(), true);
 			if (deafened) return new Head("headphones-off", "Ton aus", STATUS_RED, false);
 			if (muted) return new Head("mic-off", "Mikrofon stumm", STATUS_RED, false);
+			// ab 1.3.0: Sperre durch das Team, Voice-Regeln offen, Server ohne Voice
+			VoiceChannel.Moderation moderation = api.voice().moderation();
+			if (moderation.banned()) return new Head("ban", api.voice().statusText(), STATUS_RED, false);
+			if (moderation.rulesRequired() && status != VoiceChannel.Status.CONNECTED) return new Head("shield", api.voice().statusText(), HeldixColors.WARNING, false);
+			if (moderation.serverOff()) return new Head("volume-off", "Voice ist auf diesem Server aus", HeldixColors.MUTED, false);
 			if (status != VoiceChannel.Status.CONNECTED) return new Head("headphones", api.voice().statusText(), HeldixColors.MUTED, false);
 			if (engine.problem() != null) return new Head("warning", engine.problem(), HeldixColors.WARNING, false);
 			if (engine.transmitting()) return new Head("mic", "Du sprichst", SPEAKING, true);
@@ -745,13 +977,22 @@ public final class VoiceChatAddon implements HeldixAddon {
 			return list;
 		}
 
-		/** bei offenem Chat: wer gerade spricht und alle Mitglieder der Gruppe (Sprecher zuerst, dann nach Namen) */
+		/**
+		 * bei offenem Chat: wer gerade spricht, wer in der letzten Minute zu hören war (zum Melden) und alle Mitglieder der Gruppe
+		 * (Sprecher zuerst, dann nach Namen)
+		 */
 		private List<Speaker> members() {
 			List<Speaker> list = new ArrayList<>(speakers(false));
 			Set<UUID> listed = new HashSet<>();
 			for (Speaker speaker : list) listed.add(speaker.uuid());
-			for (UUID member : api.voice().groupMembers()) {
+			Set<UUID> group = api.voice().groupMembers();
+			for (UUID member : group) {
 				if (listed.add(member)) list.add(new Speaker(member, nameOf(member), 0f, true, tagOf(member), false));
+			}
+			if (!deafened) {
+				for (UUID recent : engine.heardSince(System.currentTimeMillis() - RECENT_MS)) {
+					if (listed.add(recent)) list.add(new Speaker(recent, nameOf(recent), 0f, group.contains(recent), tagOf(recent), false));
+				}
 			}
 			list.sort((a, b) -> a.speaking() != b.speaking() ? (a.speaking() ? -1 : 1) : a.name().compareToIgnoreCase(b.name()));
 			return list;
@@ -796,5 +1037,26 @@ public final class VoiceChatAddon implements HeldixAddon {
 
 	public void toggleDeafen() {
 		setDeafened(!deafened);
+	}
+
+	/** Lautstärke-Schutz an Testsignalen prüfen: null = in Ordnung, sonst die Abweichung */
+	public String guardSelfTest() {
+		return VolumeGuard.verify();
+	}
+
+	/** gepufferte Zeit (ms) eines Sprechers für Meldungen */
+	public long bufferedMillisOf(UUID player) {
+		return engine == null ? 0 : engine.bufferedMillis(player);
+	}
+
+	/** Sprecher im Ringpuffer */
+	public int clipSpeakers() {
+		return engine == null ? 0 : engine.clipSpeakers();
+	}
+
+	/** Sekunden im Lautstärke-Verlauf eines Sprechers */
+	public int levelSecondsOf(UUID player) {
+		VoiceChannel.ReportData data = engine == null ? null : engine.report(player, false);
+		return data == null || data.rms() == null ? 0 : data.rms().length;
 	}
 }

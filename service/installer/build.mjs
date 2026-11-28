@@ -6,7 +6,10 @@
 // öffentlichen Update-Schlüssel aus launcher/src/main/update-public-key.ts als update-public-key.pem dazulegen,
 // alles als tar.gz packen und Base64-kodiert in installer/install.sh einsetzen; dazu die App-ID des Launchers
 // (launcher/src/main/config.ts) als Standard für --minecraft-login. Die fertige Datei braucht auf dem Server nur bash und curl;
-// Node.js und Caddy lädt sie selbst (mit Prüfsumme).
+// Node.js und Caddy lädt sie selbst (mit Prüfsumme). Im Paket steckt auch der Welten-Wächter (dist/agent/, dauerhafte
+// Welten mit --hosting).
+//
+//   node installer/build.mjs --out <ordner>   zum Ausprobieren in einen anderen Ordner statt service/release/
 import { execSync } from 'node:child_process';
 import { createHash, createPublicKey } from 'node:crypto';
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -17,7 +20,9 @@ import zlib from 'node:zlib';
 import { buildWebsite } from '../../website/build.mjs';
 
 const serviceDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const releaseDir = path.join(serviceDir, 'release');
+const outIndex = process.argv.indexOf('--out');
+if (outIndex !== -1 && !process.argv[outIndex + 1]) throw new Error('--out braucht einen Ordner');
+const releaseDir = outIndex === -1 ? path.join(serviceDir, 'release') : path.resolve(process.argv[outIndex + 1]);
 const output = path.join(releaseDir, 'heldix-dienst-install.sh');
 const pkg = JSON.parse(readFileSync(path.join(serviceDir, 'package.json'), 'utf8'));
 const keySource = path.join(serviceDir, '..', 'launcher', 'src', 'main', 'update-public-key.ts');
@@ -95,7 +100,15 @@ try {
   const updateKey = readUpdateKey();
   if (updateKey) entries.push({ name: 'update-public-key.pem', data: Buffer.from(updateKey, 'utf8') });
   else console.warn('Hinweis: kein UPDATE_PUBLIC_KEY im Launcher – Updates lassen sich im Team-Bereich nicht veröffentlichen.');
-  const required = ['dist/server.js', 'dist/app.js', 'node_modules/ws/package.json', 'website/index.html', 'website/datenschutz.html'];
+  const required = [
+    'dist/server.js',
+    'dist/app.js',
+    'dist/agent/main.js',
+    'dist/hosting/agent-runner.js',
+    'node_modules/ws/package.json',
+    'website/index.html',
+    'website/datenschutz.html',
+  ];
   for (const name of required) {
     if (!entries.some((e) => e.name === name)) throw new Error(`Im Paket fehlt ${name}`);
   }

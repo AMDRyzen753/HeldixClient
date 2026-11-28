@@ -21,7 +21,7 @@ public final class Tips {
 			() -> new Tip("eye", "Halte " + key(HeldixClient.freelookKey) + " für Freelook: frei umschauen, ohne die Laufrichtung zu ändern."),
 			() -> new Tip("pin", "Mit " + key(HeldixClient.waypointKey) + " setzt du einen Wegpunkt – er bleibt auch durch Wände sichtbar."),
 			() -> new Tip("pin", "Beim Tod merkt sich HeldixClient einen Todespunkt als Wegpunkt."),
-			() -> new Tip("chat", "Strg+Klick auf eine Chat-Nachricht kopiert sie (Modul Chat)."),
+			() -> new Tip("chat", Keys.click() + " auf eine Chat-Nachricht kopiert sie (Modul Chat)."),
 			() -> new Tip("sprint", "Dauersprint: Du sprintest ohne Taste, die Sprinttaste schaltet ihn an und aus."),
 			() -> new Tip("friends", "Unter Freunde siehst du, wer online ist und auf welchem Server."),
 			() -> new Tip("cape", "Andere HeldixClient-Spieler sehen dein Heldix-Cape."),

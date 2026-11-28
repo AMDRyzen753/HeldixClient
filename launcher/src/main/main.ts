@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { accessSync, constants as fsConstants, readFileSync, rmSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -69,6 +69,8 @@ import { DEFAULT_PRESENCE_OPTIONS, PresenceTracker, buildActivity, parseStatusLi
 import { PublicHeads } from './core/discordheads';
 import { WorldClient, findWorldLink, isWorldMissing, mapWorldInvite, normalizeWorldAddress, parsePastedWorld, parseWorldLink, planWorldJoin, worldCode, worldCodeOf, worldWebUrl, WORLD_MISSING, type WorldEvent } from './core/worlds';
 import { NOTIFICATION_FILE, NotificationStore, type NewNotification } from './core/notifications';
+import { HostingClient, hostedAsFriendWorld, type HostingEvent } from './core/hosting';
+import { DiscoverClient, discoverAsFriendWorld } from './core/discover';
 import { DOWNLOAD_INVITE_FILE, INVITE_POLL_MS, INVITE_PROTOCOL, InviteService, acceptNotes, findInviteLink, inviteCode, inviteServer, isMissing, parseInviteLink, parsePastedInvite, pickInviteInstance, readDownloadInvite, finishDownloadInvite, rewardName, type PublicInvite } from './core/invites';
 import { listQuickPlay, validateQuickPlay } from './core/quickplay';
 import { serverStatus } from './core/serverstatus';
@@ -84,6 +86,21 @@ import { SocialClient, cardFallbackText, checkCard, joinableServer, pickJoinInst
 import { PartyClient, followAction, locationText, type PartyEvent } from './core/party';
 import { allowTestTextureOrigin, skinFor } from './core/skins';
 import { Updater, compareVersions, type UpdateState } from './core/updater';
+import { installMacUpdate, macAppBundle, macBlockText, macSelfUpdateBlock, parseMacInstallResult, type MacSelfUpdateBlock } from './core/mac-update';
+import {
+  afterGameAction,
+  attentionCount,
+  badgeDescription,
+  badgePng,
+  badgeText,
+  closeAction,
+  dockBadgeText,
+  loginItemSettings,
+  recentInstances,
+  shouldFlash,
+  startedHidden,
+  trayHint,
+} from './core/background';
 import {
   GAME_MARKER_FILE,
   STARTUP_CHECK_TIMEOUT_MS,
@@ -168,6 +185,7 @@ function setGameState(state: GameState): void {
   gameState = state;
   send('game:state', state);
   void updateTray();
+  refreshDockMenu();
 }
 
 /** Versionsverlauf des Dienstes (GET /v1/launcher/versions); null = nicht erreichbar */
@@ -217,6 +235,48 @@ function gameRunning(): boolean {
 
 // ---------- Automatische Updates (über die Schnittstelle des Heldix-Dienstes) ----------
 
+/**
+ * macOS (ab 0.14.0): ersetzt sich die App selbst? Nicht aus dem DMG, nicht aus einem von macOS verlegten Ordner, nicht
+ * ohne Schreibrechte, nicht in der Entwicklung und nicht, wenn macOS das letzte Ersetzen abgelehnt hat (core/mac-update.ts).
+ */
+const macAppPath = process.platform === 'darwin' ? macAppBundle(process.execPath) : null;
+const macResultFile = path.join(paths.root, 'update-mac-result.txt');
+const macUpdateBlock: MacSelfUpdateBlock | null = process.platform === 'darwin' ? macSelfUpdateBlock({
+  packaged: app.isPackaged,
+  appPath: macAppPath,
+  writable: macAppPath !== null && macWritableSync(macAppPath),
+  lastFailed: lastMacInstallFailed(),
+}) : null;
+
+function macWritableSync(appPath: string): boolean {
+  try {
+    accessSync(appPath, fsConstants.W_OK);
+    accessSync(path.dirname(appPath), fsConstants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Hat das Skript zuletzt eine neuere Version nicht einsetzen dürfen? Dann bis zur Installation von Hand nur der Hinweis. */
+function lastMacInstallFailed(): boolean {
+  try {
+    const result = parseMacInstallResult(readFileSync(macResultFile, 'utf8'));
+    if (!result) return false;
+    if (result.ok || compareVersions(app.getVersion(), result.version) >= 0) {
+      rmSync(macResultFile, { force: true });
+      return false;
+    }
+    console.log(`[Update] Das letzte Update auf ${result.version} ließ sich nicht einsetzen (${result.reason ?? 'unbekannt'}) – nur noch Hinweis mit Download`);
+    return result.reason !== 'wartet';
+  } catch {
+    return false;
+  }
+}
+
+/** Ersetzt sich die App selbst (Windows immer, Mac ohne Hindernis)? Sonst nur Hinweis mit der Download-Seite. */
+const selfUpdate = process.platform === 'win32' || (process.platform === 'darwin' && macUpdateBlock === null);
+
 // In der Entwicklung nur mit HELDIX_UPDATE_URL (zum Testen); die fertige App fragt den Heldix-Dienst.
 const updater = new Updater({
   baseUrl: process.env.HELDIX_UPDATE_URL ?? (app.isPackaged ? HELDIX_SERVICE_URL : ''),
@@ -224,8 +284,19 @@ const updater = new Updater({
   dir: path.join(paths.root, 'updates'),
   publicKey: UPDATE_PUBLIC_KEY,
   log: (line) => console.log(line),
-  // Der Installer im Update ist für Windows; auf dem Mac nur melden, laden geht über die Webseite
-  downloadInstaller: process.platform === 'win32',
+  // Mac: eigenes Manifest mit einer ZIP je Prozessor; Linux: nur melden, laden über die Webseite
+  platform: process.platform === 'darwin' ? 'mac' : 'win',
+  manualReason: selfUpdate ? null : process.platform === 'darwin' ? macBlockText(macUpdateBlock ?? 'not-bundle') : 'Auf diesem System lädst du neue Versionen über heldixclient.com.',
+  macInstall: (zip, release, restart) => installMacUpdate({
+    zip,
+    release,
+    appPath: macAppPath!,
+    restart,
+    pid: process.pid,
+    logFile: path.join(paths.root, 'update-mac.log'),
+    resultFile: macResultFile,
+    log: (line) => console.log(`[Update] ${line}`),
+  }),
 });
 /** Einstellung "Updates automatisch" (Start, Zeitgeber, Installieren beim Beenden) */
 let autoUpdate = true;
@@ -330,6 +401,7 @@ async function updateBeforeStart(): Promise<{ proceed: boolean; retrySoon: boole
   const state = await updater.check({ timeoutMs: STARTUP_CHECK_TIMEOUT_MS, download: false });
   const decision = decideStartupUpdate({
     platform: process.platform,
+    selfUpdate,
     autoUpdate,
     state,
     gameRunning: anyGameRunning(),
@@ -363,11 +435,19 @@ async function updateBeforeStart(): Promise<{ proceed: boolean; retrySoon: boole
   return { proceed: true, retrySoon: false };
 }
 
-/** Ohne Startfenster (Einstellung aus, macOS): gleich im Hintergrund prüfen, eine neue Version nur melden */
+/**
+ * Ohne Startfenster (Einstellung aus, kein Selbst-Update, unsichtbarer Start): gleich im Hintergrund prüfen. Eine neue
+ * Version nur melden – unsichtbar gestartet mit „Updates automatisch“ im Hintergrund laden (installiert wird dann mit
+ * „Jetzt neu starten“ oder beim Beenden).
+ */
 async function updateNoticeAtStart(): Promise<void> {
   const state = await updater.check({ download: false });
-  const decision = decideStartupUpdate({ platform: process.platform, autoUpdate, state, gameRunning: anyGameRunning(), attempt: null, now: Date.now() });
+  const decision = decideStartupUpdate({ platform: process.platform, selfUpdate, autoUpdate, state, gameRunning: anyGameRunning(), attempt: null, now: Date.now() });
   logStartupDecision(decision, state);
+  if (decision.action === 'install' || (decision.action === 'start' && (decision.reason === 'game' || decision.reason === 'retry-later'))) {
+    void updater.download();
+    return;
+  }
   if (decision.action !== 'notify') return;
   startupNotice = state;
   send('update:notice', null);
@@ -652,14 +732,18 @@ function toAccountInfo(account: StoredAccount): AccountInfo {
 
 function focusWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
-    // während der Prüfung beim Start noch kein Hauptfenster (es kommt danach; Links holt es beim Laden ab)
-    if (windowAllowed) createWindow();
-    return;
+    // während der Prüfung beim Start noch kein Hauptfenster (es kommt danach; Links holt es beim Laden ab). Unsichtbar
+    // gestartet bzw. auf dem Mac geschlossen: jetzt entsteht es (es zeigt sich, sobald es geladen ist).
+    if (!windowAllowed) return;
+    createWindow();
+  } else {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
   }
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
   closedToTray = false;
+  // das Symbol im Infobereich bleibt nur, solange ein Spiel läuft
+  if (!gameRunning()) destroyTray();
 }
 
 /** Frühere Installation „HeldixClient“ im offiziellen Minecraft Launcher entfernen (Brücke gibt es nicht mehr) */
@@ -694,10 +778,16 @@ const social = new SocialClient<StoredAccount>({
     // bei Freunden tut sich etwas (online, Welt geöffnet …): offene Welten gleich nachsehen
     worldsSoon();
     void updateTray();
+    // Zähler in Taskleiste bzw. Dock: ungelesene Nachrichten + offene Anfragen
+    updateAttention();
   },
   wantNotices: async () => (await store.getSettings()).socialNotifications && BrowserWindow.getFocusedWindow() === null && !heldixGameRunning(),
   onNotice: showSocialNotice,
-  onHistory: (notice) => void rememberSocialNotice(notice),
+  onHistory: (notice) => {
+    void rememberSocialNotice(notice);
+    // neue Nachricht, Fenster sichtbar, aber nicht im Vordergrund: Taskleiste blinkt kurz
+    flashForNotice(notice);
+  },
   // Echtzeit-Begleiter (/v1/ws?client=launcher): zählt beim Dienst nicht als „online im Spiel“
   onChatEvent: (event) => {
     broadcast('social:chat', event);
@@ -708,6 +798,8 @@ const social = new SocialClient<StoredAccount>({
     void party.refresh().catch(() => undefined);
     worldsSoon();
     invites.pollNow();
+    // dauerhafte Welten (Dienst 1.13.0): Stand der eigenen und betreuten Welten
+    void hosting.refresh().catch(() => undefined);
   },
   skinCacheDir: path.join(paths.cache, 'player-skins'),
   log: (line) => console.log(`[Launcher] ${line}`),
@@ -717,6 +809,7 @@ const social = new SocialClient<StoredAccount>({
 function handleRealtime(message: Record<string, unknown>): void {
   if (party.handle(message)) return;
   if (worlds.handleRealtime(message)) return;
+  if (hosting.handleRealtime(message)) return;
   switch (message.type) {
     case 'world-invite':
       showWorldInvite(message.world);
@@ -739,6 +832,7 @@ function accountsChanged(): void {
   // Discord-Knöpfe und Kopf gehören zum Konto, die Benachrichtigungen auch
   void refreshPresencePlayer();
   worldsSoon();
+  void hosting.refresh().catch(() => undefined);
   void pushNotifications();
 }
 
@@ -1136,8 +1230,79 @@ const worlds = new WorldClient({
     void updateTray();
   },
   onEvent: showWorldEvent,
+  // dauerhafte Welten (Dienst 1.13.0): als Operator betreute und die von Freunden aus Entdecken, mit Zustand
+  extraWorlds: () => {
+    const friends = new Set(social.current.status === 'online' ? social.current.friends.map((f) => f.uuid) : []);
+    return [...hosting.operatedWorlds().map(hostedAsFriendWorld), ...discover.persistentOf(friends).map(discoverAsFriendWorld)];
+  },
   log: (line) => console.log(`[Launcher] ${line}`),
 });
+
+// ---------- Dauerhafte Welten und Entdecken (Heldix-Dienst ab 1.13.0, siehe core/hosting.ts, core/discover.ts) ----------
+
+const hosting = new HostingClient({
+  auth: HELDIX_SERVICE_URL ? social : null,
+  enabled: async () => (await store.getSettings()).social,
+  onChange: () => worlds.extrasChanged(),
+  onEvent: (event) => void showHostingEvent(event),
+  log: (line) => console.log(`[Launcher] ${line}`),
+});
+
+const discover = new DiscoverClient({
+  serviceUrl: HELDIX_SERVICE_URL,
+  onUpdate: (popular) => {
+    broadcast('discover:update', popular);
+    worlds.extrasChanged();
+  },
+  log: (line) => console.log(`[Launcher] ${line}`),
+});
+
+/**
+ * Webseite angemeldet öffnen (Einmal-Link), auf Wunsch mit einem Bereich der Konto-Seite. „welten“ (Meine Welten) kennt
+ * der Dienst beim Einmal-Link nicht; die Konto-Seite liest das Ziel aber aus dem Fragment – deshalb hängt der Launcher es
+ * selbst an (#code=…&ziel=welten).
+ */
+async function openWebAccount(rawTarget?: unknown): Promise<void> {
+  const targets = ['profil', 'freunde', 'nachrichten', 'privatsphaere', 'daten', 'support', 'team'];
+  const fragmentTargets = ['welten'];
+  const target = typeof rawTarget === 'string' && targets.includes(rawTarget) ? rawTarget : undefined;
+  const fragment = typeof rawTarget === 'string' && fragmentTargets.includes(rawTarget) ? rawTarget : undefined;
+  const account = await store.getActiveAccount();
+  if (!account) throw new Error('Bitte zuerst ein Konto hinzufügen.');
+  // Offline-Konten haben keine Mojang-Anmeldung; nur zum Testen gegen einen lokalen Dienst (HELDIX_WEB_LOGIN_DEV=1)
+  const devAuth = process.env.HELDIX_WEB_LOGIN_DEV === '1';
+  if (account.type === 'offline' && !devAuth) throw new Error('Für die Webseite brauchst du ein Microsoft-Konto.');
+  const session = await sessionFor(account);
+  let url = await webLoginUrl(HELDIX_SERVICE_URL, session, devAuth, target, { sessionServer: MOJANG_TEST_URL ?? undefined });
+  if (fragment && url.includes('#code=') && !url.includes('ziel=')) url = `${url}&ziel=${fragment}`;
+  await shell.openExternal(url);
+}
+
+/** Glocke (und im Hintergrund eine Benachrichtigung): freigeschaltet, Fehler der eigenen Welt, Anklopfen ohne Spiel */
+async function showHostingEvent(event: HostingEvent): Promise<void> {
+  const openWeb = () => void openWebAccount('welten').catch((error) => launcherLog(`Webseite nicht geöffnet: ${error instanceof Error ? error.message : String(error)}`, 'WARN'));
+  if (event.kind === 'granted') {
+    const title = 'Du kannst jetzt dauerhafte Welten anlegen';
+    const body = 'Deine Welt läuft dann auf dem Heldix-Server, auch wenn du offline bist – im Spiel unter Heldix-Welten → „Dauerhaft online stellen“.';
+    await remember({ kind: 'hosting-granted', title, body, target: { view: 'hosting' }, key: 'hosting-granted', once: true }, true);
+    // gesehen: der Dienst schickt den Hinweis dann nicht bei jeder Verbindung erneut
+    void social.authed('/v1/plus/seen', { method: 'POST' }, { quiet: true }).catch(() => undefined);
+    if (!BrowserWindow.getFocusedWindow()) void systemNotice(title, body, openWeb);
+    return;
+  }
+  if (event.kind === 'problem') {
+    const title = `„${event.world.name}“ hat ein Problem`;
+    await remember({ kind: 'hosting-problem', title, body: `${event.error} Klicken: auf der Webseite ansehen.`, target: { view: 'hosting' }, key: `hosting-problem:${event.world.id}` }, true);
+    if (!BrowserWindow.getFocusedWindow()) void systemNotice(title, event.error, openWeb);
+    return;
+  }
+  // Anklopfen: im laufenden Spiel zeigt die Mod die Einblendung mit den Tasten
+  if (heldixGameRunning()) return;
+  const title = `${event.name} möchte in „${event.world.name}“`;
+  const body = 'Klicken: auf der Webseite erlauben oder ablehnen (Konto → Meine Welten).';
+  await remember({ kind: 'hosting-knock', title, body, target: { view: 'hosting' }, key: `hosting-knock:${event.world.id}:${event.name.toLowerCase()}` }, true);
+  if (!BrowserWindow.getFocusedWindow()) void systemNotice(title, body, openWeb);
+}
 
 /** Offene Welten bald neu laden (mehrere Anlässe kurz hintereinander = eine Abfrage) */
 let worldsTimer: NodeJS.Timeout | null = null;
@@ -1299,22 +1464,30 @@ function rememberInviteEvent(event: InviteEvent): Promise<void> {
   return remember({ kind: 'invite-confirmed', title: event.count > 1 ? `${event.count} Einladungen bestätigt` : 'Einladung bestätigt', body: 'Ein eingeladener Freund hat 30 Minuten mit HeldixClient gespielt.', target: { view: 'invites' } }, true);
 }
 
-// ---------- Infobereich (Tray): Launcher läuft im Hintergrund weiter, solange ein Spiel läuft ----------
+// ---------- Im Hintergrund: Infobereich (Tray), Taskleiste und Dock (Entscheidungen in core/background.ts) ----------
+//
+// Einstellung „Im Hintergrund bereit für Nachrichten“ (closeToTray, Standard an): Schließen blendet das Fenster aus, der
+// Launcher läuft im Infobereich weiter – auch ohne Spiel –, damit Nachrichten, Anfragen, Party- und Welt-Einladungen als
+// Windows-Benachrichtigung ankommen. Unsichtbar gestartet (Autostart mit --hidden) wartet er genauso dort. macOS: ohne
+// Spiel bleibt HeldixClient wie jede Mac-App im Dock; während eines Spiels gibt es zusätzlich das Symbol in der Menüleiste.
 
 let tray: Tray | null = null;
-/** Fenster wurde während des Spiels geschlossen und wartet im Infobereich */
+/** Fenster ist ausgeblendet und wartet im Infobereich (geschlossen oder unsichtbar gestartet) */
 let closedToTray = false;
-/** Einstellung „Beim Schließen in den Infobereich“ */
+/** Einstellung „Im Hintergrund bereit für Nachrichten“ */
 let closeToTraySetting = true;
 let appQuitting = false;
+/** Hinweis „läuft weiter“ schon gezeigt (Windows: dauerhaft in den Einstellungen, Mac: in dieser Sitzung) */
 let trayHintShown = false;
+/** unsichtbar gestartet (Windows-Autostart mit --hidden, Mac „Bei der Anmeldung öffnen“): kein Fenster bis zum Klick */
+let launchedHidden = false;
 
 function trayImage(): Electron.NativeImage {
   // tray.png (16 px) und tray@2x.png (32 px) liegen neben der Oberfläche (scripts/render-discord-art.mjs)
   return nativeImage.createFromPath(path.join(__dirname, '..', 'renderer', 'tray.png'));
 }
 
-/** Symbol im Infobereich, solange ein Spiel läuft (auch bei „Launcher beim Spielstart ausblenden“) */
+/** Symbol im Infobereich: solange ein Spiel läuft und solange das Fenster im Hintergrund wartet */
 function ensureTray(): void {
   if (tray) return;
   try {
@@ -1345,7 +1518,17 @@ function friendActivity(friend: { activity: string | null; server: string | null
   }
 }
 
-/** Menü im Infobereich: Spiel, Freunde online, Benachrichtigungen, Öffnen, Beenden */
+/** „Nicht stören“ aus dem Infobereich umschalten (gilt beim Dienst, also auch im Spiel und auf der Webseite) */
+async function toggleDoNotDisturb(): Promise<void> {
+  try {
+    await social.setStatus({ dnd: !social.doNotDisturb });
+  } catch (error) {
+    console.warn('[Launcher] „Nicht stören“ ließ sich nicht umschalten:', error instanceof Error ? error.message : error);
+  }
+  void updateTray();
+}
+
+/** Menü im Infobereich: Öffnen, Freunde (online), Benachrichtigungen, Nicht stören, Beenden */
 async function updateTray(list?: NotificationList): Promise<void> {
   if (!tray) return;
   const current = list ?? (await notificationList().catch((): NotificationList => ({ items: [], unread: 0 })));
@@ -1372,17 +1555,20 @@ async function updateTray(list?: NotificationList): Promise<void> {
     click: () => void activeAccountId().then((account) => notificationStore.markAllRead(account)),
   }, { label: 'Alle anzeigen', click: () => sendWhenReady('notifications:open', null) });
   const playing = gameState.state === 'running' ? gameState.label : gameState.state === 'preparing' ? 'Minecraft wird vorbereitet' : null;
+  const waiting = attentionCount(overview);
   const template: MenuItemConstructorOptions[] = [
     { label: label(playing ? `${playing} läuft` : LAUNCHER_NAME), enabled: false },
     { type: 'separator' },
-    { label: online.length ? `Freunde online (${online.length})` : 'Freunde online', submenu: friendItems },
-    { label: current.unread ? `Benachrichtigungen (${current.unread} neu)` : 'Benachrichtigungen', submenu: noteItems },
-    { type: 'separator' },
     { label: `${LAUNCHER_NAME} öffnen`, click: () => focusWindow() },
+    { label: online.length ? `Freunde (${online.length} online)` : 'Freunde', submenu: friendItems },
+    { label: current.unread ? `Benachrichtigungen (${current.unread} neu)` : 'Benachrichtigungen', submenu: noteItems },
+    { type: 'checkbox', label: 'Nicht stören', checked: social.doNotDisturb, enabled: overview.status === 'online', click: () => void toggleDoNotDisturb() },
+    { type: 'separator' },
     { label: 'Beenden', click: () => void quitFromTray() },
   ];
   tray.setContextMenu(Menu.buildFromTemplate(template));
-  tray.setToolTip(playing ? `${LAUNCHER_NAME} – ${playing} läuft` : LAUNCHER_NAME);
+  const extra = playing ? ` – ${playing} läuft` : waiting ? ` – ${badgeDescription(overview)}` : '';
+  tray.setToolTip(`${LAUNCHER_NAME}${extra}`.slice(0, 127));
 }
 
 async function quitFromTray(): Promise<void> {
@@ -1401,42 +1587,186 @@ async function quitFromTray(): Promise<void> {
   app.quit();
 }
 
-/** Fenster schließen, während ein Spiel läuft: in den Infobereich statt beenden (Einstellung) */
-function closeIntoTray(event: Electron.Event): void {
-  if (appQuitting || !closeToTraySetting || !gameRunning() || !mainWindow) return;
-  event.preventDefault();
-  mainWindow.hide();
+/** Einmaliger Hinweis beim ersten Schließen in den Infobereich (Windows: einmal überhaupt, Mac: einmal je Sitzung) */
+async function showTrayHint(): Promise<void> {
+  if (trayHintShown) return;
+  trayHintShown = true;
+  if (process.platform !== 'darwin') {
+    const settings = await store.getSettings().catch(() => null);
+    if (!settings || settings.trayHintSeen) return;
+    await store.saveSettings({ trayHintSeen: true }).catch(() => undefined);
+  }
+  if (!Notification.isSupported()) return;
+  const text = trayHint(process.platform, LAUNCHER_NAME);
+  const hint = new Notification({ title: text.title, body: text.body, silent: true });
+  notifications.add(hint);
+  hint.on('click', () => {
+    notifications.delete(hint);
+    focusWindow();
+  });
+  hint.on('close', () => notifications.delete(hint));
+  hint.show();
+}
+
+/** Fenster ausblenden, Launcher wartet im Infobereich (Schließen mit der Einstellung an, unsichtbarer Start) */
+function hideToTray(hint: boolean): void {
+  mainWindow?.hide();
   closedToTray = true;
   ensureTray();
-  if (!trayHintShown && Notification.isSupported()) {
-    trayHintShown = true;
-    const hint = new Notification({ title: `${LAUNCHER_NAME} läuft im Infobereich weiter`, body: 'Solange Minecraft läuft. Danach beendet sich der Launcher von selbst.', silent: true });
-    notifications.add(hint);
-    hint.on('click', () => {
-      notifications.delete(hint);
-      focusWindow();
-    });
-    hint.on('close', () => notifications.delete(hint));
-    hint.show();
-  }
+  if (hint) void showTrayHint();
+}
+
+/** Fenster schließen: mit „Im Hintergrund bereit für Nachrichten“ in den Infobereich statt beenden */
+function closeIntoTray(event: Electron.Event): void {
+  if (!mainWindow) return;
+  const action = closeAction({ platform: process.platform, background: closeToTraySetting, gameRunning: gameRunning(), quitting: appQuitting || quittingForUpdate });
+  if (action !== 'tray') return;
+  event.preventDefault();
+  hideToTray(true);
 }
 
 /**
- * Spiel zu Ende: war das Fenster im Infobereich geschlossen, beendet sich der Launcher (true) – nach einem Absturz oder
- * Fehler kommt stattdessen das Fenster mit der Absturz-Hilfe. Sonst verschwindet das Symbol im Infobereich.
+ * Spiel zu Ende: Wartete der Launcher im Infobereich, bleibt er dort (Windows) bzw. im Dock (Mac) – nach einem Absturz
+ * oder Fehler kommt stattdessen das Fenster mit der Absturz-Hilfe. Sonst verschwindet das Symbol im Infobereich.
+ * true = nichts weiter tun (Fenster bleibt verborgen bzw. wurde schon gezeigt).
  */
 function afterGameTray(): boolean {
   const problem = gameState.state === 'error' || (gameState.state === 'exited' && (!!gameState.crash || !!gameState.notice || (gameState.code !== 0 && gameState.code !== null)));
+  const action = afterGameAction({ platform: process.platform, closedToTray, problem, quitting: appQuitting });
   if (appQuitting) return true;
-  if (closedToTray && !problem) {
-    console.log('[Launcher] Spiel beendet – der Launcher war geschlossen und beendet sich jetzt.');
-    appQuitting = true;
-    app.quit();
+  if (action === 'stay') {
+    console.log('[Launcher] Spiel beendet – der Launcher bleibt im Infobereich.');
+    void updateTray();
+    return true;
+  }
+  if (action === 'dock') {
+    // Mac: Menüleisten-Symbol weg, HeldixClient bleibt im Dock; das verborgene Fenster schließen wie bei jeder Mac-App
+    closedToTray = false;
+    destroyTray();
+    if (mainWindow && !mainWindow.isVisible()) mainWindow.destroy();
     return true;
   }
   closedToTray = false;
   destroyTray();
+  if (action === 'show') {
+    focusWindow();
+    return true;
+  }
   return false;
+}
+
+// ---------- Zähler in Taskleiste und Dock, Blinken, Dock-Menü ----------
+
+/** zuletzt gesetzter Zähler (nur bei Änderungen neu zeichnen) */
+let shownAttention = -1;
+const overlayImages = new Map<string, Electron.NativeImage>();
+
+/** rundes Abzeichen mit Zahl (16 px für 100 %, 32 px für 200 % Anzeige) */
+function overlayImage(text: string): Electron.NativeImage {
+  let image = overlayImages.get(text);
+  if (!image) {
+    image = nativeImage.createFromBuffer(badgePng(text, 16), { scaleFactor: 1 });
+    image.addRepresentation({ scaleFactor: 2, buffer: badgePng(text, 32) });
+    overlayImages.set(text, image);
+  }
+  return image;
+}
+
+/**
+ * Ungelesene Nachrichten + offene Anfragen (derselbe Zähler wie die Freunde in der Seitenleiste, ohne Party-
+ * Einladungen): Windows als Overlay am Symbol in der Taskleiste, macOS als Abzeichen im Dock.
+ */
+function updateAttention(force = false): void {
+  const overview = social.current;
+  const count = attentionCount(overview);
+  if (count === shownAttention && !force) return;
+  shownAttention = count;
+  if (process.platform === 'darwin') {
+    app.dock?.setBadge(dockBadgeText(count));
+    return;
+  }
+  if (process.platform !== 'win32' || !mainWindow || mainWindow.isDestroyed()) return;
+  const text = badgeText(count);
+  mainWindow.setOverlayIcon(text ? overlayImage(text) : null, text ? badgeDescription(overview) : '');
+}
+
+/** Neue Nachricht, Fenster sichtbar, aber nicht im Vordergrund: Taskleiste blinkt kurz (Mac: Dock-Symbol hüpft einmal) */
+function flashForNotice(notice: SocialNotice): void {
+  const window = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  const flash = shouldFlash({
+    kind: notice.kind,
+    focused: BrowserWindow.getFocusedWindow() !== null,
+    visible: process.platform === 'darwin' ? true : !!window && window.isVisible(),
+    doNotDisturb: social.doNotDisturb,
+    heldixGame: heldixGameRunning(),
+  });
+  if (!flash) return;
+  if (process.platform === 'darwin') {
+    app.dock?.bounce('informational');
+    return;
+  }
+  if (!window || flashingWindows.has(window)) return;
+  flashingWindows.add(window);
+  window.flashFrame(true);
+  window.once('focus', () => {
+    flashingWindows.delete(window);
+    if (!window.isDestroyed()) window.flashFrame(false);
+  });
+}
+/** Fenster, deren Taskleisten-Symbol gerade blinkt (bis sie den Fokus bekommen) */
+const flashingWindows = new WeakSet<BrowserWindow>();
+
+let dockMenuTimer: NodeJS.Timeout | null = null;
+/** Dock-Menü (macOS): Spielen (gewählte Instanz), bis zu 5 zuletzt gespielte Instanzen, Freunde – gebündelt neu bauen */
+function refreshDockMenu(): void {
+  if (process.platform !== 'darwin' || dockMenuTimer) return;
+  dockMenuTimer = setTimeout(() => {
+    dockMenuTimer = null;
+    void buildDockMenu().catch((error) => console.warn('[Launcher] Dock-Menü:', error));
+  }, 300);
+  dockMenuTimer.unref();
+}
+
+async function buildDockMenu(): Promise<void> {
+  if (!app.dock) return;
+  const list = await instances.list();
+  const selected = await selectedInstance().catch(() => null);
+  const busy = gameRunning();
+  const label = (text: string) => text.replace(/&/g, '&&');
+  const play = (id: string) => {
+    focusWindow();
+    void launch(id).catch((error: unknown) => console.warn('[Launcher] Start aus dem Dock:', error instanceof Error ? error.message : error));
+  };
+  const template: MenuItemConstructorOptions[] = [];
+  if (busy) {
+    template.push({ label: label(gameState.state === 'running' ? `${gameState.label} läuft` : 'Minecraft wird vorbereitet'), enabled: false });
+  } else if (selected) {
+    template.push({ label: label(`Spielen – ${selected.name}`), click: () => play(selected.id) });
+  }
+  const recent = recentInstances(list.map((i) => ({ id: i.id, name: i.name, lastPlayed: i.lastPlayed ?? null })), 5);
+  if (recent.length) {
+    template.push({ type: 'separator' });
+    for (const item of recent) template.push({ label: label(item.name), enabled: !busy, click: () => play(item.id) });
+  }
+  template.push({ type: 'separator' }, { label: 'Freunde', click: () => sendWhenReady('social:open', null) });
+  app.dock.setMenu(Menu.buildFromTemplate(template));
+}
+
+// ---------- Mit dem System starten (Windows: unsichtbar im Infobereich, Mac: bei der Anmeldung) ----------
+
+/** Autostart setzen bzw. entfernen; in der Entwicklung nicht (das wäre electron.exe ohne App) */
+function applyLoginItem(enabled: boolean): void {
+  const settings = loginItemSettings(enabled, process.platform, process.execPath);
+  if (!settings) return;
+  if (!app.isPackaged) {
+    console.log(`[Launcher] Mit dem System starten: ${enabled ? 'an' : 'aus'} (in der Entwicklung nicht eingetragen)`);
+    return;
+  }
+  try {
+    app.setLoginItemSettings(settings);
+  } catch (error) {
+    console.warn('[Launcher] Autostart ließ sich nicht setzen:', error instanceof Error ? error.message : error);
+  }
 }
 
 // ---------- Addon-Store (siehe core/storeservice.ts) ----------
@@ -1899,6 +2229,8 @@ function registerIpc(): void {
     applyPresenceSettings(next);
     autoUpdate = next.autoUpdate;
     closeToTraySetting = next.closeToTray;
+    if (next.startWithSystem !== before.startWithSystem) applyLoginItem(next.startWithSystem);
+    if (next.selectedInstanceId !== before.selectedInstanceId) refreshDockMenu();
     if (next.social !== before.social) {
       social.refresh().catch(() => undefined);
       worldsSoon();
@@ -1917,7 +2249,7 @@ function registerIpc(): void {
   ipcMain.handle('update:install', async () => {
     if (anyGameRunning()) throw new Error('Erst das Spiel beenden, dann aktualisieren.');
     // nur gemeldet (Einstellung „Updates automatisch“ aus): jetzt laden und prüfen
-    if (updater.state.phase === 'available' && process.platform === 'win32') {
+    if (updater.state.phase === 'available' && updater.selfInstall()) {
       const state = await updater.download();
       if (state.phase !== 'ready') throw new Error(state.error ?? 'Das Update ließ sich nicht laden.');
       if (anyGameRunning()) throw new Error('Erst das Spiel beenden, dann aktualisieren.');
@@ -1959,6 +2291,8 @@ function registerIpc(): void {
   });
   ipcMain.handle('worlds:public', (_e, code: unknown) => worldJoinView(code));
   ipcMain.handle('worlds:join', (_e, code: unknown) => joinWorld(code));
+  // Startseite „Beliebte Welten“ (Entdecken, Dienst 1.13.0)
+  ipcMain.handle('discover:popular', (_e, refresh?: unknown) => discover.popular(refresh === true));
 
   // Benachrichtigungen (Glocke)
   ipcMain.handle('notifications:list', () => notificationList());
@@ -1986,6 +2320,7 @@ function registerIpc(): void {
     }
     const config = await instances.create(data);
     await store.saveSettings({ selectedInstanceId: config.id });
+    refreshDockMenu();
     return toInstanceInfo(config);
   });
   ipcMain.handle('instances:update', async (_e, id: string, patch: InstancePatch) => {
@@ -1993,6 +2328,7 @@ function registerIpc(): void {
     const updated = await instances.update(id, patch);
     // HeldixClient in einer Fabric-Instanz eingeschaltet: Addon-Ordner anlegen (Addons kommen aus dem Addon-Store)
     if (patch?.heldixClient === true && usesHeldixClient(updated)) await mkdir(path.join(instances.dir(updated.id), ADDON_DIR), { recursive: true });
+    refreshDockMenu();
     return toInstanceInfo(updated);
   });
   ipcMain.handle('instances:delete', async (_e, id: string) => {
@@ -2003,10 +2339,12 @@ function registerIpc(): void {
     if (settings.selectedInstanceId === id) {
       await store.saveSettings({ selectedInstanceId: (await instances.list())[0]?.id ?? null });
     }
+    refreshDockMenu();
   });
   ipcMain.handle('instances:select', async (_e, id: string) => {
     await instances.require(id);
     await store.saveSettings({ selectedInstanceId: id });
+    refreshDockMenu();
   });
 
   ipcMain.handle('content:list', async (_e, id: string, kind: ContentKind) => {
@@ -2288,18 +2626,7 @@ function registerIpc(): void {
   ipcMain.handle('whatsnew:seen', async () => {
     await store.saveSettings({ lastSeenVersion: app.getVersion() });
   });
-  ipcMain.handle('web:account', async (_e, rawTarget?: unknown) => {
-    const targets = ['profil', 'freunde', 'nachrichten', 'privatsphaere', 'daten', 'support', 'team'];
-    const target = typeof rawTarget === 'string' && targets.includes(rawTarget) ? rawTarget : undefined;
-    const account = await store.getActiveAccount();
-    if (!account) throw new Error('Bitte zuerst ein Konto hinzufügen.');
-    // Offline-Konten haben keine Mojang-Anmeldung; nur zum Testen gegen einen lokalen Dienst (HELDIX_WEB_LOGIN_DEV=1)
-    const devAuth = process.env.HELDIX_WEB_LOGIN_DEV === '1';
-    if (account.type === 'offline' && !devAuth) throw new Error('Für die Webseite brauchst du ein Microsoft-Konto.');
-    const session = await sessionFor(account);
-    const url = await webLoginUrl(HELDIX_SERVICE_URL, session, devAuth, target, { sessionServer: MOJANG_TEST_URL ?? undefined });
-    await shell.openExternal(url);
-  });
+  ipcMain.handle('web:account', (_e, rawTarget?: unknown) => openWebAccount(rawTarget));
   ipcMain.handle('loader:logos', () => loaderLogos(paths));
   ipcMain.handle('news:body', (_e, id: string) => newsBody(String(id)));
   ipcMain.handle('accounts:addMicrosoft', async () => {
@@ -2446,13 +2773,15 @@ async function sendCrashReport(id: string, note: string, includeFiles: boolean):
 
 // ---------- Fenster ----------
 
-/** App-Menü für macOS: HeldixClient (Über, Ausblenden, Beenden), Bearbeiten, Fenster */
+/** App-Menü für macOS: HeldixClient (Über, Einstellungen mit ⌘,, Ausblenden, Beenden), Bearbeiten, Fenster */
 function macMenu(): Menu {
   return Menu.buildFromTemplate([
     {
       label: LAUNCHER_NAME,
       submenu: [
         { role: 'about', label: `Über ${LAUNCHER_NAME}` },
+        { type: 'separator' },
+        { label: 'Einstellungen …', accelerator: 'Command+,', click: () => sendWhenReady('view:open', 'settings') },
         { type: 'separator' },
         { role: 'hide', label: `${LAUNCHER_NAME} ausblenden` },
         { role: 'hideOthers', label: 'Andere ausblenden' },
@@ -2517,6 +2846,8 @@ function createWindow(): void {
   });
   mainWindow.once('show', closeSplash);
   mainWindow.on('closed', () => (mainWindow = null));
+  // Overlay in der Taskleiste gibt es nur mit sichtbarem Fenster: beim Zeigen den Zähler neu setzen
+  mainWindow.on('show', () => updateAttention(true));
   // Freunde: wieder sichtbar = gleich im 20-s-Takt weiter (verborgen: alle 60 s)
   // Abzeichen am Addon-Store: Stand der letzten Prüfung gleich nach dem Laden der Oberfläche
   mainWindow.webContents.on('did-finish-load', () => {
@@ -2525,8 +2856,11 @@ function createWindow(): void {
   mainWindow.on('show', () => social.wake());
   mainWindow.on('restore', () => social.wake());
   mainWindow.on('focus', () => social.wake());
-  // Schließen während des Spiels: in den Infobereich (Einstellung „Beim Schließen in den Infobereich“)
+  // Schließen: mit „Im Hintergrund bereit für Nachrichten“ in den Infobereich (core/background.ts, closeAction)
   mainWindow.on('close', closeIntoTray);
+  // Windows fährt herunter oder meldet ab: nichts mehr ausblenden, sonst hielte der Launcher das Herunterfahren auf
+  mainWindow.on('query-session-end', () => (appQuitting = true));
+  mainWindow.on('session-end', () => (appQuitting = true));
   // Discord: im Launcher „Stöbert im Addon-Store“ nur bei sichtbarem Fenster
   for (const event of ['show', 'hide', 'minimize', 'restore'] as const) {
     mainWindow.on(event as 'show', () => {
@@ -2617,6 +2951,13 @@ if (singleInstance) {
     const settings = await store.getSettings();
     autoUpdate = settings.autoUpdate;
     closeToTraySetting = settings.closeToTray;
+    // unsichtbar gestartet (Windows-Autostart mit --hidden, Mac „Bei der Anmeldung öffnen“): kein Startfenster, kein
+    // Hauptfenster – der Launcher wartet im Infobereich bzw. Dock auf Nachrichten
+    launchedHidden = startedHidden(process.argv, process.platform, process.platform === 'darwin' && app.isPackaged && app.getLoginItemSettings().wasOpenedAtLogin);
+    if (launchedHidden) console.log('[Launcher] Unsichtbar gestartet (Autostart)');
+    // Autostart mit dem aktuellen Pfad eintragen (nach einem Umzug der App stimmt er sonst nicht mehr); auf dem Mac nur,
+    // wenn er fehlt – macOS meldet jedes neue Anmeldeobjekt mit einer Mitteilung
+    if (settings.startWithSystem && (process.platform !== 'darwin' || !app.getLoginItemSettings().openAtLogin)) applyLoginItem(true);
 
     // Update beim Start (siehe core/startup-update.ts)
     const memo = await readUpdateMemo(updateMemoFile);
@@ -2627,7 +2968,7 @@ if (singleInstance) {
     }
     previousGame = await readGameMarker(gameMarkerFile);
     if (previousGame && !anyGameRunning()) await rm(gameMarkerFile, { force: true }).catch(() => undefined);
-    const plan = startupPlan({ enabled: updater.enabled(), platform: process.platform, autoUpdate });
+    const plan = startupPlan({ enabled: updater.enabled(), platform: process.platform, selfUpdate, autoUpdate, hidden: launchedHidden });
     let retrySoon = false;
     if (plan === 'splash') {
       const result = await updateBeforeStart().catch((error: unknown) => {
@@ -2643,7 +2984,13 @@ if (singleInstance) {
     await decideSetup().catch((error) => console.error('[Launcher] Einrichtung: Zustand nicht lesbar', error));
     await ensureInstances().catch((error) => console.error('[Launcher] Instanzen konnten nicht vorbereitet werden', error));
     windowAllowed = true;
-    createWindow();
+    // Windows: unsichtbar gestartet nur das Symbol im Infobereich (ohne Hinweis); Mac: nur das Dock
+    if (!launchedHidden) createWindow();
+    else if (process.platform !== 'darwin') {
+      closedToTray = true;
+      ensureTray();
+    }
+    refreshDockMenu();
     social.start();
     addonStore.start();
     // Einladungen: erster Stand bald nach dem Start (ohne Meldung), dann alle 5 Minuten vergleichen
@@ -2654,6 +3001,12 @@ if (singleInstance) {
     void refreshPresencePlayer(false);
     setTimeout(() => void refreshPresencePlayer(), 20_000).unref();
     worlds.start();
+    // dauerhafte Welten: Stand alle 5 Minuten (dazwischen Echtzeit); Entdecken für „Beliebte Welten“, solange ein Fenster sichtbar ist
+    hosting.start();
+    setTimeout(() => void discover.popular().catch(() => undefined), 4000).unref();
+    setInterval(() => {
+      if (anyWindowVisible()) void discover.popular(true).catch(() => undefined);
+    }, 5 * 60_000).unref();
     // ohne Startfenster gleich prüfen (nur Hinweis); danach alle 30 Minuten, nach einer gescheiterten Prüfung schon in einer Minute
     if (plan === 'background') void updateNoticeAtStart().catch(() => undefined);
     updater.start(() => autoUpdate, retrySoon ? 60_000 : undefined);
@@ -2691,6 +3044,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+// macOS: Klick auf das Dock-Symbol holt das Fenster zurück (auch das während eines Spiels ausgeblendete)
 app.on('activate', () => {
-  if (windowAllowed && BrowserWindow.getAllWindows().length === 0) createWindow();
+  if (windowAllowed) focusWindow();
 });

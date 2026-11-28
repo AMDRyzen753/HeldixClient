@@ -39,7 +39,7 @@ Wo diese Anzeigen stehen und wie groß sie sind, legst du im [HUD-Editor](/hilfe
 ## Weitere Funktionen
 - **Dauersprint** – Sprinten ohne Taste, die Sprinttaste schaltet um. Auf Wunsch schaltest du auch das Schleichen per Tastendruck um (nicht beim Reiten und Fliegen). Ob du gerade sprinten darfst, entscheidet weiter Minecraft.
 - **Fadenkreuz** – eigenes Fadenkreuz mit sechs Formen und acht Farben, einstellbarer Größe, Dicke, Lücke und Deckkraft, Umrandung und roter Färbung beim Zielen auf Lebewesen.
-- **Chat** – Uhrzeit vor jeder Nachricht, gleiche Nachrichten hintereinander werden als „(3×)“ zusammengefasst, [[Strg]] + Klick kopiert eine Nachricht.
+- **Chat** – Uhrzeit vor jeder Nachricht, gleiche Nachrichten hintereinander werden als „(3×)“ zusammengefasst, [[Strg]] + Klick kopiert eine Nachricht (auf dem Mac [[⌘]] + Klick).
 - **Zoom** und **Freelook** – siehe [Zoom und Freelook](/hilfe/zoom-freelook).
 - **Wegpunkte** – siehe [Wegpunkte](/hilfe/wegpunkte).
 

@@ -546,7 +546,7 @@ test('Schema 9 → 10: Tabellen für Welten kommen dazu, vorhandene Daten bleibe
       store.close();
     }
     const check = new DatabaseSync(path.join(dataDir, 'heldix-dienst.db'));
-    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 11);
+    assert.equal(Number((check.prepare('PRAGMA user_version').get() as { user_version: number }).user_version), 13);
     check.close();
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });

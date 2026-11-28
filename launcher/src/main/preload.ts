@@ -162,6 +162,8 @@ const api: HeldixApi = {
   getWorldJoin: (code) => ipcRenderer.invoke('worlds:public', code),
   joinWorld: (code) => ipcRenderer.invoke('worlds:join', code),
   openWorldDialog: (code) => ipcRenderer.invoke('worlds:open', code),
+  getPopularWorlds: (refresh) => ipcRenderer.invoke('discover:popular', refresh),
+  onPopularWorlds: (callback) => subscribe('discover:update', callback),
 
   listNotifications: () => ipcRenderer.invoke('notifications:list'),
   markNotificationRead: (id) => ipcRenderer.invoke('notifications:read', id),
@@ -176,6 +178,7 @@ const api: HeldixApi = {
   onUpdateState: (callback) => subscribe('update:state', callback),
   takeUpdateNotice: () => ipcRenderer.invoke('update:notice'),
   onUpdateNotice: (callback) => subscribe('update:notice', () => callback()),
+  onViewOpen: (callback) => subscribe('view:open', callback),
 
   openWebAccount: (target) => ipcRenderer.invoke('web:account', target),
   openWebsite: (page) => ipcRenderer.invoke('web:open', page),

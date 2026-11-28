@@ -39,6 +39,7 @@ Mit [[Strg]] + [[K]] oder der Lupe oben öffnest du die Schnellsuche. Sie findet
 - [[Tab]] wechselt zwischen den Knöpfen der Leisten und Reiter, [[Enter]] oder [[Leertaste]] drückt sie.
 - Die **Pfeiltasten** wählen im Inhalt Kacheln, Zeilen und Knöpfe. [[Enter]] oder [[Leertaste]] löst aus, bei Reglern und Auswahlfeldern ändern **Pfeil links** und **Pfeil rechts** den Wert. Am Rand scrollt die Seite mit.
 - [[Strg]] + [[Tab]] wechselt zum nächsten Reiter bzw. zur nächsten Seite, [[Strg]] + [[1]] bis [[4]] direkt zu einem Bereich.
+- **Auf dem Mac** nimmst du [[⌘]] statt [[Strg]]: [[⌘]] + [[K]] für die Schnellsuche, [[⌘]] + [[1]] bis [[4]] für die Bereiche. Nur den Reiter wechselst du mit [[⌃]] + [[Tab]], weil [[⌘]] + [[Tab]] zwischen Programmen wechselt.
 - [[Bild auf]], [[Bild ab]], [[Pos1]] und [[Ende]] scrollen. [[Rücktaste]] führt aus einem Untermenü zurück, [[Esc]] schließt das Menü.
 
 ## Spielermenü

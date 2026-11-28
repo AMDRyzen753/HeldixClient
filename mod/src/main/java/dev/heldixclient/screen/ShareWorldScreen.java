@@ -1,6 +1,8 @@
 package dev.heldixclient.screen;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.heldixclient.share.Hosting;
+import dev.heldixclient.share.HostingService;
 import dev.heldixclient.share.WorldBackups;
 import dev.heldixclient.share.WorldService;
 import dev.heldixclient.share.WorldService.Access;
@@ -39,6 +41,9 @@ public class ShareWorldScreen extends ShellScreen {
 	public static final String ALLOW_LABEL = "Erlauben";
 	public static final String DENY_LABEL = "Ablehnen";
 	public static final String APPLY_LABEL = "Übernehmen";
+	/** dauerhafte Welten (Dienst 1.13.0) */
+	public static final String HOST_LABEL = "Dauerhaft online stellen";
+	public static final String HOSTED_JOIN_LABEL = "Dort beitreten";
 
 	public enum Mode {
 		/** vor dem Teilen: Einstellungen und „Teilen starten“ (während des Starts: Fortschritt) */
@@ -77,6 +82,10 @@ public class ShareWorldScreen extends ShellScreen {
 	/** Karte mit der Adresse (STATUS) */
 	private int cardY = -1;
 	private int cardH;
+	/** Adresse, wenn die Welt laut Dienst dauerhaft auf dem Heldix-Server läuft (Dienst 1.13.0), sonst null */
+	private String existingHosted;
+	private String existingHostedName;
+	private boolean hostingAsked;
 
 	public ShareWorldScreen() {
 		this(null);
@@ -143,14 +152,44 @@ public class ShareWorldScreen extends ShellScreen {
 	protected int toolbarActionsWidth() {
 		syncMode();
 		String primary = primaryLabel();
-		return ActionButton.widthFor("Zurück", "back") + (primary != null ? ActionButton.widthFor(primary, "play") + 6 : 0);
+		return ActionButton.widthFor("Zurück", "back") + (primary != null ? ActionButton.widthFor(primary, "play") + 6 : 0) + (hostButton() ? 26 : 0);
 	}
 
 	/** Hauptknopf in der Werkzeugzeile (Einstellungen vor bzw. während des Teilens), sonst null */
 	private String primaryLabel() {
 		if (mode == Mode.SETTINGS) return APPLY_LABEL;
-		if (mode == Mode.SETUP && !WorldShare.active()) return START_LABEL;
+		if (mode == Mode.SETUP && !WorldShare.active() && hostedAddress() == null) return START_LABEL;
 		return null;
+	}
+
+	/** Adresse der dauerhaften Welt, wenn diese Welt dauerhaft auf dem Heldix-Server läuft, sonst null */
+	private String hostedAddress() {
+		if (WorldShare.hostedAddress() != null) return WorldShare.hostedAddress();
+		if (existingHosted != null) return existingHosted;
+		if (minecraft == null || minecraft.getSingleplayerServer() == null) return null;
+		HostingService.Hosted hosted = Hosting.find(worldId());
+		return hosted != null && hosted.owner() && hosted.address() != null ? WorldShare.normalizeAddress(hosted.address()) : null;
+	}
+
+	private String worldIdCache;
+
+	private String worldId() {
+		if (worldIdCache == null && minecraft != null && minecraft.getSingleplayerServer() != null) {
+			worldIdCache = WorldBackups.readId(worldFolder());
+			if (worldIdCache == null) worldIdCache = "";
+		}
+		return worldIdCache == null || worldIdCache.isEmpty() ? null : worldIdCache;
+	}
+
+	private java.nio.file.Path worldFolder() {
+		return minecraft.getSingleplayerServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toAbsolutePath().normalize();
+	}
+
+	/** Knopf „Dauerhaft online stellen“ (Dienst 1.13.0): vor dem Teilen, wenn der Dienst dauerhafte Welten kann */
+	private boolean hostButton() {
+		HostingService.Overview overview = Hosting.overview();
+		return mode == Mode.SETUP && !WorldShare.active() && hostedAddress() == null && overview != null && overview.available()
+				&& minecraft != null && minecraft.getSingleplayerServer() != null;
 	}
 
 	// ======================================================================================
@@ -164,6 +203,8 @@ public class ShareWorldScreen extends ShellScreen {
 		cardY = -1;
 		rowsShown = 0;
 		rowsTotal = 0;
+		// Welt-ID neu lesen (z. B. nach „Dauerhaft online stellen“ steht sie erst jetzt in heldix-welt.json)
+		worldIdCache = null;
 		syncMode();
 		if (draft == null) {
 			draft = WorldShare.active() ? WorldShare.settings() : WorldShare.defaults(minecraft);
@@ -172,9 +213,16 @@ public class ShareWorldScreen extends ShellScreen {
 		int bw = ActionButton.widthFor("Zurück", "back");
 		addRenderableWidget(new ActionButton(headerRight() - bw, headerButtonY(), bw, 20, "Zurück", false, this::back)
 				.withIcon("back").withVariant(ActionButton.Variant.GHOST));
+		if (Hosting.overview() == null && Social.online() && !hostingAsked) {
+			hostingAsked = true;
+			Hosting.refresh().whenComplete((ignored, error) -> minecraft.execute(() -> {
+				if (minecraft.gui.screen() == this) rebuildWidgets();
+			}));
+		}
 		switch (mode) {
 			case SETUP -> {
 				if (WorldShare.active()) buildStarting();
+				else if (hostedAddress() != null) buildHosted();
 				else buildSettings(false);
 			}
 			case SETTINGS -> buildSettings(true);
@@ -192,6 +240,11 @@ public class ShareWorldScreen extends ShellScreen {
 		WorldShare.existing(minecraft).thenAccept(world -> minecraft.execute(() -> {
 			if (world == null || WorldShare.active() || mode != Mode.SETUP) return;
 			draft = draft.withAccess(world.access()).withDefaultRole(world.defaultRole()).withMaxPlayers(world.maxPlayers());
+			if (world.persistent()) {
+				// läuft dauerhaft auf dem Heldix-Server: Teilen gesperrt, dort beitreten
+				existingHosted = WorldShare.normalizeAddress(world.address());
+				existingHostedName = world.name();
+			}
 			rebuildWidgets();
 		}));
 	}
@@ -264,6 +317,15 @@ public class ShareWorldScreen extends ShellScreen {
 				.withIcon(live ? "check" : "play");
 		go.active = !busy && (live || problem == null);
 		addRenderableWidget(go);
+		// Dienst 1.13.0: statt zu teilen dauerhaft auf dem Heldix-Server (auch wenn du offline bist)
+		if (!live && hostButton()) {
+			HostingService.Overview overview = Hosting.overview();
+			ActionButton host = ActionButton.icon(headerRight() - bw - 6 - pw - 26, headerButtonY(), 20, "server",
+					overview.allowed() ? HOST_LABEL + " – läuft auf dem Heldix-Server, auch wenn du offline bist" : HeldixWorldsScreen.PLUS_TEASER, this::hostWorld)
+					.withVariant(ActionButton.Variant.SECONDARY);
+			host.active = !busy && problem == null;
+			addRenderableWidget(host);
+		}
 
 		// Fehler zuerst (wichtiger als der Hinweis), dann der Hinweis, soweit Platz ist
 		String error = message != null && messageError && System.currentTimeMillis() - messageAt < 8000 ? message : problem != null ? problem : live ? null : WorldShare.error();
@@ -273,6 +335,68 @@ public class ShareWorldScreen extends ShellScreen {
 				: "Vorher legt HeldixClient eine Sicherung der Welt an (die letzten " + WorldBackups.KEEP + " bleiben). Freunde treten über eine feste "
 						+ "Adresse bei – auch ohne HeldixClient, mit derselben Minecraft-Version.";
 		paragraph(error == null && message != null ? y + 12 : y, info, Ui.MUTED);
+	}
+
+	/** Die Welt läuft dauerhaft auf dem Heldix-Server (Dienst 1.13.0): Teilen gesperrt, „dort beitreten?“ */
+	private void buildHosted() {
+		String address = hostedAddress();
+		int y = contentY;
+		cardY = y;
+		cardH = 46;
+		HostingService.Hosted hosted = Hosting.find(worldId());
+		labels.add(new Label(contentX + 12, y + 9, contentW - 24, WorldShare.HOSTED_QUESTION, Ui.TEXT, Ui.Font.LABEL));
+		labels.add(new Label(contentX + 12, y + 27, contentW - 24, address + (hosted != null ? "  ·  " + hosted.stateLine() : ""), Ui.MUTED, Ui.Font.SMALL));
+		y += cardH + 8;
+		int jw = ActionButton.widthFor(HOSTED_JOIN_LABEL, "play");
+		addRenderableWidget(new ActionButton(contentX, y, jw, 22, HOSTED_JOIN_LABEL, true, () -> joinHosted(address)).withIcon("play"));
+		int mw = ActionButton.widthFor(HeldixWorldsScreen.MANAGE_LABEL, "external");
+		addRenderableWidget(new ActionButton(contentX + jw + 6, y, mw, 22, HeldixWorldsScreen.MANAGE_LABEL, false, () -> Hosting.manageOnWebsite()
+				.whenComplete((ignored, error) -> minecraft.execute(() -> {
+					note(error != null ? WorldService.message(error) : "Meine Welten ist im Browser geöffnet.", error != null);
+					if (minecraft.gui.screen() == this) rebuildWidgets();
+				}))).withIcon("external"));
+		y += 32;
+		drawMessage(contentX, y, contentW);
+		paragraph(y + 14, "Die Welt läuft auf dem Heldix-Server weiter, auch wenn du offline bist – teilen musst du sie nicht mehr. Beitreten verlässt "
+				+ "diese Einzelspielerwelt (sie wird gespeichert). Deine lokale Kopie bleibt unverändert; den Stand vom Server holst du in Heldix-Welten mit "
+				+ "„Herunterladen“.", Ui.MUTED);
+	}
+
+	/** Beitritt zur dauerhaften Welt: diese Einzelspielerwelt verlassen, dann verbinden (weckt sie, falls sie schläft) */
+	private void joinHosted(String address) {
+		if (address == null) return;
+		WorldShare.clearError();
+		String name = existingHostedName != null ? existingHostedName : WorldShare.hostedName() != null ? WorldShare.hostedName()
+				: minecraft.getSingleplayerServer() != null ? minecraft.getSingleplayerServer().getWorldData().getLevelName() : "Heldix-Welt";
+		dev.heldixclient.share.HostedJoin.join(minecraft, new HeldixWorldsScreen(), name, address);
+	}
+
+	/** „Dauerhaft online stellen“: mit Berechtigung die Erklärung, sonst die Heldix+-Warteliste */
+	private void hostWorld() {
+		HostingService.Overview overview = Hosting.overview();
+		if (overview == null || minecraft.getSingleplayerServer() == null) return;
+		if (!overview.allowed()) {
+			minecraft.gui.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(confirmed -> {
+				minecraft.gui.setScreen(this);
+				if (!confirmed) return;
+				Hosting.waitlist(true).whenComplete((plus, error) -> minecraft.execute(() -> {
+					note(error != null ? WorldService.message(error) : "Du stehst auf der Warteliste – du bekommst eine Einblendung, sobald du freigeschaltet bist.",
+							error != null);
+					if (minecraft.gui.screen() == this) rebuildWidgets();
+				}));
+			}, Component.literal(HeldixWorldsScreen.PLUS_TEASER), Component.literal("Dauerhafte Welten laufen auf dem Heldix-Server weiter, auch wenn du "
+					+ "offline bist. Gerade ist das eine Beta; später gehört es zu Heldix+ (geplant – Preise und Inhalte stehen noch nicht fest, bezahlt "
+					+ "wird nichts)."), Component.literal(HeldixWorldsScreen.WAITLIST_JOIN), net.minecraft.network.chat.CommonComponents.GUI_CANCEL));
+			return;
+		}
+		if (!overview.room() && overview.own(worldId()) == null) {
+			int max = overview.limits() == null ? 1 : overview.limits().worlds();
+			note(max == 1 ? "Du hast schon eine dauerhafte Welt." : "Du hast schon " + max + " dauerhafte Welten.", true);
+			rebuildWidgets();
+			return;
+		}
+		String name = minecraft.getSingleplayerServer().getWorldData().getLevelName();
+		minecraft.gui.setScreen(HostWorldScreen.upload(this, worldFolder(), name));
 	}
 
 	private void buildStarting() {
@@ -592,7 +716,8 @@ public class ShareWorldScreen extends ShellScreen {
 	/** Stand, nach dem sich der Aufbau richtet (ändert er sich, werden die Widgets neu angelegt) */
 	private String signature() {
 		StringBuilder text = new StringBuilder().append(WorldShare.state()).append('|').append(WorldShare.address()).append('|')
-				.append(WorldShare.step()).append('|').append(WorldShare.notice()).append('|').append(WorldShare.error()).append('|');
+				.append(WorldShare.step()).append('|').append(WorldShare.notice()).append('|').append(WorldShare.error()).append('|')
+				.append(mode == Mode.SETUP ? hostedAddress() + "|" + Hosting.changes() : "").append('|');
 		for (WorldShare.Knock knock : WorldShare.knocks()) text.append(knock.name()).append(',');
 		text.append('|');
 		if (mode == Mode.STATUS) for (WorldShare.Player player : WorldShare.players(minecraft)) text.append(player.name()).append(player.role()).append(',');

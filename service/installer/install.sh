@@ -21,6 +21,8 @@
 #   - Anmeldung auf der Webseite (ohne Passwort, über den Launcher) unter https://<domain>/konto, Team-Bereich dort;
 #     mit --minecraft-login zusätzlich direkt mit dem Minecraft-Konto (über Microsoft, docs/einrichtung.md).
 #   - Verwaltung (Meldungen, Sperren, Team): sudo heldix-dienst-admin hilfe; erster Admin: sudo heldix-dienst-admin team <name> admin
+#   - Dauerhafte Welten (Beta, nur mit --hosting): Docker aus den Paketquellen, ein Container je Welt mit festen Grenzen,
+#     der Welten-Wächter heldix-welten-agent (nur er spricht mit Docker, der Dienst nicht) und Netz-Regeln für die Welten.
 #
 # Optionen:
 #   --domain <name>      Hauptdomain; Webseite dort, API auf api.<domain>. Die Namen müssen per DNS auf diesen Server zeigen.
@@ -43,7 +45,14 @@
 #                        Welt teilen nur ein, wenn *.welt.<domain> per DNS auf diesen Server zeigt. Braucht Port 25565/tcp.
 #   --world-port <zahl>  anderer Port für Welt teilen (Standard 25565; Spieler geben dann <code>.<name>:<zahl> ein)
 #   --no-world           Welt teilen ausschalten
-#   --uninstall          alles entfernen (Daten bleiben); mit --purge auch Daten und Zertifikate
+#   --hosting            dauerhafte Welten einschalten (Beta): installiert Docker (Debian/Ubuntu: docker.io), legt das
+#                        Netz heldix-welten mit Firewall-Regeln an und startet den Welten-Wächter. Braucht
+#                        --accept-minecraft-eula und Welt teilen. Bleibt bei Updates an.
+#   --accept-minecraft-eula
+#                        als Betreiber der Minecraft-EULA zustimmen (https://aka.ms/MinecraftEULA); Pflicht für --hosting
+#   --welten-max <n>     höchstens so viele dauerhafte Welten gleichzeitig (Standard aus dem RAM: (RAM − 6 GB) / 3 GB)
+#   --no-hosting         dauerhafte Welten ausschalten (hält laufende Welten an; Weltdaten und Docker bleiben)
+#   --uninstall          alles entfernen (Daten bleiben); mit --purge auch Daten, Welten und Zertifikate
 #   --yes                keine Rückfragen
 #   --help               diese Hilfe
 #
@@ -76,6 +85,16 @@ UNIT="heldix-dienst"
 CADDY_UNIT="heldix-dienst-caddy"
 # Rückfall, falls GitHub die neueste Caddy-Version nicht verrät (z. B. API-Limit)
 CADDY_FALLBACK_VERSION="2.10.2"
+# Dauerhafte Welten (Beta): Welten-Wächter (root, Docker), Weltdaten, Upload-Ordner des Dienstes, Netz-Regeln
+WELTEN_DIR="/var/lib/heldix-welten"
+WELTEN_UPLOADS_DIR="$DATA_DIR/hosting-uploads"
+WELTEN_ENV_FILE="$CONFIG_DIR/welten.env"
+WELTEN_SOCKET="/run/heldix-dienst/welten.sock"
+WELTEN_UNIT="heldix-welten-agent"
+WELTEN_FIREWALL_UNIT="heldix-welten-firewall"
+WELTEN_FIREWALL_SCRIPT="$INSTALL_DIR/welten-firewall.sh"
+WELTEN_NETWORK="heldix-welten"
+MINECRAFT_EULA_URL="https://aka.ms/MinecraftEULA"
 
 DOMAIN=""
 API_DOMAIN=""
@@ -100,6 +119,15 @@ WORLD_BIND=""
 # Ergebnis der Prüfung: WORLD_ENABLE=1 schreibt die Einstellungen, WORLD_ACTIVE=1 heißt danach an (auch unverändert)
 WORLD_ENABLE=0
 WORLD_ACTIVE=0
+# Dauerhafte Welten: "" = wie bisher (bei Updates unverändert), 1 = einschalten, 0 = ausschalten
+HOSTING=""
+ACCEPT_EULA=0
+WELTEN_MAX=""
+# Ergebnis der Prüfung: HOSTING_ACTIVE=1 heißt, Docker, Netz-Regeln und Wächter werden eingerichtet bzw. aktualisiert
+HOSTING_ACTIVE=0
+WELTEN_SLOTS=0
+WELTEN_RAM_MB=0
+DOCKER_BIN=""
 
 # ---------------------------------------------------------------------------------------------
 # Ausgabe
@@ -166,6 +194,11 @@ parse_args() {
       --world-port) WORLD_PORT="${2:-}"; shift 2 ;;
       --world-port=*) WORLD_PORT="${1#*=}"; shift ;;
       --no-world) [ "$WORLD" != 1 ] || die "--world-domain und --no-world schließen sich aus."; WORLD=0; shift ;;
+      --hosting) [ "$HOSTING" != 0 ] || die "--hosting und --no-hosting schließen sich aus."; HOSTING=1; shift ;;
+      --no-hosting) [ "$HOSTING" != 1 ] || die "--hosting und --no-hosting schließen sich aus."; HOSTING=0; shift ;;
+      --accept-minecraft-eula) ACCEPT_EULA=1; shift ;;
+      --welten-max) [ $# -ge 2 ] || die "--welten-max braucht eine Zahl."; WELTEN_MAX="$2"; shift 2 ;;
+      --welten-max=*) WELTEN_MAX="${1#*=}"; shift ;;
       --uninstall) UNINSTALL=1; shift ;;
       --purge) PURGE=1; shift ;;
       --yes|-y) ASSUME_YES=1; shift ;;
@@ -203,6 +236,25 @@ parse_args() {
     [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] || die "Port bitte zwischen 1024 und 65535 wählen."
     check_microsoft_args
     check_world_args
+    check_hosting_args
+  fi
+}
+
+welten_env_value() {
+  # welten_env_value <schlüssel>: Wert aus der Env-Datei des Welten-Wächters (leer, wenn nicht gesetzt)
+  sed -n "s/^$1=//p" "$WELTEN_ENV_FILE" 2>/dev/null | tail -n1
+}
+
+check_hosting_args() {
+  if [ -n "$WELTEN_MAX" ]; then
+    case "$WELTEN_MAX" in *[!0-9]*) die "Ungültige Zahl für --welten-max: $WELTEN_MAX" ;; esac
+    [ "$WELTEN_MAX" -ge 1 ] && [ "$WELTEN_MAX" -le 200 ] || die "--welten-max bitte zwischen 1 und 200 wählen."
+    [ "$HOSTING" != 0 ] || die "--welten-max passt nicht zu --no-hosting."
+  fi
+  [ "$HOSTING" = 1 ] || return 0
+  # Einmal zugestimmt, gilt bei Updates weiter (steht in welten.env)
+  if [ "$ACCEPT_EULA" != 1 ] && [ "$(welten_env_value HELDIX_WELTEN_ACCEPT_MINECRAFT_EULA)" != 1 ]; then
+    die "Dauerhafte Welten betreiben Minecraft-Server auf diesem Rechner. Dafür musst du als Betreiber der Minecraft-EULA zustimmen: $MINECRAFT_EULA_URL – bitte lesen und den Installer mit --hosting --accept-minecraft-eula aufrufen."
   fi
 }
 
@@ -455,6 +507,322 @@ configure_world() {
 }
 
 # ---------------------------------------------------------------------------------------------
+# Dauerhafte Welten (Beta): Docker, Netz-Regeln, Welten-Wächter
+# ---------------------------------------------------------------------------------------------
+
+check_hosting() {
+  # An, wenn --hosting oder schon eingerichtet (dann ein Update); --no-hosting schaltet aus. Ohne beides und ohne
+  # bestehende Einrichtung ändert sich nichts.
+  [ "$HOSTING" != 0 ] || return 0
+  if [ "$HOSTING" = 1 ] || [ -n "$(env_value HELDIX_DIENST_WELTEN_AGENT)" ]; then
+    HOSTING_ACTIVE=1
+  else
+    [ -z "$WELTEN_MAX" ] || die "--welten-max geht nur zusammen mit --hosting (oder wenn dauerhafte Welten schon an sind)."
+    return 0
+  fi
+  local mem_kb slots
+  mem_kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
+  WELTEN_RAM_MB=$(( ${mem_kb:-0} / 1024 ))
+  # Plätze: 6 GB fürs System, je Welt 3 GB (bei 32 GB → 8)
+  slots=$(( (WELTEN_RAM_MB - 6144) / 3072 ))
+  [ "$slots" -ge 0 ] || slots=0
+  if [ -n "$WELTEN_MAX" ]; then
+    WELTEN_SLOTS="$WELTEN_MAX"
+    if [ "$WELTEN_MAX" -gt "$slots" ]; then
+      warn "Dauerhafte Welten: $WELTEN_MAX Plätze eingestellt, der Arbeitsspeicher ($WELTEN_RAM_MB MB) reicht rechnerisch nur für $slots (je Welt 3 GB, dazu 6 GB fürs System)."
+    fi
+  else
+    # bei Updates die bisherige Zahl behalten (auch eine von Hand geänderte), sonst aus dem RAM
+    WELTEN_SLOTS="$(env_value HELDIX_DIENST_WELTEN_MAX)"
+    case "$WELTEN_SLOTS" in ''|*[!0-9]*) WELTEN_SLOTS="$slots" ;; esac
+  fi
+  if [ "$WELTEN_SLOTS" -lt 1 ]; then
+    die "Dauerhafte Welten: zu wenig Arbeitsspeicher ($WELTEN_RAM_MB MB). Je Welt braucht es 3 GB, dazu 6 GB fürs System – mindestens 9 GB, empfohlen 32 GB. Ausdrücklich setzen: --welten-max <n>."
+  fi
+  if ! command -v docker >/dev/null 2>&1 && ! command -v apt-get >/dev/null 2>&1; then
+    die "Für dauerhafte Welten braucht es Docker. Auf diesem System bitte Docker selbst installieren (z. B. Paket moby-engine oder docker-ce) und den Installer erneut starten."
+  fi
+  if [ "$WORLD_ACTIVE" != 1 ] && [ -z "$(env_value HELDIX_DIENST_WELT_DOMAIN)" ]; then
+    warn "Dauerhafte Welten nutzen die Adressen von Welt teilen (<code>.welt.<domain>). Welt teilen ist aus – so erreicht niemand die Welten."
+  fi
+}
+
+install_docker() {
+  [ "$HOSTING_ACTIVE" = 1 ] || return 0
+  step "Docker (dauerhafte Welten)"
+  if command -v docker >/dev/null 2>&1; then
+    ok "Docker ist schon installiert ($(docker --version 2>/dev/null | head -n1))"
+  else
+    info "installiere docker.io aus den Paketquellen der Distribution …"
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io >/dev/null || die "docker.io ließ sich nicht installieren (apt-get install docker.io)."
+    ok "docker.io installiert"
+  fi
+  command -v iptables >/dev/null 2>&1 || install_packages iptables
+  DOCKER_BIN="$(command -v docker)"
+  case "$DOCKER_BIN" in
+    /snap/*) die "Docker aus Snap kann die Ordner unter /var/lib nicht einhängen. Bitte docker.io aus den Paketquellen nehmen (snap remove docker)." ;;
+  esac
+  systemctl enable docker >/dev/null 2>&1 || true
+  systemctl start docker || die "Docker startet nicht (journalctl -u docker)."
+  local i
+  for ((i = 0; i < 30; i++)); do
+    "$DOCKER_BIN" info >/dev/null 2>&1 && break
+    sleep 1
+  done
+  "$DOCKER_BIN" info >/dev/null 2>&1 || die "Docker antwortet nicht (journalctl -u docker)."
+  ok "Docker läuft (Version $("$DOCKER_BIN" version --format '{{.Server.Version}}' 2>/dev/null || printf '?'))"
+}
+
+configure_hosting() {
+  # Adresse des Wächters und Zahl der Plätze für den Dienst (dienst.env)
+  if [ "$HOSTING" = 0 ]; then
+    sed -i '/^HELDIX_DIENST_WELTEN_AGENT=/d; /^HELDIX_DIENST_WELTEN_MAX=/d' "$ENV_FILE"
+    return 0
+  fi
+  [ "$HOSTING_ACTIVE" = 1 ] || return 0
+  set_env HELDIX_DIENST_WELTEN_AGENT "$WELTEN_SOCKET"
+  set_env HELDIX_DIENST_WELTEN_MAX "$WELTEN_SLOTS"
+  ok "Dauerhafte Welten: an (höchstens $WELTEN_SLOTS gleichzeitig)"
+}
+
+write_welten_firewall() {
+  # Netz-Regeln als eigenes Skript; die systemd-Unit setzt sie nach jedem Start von Docker wieder
+  cat > "$WELTEN_FIREWALL_SCRIPT" <<'HELDIX_FIREWALL'
+#!/bin/sh
+# Netz-Regeln für die Container der dauerhaften Welten (Docker-Netz und Schnittstelle „heldix-welten“).
+# Erzeugt vom Installer des Heldix-Dienstes (wird bei Updates überschrieben). Aufruf: welten-firewall.sh apply|remove
+#
+#  - Weiterleiten (Kette DOCKER-USER): Container dürfen ins Internet (Plugins brauchen es), aber nicht in private oder
+#    besondere Adressbereiche: 10/8, 172.16/12 (Docker-Gateway und andere Docker-Netze), 192.168/16, 169.254/16
+#    (Metadaten-Dienste der Hoster), 100.64/10, Loopback, Multicast. Antworten auf bestehende Verbindungen gehen durch.
+#    Neue Verbindungen von außen in das Netz der Welten gibt es nicht (ihre Ports hängen nur an 127.0.0.1).
+#  - Zum Server selbst (Kette INPUT): Container erreichen keine Adresse dieses Rechners, auch nicht das Gateway –
+#    nur Antworten (z. B. an das Relay des Dienstes) gehen durch.
+set -eu
+IF=heldix-welten
+FWD=HELDIX-WELTEN
+HOST=HELDIX-WELTEN-HOST
+
+ipt() {
+  iptables -w "$@"
+}
+
+ensure_rule() {
+  # ensure_rule <kette> <regel …>: ganz oben einfügen, wenn es sie noch nicht gibt
+  chain="$1"
+  shift
+  ipt -C "$chain" "$@" 2>/dev/null || ipt -I "$chain" 1 "$@"
+}
+
+apply() {
+  ipt -N "$FWD" 2>/dev/null || true
+  ipt -F "$FWD"
+  ipt -A "$FWD" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+  for net in 0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4; do
+    ipt -A "$FWD" -d "$net" -j DROP
+  done
+  ipt -A "$FWD" -j RETURN
+  ipt -N "$HOST" 2>/dev/null || true
+  ipt -F "$HOST"
+  ipt -A "$HOST" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  ipt -A "$HOST" -j DROP
+  # DOCKER-USER legt Docker selbst an; falls Docker noch nicht lief, schon einmal anlegen
+  ipt -N DOCKER-USER 2>/dev/null || true
+  ensure_rule DOCKER-USER -i "$IF" -j "$FWD"
+  ensure_rule DOCKER-USER ! -i "$IF" -o "$IF" -m conntrack --ctstate NEW -j DROP
+  ensure_rule INPUT -i "$IF" -j "$HOST"
+}
+
+remove() {
+  while ipt -D DOCKER-USER -i "$IF" -j "$FWD" 2>/dev/null; do :; done
+  while ipt -D DOCKER-USER ! -i "$IF" -o "$IF" -m conntrack --ctstate NEW -j DROP 2>/dev/null; do :; done
+  while ipt -D INPUT -i "$IF" -j "$HOST" 2>/dev/null; do :; done
+  for chain in "$FWD" "$HOST"; do
+    ipt -F "$chain" 2>/dev/null || true
+    ipt -X "$chain" 2>/dev/null || true
+  done
+}
+
+case "${1:-apply}" in
+  apply) apply ;;
+  remove) remove ;;
+  *) echo "Aufruf: $0 apply|remove" >&2; exit 2 ;;
+esac
+HELDIX_FIREWALL
+  chmod 755 "$WELTEN_FIREWALL_SCRIPT"
+}
+
+write_welten_env() {
+  # Einstellungen des Wächters (nur root liest sie); eigene Einträge bleiben bei Updates erhalten
+  if [ ! -f "$WELTEN_ENV_FILE" ]; then
+    (umask 077 && cat > "$WELTEN_ENV_FILE" <<EOF
+# Welten-Wächter (dauerhafte Welten) – Umgebungsvariablen (siehe docs/dienst.md). Nach Änderungen: systemctl restart $WELTEN_UNIT
+# Eigene Einträge, z. B. HELDIX_WELTEN_BACKUPS_MAX=50 oder HELDIX_WELTEN_DISK_MB=65536, bleiben bei Updates erhalten.
+EOF
+    )
+  fi
+  set_env_in "$WELTEN_ENV_FILE" HELDIX_WELTEN_SOCKET "$WELTEN_SOCKET"
+  set_env_in "$WELTEN_ENV_FILE" HELDIX_WELTEN_SOCKET_GID "$(id -g "$SERVICE_USER")"
+  set_env_in "$WELTEN_ENV_FILE" HELDIX_WELTEN_DATA "$WELTEN_DIR"
+  set_env_in "$WELTEN_ENV_FILE" HELDIX_WELTEN_UPLOADS "$WELTEN_UPLOADS_DIR"
+  set_env_in "$WELTEN_ENV_FILE" HELDIX_WELTEN_DOCKER "$DOCKER_BIN"
+  set_env_in "$WELTEN_ENV_FILE" HELDIX_WELTEN_MAX "$WELTEN_SLOTS"
+  [ "$ACCEPT_EULA" != 1 ] || set_env_in "$WELTEN_ENV_FILE" HELDIX_WELTEN_ACCEPT_MINECRAFT_EULA 1
+  chown root:root "$WELTEN_ENV_FILE"
+  chmod 600 "$WELTEN_ENV_FILE"
+}
+
+write_welten_units() {
+  cat > "/etc/systemd/system/$WELTEN_FIREWALL_UNIT.service" <<EOF
+[Unit]
+Description=Netz-Regeln für die dauerhaften Welten (Heldix-Dienst)
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+Before=$WELTEN_UNIT.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=$WELTEN_FIREWALL_SCRIPT apply
+ExecStop=$WELTEN_FIREWALL_SCRIPT remove
+
+[Install]
+WantedBy=multi-user.target docker.service
+EOF
+
+  cat > "/etc/systemd/system/$WELTEN_UNIT.service" <<EOF
+[Unit]
+Description=Heldix Welten-Wächter (dauerhafte Welten mit Docker)
+Documentation=https://github.com/AMDRyzen753/HeldixClient/blob/main/docs/dienst.md
+After=network-online.target docker.service $WELTEN_FIREWALL_UNIT.service
+Wants=network-online.target
+Requires=docker.service $WELTEN_FIREWALL_UNIT.service
+Before=$UNIT.service
+
+[Service]
+Type=simple
+# root, aber nur mit den Rechten, die er braucht: Besitzer der Weltdaten setzen (1000:1000), Ordner der Welten und
+# den Upload-Ordner des Dienstes lesen und schreiben. Mit Docker spricht er über die Docker-CLI.
+User=root
+Group=root
+EnvironmentFile=$WELTEN_ENV_FILE
+Environment=DOCKER_CONFIG=$WELTEN_DIR/.docker
+ExecStart=$INSTALL_DIR/node/bin/node --disable-warning=ExperimentalWarning $INSTALL_DIR/app/dist/agent/main.js
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+# Socket /run/heldix-dienst/welten.sock (Rechte 0660, Gruppe $SERVICE_USER); der Ordner bleibt bei Neustarts
+RuntimeDirectory=heldix-dienst
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=$WELTEN_DIR $WELTEN_UPLOADS_DIR
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+}
+
+setup_welten() {
+  [ "$HOSTING_ACTIVE" = 1 ] || return 0
+  step "Dauerhafte Welten (Welten-Wächter)"
+  # Verwaltung gehört root; die Daten je Welt (worlds/<id>/data) gehören 1000:1000 – die legt der Wächter selbst an
+  install -d -m 711 -o root -g root "$WELTEN_DIR"
+  install -d -m 700 -o root -g root "$WELTEN_DIR/.docker"
+  install -d -m 700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$WELTEN_UPLOADS_DIR"
+  local bridge
+  if "$DOCKER_BIN" network inspect "$WELTEN_NETWORK" >/dev/null 2>&1; then
+    bridge="$("$DOCKER_BIN" network inspect --format '{{index .Options "com.docker.network.bridge.name"}}' "$WELTEN_NETWORK" 2>/dev/null || true)"
+    [ "$bridge" = "$WELTEN_NETWORK" ] || die "Das Docker-Netz $WELTEN_NETWORK hat eine andere Schnittstelle ($bridge) – die Netz-Regeln griffen nicht. Bitte entfernen (docker network rm $WELTEN_NETWORK) und den Installer erneut starten."
+    ok "Docker-Netz $WELTEN_NETWORK vorhanden"
+  else
+    "$DOCKER_BIN" network create --driver bridge \
+      --opt "com.docker.network.bridge.name=$WELTEN_NETWORK" \
+      --opt com.docker.network.bridge.enable_icc=false "$WELTEN_NETWORK" >/dev/null \
+      || die "Das Docker-Netz $WELTEN_NETWORK ließ sich nicht anlegen."
+    ok "Docker-Netz $WELTEN_NETWORK angelegt (Container untereinander getrennt)"
+  fi
+  write_welten_firewall
+  "$WELTEN_FIREWALL_SCRIPT" apply || die "Die Netz-Regeln für die Welten ließen sich nicht setzen (iptables)."
+  ok "Netz-Regeln: Welten dürfen ins Internet, nicht ins lokale Netz und nicht auf diesen Server"
+  write_welten_env
+  write_welten_units
+  ok "$WELTEN_UNIT.service und $WELTEN_FIREWALL_UNIT.service"
+  info "lade das Image der Welt-Container (beim ersten Mal etwa 100 MB) …"
+  HELDIX_WELTEN_DOCKER="$DOCKER_BIN" "$INSTALL_DIR/node/bin/node" "$INSTALL_DIR/app/dist/agent/main.js" pull >/dev/null \
+    || die "Das Image der Welt-Container ließ sich nicht laden (Internet? docker pull)."
+  ok "Image $("$INSTALL_DIR/node/bin/node" "$INSTALL_DIR/app/dist/agent/main.js" image)"
+}
+
+stop_welten_containers() {
+  # laufende Welten sauber anhalten (Minecraft speichert dabei)
+  command -v docker >/dev/null 2>&1 || return 0
+  local ids id
+  ids="$(docker ps -q --filter label=heldix.world 2>/dev/null || true)"
+  [ -n "$ids" ] || return 0
+  info "halte die laufenden Welten an (sie speichern dabei) …"
+  for id in $ids; do
+    docker stop -t 60 "$id" >/dev/null 2>&1 || true
+  done
+}
+
+disable_welten() {
+  [ "$HOSTING" = 0 ] || return 0
+  if [ ! -f "/etc/systemd/system/$WELTEN_UNIT.service" ] && [ ! -f "/etc/systemd/system/$WELTEN_FIREWALL_UNIT.service" ]; then
+    ok "Dauerhafte Welten: aus"
+    return 0
+  fi
+  step "Dauerhafte Welten ausschalten"
+  stop_welten_containers
+  systemctl disable --now "$WELTEN_UNIT" >/dev/null 2>&1 || true
+  # beim Anhalten nimmt die Unit die Netz-Regeln wieder heraus
+  systemctl disable --now "$WELTEN_FIREWALL_UNIT" >/dev/null 2>&1 || true
+  rm -f "/etc/systemd/system/$WELTEN_UNIT.service" "/etc/systemd/system/$WELTEN_FIREWALL_UNIT.service" "$WELTEN_FIREWALL_SCRIPT"
+  systemctl daemon-reload
+  ok "Welten-Wächter und Netz-Regeln entfernt; Weltdaten bleiben in $WELTEN_DIR, Docker bleibt installiert"
+}
+
+start_welten() {
+  [ "$HOSTING_ACTIVE" = 1 ] || return 0
+  systemctl enable "$WELTEN_FIREWALL_UNIT" "$WELTEN_UNIT" >/dev/null 2>&1
+  systemctl start "$WELTEN_FIREWALL_UNIT"
+  # Neustart des Wächters: laufende Welten laufen weiter, er hängt sich wieder an
+  systemctl restart "$WELTEN_UNIT"
+  local i
+  for ((i = 0; i < 20; i++)); do
+    if systemctl is-active --quiet "$WELTEN_UNIT" && [ -S "$WELTEN_SOCKET" ]; then
+      ok "Welten-Wächter läuft ($WELTEN_SOCKET)"
+      return 0
+    fi
+    sleep 1
+  done
+  journalctl -u "$WELTEN_UNIT" -n 30 --no-pager >&2 || true
+  die "Der Welten-Wächter startet nicht (Log oben, mehr mit: journalctl -u $WELTEN_UNIT)."
+}
+
+# ---------------------------------------------------------------------------------------------
 # Installation
 # ---------------------------------------------------------------------------------------------
 
@@ -561,24 +929,62 @@ install_app() {
   ok "nach $target entpackt"
 }
 
-set_env() {
-  # set_env <schlüssel> <wert>: Wert in der env-Datei setzen, eigene Einträge bleiben erhalten
-  if grep -q "^$1=" "$ENV_FILE" 2>/dev/null; then
-    sed -i "s|^$1=.*|$1=$2|" "$ENV_FILE"
+set_env_in() {
+  # set_env_in <datei> <schlüssel> <wert>: Wert in einer env-Datei setzen, eigene Einträge bleiben erhalten
+  if grep -q "^$2=" "$1" 2>/dev/null; then
+    sed -i "s|^$2=.*|$2=$3|" "$1"
   else
-    printf '%s=%s\n' "$1" "$2" >> "$ENV_FILE"
+    printf '%s=%s\n' "$2" "$3" >> "$1"
   fi
+}
+
+set_env() {
+  # set_env <schlüssel> <wert>: Wert in der env-Datei des Dienstes setzen
+  set_env_in "$ENV_FILE" "$1" "$2"
+}
+
+configure_voice_clip_key() {
+  # Schlüssel für Voice-Clips (HELDIX_DIENST_VOICE_CLIP_KEY, 32 Byte als 64 Hex-Zeichen, wie der Dienst ihn erwartet):
+  # beim ersten Lauf zufällig, bei Updates bleibt er. Hat der Dienst ohne ihn schon <Daten>/voice-clips.key angelegt,
+  # übernimmt der Installer dessen Inhalt, damit vorhandene Clips lesbar bleiben. Der Schlüssel erscheint nie in der
+  # Ausgabe und nie in einer Befehlszeile (nur über Umleitungen und eingebaute Befehle der Shell).
+  local key file="$DATA_DIR/voice-clips.key"
+  key="$(env_value HELDIX_DIENST_VOICE_CLIP_KEY)"
+  if [ -n "$key" ]; then
+    ok "Schlüssel für Voice-Clips: bleibt"
+    return 0
+  fi
+  # leere Zeile „HELDIX_DIENST_VOICE_CLIP_KEY=“ nicht doppelt stehen lassen
+  sed -i '/^HELDIX_DIENST_VOICE_CLIP_KEY=/d' "$ENV_FILE"
+  if [ -f "$file" ]; then
+    key="$(tr -d '[:space:]' < "$file")"
+    if [[ "$key" =~ ^[0-9a-f]{64}$ ]]; then
+      printf 'HELDIX_DIENST_VOICE_CLIP_KEY=%s\n' "$key" >> "$ENV_FILE"
+      ok "Schlüssel für Voice-Clips aus $file übernommen (vorhandene Clips bleiben lesbar)"
+      return 0
+    fi
+    warn "$file ist beschädigt (erwartet 64 Hex-Zeichen): neuer Schlüssel, ältere Clips lassen sich nicht mehr abspielen."
+  fi
+  key="$(od -An -v -tx1 -N32 /dev/urandom | tr -d ' \n')"
+  [[ "$key" =~ ^[0-9a-f]{64}$ ]] || die "Kein Zufall für den Schlüssel der Voice-Clips (/dev/urandom nicht lesbar)."
+  printf 'HELDIX_DIENST_VOICE_CLIP_KEY=%s\n' "$key" >> "$ENV_FILE"
+  ok "Schlüssel für Voice-Clips erzeugt (HELDIX_DIENST_VOICE_CLIP_KEY in $ENV_FILE)"
 }
 
 write_config() {
   step "Einstellungen"
   if [ ! -f "$ENV_FILE" ]; then
-    cat > "$ENV_FILE" <<EOF
+    (umask 077 && cat > "$ENV_FILE" <<EOF
 # Heldix-Dienst – Umgebungsvariablen (siehe docs/dienst.md). Nach Änderungen: systemctl restart $UNIT
 # Eigene Einträge, z. B. HELDIX_DIENST_CAPES=heldix,glut, bleiben bei Updates erhalten.
 # Voice Chat: HELDIX_DIENST_VOICE=0 schaltet ihn aus, HELDIX_DIENST_VOICE_RANGE=48 setzt die Reichweite (8–128 Blöcke).
+# Enthält den Schlüssel für Voice-Clips (HELDIX_DIENST_VOICE_CLIP_KEY): nur für root lesbar, bei Sicherungen mitnehmen.
 EOF
+    )
   fi
+  # Ab 1.13.0 steht hier ein Schlüssel: nur root (systemd liest die Datei vor dem Wechsel zum Benutzer des Dienstes)
+  chown root:root "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
   set_env PORT "$PORT"
   set_env HOST 127.0.0.1
   set_env HELDIX_DIENST_DATA "$DATA_DIR"
@@ -591,6 +997,8 @@ EOF
   if [ -n "$API_DOMAIN" ]; then set_env HELDIX_DIENST_API_URL "https://$API_DOMAIN"; fi
   configure_microsoft
   configure_world
+  configure_hosting
+  configure_voice_clip_key
   # Update-Schlüssel aus dem Installer (fehlt er, bleibt Veröffentlichen im Team-Bereich aus)
   if [ -f "$INSTALL_DIR/app/update-public-key.pem" ]; then
     install -m 644 "$INSTALL_DIR/app/update-public-key.pem" "$UPDATE_KEY_FILE"
@@ -598,8 +1006,9 @@ EOF
   fi
   # Entwicklungsmodus niemals auf einem Server
   sed -i '/^HELDIX_DIENST_DEV=/d' "$ENV_FILE"
-  chmod 644 "$ENV_FILE"
-  ok "$ENV_FILE"
+  chown root:root "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  ok "$ENV_FILE (nur für root lesbar)"
 
   if [ "$HTTPS" = 1 ]; then
     write_caddyfile > "$CADDYFILE"
@@ -772,7 +1181,7 @@ write_units() {
 [Unit]
 Description=Heldix-Dienst (Freunde, Capes und Heldix-Symbol für HeldixClient)
 Documentation=https://github.com/AMDRyzen753/HeldixClient/blob/main/docs/dienst.md
-After=network-online.target
+After=network-online.target $WELTEN_UNIT.service
 Wants=network-online.target
 
 [Service]
@@ -912,6 +1321,8 @@ wait_for() {
 
 start_services() {
   step "Starten"
+  # erst der Welten-Wächter (falls an), dann der Dienst, der mit ihm spricht
+  start_welten
   systemctl enable "$UNIT" >/dev/null 2>&1
   systemctl restart "$UNIT"
   if wait_for "http://127.0.0.1:$PORT/health" 30 '"ok":true'; then
@@ -973,6 +1384,7 @@ summary() {
   echo "    Update       denselben Befehl mit einer neueren Installer-Datei noch einmal ausführen"
   echo "    Entfernen    sudo bash heldix-dienst-install.sh --uninstall   (Daten bleiben; --purge löscht auch sie)"
   echo "    Daten        $DATA_DIR (Sicherung: Ordner kopieren, während der Dienst gestoppt ist)"
+  echo "    Einstellungen $ENV_FILE (mit dem Schlüssel für Voice-Clips: mit sichern, nur für root lesbar)"
   echo "    Verwaltung   sudo heldix-dienst-admin meldungen   (Meldungen, Sperren, Team: sudo heldix-dienst-admin hilfe)"
   echo ""
   if grep -q '^HELDIX_DIENST_VOICE=0' "$ENV_FILE" 2>/dev/null; then
@@ -992,6 +1404,21 @@ summary() {
   else
     echo "  Welt teilen ist aus. Einschalten: DNS-Eintrag *.welt.${DOMAIN:-<domain>} (A bzw. AAAA) auf diesen Server setzen"
     echo "  und den Installer erneut ausführen (oder mit --world-domain <name>). Port 25565/tcp muss frei sein."
+  fi
+  echo ""
+  if [ "$HOSTING_ACTIVE" = 1 ]; then
+    printf '  %sDauerhafte Welten (Beta) sind an: %s Plätze%s (höchstens so viele Welten laufen gleichzeitig;\n' "$BOLD" "$WELTEN_SLOTS" "$RESET"
+    echo "  aus dem Arbeitsspeicher: $WELTEN_RAM_MB MB, je Welt 3 GB, dazu 6 GB fürs System). Ändern: --welten-max <n>."
+    echo "    Wächter      systemctl status $WELTEN_UNIT   ·   Log: journalctl -u $WELTEN_UNIT -f"
+    echo "    Weltdaten    $WELTEN_DIR (je Welt worlds/<id>/, Sicherungen in worlds/<id>/backups)"
+    echo "    Netz         Container nur im Docker-Netz $WELTEN_NETWORK, Ports nur auf 127.0.0.1, kein Zugriff aufs lokale Netz"
+    echo "    Ausschalten  Installer mit --no-hosting (hält die Welten an, Weltdaten bleiben)"
+    if [ "$(welten_env_value HELDIX_WELTEN_ACCEPT_MINECRAFT_EULA)" != 1 ]; then
+      warn "Der Minecraft-EULA ist nicht zugestimmt – der Wächter startet keine Welt. Lesen: $MINECRAFT_EULA_URL, dann mit --hosting --accept-minecraft-eula."
+    fi
+  else
+    echo "  Dauerhafte Welten (Beta) sind aus. Einschalten: --hosting --accept-minecraft-eula (installiert Docker;"
+    echo "  Minecraft-EULA: $MINECRAFT_EULA_URL). Empfohlen ab 32 GB Arbeitsspeicher."
   fi
   echo ""
   if [ "$WEBSITE" = 1 ] && grep -q '^HELDIX_DIENST_MS_CLIENT_ID=' "$ENV_FILE" 2>/dev/null; then
@@ -1032,8 +1459,10 @@ summary() {
 uninstall() {
   [ "$(id -u)" = 0 ] || die "Bitte mit sudo bzw. als root ausführen."
   step "Heldix-Dienst entfernen"
+  # dauerhafte Welten: laufende Welten sauber anhalten; die Firewall-Unit nimmt beim Anhalten ihre Regeln heraus
+  stop_welten_containers
   local unit
-  for unit in "$CADDY_UNIT" "$UNIT"; do
+  for unit in "$WELTEN_UNIT" "$WELTEN_FIREWALL_UNIT" "$CADDY_UNIT" "$UNIT"; do
     systemctl disable --now "$unit" >/dev/null 2>&1 || true
     rm -f "/etc/systemd/system/$unit.service"
   done
@@ -1042,13 +1471,20 @@ uninstall() {
   rm -f "$ADMIN_BIN"
   ok "Programme, Systemdienste und $ADMIN_BIN entfernt"
   if [ "$PURGE" = 1 ]; then
-    confirm "Alle Daten des Dienstes ($DATA_DIR) und die Zertifikate unwiderruflich löschen?" || die "Abgebrochen, Daten bleiben."
-    rm -rf "$DATA_DIR" "$CADDY_DATA_DIR" "$CONFIG_DIR"
+    confirm "Alle Daten des Dienstes ($DATA_DIR), die dauerhaften Welten ($WELTEN_DIR) und die Zertifikate unwiderruflich löschen?" || die "Abgebrochen, Daten bleiben."
+    if command -v docker >/dev/null 2>&1; then
+      local id
+      for id in $(docker ps -aq --filter label=heldix.world 2>/dev/null || true); do
+        docker rm -f "$id" >/dev/null 2>&1 || true
+      done
+      docker network rm "$WELTEN_NETWORK" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$DATA_DIR" "$CADDY_DATA_DIR" "$CONFIG_DIR" "$WELTEN_DIR"
     userdel "$SERVICE_USER" >/dev/null 2>&1 || true
     userdel "$CADDY_USER" >/dev/null 2>&1 || true
     ok "Daten, Zertifikate, Einstellungen und Benutzer gelöscht"
   else
-    info "Daten (auch Launcher-Updates und Addons) bleiben in $DATA_DIR, Einstellungen in $CONFIG_DIR (löschen mit --uninstall --purge)."
+    info "Daten (auch Launcher-Updates und Addons) bleiben in $DATA_DIR, dauerhafte Welten in $WELTEN_DIR, Einstellungen in $CONFIG_DIR (löschen mit --uninstall --purge)."
   fi
 }
 
@@ -1064,6 +1500,7 @@ main() {
   check_ports
   check_dns
   check_world
+  check_hosting
   if [ "$HTTPS" = 1 ]; then
     info "Webseite: $([ "$WEBSITE" = 1 ] && printf %s "$DOMAIN" || printf aus) · API: $API_DOMAIN · interner Port: $PORT"
   else
@@ -1072,9 +1509,12 @@ main() {
   create_users
   install_node
   install_caddy
+  install_docker
   install_app
   write_config
   write_units
+  setup_welten
+  disable_welten
   write_admin
   open_firewall
   start_services

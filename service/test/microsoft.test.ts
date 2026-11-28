@@ -323,14 +323,18 @@ describe('Anmeldung mit dem Minecraft-Konto: Ablauf', () => {
     }
   });
 
-  test('Ziel nur aus der Liste: support, team, sicherheit bleiben; alles andere fällt weg (auch bei Fehlern)', async () => {
-    const { service, fake, close } = await setup();
+  test('Ziel nur aus der Liste: support, team, sicherheit, welten, plus bleiben; alles andere fällt weg (auch bei Fehlern)', async () => {
+    // mehr Anmeldungen als die übliche Grenze (20 pro Minute und IP), die ein eigener Test prüft
+    const { service, fake, close } = await setup({ webMicrosoftRateLimit: 100 });
     try {
       for (const [ziel, expected] of [
         ['support', 'support'],
         ['team', 'team'],
         ['sicherheit', 'sicherheit'],
         ['addons', 'addons'],
+        // ab 1.13.0
+        ['welten', 'welten'],
+        ['plus', 'plus'],
         ['evil', null],
         ['https://evil.example/', null],
         ['team&code=x', null],

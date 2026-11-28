@@ -1,4 +1,6 @@
-// HeldixClient – Webseite: Team-Rollen, Rechte und Abzeichen (Heldix-Dienst 1.12.0, rollen-spec.md).
+// HeldixClient – Webseite: Team-Rollen, Rechte und Abzeichen (Heldix-Dienst 1.12.0, rollen-spec.md; 1.13.0: Rechte
+// hosting:manage, hosting:grant und discover:moderate für dauerhafte Welten, Heldix+-Warteliste und Entdecken;
+// voice:moderate und voice:admin für die Voice-Moderation).
 //
 // Der Dienst entscheidet über jede Route selbst (403 code forbidden). Die Webseite blendet nur aus, was die eigene
 // Rolle nicht darf: WebMe.permissions bzw. GET /v1/team/permissions. Fehlen die Angaben (älterer Dienst bis 1.11),
@@ -29,14 +31,20 @@ export const PERMISSIONS = [
   { id: 'support', label: 'Support', text: 'Support-Anfragen beantworten und schließen' },
   { id: 'audit', label: 'Protokoll', text: 'Jede Änderung durch das Team ansehen' },
   { id: 'team.view', label: 'Team-Übersicht', text: 'Team-Mitglieder und Abzeichen ansehen' },
+  // Ab Dienst 1.13.0
+  { id: 'hosting:manage', label: 'Dauerhafte Welten', text: 'Dauerhafte Welten (Übersicht, anhalten, Grenzen ändern)' },
+  { id: 'hosting:grant', label: 'Freischaltungen', text: 'Freischaltungen für dauerhafte Welten und Heldix+-Warteliste' },
+  { id: 'discover:moderate', label: 'Entdecken moderieren', text: 'Entdecken moderieren (Meldungen, ausblenden, Besitzer sperren)' },
+  { id: 'voice:moderate', label: 'Voice moderieren', text: 'Voice-Meldungen prüfen (auch Aufnahmen anhören), Voice-Sperren, Regeln und Liste „Voice aus“ ansehen' },
+  { id: 'voice:admin', label: 'Voice verwalten', text: 'Voice-Regeln veröffentlichen, Aufnahmen beim Melden schalten, Liste „Voice aus“ ändern' },
 ];
 
-/** Rechte je Rolle (Tabelle aus rollen-spec.md bzw. dienst-1.12 §7) – nur als Rückfall, der Dienst liefert sie selbst. */
+/** Rechte je Rolle (Tabelle aus rollen-spec.md bzw. dienst-1.12 §7, ab 1.13.0 mit Hosting und Entdecken) – nur als Rückfall, der Dienst liefert sie selbst. */
 export const ROLE_PERMISSIONS = {
-  admin: ['team.manage', 'players.delete', 'updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'moderation', 'players', 'support', 'audit', 'team.view'],
-  'developer-team': ['updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'players', 'audit', 'team.view'],
-  moderator: ['addon-reports', 'news', 'moderation', 'players', 'support', 'audit', 'team.view'],
-  supporter: ['players', 'support', 'team.view'],
+  admin: ['team.manage', 'players.delete', 'updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'moderation', 'players', 'support', 'audit', 'team.view', 'hosting:manage', 'hosting:grant', 'discover:moderate', 'voice:moderate', 'voice:admin'],
+  'developer-team': ['updates', 'addons', 'addon-reports', 'cosmetics', 'news', 'players', 'audit', 'team.view', 'hosting:manage'],
+  moderator: ['addon-reports', 'news', 'moderation', 'players', 'support', 'audit', 'team.view', 'discover:moderate', 'voice:moderate'],
+  supporter: ['players', 'support', 'team.view', 'discover:moderate', 'voice:moderate'],
   designer: ['cosmetics', 'team.view'],
   tester: ['team.view'],
 };

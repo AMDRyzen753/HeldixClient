@@ -1,14 +1,14 @@
 ---
 titel: Updates des Launchers
-beschreibung: Wie sich HeldixClient unter Windows selbst aktualisiert und wie du auf dem Mac eine neue Version installierst.
+beschreibung: Wie sich HeldixClient unter Windows und auf dem Mac selbst aktualisiert – und was zu tun ist, wenn der Mac nur einen Hinweis zeigt.
 kategorie: launcher
 reihenfolge: 6
 stichworte: update, updates, aktualisieren, neue version, automatisch, beim start, startfenster, suche nach updates, versionsverlauf, was ist neu, neu in, mac update, neu starten, jetzt neu starten, jetzt installieren, signatur
 ---
 Neue Versionen von HeldixClient kommen über heldixclient.com. Mit dem Launcher bekommen deine Instanzen beim nächsten Start auch die neue HeldixClient-Mod.
 
-## Windows: automatisch
-Unter Windows hält sich der Launcher selbst aktuell – direkt beim Start:
+## Automatisch beim Start
+Unter Windows und ab Version 0.14.0 auch auf dem Mac hält sich der Launcher selbst aktuell – direkt beim Start:
 1. Beim Öffnen zeigt ein kleines Startfenster **„Suche nach Updates …“**. Das dauert höchstens ein paar Sekunden; ohne Internet startet der Launcher einfach normal.
 2. Gibt es eine neue Version, lädt er sie gleich (**„Update auf … wird geladen … 42 %“**), installiert sie (**„Wird installiert …“**) und startet danach von selbst neu. Dauert das Laden zu lange, startet **Später – Launcher jetzt öffnen** den Launcher sofort; das Update lädt dann im Hintergrund weiter.
 3. Läuft der Launcher schon länger, schaut er alle 30 Minuten nach. Eine neue Version lädt er im Hintergrund; ist sie fertig, steht in der Seitenleiste **Update bereit** mit **Jetzt neu starten**. Spielst du gerade, kommt der Hinweis erst nach dem Spiel. Spätestens beim Beenden des Launchers wird installiert.
@@ -24,11 +24,16 @@ Unter **Einstellungen → Updates** findest du:
 - **Nach Updates suchen:** prüft sofort und lädt eine neue Version gleich herunter. Danach installierst du sie mit **Jetzt neu starten**.
 - **Versionsverlauf:** öffnet die Liste aller Versionen mit ihren Änderungen.
 
-## Mac: neue Version laden
-Auf dem Mac aktualisiert sich der Launcher nicht selbst. Er meldet eine neue Version aber beim Start (**Update verfügbar**), in der Seitenleiste und unter **Einstellungen → Updates**:
+## Mac: so läuft es
+Auf dem Mac lädt der Launcher die Version für deinen Chip (Apple Silicon oder Intel), prüft sie, entpackt sie und tauscht nach dem Beenden die App in **Programme** aus. Danach startet HeldixClient von selbst neu. Klappt der Austausch nicht, bleibt die alte Version, und der Launcher startet trotzdem.
+
+Das geht nur, wenn HeldixClient im Ordner **Programme** liegt und dort ersetzt werden darf. Läuft die App direkt aus der DMG, aus dem Ordner Downloads oder ohne Schreibrechte, meldet der Launcher neue Versionen nur (**Update verfügbar** mit dem Grund) – dann so:
 1. Klicke auf **Herunterladen**. Die [Download-Seite](/download) öffnet sich.
 2. Lade die passende `.dmg`-Datei (Apple Silicon oder Intel).
-3. Beende HeldixClient, öffne die DMG und ziehe HeldixClient wieder in **Programme**. Ersetze dabei die alte Version.
+3. Beende HeldixClient, öffne die DMG und ziehe HeldixClient in **Programme**. Ersetze dabei die alte Version.
+4. Starte HeldixClient ab jetzt aus **Programme** – dann kommen die nächsten Updates von selbst.
+
+Versionen vor 0.14.0 aktualisieren sich auf dem Mac noch nicht selbst; dort einmal wie oben von Hand neu installieren.
 
 Deine Instanzen, Welten und Konten bleiben erhalten – sie liegen nicht in der App, sondern im Datenordner. Blockiert macOS den Start erneut, hilft wieder **Dennoch öffnen**, siehe [Auf dem Mac installieren](/hilfe/installation-mac).
 

@@ -11,15 +11,28 @@
 //   [16 Byte ID][Opus] → je Sprecher ein AudioDecoder → Worklet (Jitter-Puffer, Lautstärke je Person) → Lautsprecher.
 // - Senden nur bei Sprachaktivierung (Schwelle mit 300 ms Nachlauf) oder Push-to-Talk, nie stumm oder mit Ton aus.
 // - Schließcodes des Dienstes: 4002 woanders verbunden, 4004 entfernt, 4005 Gast-Sitzung abgelaufen, 4006 Einladung
-//   ungültig, 4007 voll (Gäste), 4001/4003 Konto gelöscht/gesperrt. Neu verbunden wird nur bei Netzfehlern.
+//   ungültig, 4007 voll (Gäste), 4001/4003 Konto gelöscht/gesperrt, ab Dienst 1.13.0 (Funktion „moderation“) 4012
+//   Voice-Regeln nicht angenommen (vorher Nachricht `rules`) und 4013 Voice-Sperre (vorher Nachricht `banned`). Neu
+//   verbunden wird nur bei Netzfehlern; nach 4012 zeigt voice-panel.js den Regeln-Dialog und verbindet danach neu.
+// - Moderation (1.13.0): `room` mit voice "off" (Server hat Voice abgeschaltet) beendet die Teilnahme mit Hinweis,
+//   `group` mit status "kicked" bzw. `moderated` (vom Party-Leiter entfernt/stummgeschaltet) ebenso bzw. als Hinweis,
+//   `peers.silenced` kennzeichnet Teilnehmer, die im Bereich für alle stumm geschaltet sind, `clips` sagt, ob Spieler
+//   im Spiel beim Melden die letzten 10 Minuten hochladen können.
+// - Lautstärke-Schutz: DynamicsCompressorNode zwischen Worklet und Lautsprecher (LIMITER in voice-core.js), seine
+//   eingebaute Aufholverstärkung mit einem GainNode ausgeglichen; abschaltbar.
+// - Lautstärke-Verlauf je Sprecher (Pegel je Sekunde, höchstens 10 Minuten, nur im Arbeitsspeicher), gemessen direkt
+//   nach dem Dekodieren – geht nur mit einer Meldung gegen genau diesen Sprecher an den Dienst.
 // Der Browser nimmt nichts auf und speichert nichts; die Sprache geht nur über den Heldix-Dienst an die Gruppe.
 import {
   FRAME_SAMPLES,
   FRAME_US,
+  LIMITER,
+  LevelHistory,
   SAMPLE_RATE,
   SentenceFramer,
   SequenceTracker,
   VoiceActivation,
+  compressorMakeupGain,
   frameTimestamp,
   gapSamples,
   meterLevel,
@@ -54,9 +67,28 @@ export const CLOSE_TEXTS = Object.freeze({
   4005: 'Deine Gast-Sitzung ist abgelaufen. Gilt die Einladung noch, kannst du neu beitreten.',
   4006: 'Diese Einladung ist abgelaufen oder wurde zurückgezogen.',
   4007: 'Die Gruppe ist voll – es können höchstens 4 Gäste gleichzeitig dabei sein.',
+  4012: 'Die Voice-Regeln haben sich geändert. Lies sie bitte und nimm sie an, dann kannst du weiter mitreden.',
+  4013: 'Du bist vom Voice Chat gesperrt.',
 });
+export const VOICE_OFF_TEXT = 'Voice ist auf diesem Server aus (auf Wunsch des Server-Betreibers).';
 
 const UUID_RE = /^[0-9a-f]{32}$/;
+/** Lautstärke-Verläufe von Sprechern, die so lange nichts mehr gesagt haben, fallen weg. */
+const LEVELS_KEEP_MS = 10 * 60_000;
+const cleanText = (value, max) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null);
+const time = (value) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null);
+
+/** `clips` aus `ready`/`clips`: { maxMs, maxBytes } oder null (Aufnahmen beim Melden aus). */
+function normalizeClips(value) {
+  if (!value || typeof value !== 'object') return null;
+  return { maxMs: Number(value.maxMs) > 0 ? Number(value.maxMs) : 600_000, maxBytes: Number(value.maxBytes) > 0 ? Number(value.maxBytes) : 3_145_728 };
+}
+
+/** Nachricht `banned` → { until (ms | null = dauerhaft), reason, message, appeal } (Texte nur als Text). */
+export function normalizeBan(value) {
+  if (!value || typeof value !== 'object') return null;
+  return { until: time(value.until), reason: cleanText(value.reason, 300), message: cleanText(value.message, 500), appeal: cleanText(value.appeal, 300) };
+}
 
 /**
  * Kann dieser Browser mitreden? → { ok, reason, encoderConfig, microphone }
@@ -136,11 +168,14 @@ export function audioDataToFloat32(data) {
  * Unterprotokolle oder null, wenn der Gast-Zugang nicht mehr geht), checkLogin (async () → false, wenn die Anmeldung
  * abgelaufen ist), onEvent(type, detail).
  *
- * Ereignisse: status { status: connecting|connected|reconnecting|closed, message?, retryIn? }, peers [Teilnehmer],
- * activity { level, talking, speaking: Set }, microphone { ok, reason }, notice { message }.
+ * Ereignisse: status { status: connecting|connected|reconnecting|closed, message?, code?, ban? (bei 4013) }, peers
+ * [Teilnehmer], activity { level, talking, speaking: Set }, microphone { ok, reason }, notice { message },
+ * moderation { moderation (Dienst kann Melden), clips } (nach `ready` und bei `clips`), self { silenced, message }
+ * (ich bin im Bereich für alle stumm geschaltet).
+ * protection: Lautstärke-Schutz an (Standard) oder aus.
  */
 export class VoiceSession {
-  constructor({ code, protocols, selfId = null, guest = false, encoderConfig = ENCODER_CONFIGS[2], renewGuest = null, checkLogin = null, onEvent = () => {} }) {
+  constructor({ code, protocols, selfId = null, guest = false, encoderConfig = ENCODER_CONFIGS[2], renewGuest = null, checkLogin = null, protection = true, onEvent = () => {} }) {
     this.code = code;
     this.protocols = protocols;
     this.selfId = selfId;
@@ -148,6 +183,7 @@ export class VoiceSession {
     this.encoderConfig = encoderConfig;
     this.renewGuest = renewGuest;
     this.checkLogin = checkLogin;
+    this.protection = protection !== false;
     this.emit = onEvent;
 
     this.status = 'idle';
@@ -185,6 +221,20 @@ export class VoiceSession {
     this.names = new Map();
     /** id → Zustand des Sprechers (Dekodierer, Folgenummern) */
     this.speakers = new Map();
+    /** id → LevelHistory (Pegel je Sekunde, nur für Meldungen) */
+    this.levels = new Map();
+    this.activityTicks = 0;
+    /** Lautstärke-Schutz: { compressor, makeup } oder null (Browser kann es nicht) */
+    this.limiter = null;
+
+    /** Ab Dienst 1.13.0: Melden möglich, Aufnahmen beim Melden im Spiel aktiv (null = aus) */
+    this.moderation = false;
+    this.clips = null;
+    /** Version der Voice-Regeln aus `rules` (vor 4012) und Angaben aus `banned` (vor 4013) */
+    this.rulesRequired = null;
+    this.ban = null;
+    this.selfSilenced = false;
+    this.selfSilencedText = null;
     this.onPageHide = () => this.leave();
   }
 
@@ -237,9 +287,54 @@ export class VoiceSession {
     this.node.port.onmessage = (event) => {
       if (event.data?.type === 'block') this.onBlock(event.data.samples);
     };
-    this.node.connect(this.context.destination);
+    this.limiter = this.createLimiter();
+    this.routeOutput();
     this.node.port.postMessage({ type: 'silent', on: this.deafened });
     for (const [id, gain] of this.volumes) this.node.port.postMessage({ type: 'gain', id, gain });
+  }
+
+  /** Lautstärke-Schutz: Kompressor → Ausgleich seiner Aufholverstärkung → Lautsprecher. */
+  createLimiter() {
+    try {
+      const compressor = this.context.createDynamicsCompressor();
+      compressor.threshold.value = LIMITER.threshold;
+      compressor.knee.value = LIMITER.knee;
+      compressor.ratio.value = LIMITER.ratio;
+      compressor.attack.value = LIMITER.attack;
+      compressor.release.value = LIMITER.release;
+      const makeup = this.context.createGain();
+      makeup.gain.value = 1 / compressorMakeupGain(LIMITER);
+      compressor.connect(makeup);
+      makeup.connect(this.context.destination);
+      return { compressor, makeup };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Ausgang des Worklets je nach Lautstärke-Schutz über den Begrenzer oder direkt an den Lautsprecher. */
+  routeOutput() {
+    if (!this.node || !this.context) return;
+    try {
+      this.node.disconnect();
+    } catch {
+      // war nicht verbunden
+    }
+    try {
+      this.node.connect(this.protection && this.limiter ? this.limiter.compressor : this.context.destination);
+    } catch {
+      try {
+        this.node.connect(this.context.destination);
+      } catch {
+        // Kontext schon geschlossen
+      }
+    }
+  }
+
+  /** Lautstärke-Schutz ein- oder ausschalten (gilt sofort). */
+  setProtection(on) {
+    this.protection = Boolean(on);
+    this.routeOutput();
   }
 
   /** Mikrofon anfragen (beim Start und mit „Mikrofon erlauben“). Ohne Mikrofon hört man nur zu. */
@@ -334,7 +429,8 @@ export class VoiceSession {
     this.finish(null);
   }
 
-  finish(message, { code = null } = {}) {
+  /** Teilnahme beenden. extra (z. B. ban bei 4013, version bei 4012) geht mit dem Status „closed“ an die Oberfläche. */
+  finish(message, { code = null, ...extra } = {}) {
     this.closedByUs = true;
     clearInterval(this.timers.ping);
     clearTimeout(this.timers.reconnect);
@@ -349,7 +445,7 @@ export class VoiceSession {
     }
     this.ws = null;
     this.cleanupAudio();
-    this.setStatus('closed', { message, code });
+    this.setStatus('closed', { message, code, ...extra });
   }
 
   cleanupAudio() {
@@ -369,9 +465,11 @@ export class VoiceSession {
     this.encoder = null;
     for (const speaker of this.speakers.values()) this.closeDecoder(speaker);
     this.speakers.clear();
+    this.levels.clear();
     this.context?.close().catch(() => {});
     this.context = null;
     this.node = null;
+    this.limiter = null;
     this.source = null;
   }
 
@@ -388,6 +486,8 @@ export class VoiceSession {
     if (this.closedByUs) return;
     this.opened = false;
     this.joined = false;
+    this.rulesRequired = null;
+    this.ban = null;
     let ws;
     try {
       ws = new WebSocket(voiceUrl(), this.protocols);
@@ -425,6 +525,9 @@ export class VoiceSession {
     if (this.closedByUs) return;
     this.ws = null;
     this.clearPeers();
+    // Voice-Regeln (neue Version oder nicht angenommen) und Voice-Sperre: Angaben kamen vorher als Nachricht
+    if (code === 4012) return this.finish(CLOSE_TEXTS[4012], { code, version: this.rulesRequired });
+    if (code === 4013) return this.finish(this.ban?.message ?? CLOSE_TEXTS[4013], { code, ban: this.ban });
     if (CLOSE_TEXTS[code]) return this.finish(CLOSE_TEXTS[code], { code });
     if (!this.opened) {
       // Abgelehnt, bevor die Verbindung stand: abgelaufene Gast-Sitzung (z. B. nach einem Neustart des Dienstes,
@@ -436,6 +539,8 @@ export class VoiceSession {
           protocols = await this.renewGuest();
         } catch (error) {
           if (error?.status === 404) return this.finish(CLOSE_TEXTS[4006], { code: 4006 });
+          // Neue Version der Voice-Regeln: wie 4012 (Dialog, danach neu)
+          if (error?.status === 409 && error.code === 'voice-rules') return this.finish(CLOSE_TEXTS[4012], { code: 4012, version: null });
           if (error?.status === 429 || error?.status === 409 || error?.status === 400) return this.finish(error.message, { code: error.status });
           // Dienst nicht erreichbar: beim nächsten Versuch wieder einen neuen Gast-Zugang holen
           this.renewed = false;
@@ -480,12 +585,15 @@ export class VoiceSession {
         if (!features.includes('guests')) return this.finish('Der Heldix-Dienst kann noch keine Teilnehmer im Browser. Versuch es nach dem nächsten Update noch einmal.', { code: 'alt' });
         this.attempt = 0;
         this.renewed = false;
+        this.moderation = features.includes('moderation');
+        this.clips = this.moderation ? normalizeClips(message.clips) : null;
         this.send({ type: 'join', invite: this.code });
         this.sendState();
         clearInterval(this.timers.ping);
         this.timers.ping = setInterval(() => this.send({ type: 'ping' }), PING_MS);
         this.joined = true;
         this.setStatus('connected');
+        this.emit('moderation', { moderation: this.moderation, clips: this.clips });
         return;
       }
       case 'peers':
@@ -496,13 +604,59 @@ export class VoiceSession {
         return;
       case 'group':
         if (message.status === 'full') this.finish('Die Gruppe ist voll – in eine Gruppe passen höchstens 16 Teilnehmer.', { code: 'voll' });
+        // Vom Party-Leiter aus dem Voice der Party entfernt (10 Minuten): danach in keiner Gruppe
+        else if (message.status === 'kicked') this.finish(cleanText(message.message, 300) ?? 'Du wurdest aus dem Voice der Party entfernt (10 Minuten).', { code: 'entfernt' });
         return;
       case 'invite':
         // Einladung ungültig: der Dienst schließt gleich mit 4006
         if (message.status === 'invalid') this.finish(CLOSE_TEXTS[4006], { code: 4006 });
         return;
+      case 'rules':
+        // Voice-Regeln nicht (in dieser Version) angenommen: gleich kommt 4012
+        if (message.status === 'required') this.rulesRequired = Number.isInteger(message.version) && message.version > 0 ? message.version : null;
+        return;
+      case 'banned':
+        // Voice-Sperre: gleich kommt 4013
+        this.ban = normalizeBan(message);
+        return;
+      case 'room':
+        // Server hat Voice abgeschaltet: kein Raum, keine Gruppe – hier gibt es dann nichts zu hören
+        if (message.voice === 'off') this.finish(cleanText(message.message, 300) ?? VOICE_OFF_TEXT, { code: 'aus' });
+        else if (message.voice === 'kicked' && cleanText(message.message, 300)) this.emit('notice', { message: cleanText(message.message, 300) });
+        return;
+      case 'moderated':
+        this.onModerated(message);
+        return;
+      case 'clips':
+        this.clips = normalizeClips(message.clips);
+        this.emit('moderation', { moderation: this.moderation, clips: this.clips });
+        return;
       default:
-      // pong und Unbekanntes: nichts zu tun
+      // pong, mod und Unbekanntes: nichts zu tun
+    }
+  }
+
+  /** Vom Gastgeber/Party-Leiter stummgeschaltet, entfernt oder wieder zugelassen (nur Party-Gruppe betrifft den Browser). */
+  onModerated(message) {
+    const notice = cleanText(message.message, 300);
+    switch (message.action) {
+      case 'muted':
+        this.selfSilenced = true;
+        this.selfSilencedText = notice;
+        this.emit('self', { silenced: true, message: notice });
+        return;
+      case 'unmuted':
+        this.selfSilenced = false;
+        this.selfSilencedText = null;
+        this.emit('self', { silenced: false, message: null });
+        if (notice) this.emit('notice', { message: notice });
+        return;
+      case 'kicked':
+        if (message.scope === 'party') this.finish(notice ?? 'Du wurdest aus dem Voice der Party entfernt (10 Minuten).', { code: 'entfernt' });
+        else if (notice) this.emit('notice', { message: notice });
+        return;
+      default:
+        if (notice) this.emit('notice', { message: notice });
     }
   }
 
@@ -520,6 +674,8 @@ export class VoiceSession {
     const browser = new Set(Array.isArray(message.browser) ? message.browser : []);
     const muted = new Set(Array.isArray(message.muted) ? message.muted : []);
     const deafened = new Set(Array.isArray(message.deafened) ? message.deafened : []);
+    // Ab 1.13.0: im Bereich (Party-Gruppe, Welt) für alle stumm geschaltet
+    const silenced = new Set(Array.isArray(message.silenced) ? message.silenced : []);
     const next = new Map();
     for (const id of ids) {
       const before = this.peers.get(id);
@@ -531,8 +687,18 @@ export class VoiceSession {
         name: guestName,
         muted: muted.has(id),
         deafened: deafened.has(id),
+        silenced: silenced.has(id),
         volume: this.volumes.get(id) ?? before?.volume ?? 1,
       });
+    }
+    // Steht man selbst in der Liste (Gruppe), sagt `silenced` auch, ob man selbst stumm geschaltet ist; sonst gilt
+    // nur `moderated`.
+    const listed = [...(Array.isArray(message.group) ? message.group : []), ...(Array.isArray(message.uuids) ? message.uuids : [])].includes(this.selfId);
+    const selfSilenced = Boolean(this.selfId && silenced.has(this.selfId));
+    if (listed && Array.isArray(message.silenced) && selfSilenced !== this.selfSilenced) {
+      this.selfSilenced = selfSilenced;
+      if (!selfSilenced) this.selfSilencedText = null;
+      this.emit('self', { silenced: selfSilenced, message: this.selfSilencedText });
     }
     for (const id of this.peers.keys()) {
       if (!next.has(id)) {
@@ -544,6 +710,14 @@ export class VoiceSession {
     }
     this.peers = next;
     this.emitPeers();
+  }
+
+  /**
+   * Lautstärke-Verlauf eines Teilnehmers für eine Meldung: { end, rms, peak } (je Sekunde, dBFS, höchstens 600,
+   * null = nichts gehört) oder null, wenn in den letzten 10 Minuten nichts von ihm ankam.
+   */
+  levelsFor(id) {
+    return this.levels.get(id)?.snapshot(Date.now()) ?? null;
   }
 
   applyState(message) {
@@ -673,6 +847,11 @@ export class VoiceSession {
         this.speakers.delete(speaker.id);
       }
     }
+    // Etwa alle 10 Sekunden: Lautstärke-Verläufe von Sprechern, die 10 Minuten nichts gesagt haben, verwerfen
+    if (++this.activityTicks % 100 === 0) {
+      const cutoff = Date.now() - LEVELS_KEEP_MS;
+      for (const [id, history] of this.levels) if (history.lastAt < cutoff) this.levels.delete(id);
+    }
     this.emit('activity', { level: this.microphone.ok ? this.level : 0, talking: this.talking, speaking });
     this.level *= 0.85;
   }
@@ -746,6 +925,15 @@ export class VoiceSession {
       const timestamp = audio.timestamp;
       const gap = gapSamples(speaker.expected, timestamp, { maxFrames: 5 });
       speaker.expected = timestamp + Math.round((samples.length * 1e6) / (audio.sampleRate || SAMPLE_RATE));
+      // Pegel für den Lautstärke-Verlauf messen, bevor die Samples ans Worklet gehen (danach gehören sie ihm)
+      if (this.moderation) {
+        let history = this.levels.get(speaker.id);
+        if (!history) {
+          history = new LevelHistory({ seconds: 600 });
+          this.levels.set(speaker.id, history);
+        }
+        history.add(samples, Date.now());
+      }
       this.node.port.postMessage({ type: 'pcm', id: speaker.id, samples, gap }, [samples.buffer]);
       if (speaker.endTs !== null && timestamp >= speaker.endTs) {
         speaker.endTs = null;

@@ -23,6 +23,8 @@ Angezeigt werden nur Addons, die auf deinem PC und in deinen Instanzen laufen. I
 ## 4. Fertig
 Der Launcher installiert die gewählten Addons in deine Instanzen mit HeldixClient und zeigt dabei den Fortschritt. Mit **Los geht's** bist du auf der Startseite – und hattest du eine Einladung, öffnet sie sich jetzt zum Annehmen.
 
+Mit dem Häkchen **Mit Windows starten** (Mac: **Bei der Anmeldung starten**) läuft HeldixClient ab dem nächsten Anmelden unsichtbar im Hintergrund, damit Nachrichten deiner Freunde gleich ankommen. Ab Werk aus; ändern kannst du es jederzeit unter **Einstellungen → Allgemein**.
+
 ## Einrichtung erneut starten
 Willst du die Schritte noch einmal durchgehen, etwa um Addons nachzuholen: **Einstellungen → Über HeldixClient → Einrichtung erneut starten**.
 

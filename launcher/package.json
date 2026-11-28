@@ -1,7 +1,7 @@
 {
   "name": "heldixclient-launcher",
   "productName": "HeldixClient",
-  "version": "0.13.9",
+  "version": "0.14.0",
   "description": "Minecraft-Launcher mit eigenem Mod-Loader (Heldix Loader), Client-Mod und Addon-System",
   "license": "MIT",
   "author": "HeldixClient contributors",
@@ -22,6 +22,7 @@
     "icon": "electron scripts/render-icon.mjs",
     "ui-assets": "electron scripts/render-ui-assets.mjs",
     "installer-art": "electron scripts/render-installer.mjs",
+    "dmg-art": "electron scripts/render-dmg.mjs",
     "dist": "npm run mod && npm run build && electron-builder --win",
     "test:launch": "npm run build && node dist/scripts/test-launch.js",
     "test:discord": "npm run build && node dist/scripts/test-discord.js",
@@ -31,6 +32,7 @@
     "capes": "electron scripts/render-capes.mjs",
     "update-key": "npm run build && node dist/scripts/release.js --init",
     "release": "npm run dist && node dist/scripts/release.js",
+    "release:mac": "npm run build && node dist/scripts/release-mac.js",
     "addon": "npm run build && node dist/scripts/addon-release.js",
     "cosmetic": "npm run build && node dist/scripts/cosmetic-release.js",
     "cosmetic:preview": "npm run build && node dist/scripts/cosmetic-preview.js",
@@ -41,6 +43,7 @@
     "test:cosmetics": "npm run build && node dist/scripts/test-cosmetics.js",
     "test:cosmetics-client": "npm run build && node dist/scripts/test-cosmetics-client.js",
     "test:update": "npm run build && node dist/scripts/test-update.js",
+    "test:background": "npm run build && node dist/scripts/test-background.js",
     "test:crash": "npm run build && node dist/scripts/test-crash.js",
     "test:serverstatus": "npm run build && node dist/scripts/test-serverstatus.js",
     "test:social": "npm run build && node dist/scripts/test-social.js",
@@ -163,19 +166,22 @@
     },
     "dmg": {
       "title": "HeldixClient ${version}",
+      "background": "build/dmg-background.png",
+      "iconSize": 96,
+      "iconTextSize": 13,
       "window": {
         "width": 540,
         "height": 380
       },
       "contents": [
         {
-          "x": 140,
-          "y": 190,
+          "x": 150,
+          "y": 196,
           "type": "file"
         },
         {
-          "x": 400,
-          "y": 190,
+          "x": 390,
+          "y": 196,
           "type": "link",
           "path": "/Applications"
         }

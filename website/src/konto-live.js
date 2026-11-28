@@ -7,6 +7,8 @@
 // - Klappt der WebSocket nicht (älterer Dienst, Proxy, Netz), fragt die Seite alle 15 Sekunden nach (poll) und
 //   versucht es später erneut (5 s, 15 s, 30 s, dann jede Minute). Auch mit Verbindung gleicht sie jede Minute einmal ab.
 // - „schreibt …“: höchstens alle 3 Sekunden je Freund, über den WebSocket oder POST /v1/messages/<uuid>/typing.
+// - Abos (ab Dienst 1.13.0, z. B. hosting-subscribe fürs Live-Log einer dauerhaften Welt): send() schickt eine Nachricht,
+//   onOpen() meldet jede (neue) Verbindung – dort schickt die Seite ihre Abos erneut, weil der Dienst sie je Verbindung führt.
 //
 // Keine Tokens im Code oder in der Konsole: angemeldet wird nur über das HttpOnly-Cookie.
 
@@ -26,7 +28,7 @@ export function realtimeUrl() {
  * 'abfrage' | 'aus'. onSignedOut(): Verbindung mit 4008 geschlossen. poll(): Stand per HTTP holen (Rückfall und
  * Abgleich). call(method, path): Anfrage mit Sitzung (für „schreibt …“ ohne WebSocket).
  */
-export function createLive({ onEvent, onState, onSignedOut, poll, call }) {
+export function createLive({ onEvent, onState, onSignedOut, onOpen, poll, call }) {
   const state = { socket: null, status: 'aus', running: false, retry: 0, retryTimer: null, pingTimer: null, pollTimer: null, typing: new Map(), polling: false };
 
   function setStatus(status) {
@@ -103,6 +105,11 @@ export function createLive({ onEvent, onState, onSignedOut, poll, call }) {
       state.pingTimer = setInterval(() => send({ type: 'ping' }), PING_MS);
       // Nach (Wieder-)Verbinden einmal abgleichen: in der Zwischenzeit kann etwas verloren gegangen sein.
       pollOnce();
+      try {
+        onOpen?.();
+      } catch (error) {
+        console.error(error);
+      }
     };
     socket.onmessage = (event) => {
       if (typeof event.data !== 'string' || event.data.length > 512 * 1024) return;
@@ -191,6 +198,8 @@ export function createLive({ onEvent, onState, onSignedOut, poll, call }) {
     typing,
     pollNow: pollOnce,
     status: () => state.status,
+    /** Nachricht über den WebSocket (false, wenn gerade keiner verbunden ist). */
+    send,
     /** Nach einer Nachricht darf sofort wieder „schreibt …“ gehen. */
     resetTyping(uuid) {
       state.typing.delete(uuid);

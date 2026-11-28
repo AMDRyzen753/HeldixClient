@@ -140,8 +140,24 @@ export async function api(
   return { status: res.status, body: text === '' ? undefined : JSON.parse(text), headers: res.headers };
 }
 
-/** Macht Stufe 11 (Freunde 2.0, Community-Abzeichen) rückgängig, damit ältere Stufen getestet werden können. */
-export const UNDO_SCHEMA_11 = `
+/** Macht Stufe 13 (Voice-Moderation: Meldungsart, Voice-Sperren, Zustimmung, Regeln, „Voice aus“, Clips) rückgängig. */
+export const UNDO_SCHEMA_13 = `
+DROP TABLE voice_clips; DROP TABLE voice_servers; DROP TABLE voice_settings; DROP TABLE voice_rules; DROP TABLE voice_consents;
+DROP TABLE voice_bans; DROP INDEX reports_kind;
+ALTER TABLE reports DROP COLUMN kind; ALTER TABLE reports DROP COLUMN context; ALTER TABLE reports DROP COLUMN outcome;
+`;
+
+/** Macht Stufe 12 (Dauerhafte Welten, Freischaltungen, Warteliste, Entdecken) rückgängig (vorher auch Stufe 13). */
+export const UNDO_SCHEMA_12 = `${UNDO_SCHEMA_13}
+DROP TRIGGER hosted_worlds_tombstone; DROP TABLE hosted_tombstones; DROP TABLE hosted_backup_plugins; DROP TABLE hosted_plugins; DROP TABLE hosted_worlds; DROP TABLE hosting_grants; DROP TABLE plus_waitlist;
+DROP TABLE discover_likes; DROP TABLE discover_reports; DROP TABLE discover_listings; DROP TABLE discover_bans;
+`;
+
+/**
+ * Macht Stufe 11 (Freunde 2.0, Community-Abzeichen) rückgängig, damit ältere Stufen getestet werden können (vorher auch
+ * Stufe 12, die darauf aufbaut).
+ */
+export const UNDO_SCHEMA_11 = `${UNDO_SCHEMA_12}
 DROP TABLE message_reactions; DROP TABLE community_badges; DROP INDEX friendships_friend;
 ALTER TABLE users DROP COLUMN status_text; ALTER TABLE users DROP COLUMN dnd; ALTER TABLE users DROP COLUMN show_last_online;
 ALTER TABLE users DROP COLUMN suggestable; ALTER TABLE users DROP COLUMN show_suggestions; ALTER TABLE users DROP COLUMN online_notify;

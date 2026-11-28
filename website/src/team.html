@@ -6,6 +6,8 @@
 <link rel="stylesheet" href="/bereich-bausteine.css">
 <link rel="stylesheet" href="/bereich.css">
 <link rel="stylesheet" href="/team.css">
+<link rel="stylesheet" href="/welten.css">
+<link rel="stylesheet" href="/moderation.css">
 <script type="module" src="/team.js"></script>
 </head>
 <body class="bereich bereich--team" data-seite="team">
@@ -210,6 +212,16 @@
       </div>
     </div>
 
+    <!-- Voice: Meldungen, Aufnahmen, Voice-Sperren, Regeln, „Voice aus“ (team-voice.js) -->
+    <div class="panel" id="panel-voice" role="tabpanel" aria-labelledby="tab-voice" tabindex="0" hidden>
+      <div id="team-voice" class="stack"></div>
+    </div>
+
+    <!-- Entdecken: Meldungen, ausblenden, Besitzer sperren (team-welten.js) -->
+    <div class="panel" id="panel-entdecken" role="tabpanel" aria-labelledby="tab-entdecken" tabindex="0" hidden>
+      <div id="team-entdecken" class="stack"></div>
+    </div>
+
     <!-- Neuigkeiten -->
     <div class="panel" id="panel-neuigkeiten" role="tabpanel" aria-labelledby="tab-neuigkeiten" tabindex="0" hidden>
       <div class="toolbar">
@@ -291,8 +303,10 @@
         </ol>
       </div>
       <div class="app-card">
-        <h2>Mac-Downloads hochladen</h2>
-        <p class="muted small">DMG und ZIP für Apple Silicon und Intel, z. B. aus dem Build-Artefakt <code>HeldixClient-macOS</code> oder aus <code>launcher/release</code> auf einem Mac. Namen wie beim Bauen: <code>HeldixClient-&lt;version&gt;-mac-arm64.dmg</code> bzw. <code>-mac-x64.zip</code>. Die neueste Datei je Prozessor steht sofort auf der Download-Seite – ohne update.json, der Launcher auf dem Mac meldet neue Versionen nur.</p>
+        <h2>Mac-Downloads und Mac-Update</h2>
+        <p class="muted small">DMG und ZIP für Apple Silicon und Intel, z. B. aus dem Build-Artefakt <code>HeldixClient-macOS</code> oder aus <code>launcher/release</code> auf einem Mac. Namen wie beim Bauen: <code>HeldixClient-&lt;version&gt;-mac-arm64.dmg</code> bzw. <code>-mac-x64.zip</code>. Die neueste DMG je Prozessor steht sofort auf der Download-Seite.</p>
+        <p class="info-box small" id="mac-reihenfolge">{{icon:info}}<span><strong>Reihenfolge:</strong> erst die Mac-ZIPs (und DMGs) hochladen, <code>update-mac.json</code> aus <code>npm run release:mac</code> <strong>zuletzt</strong> – der Dienst prüft beim Veröffentlichen Signatur, Größe und SHA-512 beider ZIPs. Ab dann aktualisieren sich die Mac-Launcher selbst.</span></p>
+        <h3 class="h4">1. Mac-Dateien hochladen</h3>
         <div class="file-row">
           <label class="button small ghost file-button">{{icon:file}}Mac-Dateien wählen …<input type="file" id="upload-mac" accept=".dmg,.zip,application/x-apple-diskimage,application/zip" multiple class="visually-hidden"></label>
           <span class="file-name muted" id="upload-mac-name">Keine Datei gewählt</span>
@@ -303,6 +317,16 @@
         </div>
         <p class="form-error" id="upload-mac-fehler" role="alert" hidden></p>
         <p class="form-ok" id="upload-mac-ok" hidden></p>
+        <h3 class="h4">2. update-mac.json veröffentlichen</h3>
+        <div class="file-row">
+          <label class="button small ghost file-button">{{icon:file}}update-mac.json wählen …<input type="file" id="upload-mac-json" accept=".json,application/json" class="visually-hidden"></label>
+          <span class="file-name muted" id="upload-mac-json-name">Keine Datei gewählt</span>
+        </div>
+        <div id="mac-manifest-pruefung" hidden></div>
+        <p class="form-error" id="upload-mac-json-fehler" role="alert" hidden></p>
+        <div class="card-actions" id="mac-manifest-aktionen" hidden>
+          <button class="button small" type="button" id="mac-manifest-veroeffentlichen">{{icon:check}}Mac-Update veröffentlichen</button>
+        </div>
       </div>
       <div class="app-card">
         <div class="card-head"><h2>Dateien auf dem Server</h2></div>
@@ -454,6 +478,16 @@
         </div>
         <div id="cosmetic-liste"></div>
       </div>
+    </div>
+
+    <!-- Dauerhafte Welten: Übersicht, Grenzen, Freischaltungen (team-welten.js) -->
+    <div class="panel" id="panel-hosting" role="tabpanel" aria-labelledby="tab-hosting" tabindex="0" hidden>
+      <div id="team-hosting" class="stack"></div>
+    </div>
+
+    <!-- Heldix+-Warteliste (team-welten.js) -->
+    <div class="panel" id="panel-plus" role="tabpanel" aria-labelledby="tab-plus" tabindex="0" hidden>
+      <div id="team-plus" class="stack"></div>
     </div>
 
     <!-- Team -->

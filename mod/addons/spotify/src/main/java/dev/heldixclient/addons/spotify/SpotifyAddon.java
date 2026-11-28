@@ -22,7 +22,12 @@ import java.util.function.IntSupplier;
  *   <li>Chat-Befehle {@code .np} und {@code .spotify …}</li>
  *   <li>Einblendung bei jedem Songwechsel (einstellbar)</li>
  * </ul>
- * Die Daten kommen vom System (Windows-Mediensteuerung, AppleScript, MPRIS) – siehe {@link Player}. Keine Anmeldung.
+ * Die Daten kommen vom System (Windows-Mediensteuerung, AppleScript für Spotify und Apple Music, MPRIS) – siehe
+ * {@link Player}. Keine Anmeldung.
+ *
+ * <p>Tasten: Pos1, Bild ab und Bild auf gibt es auf Mac-Tastaturen ohne eigene Tasten als fn + ←, fn + ↓ und fn + ↑ –
+ * deshalb bleiben sie auch dort Standard, mit diesem Hinweis im Untermenü (Mac-Medientasten F7–F9 steuern die Musik
+ * ohnehin über macOS).
  */
 public final class SpotifyAddon implements HeldixAddon {
 	static final int GREEN = 0xFF1DB954;
@@ -80,16 +85,20 @@ public final class SpotifyAddon implements HeldixAddon {
 		announce = module.addToggle("announce", "Songwechsel einblenden", "Kurze Einblendung mit Cover oben rechts bei jedem neuen Song", true);
 		announceHiddenOnly = module.addToggle("announce-hidden-only", "Einblendung nur ohne HUD-Element",
 				"Nur einblenden, wenn das HUD-Element aus oder ausgeblendet ist (auch mit F1)", false);
-		onlySpotify = module.addToggle("only-spotify", "Nur Spotify", "Aus: auch andere Player steuern, z. B. Browser oder VLC", true);
+		onlySpotify = module.addToggle("only-spotify", "Nur Spotify", os == Player.Os.MAC
+				? "Aus: auch Apple Music steuern – es zählt der Player, der gerade spielt"
+				: "Aus: auch andere Player steuern, z. B. Browser oder VLC", true);
 		module.addAction("Abspielen / Pause", "", "Umschalten", this::playPause);
 		module.addAction("Nächster Song", "", "Weiter", () -> command(() -> player.next()));
 		module.addAction("Vorheriger Song", "", "Zurück", () -> command(() -> player.previous()));
 		module.addAction("Player wechseln", "Wenn mehrere Player laufen (Windows, „Nur Spotify“ aus)", "Wechseln", () -> command(() -> player.nextPlayer()));
 
 		// ab API 6: die Tasten stehen zusätzlich im Untermenü des Moduls unter „Tasten“ (dort umbelegbar)
-		module.showKey(api.registerKey("play-pause", "Abspielen/Pause", HeldixKeys.HOME, this::playPause), "Abspielen/Pause", "");
-		module.showKey(api.registerKey("next", "Nächster Song", HeldixKeys.PAGE_DOWN, () -> command(() -> player.next())), "Nächster Song", "");
-		module.showKey(api.registerKey("previous", "Vorheriger Song", HeldixKeys.PAGE_UP, () -> command(() -> player.previous())), "Vorheriger Song", "");
+		// Mac-Tastaturen ohne Pos1/Bild-Tasten: dieselben Tasten mit fn + Pfeil (Hinweis nur auf dem Mac)
+		boolean mac = os == Player.Os.MAC;
+		module.showKey(api.registerKey("play-pause", "Abspielen/Pause", HeldixKeys.HOME, this::playPause), "Abspielen/Pause", mac ? macKeyHint("←") : "");
+		module.showKey(api.registerKey("next", "Nächster Song", HeldixKeys.PAGE_DOWN, () -> command(() -> player.next())), "Nächster Song", mac ? macKeyHint("↓") : "");
+		module.showKey(api.registerKey("previous", "Vorheriger Song", HeldixKeys.PAGE_UP, () -> command(() -> player.previous())), "Vorheriger Song", mac ? macKeyHint("↑") : "");
 		module.showKey(api.registerKey("seek-forward", "10 Sekunden vor", HeldixKeys.NONE, () -> seek(SEEK_MS)), "10 Sekunden vor", "");
 		module.showKey(api.registerKey("seek-back", "10 Sekunden zurück", HeldixKeys.NONE, () -> seek(-SEEK_MS)), "10 Sekunden zurück", "");
 		module.showKey(api.registerKey("shuffle", "Zufallswiedergabe", HeldixKeys.NONE, this::shuffle), "Zufallswiedergabe", "");
@@ -107,6 +116,11 @@ public final class SpotifyAddon implements HeldixAddon {
 		if (module.isEnabled()) startPlayer();
 
 		if (player == null) api.logger().warn("Das Spotify-Addon läuft nur unter Windows, macOS und Linux und ist auf diesem System inaktiv.");
+	}
+
+	/** Hinweis im Untermenü auf dem Mac: Standardtaste auf Laptop-Tastaturen mit fn (nur solange sie nicht umbelegt ist) */
+	static String macKeyHint(String arrow) {
+		return "Auf MacBook-Tastaturen: fn + " + arrow;
 	}
 
 	@Override
@@ -144,7 +158,7 @@ public final class SpotifyAddon implements HeldixAddon {
 		if (player.failures() >= 2) {
 			return switch (os) {
 				case WINDOWS -> "Windows-Mediensteuerung nicht erreichbar";
-				case MAC -> "Spotify-Steuerung nicht erreichbar";
+				case MAC -> "Musik-Steuerung nicht erreichbar";
 				default -> "playerctl antwortet nicht";
 			};
 		}
@@ -234,7 +248,8 @@ public final class SpotifyAddon implements HeldixAddon {
 		command(() -> {
 			Track track = player.track();
 			player.cycleRepeat();
-			if (track.repeat() != null) api.notify(track.repeat().next(os != Player.Os.MAC).label(), track.title(), track.cover());
+			// Spotify auf dem Mac kennt nur „Liste wiederholen“, Apple Music auch einen Song
+			if (track.repeat() != null) api.notify(track.repeat().next(os != Player.Os.MAC || MacPlayer.repeatsTrack(track)).label(), track.title(), track.cover());
 		});
 	}
 

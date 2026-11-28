@@ -50,6 +50,8 @@ Wer Fabric-Mods wie Sodium oder Shaderpacks nutzen möchte, legt im Launcher ein
 - **Nachrichten** mit Antworten, Reaktionen, „schreibt …“, Löschen und Beitreten-Karten; Einblendung im Spiel
 - **Party** mit bis zu 7 Freunden: sehen, wo jeder spielt, Party-Chat, dem Leiter folgen und automatisch eine gemeinsame Voice-Gruppe
 - **Welt teilen:** Einzelspielerwelt im Pausemenü öffnen, feste Adresse wie `k7m2xq.welt.heldixclient.com`, auch für Spieler ohne HeldixClient. Die IP-Adressen der Mitspieler sieht der Gastgeber nicht. Dazu **Heldix-Welten** im Hauptmenü mit den Welten der Freunde, Mitgliedern, Rollen, Anklopfen (**H**/**N**) und automatischen Sicherungen. In der Serverliste deiner Mitspieler steht „Geteilt mit HeldixClient“
+- **Dauerhafte Welten** (Beta, später mit Heldix+): eine Welt läuft auf dem Heldix-Server weiter, auch wenn du offline bist, schläft ohne Spieler und wacht beim Beitreten auf – hochladen im Spiel, verwalten (Plugins, Konsole, Sicherungen) auf der Webseite, jederzeit als neue Einzelspielerwelt herunterladen. Ohne Freischaltung: Heldix+-Warteliste
+- **Entdecken:** öffentliche Welten in Heldix-Welten und auf der Startseite des Launchers – beliebt, neu oder gerade aktiv, mit Tags, Suche, „Gefällt mir“ und „Melden“
 - **Einladen:** eigener Link – wer darüber dazukommt, ist gleich befreundet; Belohnungen für bestätigte Freunde. Der Link kann direkt auf deinen Server führen
 - **Voice Chat** (Addon): Nähe, Gruppen, Party und geteilte Welten; Mikrofon und Ton auch im Pausemenü schalten; Gäste im Browser über einen Gast-Link
 - **Blockieren** und **Melden**, Privatsphäre-Einstellungen für alles, was Freunde sehen
@@ -115,9 +117,9 @@ Freelook und andere Komfort-Funktionen bleiben auf Servern aus, deren Regeln sie
 3. Die Einrichtung führt durch Anmeldung und Addons – danach eine Instanz wählen und **Spielen** drücken.
 
 **macOS 11 oder neuer** (Apple Silicon und Intel)
-1. Auf [heldixclient.com/download](https://heldixclient.com/download) die Mac-Version laden (Apple Silicon für M1 und neuer, sonst Intel), öffnen und HeldixClient in **Programme** ziehen.
+1. Auf [heldixclient.com/download](https://heldixclient.com/download) die Mac-Version laden (Apple Silicon für M1 und neuer, sonst Intel), die DMG öffnen und HeldixClient auf **Programme** ziehen – und von dort starten, nicht aus der DMG.
 2. Die App ist nur ad-hoc signiert und nicht von Apple beglaubigt. Beim ersten Start blockiert macOS sie; unter **Systemeinstellungen → Datenschutz & Sicherheit** steht dann **Dennoch öffnen**.
-3. Anmelden und spielen wie unter Windows. Unterschiede: kein Vulkan (Minecraft wählt die Grafik selbst), Updates meldet der Launcher nur und schickt zur Download-Seite, und das Spotify-Addon braucht Windows.
+3. Anmelden und spielen wie unter Windows. Ab 0.14.0 aktualisiert sich die App selbst (solange sie in **Programme** liegt). Das Spotify-Addon spricht mit Spotify und auf Wunsch mit Apple Music (macOS fragt einmal nach der Automation-Erlaubnis). Unterschiede: kein Vulkan (Minecraft wählt die Grafik selbst), Kürzel mit ⌘ statt Strg. Mehr in der Hilfe: [Mac: Installieren und erster Start](https://heldixclient.com/hilfe/installation-mac).
 
 > [!NOTE]
 > Die Anmeldung mit Microsoft-Konten braucht eine App-ID, die Mojang freigeschaltet hat. Die App-ID von HeldixClient ist freigegeben. Wer einen eigenen Build mit eigener App-ID ausliefert, muss sie selbst freischalten lassen, siehe [docs/einrichtung.md](docs/einrichtung.md).

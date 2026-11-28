@@ -8,6 +8,7 @@ import dev.heldixclient.module.HudModule;
 import dev.heldixclient.module.ModuleManager;
 import dev.heldixclient.module.Setting;
 import dev.heldixclient.ui.ContextMenu;
+import dev.heldixclient.ui.Keys;
 import dev.heldixclient.ui.Shell;
 import dev.heldixclient.ui.Ui;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -142,8 +143,8 @@ public class HudEditorScreen extends Screen {
 			config().hudSnap = !config().hudSnap;
 			HeldixConfig.save();
 		});
-		undoButton = tool("undo", "Rückgängig (Strg+Z)", this::undo);
-		redoButton = tool("refresh", "Wiederholen (Strg+Y)", this::redo);
+		undoButton = tool("undo", "Rückgängig (" + Keys.shortcut("Z") + ")", this::undo);
+		redoButton = tool("refresh", "Wiederholen (" + Keys.redo() + ")", this::redo);
 		tool("reset", "Standard: alle Positionen und Größen", this::resetAll);
 		String done = "Fertig";
 		ActionButton finish = new ActionButton(0, 0, ActionButton.widthFor(done, "check"), BUTTON_H, done, true, this::onClose).withIcon("check");
@@ -729,9 +730,9 @@ public class HudEditorScreen extends Screen {
 		items.add(new ContextMenu.Toggle("Hilfslinien", "crosshair", () -> config().hudGuides, value -> config().hudGuides = value));
 		items.add(new ContextMenu.Toggle("Einrasten", "magnet", () -> config().hudSnap, value -> config().hudSnap = value));
 		items.add(new ContextMenu.Separator());
-		items.add(new ContextMenu.Action("Alles auswählen", "check", "Strg+A", !visibleModules().isEmpty(), false, this::selectAll));
-		items.add(new ContextMenu.Action("Rückgängig", "undo", "Strg+Z", !undo.isEmpty(), false, this::undo));
-		items.add(new ContextMenu.Action("Wiederholen", "refresh", "Strg+Y", !redo.isEmpty(), false, this::redo));
+		items.add(new ContextMenu.Action("Alles auswählen", "check", Keys.shortcut("A"), !visibleModules().isEmpty(), false, this::selectAll));
+		items.add(new ContextMenu.Action("Rückgängig", "undo", Keys.shortcut("Z"), !undo.isEmpty(), false, this::undo));
+		items.add(new ContextMenu.Action("Wiederholen", "refresh", Keys.redo(), !redo.isEmpty(), false, this::redo));
 		items.add(new ContextMenu.Separator());
 		items.add(new ContextMenu.Action("Alles zurücksetzen", "reset", null, true, true, this::resetEverything));
 		return items;
@@ -867,8 +868,8 @@ public class HudEditorScreen extends Screen {
 		int h = y1 - y0;
 		int x = Math.clamp(x0 + dx, 0, Math.max(0, width - w));
 		int y = Math.clamp(y0 + dy, 0, Math.max(0, height - h));
-		// frei platzieren: Strg oder Alt gedrückt halten
-		boolean free = event.hasControlDown() || event.hasAltDown();
+		// frei platzieren: Strg oder Alt gedrückt halten (Mac: ⌘ oder ⌥ – Ctrl+Ziehen ist dort ein Rechtsklick)
+		boolean free = Keys.shortcutDown(event) || event.hasAltDown();
 		int[] snapped = snap(x, y, w, h, free);
 		int moveX = snapped[0] - x0;
 		int moveY = snapped[1] - y0;
@@ -1000,16 +1001,17 @@ public class HudEditorScreen extends Screen {
 			if (menu.keyPressed(key)) return true;
 			return true;
 		}
-		if (event.hasControlDown() && key == InputConstants.KEY_Z) {
+		// Strg bzw. auf dem Mac ⌘ (Keys.shortcutDown)
+		if (Keys.shortcutDown(event) && key == InputConstants.KEY_Z) {
 			if (event.hasShiftDown()) redo();
 			else undo();
 			return true;
 		}
-		if (event.hasControlDown() && key == InputConstants.KEY_Y) {
+		if (Keys.shortcutDown(event) && key == InputConstants.KEY_Y) {
 			redo();
 			return true;
 		}
-		if (event.hasControlDown() && key == InputConstants.KEY_A) {
+		if (Keys.shortcutDown(event) && key == InputConstants.KEY_A) {
 			selectAll();
 			return true;
 		}
@@ -1018,7 +1020,7 @@ public class HudEditorScreen extends Screen {
 			HeldixConfig.save();
 			return true;
 		}
-		if (key == InputConstants.KEY_R && !event.hasControlDown()) {
+		if (key == InputConstants.KEY_R && !Keys.shortcutDown(event)) {
 			resetAll();
 			return true;
 		}

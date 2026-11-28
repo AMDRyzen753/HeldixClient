@@ -18,6 +18,9 @@ const KIND_ICONS: Record<NotificationKind, string> = {
   'party-follow': 'connect',
   update: 'download',
   addons: 'addons',
+  'hosting-granted': 'server',
+  'hosting-problem': 'warning',
+  'hosting-knock': 'user-plus',
 };
 
 export interface NotificationLinks {

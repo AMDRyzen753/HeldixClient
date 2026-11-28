@@ -19,6 +19,8 @@ import java.util.Set;
  *   <li>{@code IntegratedServer.getProfilePermissions}: Gastgeber immer mit allen Befehlen, Rolle Operator mit Befehlen.</li>
  *   <li>{@code IntegratedServer.getMaxPlayers}: Höchstspieler der geteilten Welt statt fest 8.</li>
  *   <li>{@code PlayerList.placeNewPlayer} (am Ende): Spielmodus nach Rolle.</li>
+ *   <li>{@code ConnectScreen.startConnecting} (am Anfang): Adresse merken – weckt der Beitritt eine schlafende dauerhafte
+ *       Welt (Dienst 1.13.0), versucht {@link dev.heldixclient.share.HostedJoin} es nach 30 s von selbst noch einmal.</li>
  * </ul>
  *
  * <p>Wichtig: Diese Klasse wird vor Minecraft geladen und benutzt keine Minecraft-Klassen, nur deren Namen als Text.
@@ -30,6 +32,10 @@ public final class WorldSharePatches implements ClassTransformer, Opcodes {
 	static final String INTEGRATED_SERVER = "net/minecraft/client/server/IntegratedServer";
 	static final String INTEGRATED_PLAYER_LIST = "net/minecraft/client/server/IntegratedPlayerList";
 	static final String PLAYER_LIST = "net/minecraft/server/players/PlayerList";
+	static final String CONNECT_SCREEN = "net/minecraft/client/gui/screens/ConnectScreen";
+	private static final String SERVER_DATA = "Lnet/minecraft/client/multiplayer/ServerData;";
+	private static final String START_CONNECTING = "(Lnet/minecraft/client/gui/screens/Screen;Lnet/minecraft/client/Minecraft;"
+			+ "Lnet/minecraft/client/multiplayer/resolver/ServerAddress;" + SERVER_DATA + "ZLnet/minecraft/client/multiplayer/TransferState;)V";
 	private static final String NAME_AND_ID = "Lnet/minecraft/server/players/NameAndId;";
 	private static final String COMPONENT = "Lnet/minecraft/network/chat/Component;";
 	private static final String PERMISSIONS = "Lnet/minecraft/server/permissions/LevelBasedPermissionSet;";
@@ -38,7 +44,7 @@ public final class WorldSharePatches implements ClassTransformer, Opcodes {
 
 	@Override
 	public Set<String> targets() {
-		return Set.of(INTEGRATED_SERVER, INTEGRATED_PLAYER_LIST, PLAYER_LIST);
+		return Set.of(INTEGRATED_SERVER, INTEGRATED_PLAYER_LIST, PLAYER_LIST, CONNECT_SCREEN);
 	}
 
 	@Override
@@ -62,6 +68,11 @@ public final class WorldSharePatches implements ClassTransformer, Opcodes {
 				MethodNode place = Patches.method(node, "placeNewPlayer", PLACE_DESC);
 				Patches.tail(place, Code.begin().loadThis().loadArg(place, 1)
 						.invokeStatic(HOOKS, "playerJoined", "(L" + PLAYER_LIST + ";" + SERVER_PLAYER + ")V"));
+			}
+			case CONNECT_SCREEN -> {
+				// statisch: Parameter 3 ist ServerData (Name und Adresse)
+				MethodNode start = Patches.method(node, "startConnecting", START_CONNECTING);
+				Patches.head(start, Code.begin().loadArg(start, 3).invokeStatic(HOOKS, "connecting", "(" + SERVER_DATA + ")V"));
 			}
 			default -> {
 			}

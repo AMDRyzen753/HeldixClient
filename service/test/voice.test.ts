@@ -56,8 +56,9 @@ type Text = any;
 /** Eine `peers`-Nachricht: immer alle Felder (ab 1.11.0 auch guests und browser, ohne Browser leer), ohne Reihenfolge. */
 function peersOf(message: Text): Peers {
   assert.equal(message.type, 'peers');
-  assert.deepEqual(Object.keys(message).sort(), ['browser', 'deafened', 'group', 'guests', 'muted', 'type', 'uuids']);
-  assert.deepEqual([message.guests, message.browser], [{}, []]);
+  // ab 1.13.0 dazu silenced (für alle stumm geschaltet durch Gastgeber bzw. Party-Leiter)
+  assert.deepEqual(Object.keys(message).sort(), ['browser', 'deafened', 'group', 'guests', 'muted', 'silenced', 'type', 'uuids']);
+  assert.deepEqual([message.guests, message.browser, message.silenced], [{}, [], []]);
   return peers(message.uuids, message.group, message.muted, message.deafened);
 }
 
@@ -93,6 +94,8 @@ function frame(seq: number, payload: Buffer | number[], flags = 0, version = 1):
 /** WebSocket-Client für /v1/voice: sammelt Textnachrichten und Sprach-Rahmen getrennt. */
 class VoiceClient {
   readonly texts: Text[] = [];
+  /** `room`-Nachrichten (ab 1.13.0) getrennt, damit drain() wie bisher nur den Rest zeigt */
+  readonly rooms: Text[] = [];
   readonly frames: Buffer[] = [];
   private waiters: { match: (m: Text) => boolean; resolve: (m: Text) => void }[] = [];
   readonly closed: Promise<{ code: number; reason: string }>;
@@ -108,6 +111,9 @@ class VoiceClient {
       if (index >= 0) {
         const [waiter] = this.waiters.splice(index, 1);
         waiter!.resolve(message);
+      } else if (message.type === 'room') {
+        // ab 1.13.0: nach jedem join; nur Tests der Moderation warten darauf
+        this.rooms.push(message);
       } else {
         this.texts.push(message);
       }
@@ -119,6 +125,8 @@ class VoiceClient {
     const fn = typeof match === 'string' ? (m: Text) => m.type === match : match;
     const index = this.texts.findIndex(fn);
     if (index >= 0) return Promise.resolve(this.texts.splice(index, 1)[0]);
+    const room = this.rooms.findIndex(fn);
+    if (room >= 0) return Promise.resolve(this.rooms.splice(room, 1)[0]);
     return new Promise((resolve, reject) => {
       const waiter = {
         match: fn,
@@ -264,7 +272,17 @@ describe('Voice Chat: Verbindung', () => {
       assert.equal(await voiceCount(service), 0);
 
       const { client, ready } = await connect(anna);
-      assert.deepEqual(ready, { type: 'ready', range: 48, maxFrame: 1024, protocol: 1, features: ['state', 'groups', 'guests'], maxGroup: 16 });
+      assert.deepEqual(ready, {
+        type: 'ready',
+        range: 48,
+        maxFrame: 1024,
+        protocol: 1,
+        features: ['state', 'groups', 'guests', 'moderation'],
+        maxGroup: 16,
+        // ab 1.13.0: keine Voice-Regeln veröffentlicht, keine Aufnahmen
+        rules: null,
+        clips: null,
+      });
       client.send({ type: 'ping' });
       assert.deepEqual(await client.next('pong'), { type: 'pong' });
       assert.equal(await voiceCount(service), 1);
@@ -855,7 +873,7 @@ describe('Voice Chat: Status', () => {
 
       // leave: alles leer
       anna.send({ type: 'leave' });
-      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [], group: [], muted: [], deafened: [], guests: {}, browser: [] });
+      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [], group: [], muted: [], deafened: [], guests: {}, browser: [], silenced: [] });
       assert.deepEqual(await ben.nextPeers(), peers());
 
       // über den Nether zurück: der Status ist noch da
@@ -1097,7 +1115,7 @@ describe('Voice Chat: Gruppen', () => {
       }
 
       anna.send({ type: 'leave' });
-      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [], group: [], muted: [], deafened: [], guests: {}, browser: [] });
+      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [], group: [], muted: [], deafened: [], guests: {}, browser: [], silenced: [] });
       assert.deepEqual(await ben.nextPeers(), peers([c], [c, d]));
       assert.deepEqual(await carla.nextPeers(), peers([b], [b, d]));
       assert.deepEqual(await dirk.nextPeers(), peers([], [b, c]));
@@ -1134,7 +1152,7 @@ describe('Voice Chat: Gruppen', () => {
       const { client: carla } = await connect(carlaP!);
       assert.deepEqual(await anna.join(SERVER, OVERWORLD), []);
       assert.deepEqual(await ben.enter(SERVER, OVERWORLD, GROUP), peers([annaP!.uuid]));
-      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [benP!.uuid], group: [], muted: [], deafened: [], guests: {}, browser: [] });
+      assert.deepEqual(await anna.next('peers'), { type: 'peers', uuids: [benP!.uuid], group: [], muted: [], deafened: [], guests: {}, browser: [], silenced: [] });
       assert.deepEqual(await carla.enter(SERVER, NETHER, GROUP), peers([], [benP!.uuid]));
       assert.deepEqual(await ben.nextPeers(), peers([annaP!.uuid], [carlaP!.uuid]));
       await anna.sync();

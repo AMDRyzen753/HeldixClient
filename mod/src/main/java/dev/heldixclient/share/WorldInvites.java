@@ -41,9 +41,18 @@ public final class WorldInvites {
 	}
 
 	/** Stand von {@code GET /v1/worlds} übernehmen (Echtzeit-Meldungen können bei einer Trennung fehlen) */
+	/** dauerhafte Welten von Freunden, die gerade schlafen (Stand des letzten Abgleichs, ab Dienst 1.13.0) */
+	private static volatile List<WorldService.FriendWorld> sleeping = List.of();
+
+	public static List<WorldService.FriendWorld> sleepingHosted() {
+		return sleeping;
+	}
+
 	public static void syncOpen(List<WorldService.FriendWorld> worlds) {
+		sleeping = worlds.stream().filter(world -> !world.open()).toList();
 		OPEN.clear();
-		for (WorldService.FriendWorld world : worlds) OPEN.put(world.id(), world);
+		// schlafende dauerhafte Welten zählen nicht als „geöffnet“ (keine Einblendung, nicht in „In Welt von …“)
+		for (WorldService.FriendWorld world : worlds) if (world.open()) OPEN.put(world.id(), world);
 	}
 
 	/** {@code { type: 'world-open', world: { id, name, address, host, players, maxPlayers, version } }} (Netzwerk-Thread) */

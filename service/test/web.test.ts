@@ -335,7 +335,7 @@ describe('Spieler-Bereich', () => {
       assert.equal(mine.status, 200);
       assert.equal(mine.body.reports.length, 2);
       const [newest, older] = mine.body.reports;
-      assert.deepEqual(Object.keys(newest).sort(), ['at', 'id', 'note', 'reason', 'reported', 'status']);
+      assert.deepEqual(Object.keys(newest).sort(), ['at', 'id', 'kind', 'note', 'reason', 'reported', 'status']);
       assert.deepEqual(newest.reported, { uuid: carla.uuid, name: 'Carla' });
       assert.deepEqual([newest.reason, newest.note, newest.status], ['harassment', 'gemein', 'open']);
       assert.equal(older.reported.name, 'Ben');

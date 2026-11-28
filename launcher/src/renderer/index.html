@@ -191,6 +191,15 @@
               <div class="row-list" id="home-worlds"></div>
             </section>
 
+            <!-- Beliebte Welten aus Entdecken (öffentliches Weltenverzeichnis, ab Heldix-Dienst 1.13.0) -->
+            <section class="panel" id="home-popular-panel" hidden>
+              <div class="panel-head">
+                <div class="panel-icon"><svg data-icon="compass"></svg></div>
+                <div class="panel-title"><h3>Beliebte Welten</h3><span id="home-popular-sub">Entdecken</span></div>
+              </div>
+              <div class="row-list" id="home-popular"></div>
+            </section>
+
             <section class="panel" id="home-instances-panel">
               <div class="panel-head">
                 <div class="panel-icon"><svg data-icon="modules"></svg></div>
@@ -389,7 +398,8 @@
         </div>
         <div class="settings-layout">
           <nav class="settings-nav" id="settings-nav" aria-label="Bereiche der Einstellungen">
-            <button type="button" data-target="set-spiel" class="active"><svg data-icon="monitor"></svg><span>Spiel</span></button>
+            <button type="button" data-target="set-allgemein" class="active"><svg data-icon="settings"></svg><span>Allgemein</span></button>
+            <button type="button" data-target="set-spiel"><svg data-icon="monitor"></svg><span>Spiel</span></button>
             <button type="button" data-target="set-leistung"><svg data-icon="performance"></svg><span>Leistung &amp; Java</span></button>
             <button type="button" data-target="set-freunde"><svg data-icon="friends"></svg><span>Freunde</span></button>
             <button type="button" data-target="set-discord"><svg data-icon="chat"></svg><span>Discord</span></button>
@@ -397,6 +407,26 @@
             <button type="button" data-target="set-erweitert"><svg data-icon="info"></svg><span>Über HeldixClient</span></button>
           </nav>
           <div class="settings-content">
+            <section class="settings-group" id="set-allgemein">
+              <h3 class="settings-group-title">Allgemein</h3>
+              <div class="cards">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-icon"><svg data-icon="bell"></svg></div>
+                  <div><h3>Hintergrund &amp; Start</h3><p class="hint" id="background-hint">Nachrichten auch bei geschlossenem Fenster.</p></div>
+                </div>
+                <label class="toggle-row">
+                  <span>Im Hintergrund bereit für Nachrichten<small class="toggle-sub" id="tray-toggle-sub">Schließen lässt den Launcher im Infobereich weiterlaufen – Nachrichten, Anfragen und Einladungen kommen als Windows-Benachrichtigung. Beenden: Rechtsklick auf das Symbol → Beenden</small></span>
+                  <input type="checkbox" class="switch" id="tray-toggle">
+                </label>
+                <label class="toggle-row">
+                  <span id="autostart-label">Mit Windows starten<small class="toggle-sub" id="autostart-sub">startet unsichtbar im Infobereich, damit Nachrichten gleich ankommen</small></span>
+                  <input type="checkbox" class="switch" id="autostart-toggle">
+                </label>
+              </div>
+              </div>
+            </section>
+
             <section class="settings-group" id="set-spiel">
               <h3 class="settings-group-title">Spiel</h3>
               <div class="cards">
@@ -426,10 +456,6 @@
                 <label class="toggle-row">
                   <span>Launcher beim Spielstart ausblenden</span>
                   <input type="checkbox" class="switch" id="hide-toggle">
-                </label>
-                <label class="toggle-row">
-                  <span>Beim Schließen in den Infobereich<small class="toggle-sub">während ein Spiel läuft, bleibt der Launcher als Symbol neben der Uhr – mit Freunden und Benachrichtigungen</small></span>
-                  <input type="checkbox" class="switch" id="tray-toggle">
                 </label>
                 <label class="toggle-row">
                   <span>Kontowechsel im Spiel erlauben<small class="toggle-sub">im Heldix-Menü zwischen deinen Konten wechseln; beim ersten Wechsel zu einem Konto fragt der Launcher nach</small></span>

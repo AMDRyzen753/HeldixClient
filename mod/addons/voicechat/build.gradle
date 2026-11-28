@@ -1,10 +1,10 @@
-// Voice Chat: Sprache in der Nähe mit anderen HeldixClient-Spielern, über den Heldix-Dienst (Heldix-API 9, Gäste im Browser).
-// Opus kommt aus Concentus (reines Java, BSD-Lizenz) und wird mit in die JAR gepackt.
+// Voice Chat: Sprache in der Nähe mit anderen HeldixClient-Spielern, über den Heldix-Dienst (Heldix-API 10, Gäste im Browser,
+// Moderation und Melden ab Dienst 1.13.0). Opus kommt aus Concentus (reines Java, BSD-Lizenz) und wird mit in die JAR gepackt.
 plugins {
 	id 'java'
 }
 
-version = '1.2.0'
+version = '1.3.0'
 
 base {
 	archivesName = 'heldix-addon-voicechat'
@@ -23,6 +23,28 @@ dependencies {
 tasks.withType(JavaCompile).configureEach {
 	it.options.release = 21
 	it.options.encoding = 'UTF-8'
+}
+
+// Prüfstand (wird nicht ausgeliefert, läuft mit jedem build): Lautstärke-Schutz an Testsignalen, Ringpuffer mit seinen
+// Grenzen (10 Minuten, 3 MiB je Sprecher, 32 Sprecher, 48 MiB) und Lautstärke-Verlauf – ohne JUnit, als eigene Main-Klasse.
+sourceSets {
+	voiceCheck {
+		java.srcDir 'src/check/java'
+		compileClasspath += sourceSets.main.output + configurations.compileClasspath
+		runtimeClasspath += sourceSets.main.output + configurations.compileClasspath
+	}
+}
+
+tasks.register('checkVoiceChat', JavaExec) {
+	group = 'verification'
+	description = 'Prüft Lautstärke-Schutz, Ringpuffer und Lautstärke-Verlauf des Voice Chats'
+	classpath = sourceSets.voiceCheck.runtimeClasspath
+	mainClass = 'dev.heldixclient.addons.voicechat.VoiceChatCheck'
+	jvmArgs '-Dstdout.encoding=UTF-8'
+}
+
+check {
+	dependsOn('checkVoiceChat')
 }
 
 processResources {

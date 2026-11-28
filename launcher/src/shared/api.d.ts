@@ -49,8 +49,16 @@ export interface Settings {
   discordShowHead: boolean;
   /** nur „Spielt HeldixClient“ ohne weitere Angaben */
   discordMinimal: boolean;
-  /** Fenster schließen, während ein Spiel läuft: Launcher bleibt im Infobereich (Tray) */
+  /**
+   * „Im Hintergrund bereit für Nachrichten“ (ab 0.14.0; früher nur „während des Spiels in den Infobereich“): Fenster
+   * schließen lässt den Launcher im Infobereich weiterlaufen – auch ohne Spiel –, damit Nachrichten, Anfragen und
+   * Einladungen als Systembenachrichtigung ankommen. macOS: HeldixClient bleibt wie gewohnt im Dock. Aus = Schließen beendet.
+   */
   closeToTray: boolean;
+  /** Hinweis „läuft im Infobereich weiter“ wurde schon einmal gezeigt */
+  trayHintSeen: boolean;
+  /** mit Windows starten (unsichtbar im Infobereich, --hidden) bzw. auf dem Mac bei der Anmeldung öffnen; Standard aus */
+  startWithSystem: boolean;
   /** Grafik-API für Minecraft-Versionen mit Vulkan-Unterstützung */
   graphicsApi: GraphicsApi;
   /** abgestimmte JVM-Einstellungen (G1, kompakte Objekt-Header ab Java 25) */
@@ -131,11 +139,12 @@ export interface WhatsNew {
 }
 
 /** Bereich auf heldixclient.com nach der Anmeldung */
-export type WebTarget = 'profil' | 'freunde' | 'nachrichten' | 'privatsphaere' | 'daten' | 'support' | 'team';
+/** welten = Konto → Meine Welten (dauerhafte Welten, ab Dienst 1.13.0) */
+export type WebTarget = 'profil' | 'freunde' | 'nachrichten' | 'privatsphaere' | 'daten' | 'support' | 'team' | 'welten';
 
 /** Stand der automatischen Updates (siehe main/core/updater.ts) */
 export interface UpdateState {
-  /** available = neue Version, nur zum Herunterladen von der Webseite (macOS) */
+  /** available = neue Version gefunden (mit manual: nur zum Herunterladen von der Webseite) */
   phase: 'disabled' | 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'error';
   current: string;
   version?: string;
@@ -144,6 +153,8 @@ export interface UpdateState {
   progress?: number;
   error?: string;
   checkedAt?: number;
+  /** gesetzt = dieses System aktualisiert sich nicht selbst (Grund als Text, z. B. Mac aus dem DMG); neue Versionen über die Webseite */
+  manual?: string;
 }
 
 // ---------- Instanzen ----------
@@ -1187,6 +1198,9 @@ export interface DiscordPreview {
 // ---------- Welt teilen (Heldix-Dienst ab 1.12.0, main/core/worlds.ts) ----------
 
 /** Gerade geöffnete Welt eines Freundes (GET /v1/worlds → friends) */
+/** Zustand einer dauerhaften Welt auf dem Heldix-Server (Dienst ab 1.13.0) */
+export type HostedState = 'creating' | 'sleeping' | 'starting' | 'running' | 'stopping' | 'error';
+
 export interface FriendWorld {
   id: string;
   /** 6 Zeichen; Adresse <code>.welt.<Domain> */
@@ -1198,6 +1212,36 @@ export interface FriendWorld {
   maxPlayers: number;
   /** Minecraft-Version des Gastgebers (null = unbekannt) */
   version: string | null;
+  /** nur bei dauerhaften Welten (läuft auf dem Heldix-Server, schläft, wenn leer; Beitreten weckt sie) */
+  hosted?: { state: HostedState } | null;
+}
+
+/** Eintrag aus Entdecken (öffentliches Weltenverzeichnis, GET /v1/public/discover) */
+export interface DiscoverWorld {
+  code: string;
+  name: string;
+  /** Kurzbeschreibung (höchstens 160 Zeichen, kann leer sein) */
+  description: string;
+  /** IDs aus der festen Liste (survival, kreativ, …), höchstens drei */
+  tags: string[];
+  lang: 'de' | 'en';
+  version: string | null;
+  players: number;
+  maxPlayers: number;
+  /** online = normal geteilte Welt, gerade geöffnet; sonst Zustand der dauerhaften Welt */
+  state: 'online' | 'sleeping' | 'starting' | 'running' | 'stopping';
+  persistent: boolean;
+  host: { uuid: string; name: string };
+  likes: number;
+  address: string;
+}
+
+/** Startseite „Beliebte Welten“ (bis zu drei aus Entdecken) */
+export interface PopularWorlds {
+  /** off = kein Dienst · unsupported = Dienst ohne Entdecken · error = siehe error (letzter Stand bleibt) */
+  status: 'ok' | 'off' | 'unsupported' | 'error';
+  error: string | null;
+  worlds: DiscoverWorld[];
 }
 
 export interface WorldsOverview {
@@ -1219,6 +1263,8 @@ export interface PublicWorldView {
   version: string | null;
   /** open = jeder mit der Adresse, closed = nur Eingeladene/Freunde (andere klopfen an) */
   access: 'open' | 'closed';
+  /** dauerhafte Welt (Dienst ab 1.13.0): dann ist online = läuft; Beitreten weckt eine schlafende */
+  hosted?: { state: HostedState } | null;
 }
 
 /** Welt aus einem Link (heldixclient://welt/<code>) für den Dialog „Welt von <Name>“ */
@@ -1238,11 +1284,12 @@ export interface WorldJoinView {
 
 // ---------- Benachrichtigungen (Glocke, main/core/notifications.ts) ----------
 
-export type NotificationKind = 'friend-request' | 'message' | 'invite-accepted' | 'invite-confirmed' | 'unlock' | 'world-open' | 'world-invite' | 'party-invite' | 'party-follow' | 'update' | 'addons';
+export type NotificationKind = 'friend-request' | 'message' | 'invite-accepted' | 'invite-confirmed' | 'unlock' | 'world-open' | 'world-invite' | 'party-invite' | 'party-follow' | 'update' | 'addons'
+  | 'hosting-granted' | 'hosting-problem' | 'hosting-knock';
 
-/** Wohin ein Klick führt */
+/** Wohin ein Klick führt (hosting = Webseite, Konto → Meine Welten, angemeldet) */
 export interface NotificationTarget {
-  view: 'friends' | 'invites' | 'cosmetics' | 'store' | 'updates' | 'world' | 'party';
+  view: 'friends' | 'invites' | 'cosmetics' | 'store' | 'updates' | 'world' | 'party' | 'hosting';
   /** Freund (Unterhaltung) */
   uuid?: string;
   /** Cosmetic */
@@ -1517,6 +1564,9 @@ export interface HeldixApi {
   joinWorld(code: string): Promise<{ instanceId: string; instanceName: string; address: string }>;
   /** Dialog zu einer Welt öffnen (z. B. aus „Offene Welten“ oder der Glocke) */
   openWorldDialog(code: string): Promise<void>;
+  /** Startseite „Beliebte Welten“ (Entdecken, bis zu drei); refresh = am Speicher vorbei */
+  getPopularWorlds(refresh?: boolean): Promise<PopularWorlds>;
+  onPopularWorlds(callback: (popular: PopularWorlds) => void): () => void;
 
   // ---------- Benachrichtigungen ----------
   listNotifications(): Promise<NotificationList>;
@@ -1536,6 +1586,8 @@ export interface HeldixApi {
   takeUpdateNotice(): Promise<UpdateState | null>;
   /** Hinweis vom Start ist da (die Prüfung lief im Hintergrund): takeUpdateNotice() aufrufen */
   onUpdateNotice(callback: () => void): () => void;
+  /** Seite öffnen (macOS: App-Menü „Einstellungen …“ mit ⌘,) */
+  onViewOpen(callback: (view: string) => void): () => void;
 
   /** öffnet heldixclient.com im Browser, schon angemeldet (Profil, Freunde, Nachrichten, Support, Team-Bereich) */
   openWebAccount(target?: WebTarget): Promise<void>;

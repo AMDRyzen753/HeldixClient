@@ -24,9 +24,12 @@ const SECRET_RE = /^[A-Za-z0-9_-]{43}$/;
 /** Höchstens so viele Web-Sitzungen pro Spieler; die ältesten fallen weg. */
 const SESSIONS_PER_USER = 10;
 
-/** Erlaubte Ziele im Einmal-Link: Reiter der Konto-Seite bzw. `team` für die Seite /team. */
-export const LINK_TARGETS = ['profil', 'freunde', 'nachrichten', 'privatsphaere', 'daten', 'support', 'team'] as const;
-/** Erlaubte Ziele bei der Anmeldung mit dem Minecraft-Konto (`?ziel=`): alle Bereiche der Konto-Seite und `team`. */
+/**
+ * Erlaubte Ziele im Einmal-Link: Reiter der Konto-Seite (ab 1.13.0 auch `welten` = Meine Welten) bzw. `team` für die
+ * Seite /team und (ab 1.13.0) `plus` für die Seite /plus. Die Webseite leitet nach dem Einlösen dorthin weiter.
+ */
+export const LINK_TARGETS = ['profil', 'freunde', 'nachrichten', 'privatsphaere', 'daten', 'support', 'team', 'welten', 'plus'] as const;
+/** Erlaubte Ziele bei der Anmeldung mit dem Minecraft-Konto (`?ziel=`): alle Bereiche der Konto-Seite, `team` und `plus`. */
 export const LOGIN_TARGETS = [...LINK_TARGETS, 'uebersicht', 'sicherheit', 'addons'] as const;
 
 /** Ziel aus der Anfrage, nur aus der Liste; alles andere (auch Adressen) fällt still weg. */

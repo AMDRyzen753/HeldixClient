@@ -111,6 +111,8 @@ export class Team {
     const names: Record<string, string> = { [report.reporter]: report.reporterName, [report.reported]: report.reportedName };
     return {
       id: report.id,
+      // ab 1.13.0: „voice“ = Voice-Meldung (Kontext, Aufnahme und Ergebnis unter /v1/team/voice/reports)
+      kind: report.kind,
       at: report.at,
       status: report.status,
       reason: report.reason,

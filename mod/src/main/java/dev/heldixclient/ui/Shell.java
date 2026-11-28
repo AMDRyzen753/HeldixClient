@@ -329,8 +329,8 @@ public final class Shell {
 		// Suche, Profil, Schließen
 		ActionButton search = bar.searchLabel()
 				? new ActionButton(bar.searchX(), bar.buttonY(), bar.searchW(), bar.buttonH(), "Suchen", false, () -> QuickSearchScreen.open(screen))
-						.withIcon("search").withVariant(ActionButton.Variant.GHOST).withTooltip("Schnellsuche (Strg+K)")
-				: ActionButton.icon(bar.searchX(), bar.buttonY(), bar.buttonH(), "search", "Schnellsuche (Strg+K)", () -> QuickSearchScreen.open(screen));
+						.withIcon("search").withVariant(ActionButton.Variant.GHOST).withTooltip("Schnellsuche (" + Keys.shortcut("K") + ")")
+				: ActionButton.icon(bar.searchX(), bar.buttonY(), bar.buttonH(), "search", "Schnellsuche (" + Keys.shortcut("K") + ")", () -> QuickSearchScreen.open(screen));
 		add.accept(search);
 		add.accept(new ProfileButton(bar.profileX(), bar.buttonY(), bar.profileW(), bar.buttonH(), bar.buttonH() / 2f,
 				() -> {
@@ -510,6 +510,8 @@ public final class Shell {
 	public static Screen replace(Screen screen) {
 		if (screen == null) return null;
 		if (VANILLA.contains(screen)) return screen;
+		// dauerhafte Welt wird gerade geweckt (Dienst 1.13.0): statt der Trennung warten und von selbst erneut beitreten
+		if (screen instanceof net.minecraft.client.gui.screens.DisconnectedScreen) return dev.heldixclient.share.HostedJoin.replace(screen);
 		Minecraft minecraft = Minecraft.getInstance();
 		if (!WidgetStyle.enabled() || minecraft.isDemo()) return screen;
 		if (screen.getClass() == net.minecraft.client.gui.screens.worldselection.SelectWorldScreen.class) return new WorldsScreen();

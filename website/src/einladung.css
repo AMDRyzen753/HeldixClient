@@ -724,6 +724,127 @@
   margin-top: 12px !important;
 }
 
+/* Vom Gastgeber/Party-Leiter für alle stumm geschaltet (eigener Hinweis), Lautstärke-Schutz */
+.voice-mod-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.08);
+  color: var(--danger-text);
+  font-size: 14px;
+}
+.voice-mod-notice .icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+}
+.voice-mod-notice p {
+  margin: 0 !important;
+  color: inherit !important;
+}
+.voice-protection {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.voice-protection .switch__text {
+  gap: 2px;
+  min-width: 0;
+}
+.voice-protection .switch__text strong {
+  font-size: 14.5px;
+}
+.voice-protection .hint {
+  margin: 0 !important;
+}
+.voice-silenced {
+  white-space: nowrap;
+}
+
+/* Dialog „Voice-Regeln lesen und annehmen“ (an <body>, nicht im Bereich) */
+.voice-rules-record {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+  background: rgba(251, 191, 36, 0.08);
+}
+.voice-rules-record > .icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  color: #fde68a;
+}
+.voice-rules-record strong {
+  color: #fde68a;
+}
+.voice-rules-record p {
+  margin: 6px 0 0;
+  font-size: 14px;
+}
+.voice-rules-text {
+  max-height: min(42vh, 380px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 16px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: rgba(8, 11, 18, 0.5);
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+.voice-rules-text:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+.voice-rules-text h3 {
+  margin: 14px 0 0;
+  font-size: 15px;
+}
+.voice-rules-text p,
+.voice-rules-text ul {
+  margin: 8px 0 0;
+}
+.voice-rules-text ul {
+  padding-left: 20px;
+}
+.voice-rules-text li + li {
+  margin-top: 4px;
+}
+.voice-rules-meta {
+  margin: 0;
+}
+
+/* Dialog „… melden“ */
+.voice-report-reasons {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.voice-report-reasons legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+.voice-report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+.voice-report-reason span {
+  font-size: 14.5px;
+}
+
 /* Regler (Schwelle, Lautstärke) */
 .range {
   -webkit-appearance: none;
@@ -828,6 +949,9 @@
   .invite-unlocked {
     flex-direction: column;
     align-items: flex-start;
+  }
+  .voice-report-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -14,6 +14,7 @@ import dev.heldixclient.module.impl.ChatModule;
 import dev.heldixclient.module.impl.WaypointsModule;
 import dev.heldixclient.screen.HeldixMenuScreen;
 import dev.heldixclient.screen.HudInteractScreen;
+import dev.heldixclient.ui.Keys;
 import dev.heldixclient.ui.Shell;
 import dev.heldixclient.ui.Ui;
 import dev.heldixclient.waypoint.Waypoints;
@@ -185,7 +186,8 @@ public final class HudInteraction {
 
 	/**
 	 * Im Chat haben Vorrang: das Eingabefeld, anklickbarer Chattext (Links, Befehle, mit Umschalt Einfügungen – wie bei
-	 * Minecraft) und mit Strg jede Nachricht (Strg+Klick kopiert sie, Chat-Modul). Normaler Text darüber blockiert nicht.
+	 * Minecraft) und mit der Kürzel-Taste jede Nachricht (Strg+Klick bzw. auf dem Mac ⌘-Klick kopiert sie, Chat-Modul).
+	 * Normaler Text darüber blockiert nicht.
 	 */
 	private static boolean blockedByChat(double mouseX, double mouseY) {
 		Minecraft mc = Minecraft.getInstance();
@@ -197,7 +199,7 @@ public final class HudInteraction {
 					.includeInsertions(mc.hasShiftDown());
 			mc.gui.hud.getChat().captureClickableText(finder, height, mc.gui.hud.getGuiTicks(), ChatComponent.DisplayMode.FOREGROUND);
 			if (finder.result() != null) return true;
-			return mc.hasControlDown() && ChatModule.messageAt(mouseX, mouseY) != null;
+			return Keys.shortcutHeld() && ChatModule.messageAt(mouseX, mouseY) != null;
 		} catch (RuntimeException e) {
 			return false;
 		}
@@ -207,7 +209,7 @@ public final class HudInteraction {
 	// Klicks
 	// ======================================================================================
 
-	/** Hook ChatScreen.mouseClicked (nach Strg+Klick): true = verbraucht */
+	/** Hook ChatScreen.mouseClicked (nach Strg+Klick bzw. ⌘-Klick): true = verbraucht */
 	public static boolean chatClick(CommandSuggestions suggestions, MouseButtonEvent event) {
 		if (!active()) return false;
 		// Befehlsvorschläge wie bei Minecraft zuerst

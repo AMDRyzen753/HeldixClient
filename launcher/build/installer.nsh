@@ -41,6 +41,15 @@
   !insertmacro MUI_PAGE_WELCOME
 !macroend
 
+; Autostart (Einstellungen → Allgemein → „Mit Windows starten“, ab 0.14.0): app.setLoginItemSettings schreibt den Wert
+; „HeldixClient“ unter HKCU\Software\Microsoft\Windows\CurrentVersion\Run (core/background.ts, LOGIN_ITEM_NAME).
+; Beim Deinstallieren entfernen – nicht bei einem Update (--updated), da trägt der neue Launcher ihn beim Start neu ein.
+!macro customUnInstall
+  ${ifNot} ${isUpdated}
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "HeldixClient"
+  ${endIf}
+!macroend
+
 !macro customInstall
   !insertmacro heldixInviteFromFileName
 !macroend

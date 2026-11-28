@@ -437,6 +437,10 @@ function readModules(icons) {
   for (const file of readdirSync(path.join(modDir, 'impl')).filter((name) => name.endsWith('.java')).sort()) {
     const source = readFileSync(path.join(modDir, 'impl', file), 'utf8');
     const call = /super\(\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]*)",\s*(true|false)/.exec(source);
+    // Ein Modul ohne lesbare Zeile würde sonst still von /module verschwinden (Beschreibung muss ein fester Text sein)
+    if (!call && /extends\s+(?:Hud)?Module\b/.test(source)) {
+      throw new Error(`Modul in ${file}: super("id", "Name", "Beschreibung", an) nicht lesbar – die Beschreibung muss ein fester Text sein.`);
+    }
     if (!call) continue;
     const [, id, name, description, enabled] = call;
     modules.push({ id, name, description, enabled: enabled === 'true', hud: /extends\s+HudModule\b/.test(source), icon: iconMap[id] ?? 'cube', addon: null });

@@ -1,5 +1,6 @@
-// Updates und Downloads des Launchers: Installer (Windows), Mac-Dateien und update.json liegen im Update-Ordner,
-// der Dienst liefert sie aus (das GitHub-Repository ist privat).
+// Updates und Downloads des Launchers: Installer (Windows), Mac-Dateien, update.json (Windows) und update-mac.json
+// (Mac, ab 1.13.0: eine ZIP je Prozessor) liegen im Update-Ordner, der Dienst liefert sie aus (das GitHub-Repository
+// ist privat).
 // Hochladen geht per scp (Betreiber) oder im Team-Bereich (Admin). Der Launcher prüft die Signatur selbst; beim
 // Veröffentlichen im Team-Bereich prüft sie zusätzlich der Dienst mit dem öffentlichen Update-Schlüssel.
 import { createHash, randomBytes, verify, type KeyObject } from 'node:crypto';
@@ -74,10 +75,16 @@ export function downloadName(file: string, invite: string | null): string {
 const INVALID_NAME =
   'Ungültiger Dateiname (erwartet: HeldixClient-Setup-<version>.exe oder HeldixClient-<version>-mac-<arm64|x64>.<dmg|zip>).';
 export const MANIFEST_FILE = 'update.json';
-/** update.json ist ein paar hundert Byte groß; alles über 64 KB ist sicher ein Versehen. */
+/** Manifest der Mac-Updates (ab 1.13.0), erzeugt mit `npm run release:mac` im Launcher. */
+export const MAC_MANIFEST_FILE = 'update-mac.json';
+/** update.json und update-mac.json sind ein paar hundert Byte groß; alles über 64 KB ist sicher ein Versehen. */
 const MAX_MANIFEST_SIZE = 64 * 1024;
 
 export const NOTHING_PUBLISHED = 'Noch keine Version veröffentlicht.';
+export const NOTHING_PUBLISHED_MAC = 'Noch keine Mac-Version veröffentlicht.';
+/** Prozessoren im Mac-Manifest; für jeden muss eine ZIP drinstehen. */
+export const MAC_ARCHES = ['arm64', 'x64'] as const;
+export type MacArch = (typeof MAC_ARCHES)[number];
 const NO_SUCH_FILE = 'Diese Datei gibt es nicht.';
 /** Versionen wie im Launcher (core/updater.ts): 1.2.3 oder 1.2.3-beta.1 */
 const VERSION_RE = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.]+))?$/;
@@ -275,17 +282,40 @@ function sha512File(file: string): Promise<string> {
   return hashFile(file, 'sha512', 'base64');
 }
 
-/** Inhalt einer gültigen update.json. `manifest` bleibt genau der Text aus der Datei (darüber läuft die Signatur). */
-export interface Published {
+/** Was jede veröffentlichte Version hat (Windows und Mac), z. B. für den Versionsverlauf. */
+export interface PublishedVersion {
+  /** genau der Text aus der Datei (darüber läuft die Signatur) */
   manifest: string;
   signature: string;
   version: string;
+}
+
+/** Inhalt einer gültigen update.json. `manifest` bleibt genau der Text aus der Datei (darüber läuft die Signatur). */
+export interface Published extends PublishedVersion {
   file: string;
   size: number;
 }
 
+/** Eine ZIP im Mac-Manifest. */
+export interface MacFile {
+  file: string;
+  size: number;
+  /** SHA-512, Base64 */
+  sha512: string;
+}
+
+/** Inhalt einer gültigen update-mac.json (Manifest Version 2 mit einer ZIP je Prozessor). */
+export interface PublishedMac extends PublishedVersion {
+  files: Record<MacArch, MacFile>;
+}
+
 /** Prüft den Inhalt von update.json. Liefert das Ergebnis oder einen Fehlertext fürs Log. */
 export function parseUpdateJson(text: string): Published | string {
+  return parseManifestFile(text, checkUpdateObject);
+}
+
+/** JSON aus einer Manifest-Datei, dann `check`. Liefert das Ergebnis oder einen Fehlertext fürs Log. */
+function parseManifestFile<T>(text: string, check: (outer: unknown) => T | string): T | string {
   let outer: unknown;
   try {
     // Ein BOM am Anfang (manche Editoren) stört JSON.parse.
@@ -293,11 +323,11 @@ export function parseUpdateJson(text: string): Published | string {
   } catch {
     return 'kein gültiges JSON';
   }
-  return checkUpdateObject(outer);
+  return check(outer);
 }
 
-/** Prüft die Form von `{ manifest, signature }` (ohne Signatur). Liefert das Ergebnis oder einen Fehlertext. */
-export function checkUpdateObject(outer: unknown): Published | string {
+/** `{ manifest, signature }` mit dem Manifest als JSON-Objekt, sonst ein Fehlertext. */
+function parseOuter(outer: unknown): { manifest: string; signature: string; inner: Record<string, unknown> } | string {
   if (typeof outer !== 'object' || outer === null || Array.isArray(outer)) return 'kein JSON-Objekt';
   const { manifest, signature } = outer as Record<string, unknown>;
   if (typeof manifest !== 'string' || manifest === '') return '„manifest“ fehlt oder ist kein Text';
@@ -309,13 +339,106 @@ export function checkUpdateObject(outer: unknown): Published | string {
     return '„manifest“ ist kein gültiges JSON';
   }
   if (typeof inner !== 'object' || inner === null || Array.isArray(inner)) return '„manifest“ ist kein JSON-Objekt';
-  const { v, version, file, size } = inner as Record<string, unknown>;
+  return { manifest, signature, inner: inner as Record<string, unknown> };
+}
+
+/** Prüft die Form von `{ manifest, signature }` (ohne Signatur). Liefert das Ergebnis oder einen Fehlertext. */
+export function checkUpdateObject(outer: unknown): Published | string {
+  const parsed = parseOuter(outer);
+  if (typeof parsed === 'string') return parsed;
+  const { manifest, signature, inner } = parsed;
+  const { v, version, file, size } = inner;
   if (v !== 1) return '„v“ im Manifest ist nicht 1';
   if (typeof version !== 'string' || version === '') return '„version“ im Manifest fehlt';
   if (typeof file !== 'string' || !SETUP_FILE_RE.test(file)) return '„file“ im Manifest fehlt oder heißt nicht HeldixClient-Setup-<version>.exe';
   if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0) return '„size“ im Manifest fehlt oder ist keine ganze Zahl';
   return { manifest, signature, version, file, size };
 }
+
+/** Prüft den Inhalt von update-mac.json. Liefert das Ergebnis oder einen Fehlertext fürs Log. */
+export function parseMacUpdateJson(text: string): PublishedMac | string {
+  return parseManifestFile(text, checkMacUpdateObject);
+}
+
+/**
+ * Prüft `{ manifest, signature }` einer update-mac.json (ohne Signatur) mit denselben Regeln wie der Launcher
+ * (core/mac-update.ts): `v` 2, `platform` „mac“, gültige Version und für arm64 und x64 je eine ZIP
+ * `HeldixClient-<version>-mac-<arch>.zip` mit Größe (1 Byte bis 1 GiB) und SHA-512 (Base64, 64 Byte).
+ */
+export function checkMacUpdateObject(outer: unknown): PublishedMac | string {
+  const parsed = parseOuter(outer);
+  if (typeof parsed === 'string') return parsed;
+  const { manifest, signature, inner } = parsed;
+  if (inner.v !== 2) return '„v“ im Manifest ist nicht 2';
+  if (inner.platform !== 'mac') return '„platform“ im Manifest ist nicht „mac“';
+  const version = inner.version;
+  if (!isVersion(version)) return '„version“ im Manifest fehlt oder ist ungültig';
+  const raw = inner.files;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return '„files“ im Manifest fehlt oder ist kein Objekt';
+  const files = {} as Record<MacArch, MacFile>;
+  for (const arch of MAC_ARCHES) {
+    const entry = (raw as Record<string, unknown>)[arch];
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return `„files.${arch}“ im Manifest fehlt (beide ZIPs sind Pflicht)`;
+    const { file, size, sha512 } = entry as Record<string, unknown>;
+    const expected = `HeldixClient-${version}-mac-${arch}.zip`;
+    if (file !== expected) return `„files.${arch}.file“ im Manifest heißt nicht ${expected}`;
+    if (typeof size !== 'number' || !Number.isSafeInteger(size) || size <= 0 || size > MAX_SETUP_SIZE) return `„files.${arch}.size“ im Manifest ist keine gültige Größe`;
+    if (typeof sha512 !== 'string' || Buffer.from(sha512, 'base64').length !== 64) return `„files.${arch}.sha512“ im Manifest ist keine gültige Prüfsumme (SHA-512, Base64)`;
+    files[arch] = { file: expected, size, sha512 };
+  }
+  return { manifest, signature, version, files };
+}
+
+/**
+ * Ist das eine update-mac.json (und keine update.json)? Erkannt am Manifest: `platform` „mac“ oder `v` 2. So nimmt
+ * `PUT /v1/team/updates/manifest` beide Dateien an.
+ */
+export function isMacUpdateObject(input: unknown): boolean {
+  if (typeof input !== 'object' || input === null) return false;
+  const manifest = (input as Record<string, unknown>).manifest;
+  if (typeof manifest !== 'string') return false;
+  try {
+    const inner = JSON.parse(manifest) as unknown;
+    if (typeof inner !== 'object' || inner === null) return false;
+    const { platform, v } = inner as Record<string, unknown>;
+    return platform === 'mac' || v === 2;
+  } catch {
+    return false;
+  }
+}
+
+/** Wirft 400, wenn die Signatur (Ed25519 über den Manifest-Text) nicht zum Update-Schlüssel passt. */
+function checkSignature(published: PublishedVersion, publicKey: KeyObject): void {
+  let signed = false;
+  try {
+    signed = verify(null, Buffer.from(published.manifest, 'utf8'), publicKey, Buffer.from(published.signature, 'base64'));
+  } catch {
+    signed = false;
+  }
+  if (!signed) throw new HttpError(400, 'Die Signatur passt nicht zum Update-Schlüssel dieses Servers. Das Update wird nicht veröffentlicht.');
+}
+
+/** Wirft 409, wenn `version` nicht höher ist als `current`; `label` benennt die bisherige im Fehlertext. */
+function checkNewer(version: string, current: string | undefined, label: string): void {
+  if (current === undefined) return;
+  let newer = true;
+  try {
+    newer = compareVersions(version, current) > 0;
+  } catch {
+    // Die bisherige Datei hat keine gültige Version: Die neue darf sie ersetzen.
+  }
+  if (!newer) throw new HttpError(409, `Die Version ${version} ist nicht höher als ${label} (${current}).`);
+}
+
+/** Woran der Dienst eine Manifest-Datei erkennt und was gilt, solange sie fehlt oder ungültig ist. */
+interface ManifestKind<T> {
+  file: string;
+  nothing: string;
+  parse: (text: string) => T | string;
+}
+
+const WINDOWS_MANIFEST: ManifestKind<Published> = { file: MANIFEST_FILE, nothing: NOTHING_PUBLISHED, parse: parseUpdateJson };
+const MAC_MANIFEST: ManifestKind<PublishedMac> = { file: MAC_MANIFEST_FILE, nothing: NOTHING_PUBLISHED_MAC, parse: parseMacUpdateJson };
 
 /**
  * Liest einen `Range`-Header für eine Datei mit `size` Byte. Unterstützt genau einen Bereich
@@ -341,27 +464,27 @@ export function parseRange(header: string | undefined, size: number): { start: n
   return { start, end: last === '' ? size - 1 : Math.min(Number(last), size - 1) };
 }
 
-interface ManifestCache {
-  /** Änderungszeit, Größe und Inode von update.json beim Lesen */
+interface ManifestCache<T> {
+  /** Änderungszeit, Größe und Inode der Manifest-Datei beim Lesen */
   key: string;
-  value: Published | null;
-  /** Schon ins Log geschrieben, dass die Datei fehlt bzw. dass die Version veröffentlicht ist */
+  value: T | null;
+  /** Schon ins Log geschrieben, dass eine Datei fehlt bzw. dass die Version veröffentlicht ist */
   warned: boolean;
   announced: boolean;
 }
 
 export class Updates {
-  private cache?: ManifestCache;
+  private cache?: ManifestCache<Published>;
 
   /**
-   * `onPublished`: für jede neu veröffentlichte Version – beim Neueinlesen einer hochgeladenen update.json (sobald der
-   * Installer vollständig da ist) und nach dem Veröffentlichen im Team-Bereich. Kann für dieselbe Version mehrfach
-   * kommen; der Versionsverlauf merkt sich jede Version nur einmal.
+   * `onPublished`: für jede neu veröffentlichte Version (Windows und Mac) – beim Neueinlesen einer hochgeladenen
+   * update.json bzw. update-mac.json (sobald Installer bzw. beide ZIPs vollständig da sind) und nach dem Veröffentlichen
+   * im Team-Bereich. Kann für dieselbe Version mehrfach kommen; der Versionsverlauf merkt sich jede Version nur einmal.
    */
   constructor(
     private readonly dir: string,
     private readonly log: (line: string) => void,
-    private readonly onPublished: (published: Published) => void = () => {},
+    private readonly onPublished: (published: PublishedVersion) => void = () => {},
   ) {}
 
   /** Installer, die gerade hochgeladen werden (je Datei nur ein Upload gleichzeitig). */
@@ -369,30 +492,46 @@ export class Updates {
   /** SHA-256 pro Datei, gültig solange Größe und Änderungszeit gleich sind. */
   private readonly sha256Cache = new Map<string, { size: number; mtimeMs: number; sha256: string }>();
   private readonly sha256Pending = new Map<string, Promise<string>>();
-  private publishing = false;
+  /** Manifeste, die gerade veröffentlicht werden (update.json, update-mac.json). */
+  private readonly publishing = new Set<string>();
+  private macCache?: ManifestCache<PublishedMac>;
 
   /**
    * Inhalt von update.json, wenn die Form stimmt (ohne Prüfung, ob der Installer schon da ist), sonst `null`.
    * Ändert sich die Datei (Änderungszeit, Größe oder Inode), liest der Dienst sie neu.
    */
-  private async manifestCache(): Promise<ManifestCache | null> {
+  private async manifestCache(): Promise<ManifestCache<Published> | null> {
+    this.cache = await this.readManifest(WINDOWS_MANIFEST, this.cache);
+    return this.cache ?? null;
+  }
+
+  /** Dasselbe für update-mac.json. */
+  private async macManifestCache(): Promise<ManifestCache<PublishedMac> | null> {
+    this.macCache = await this.readManifest(MAC_MANIFEST, this.macCache);
+    return this.macCache ?? null;
+  }
+
+  /** Liest eine Manifest-Datei neu, wenn sie sich geändert hat; fehlt sie: `undefined`. */
+  private async readManifest<T>(kind: ManifestKind<T>, cache: ManifestCache<T> | undefined): Promise<ManifestCache<T> | undefined> {
     let info: fs.Stats;
     try {
-      info = await fs.promises.stat(path.join(this.dir, MANIFEST_FILE));
+      info = await fs.promises.stat(path.join(this.dir, kind.file));
     } catch {
-      this.cache = undefined;
-      return null;
+      return undefined;
     }
     const key = `${info.mtimeMs}:${info.size}:${info.ino}`;
-    if (this.cache?.key !== key) {
-      this.cache = { key, value: await this.load(info), warned: false, announced: false };
-    }
-    return this.cache;
+    if (cache?.key === key) return cache;
+    return { key, value: await this.load(kind, info), warned: false, announced: false };
   }
 
   /** update.json, wenn ihre Form stimmt – auch wenn der Installer noch fehlt. */
   async published(): Promise<Published | null> {
     return (await this.manifestCache())?.value ?? null;
+  }
+
+  /** update-mac.json, wenn ihre Form stimmt – auch wenn die ZIPs noch fehlen. */
+  async publishedMac(): Promise<PublishedMac | null> {
+    return (await this.macManifestCache())?.value ?? null;
   }
 
   /**
@@ -421,6 +560,43 @@ export class Updates {
       this.onPublished(published);
     }
     return published;
+  }
+
+  /**
+   * `GET /v1/launcher/latest/mac`: die veröffentlichte Mac-Version aus update-mac.json oder `null`. Gilt erst, wenn
+   * beide ZIPs vollständig im Ordner liegen (Größe wie im Manifest).
+   */
+  async latestMac(): Promise<PublishedMac | null> {
+    const cache = await this.macManifestCache();
+    const published = cache?.value ?? null;
+    if (!cache || !published) return null;
+    for (const arch of MAC_ARCHES) {
+      const { file, size: expected } = published.files[arch];
+      const size = await this.sizeOf(file);
+      if (size === expected) continue;
+      if (!cache.warned) {
+        cache.warned = true;
+        this.log(
+          size === null
+            ? `${MAC_MANIFEST_FILE} nennt ${file}, die Datei fehlt aber im Update-Ordner. Bis sie da ist, gilt: ${NOTHING_PUBLISHED_MAC}`
+            : `${file} ist ${size} Byte groß, ${MAC_MANIFEST_FILE} nennt ${expected} (Upload noch nicht fertig?). Bis dahin gilt: ${NOTHING_PUBLISHED_MAC}`,
+        );
+      }
+      return null;
+    }
+    if (!cache.announced) {
+      cache.announced = true;
+      this.log(`Mac-Launcher-Version ${published.version} ist veröffentlicht (${MAC_ARCHES.map((arch) => published.files[arch].file).join(', ')}).`);
+      this.onPublished(published);
+    }
+    return published;
+  }
+
+  /** Ist `file` der Installer aus update.json bzw. eine ZIP aus update-mac.json? Dann ist sie geschützt. */
+  private async protectedFile(file: string): Promise<'windows' | 'mac' | null> {
+    if ((await this.published())?.file === file) return 'windows';
+    const mac = await this.publishedMac();
+    return mac && MAC_ARCHES.some((arch) => mac.files[arch].file === file) ? 'mac' : null;
   }
 
   /**
@@ -503,20 +679,27 @@ export class Updates {
 
   /**
    * `GET /v1/launcher/files`: die neueste Datei je System, Prozessor und Art mit SHA-256 – Windows (der veröffentlichte
-   * Installer aus dem Manifest), Mac Apple Silicon (dmg, zip), Mac Intel (dmg, zip).
+   * Installer aus dem Manifest), Mac Apple Silicon (dmg, zip), Mac Intel (dmg, zip). Ist update-mac.json veröffentlicht,
+   * stehen dort ihre ZIPs, und `mac` ist ihre Version; sonst die höchste Version unter den Mac-Dateien (nach Namen).
    */
   async publicFiles() {
     const all = await this.files();
     const published = await this.latest();
+    const mac = await this.latestMac();
     // Einträge für Dateien, die es nicht mehr gibt, aus dem Zwischenspeicher nehmen.
     for (const name of this.sha256Cache.keys()) if (!all.some((f) => f.file === name)) this.sha256Cache.delete(name);
+    const zip = (arch: MacArch) => (mac ? (all.find((f) => f.file === mac.files[arch].file) ?? null) : this.newest(all, 'mac', arch, 'zip'));
     const chosen = [
       published ? (all.find((f) => f.file === published.file) ?? null) : null,
       this.newest(all, 'mac', 'arm64', 'dmg'),
-      this.newest(all, 'mac', 'arm64', 'zip'),
+      zip('arm64'),
       this.newest(all, 'mac', 'x64', 'dmg'),
-      this.newest(all, 'mac', 'x64', 'zip'),
+      zip('x64'),
     ].filter((f): f is DownloadFile => f !== null);
+    let macVersion = mac?.version ?? null;
+    if (macVersion === null) {
+      for (const f of chosen) if (f.platform === 'mac' && (macVersion === null || compareVersions(f.version, macVersion) > 0)) macVersion = f.version;
+    }
     const files = [];
     for (const f of chosen) {
       const real = await this.resolve(f.file);
@@ -533,7 +716,7 @@ export class Updates {
         uploadedAt: Math.floor(info.mtimeMs),
       });
     }
-    return { version: published?.version ?? null, files };
+    return { version: published?.version ?? null, mac: macVersion, files };
   }
 
   /**
@@ -543,9 +726,9 @@ export class Updates {
   async receive(req: IncomingMessage, file: string, maxBytes: number, idleTimeoutMs: number): Promise<{ file: string; size: number; sha512: string }> {
     if (parseDownloadName(file) === null) throw new HttpError(400, INVALID_NAME);
     checkUploadLength(req, maxBytes);
-    if ((await this.published())?.file === file) {
-      throw new HttpError(409, 'Das ist der Installer der veröffentlichten Version. Er lässt sich nicht ersetzen.');
-    }
+    const protectedBy = await this.protectedFile(file);
+    if (protectedBy === 'windows') throw new HttpError(409, 'Das ist der Installer der veröffentlichten Version. Er lässt sich nicht ersetzen.');
+    if (protectedBy === 'mac') throw new HttpError(409, 'Das ist eine ZIP der veröffentlichten Mac-Version. Sie lässt sich nicht ersetzen.');
     if (this.uploading.has(file)) throw new HttpError(409, 'Diese Datei wird gerade schon hochgeladen.');
     this.uploading.add(file);
     try {
@@ -565,13 +748,7 @@ export class Updates {
   async publish(input: unknown, publicKey: KeyObject): Promise<{ manifest: Record<string, unknown>; version: string; file: string }> {
     const checked = checkUpdateObject(input);
     if (typeof checked === 'string') throw new HttpError(400, `Ungültige update.json: ${checked}.`);
-    let signed = false;
-    try {
-      signed = verify(null, Buffer.from(checked.manifest, 'utf8'), publicKey, Buffer.from(checked.signature, 'base64'));
-    } catch {
-      signed = false;
-    }
-    if (!signed) throw new HttpError(400, 'Die Signatur passt nicht zum Update-Schlüssel dieses Servers. Das Update wird nicht veröffentlicht.');
+    checkSignature(checked, publicKey);
     const manifest = JSON.parse(checked.manifest) as Record<string, unknown>;
     // Dieselben Regeln wie im Launcher, damit nichts veröffentlicht wird, was der Launcher ablehnt.
     if (!VERSION_RE.test(checked.version)) throw new HttpError(400, 'Ungültige Version im Manifest.');
@@ -582,62 +759,91 @@ export class Updates {
     const sha512 = manifest.sha512;
     if (typeof sha512 !== 'string' || Buffer.from(sha512, 'base64').length !== 64) throw new HttpError(400, 'Ungültige Prüfsumme (sha512) im Manifest.');
 
-    if (this.publishing) throw new HttpError(409, 'Gerade wird schon eine Version veröffentlicht.');
-    this.publishing = true;
-    try {
-      const current = await this.published();
-      if (current) {
-        let newer = true;
-        try {
-          newer = compareVersions(checked.version, current.version) > 0;
-        } catch {
-          // Die bisherige update.json hat keine gültige Version: Die neue darf sie ersetzen.
-        }
-        if (!newer) {
-          throw new HttpError(409, `Die Version ${checked.version} ist nicht höher als die veröffentlichte (${current.version}).`);
-        }
-      }
-      const real = await this.resolve(checked.file);
-      const info = real === null ? null : await fs.promises.stat(real).catch(() => null);
-      if (real === null || !info || !info.isFile()) {
-        throw new HttpError(409, `${checked.file} liegt nicht im Update-Ordner. Bitte zuerst hochladen.`);
-      }
-      if (info.size !== checked.size) {
-        throw new HttpError(409, `${checked.file} ist ${info.size} Byte groß, das Manifest nennt ${checked.size}.`);
-      }
-      if ((await sha512File(real)) !== sha512) {
-        throw new HttpError(409, `Die Prüfsumme (SHA-512) von ${checked.file} passt nicht zum Manifest.`);
-      }
-      // Atomar: erst eine neue Datei schreiben, dann umbenennen. Wer gerade liest, sieht die alte oder die neue.
-      const dir = await fs.promises.realpath(this.dir);
-      const tmp = path.join(dir, `.${MANIFEST_FILE}.${randomBytes(6).toString('hex')}.tmp`);
-      try {
-        const handle = await fs.promises.open(tmp, 'wx', 0o644);
-        try {
-          await handle.writeFile(JSON.stringify({ manifest: checked.manifest, signature: checked.signature }));
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
-        await fs.promises.rename(tmp, path.join(dir, MANIFEST_FILE));
-      } catch (err) {
-        await fs.promises.rm(tmp, { force: true }).catch(() => {});
-        throw err;
-      }
+    return this.exclusive(MANIFEST_FILE, async () => {
+      checkNewer(checked.version, (await this.published())?.version, 'die veröffentlichte');
+      await this.checkUploaded({ file: checked.file, size: checked.size, sha512 });
+      await this.writeManifest(MANIFEST_FILE, checked);
       this.cache = undefined;
       this.onPublished(checked);
       return { manifest, version: checked.version, file: checked.file };
+    });
+  }
+
+  /**
+   * `PUT /v1/team/updates/manifest` mit dem Inhalt von update-mac.json (erkannt an `platform` „mac“): prüft Form,
+   * Signatur (Ed25519, öffentlicher Update-Schlüssel), beide ZIPs (Größe und SHA-512) und dass die Version höher ist
+   * als die bisherige Mac-Version, und ersetzt dann update-mac.json atomar.
+   */
+  async publishMac(input: unknown, publicKey: KeyObject): Promise<{ manifest: Record<string, unknown>; version: string; files: string[] }> {
+    const checked = checkMacUpdateObject(input);
+    if (typeof checked === 'string') throw new HttpError(400, `Ungültige ${MAC_MANIFEST_FILE}: ${checked}.`);
+    checkSignature(checked, publicKey);
+    const manifest = JSON.parse(checked.manifest) as Record<string, unknown>;
+    return this.exclusive(MAC_MANIFEST_FILE, async () => {
+      checkNewer(checked.version, (await this.publishedMac())?.version, 'die veröffentlichte Mac-Version');
+      for (const arch of MAC_ARCHES) await this.checkUploaded(checked.files[arch]);
+      await this.writeManifest(MAC_MANIFEST_FILE, checked);
+      this.macCache = undefined;
+      this.onPublished(checked);
+      return { manifest, version: checked.version, files: MAC_ARCHES.map((arch) => checked.files[arch].file) };
+    });
+  }
+
+  /** Je Manifest-Datei nur ein Veröffentlichen gleichzeitig (sonst 409). */
+  private async exclusive<T>(name: string, work: () => Promise<T>): Promise<T> {
+    if (this.publishing.has(name)) throw new HttpError(409, 'Gerade wird schon eine Version veröffentlicht.');
+    this.publishing.add(name);
+    try {
+      return await work();
     } finally {
-      this.publishing = false;
+      this.publishing.delete(name);
     }
   }
 
-  /** `DELETE /v1/team/updates/files/<file>`: löscht einen Installer, aber nie den veröffentlichten (409). */
+  /** Wirft 409, wenn die Datei fehlt, gerade hochgeladen wird oder Größe bzw. SHA-512 nicht zum Manifest passen. */
+  private async checkUploaded({ file, size, sha512 }: { file: string; size: number; sha512: string }): Promise<void> {
+    const real = await this.resolve(file);
+    const info = real === null ? null : await fs.promises.stat(real).catch(() => null);
+    if (real === null || !info || !info.isFile()) {
+      throw new HttpError(409, `${file} liegt nicht im Update-Ordner. Bitte zuerst hochladen.`);
+    }
+    if (this.uploading.has(file)) throw new HttpError(409, `${file} wird gerade hochgeladen. Bitte warten, bis der Upload fertig ist.`);
+    if (info.size !== size) {
+      throw new HttpError(409, `${file} ist ${info.size} Byte groß, das Manifest nennt ${size}.`);
+    }
+    if ((await sha512File(real)) !== sha512) {
+      throw new HttpError(409, `Die Prüfsumme (SHA-512) von ${file} passt nicht zum Manifest.`);
+    }
+  }
+
+  /** Atomar: erst eine neue Datei schreiben, dann umbenennen. Wer gerade liest, sieht die alte oder die neue. */
+  private async writeManifest(name: string, published: PublishedVersion): Promise<void> {
+    const dir = await fs.promises.realpath(this.dir);
+    const tmp = path.join(dir, `.${name}.${randomBytes(6).toString('hex')}.tmp`);
+    try {
+      const handle = await fs.promises.open(tmp, 'wx', 0o644);
+      try {
+        await handle.writeFile(JSON.stringify({ manifest: published.manifest, signature: published.signature }));
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await fs.promises.rename(tmp, path.join(dir, name));
+    } catch (err) {
+      await fs.promises.rm(tmp, { force: true }).catch(() => {});
+      throw err;
+    }
+  }
+
+  /**
+   * `DELETE /v1/team/updates/files/<file>`: löscht einen Installer oder eine Mac-Datei, aber nie den veröffentlichten
+   * Installer und nie eine ZIP der veröffentlichten Mac-Version (409).
+   */
   async deleteFile(file: string): Promise<void> {
     if (parseDownloadName(file) === null) throw new HttpError(404, NO_SUCH_FILE);
-    if ((await this.published())?.file === file) {
-      throw new HttpError(409, 'Das ist der Installer der veröffentlichten Version. Er lässt sich nicht löschen.');
-    }
+    const protectedBy = await this.protectedFile(file);
+    if (protectedBy === 'windows') throw new HttpError(409, 'Das ist der Installer der veröffentlichten Version. Er lässt sich nicht löschen.');
+    if (protectedBy === 'mac') throw new HttpError(409, 'Das ist eine ZIP der veröffentlichten Mac-Version. Sie lässt sich nicht löschen.');
     if ((await this.resolve(file)) === null) throw new HttpError(404, NO_SUCH_FILE);
     // Den Eintrag im Ordner löschen (bei einem Link den Link, nie sein Ziel).
     await fs.promises.unlink(path.join(await fs.promises.realpath(this.dir), file)).catch(() => {
@@ -645,20 +851,20 @@ export class Updates {
     });
   }
 
-  private async load(info: fs.Stats): Promise<Published | null> {
+  private async load<T>(kind: ManifestKind<T>, info: fs.Stats): Promise<T | null> {
     const invalid = (reason: string) => {
-      this.log(`update.json im Update-Ordner ist ungültig (${reason}). Bis zur Korrektur gilt: ${NOTHING_PUBLISHED}`);
+      this.log(`${kind.file} im Update-Ordner ist ungültig (${reason}). Bis zur Korrektur gilt: ${kind.nothing}`);
       return null;
     };
     if (!info.isFile()) return invalid('keine Datei');
     if (info.size > MAX_MANIFEST_SIZE) return invalid(`größer als ${MAX_MANIFEST_SIZE / 1024} KB`);
     let text: string;
     try {
-      text = await fs.promises.readFile(path.join(this.dir, MANIFEST_FILE), 'utf8');
+      text = await fs.promises.readFile(path.join(this.dir, kind.file), 'utf8');
     } catch (err) {
       return invalid(`nicht lesbar: ${(err as NodeJS.ErrnoException).code ?? String(err)}`);
     }
-    const result = parseUpdateJson(text);
+    const result = kind.parse(text);
     return typeof result === 'string' ? invalid(result) : result;
   }
 

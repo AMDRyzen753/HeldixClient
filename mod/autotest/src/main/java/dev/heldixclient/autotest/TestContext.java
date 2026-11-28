@@ -217,4 +217,23 @@ final class TestContext {
 			throw new IllegalStateException(e);
 		}
 	}
+
+	/** Versionsnummer wie „1.3.0“ mindestens {@code minimum}? (Zahlen je Stelle verglichen, Fehlendes zählt als 0) */
+	static boolean versionAtLeast(String version, String minimum) {
+		if (version == null) return false;
+		String[] a = version.split("\\.");
+		String[] b = minimum.split("\\.");
+		for (int i = 0; i < Math.max(a.length, b.length); i++) {
+			int x;
+			int y;
+			try {
+				x = i < a.length ? Integer.parseInt(a[i].replaceAll("[^0-9].*$", "")) : 0;
+				y = i < b.length ? Integer.parseInt(b[i]) : 0;
+			} catch (NumberFormatException e) {
+				return false;
+			}
+			if (x != y) return x > y;
+		}
+		return true;
+	}
 }

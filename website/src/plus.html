@@ -1,0 +1,101 @@
+<!--seite {"titel":"Heldix+ – bald","beschreibung":"Heldix+ ist geplant: dauerhafte Welten auf dem Heldix-Server, mehr Plätze und Speicher, Vorrang beim Start. Preise und Inhalte stehen noch nicht fest – trag dich auf die Warteliste ein.","og":"zusammen"}-->
+<!doctype html>
+<html lang="de">
+<head>
+{{include:head.html}}
+<link rel="stylesheet" href="/seiten.css">
+<link rel="stylesheet" href="/entdecken.css">
+<script type="module" src="/plus.js"></script>
+</head>
+<body data-seite="plus">
+{{include:nav.html}}
+
+<main id="inhalt">
+  <section class="page-hero" aria-labelledby="seite-titel">
+    <div class="container">
+      <div class="page-hero__inner">
+        <span class="eyebrow eyebrow--reward plus-badge">{{icon:star}}Heldix+ <span class="chip chip--soon">bald</span></span>
+        <h1 class="h1" id="seite-titel">Heldix+ – <span class="text-gradient">bald</span></h1>
+        <p class="lead">Mit Heldix+ planen wir Extras, die auf unseren Servern laufen – allen voran dauerhafte Welten, die online bleiben, auch wenn du es nicht bist.</p>
+        <p class="notice" id="plus-geplant"><strong>Geplant – Preise und Inhalte stehen noch nicht fest.</strong> Bezahlen kannst du noch nichts. Gerade testen das Team und Beta-Tester; Beta-Plätze vergeben wir nach und nach über die Warteliste.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight" aria-labelledby="warteliste-titel">
+    <div class="container">
+      <div class="card card--reward plus-waitlist" id="plus-warteliste" aria-live="polite">
+        <span class="icon-tile icon-tile--lg icon-tile--reward">{{icon:star}}</span>
+        <div>
+          <h2 class="h3" id="warteliste-titel">Auf die Warteliste</h2>
+          <p class="plus-waitlist__state" id="plus-stand">{{icon:clock}}<span id="plus-stand-text">Wird geprüft …</span></p>
+          <p class="small text-3">Bescheid bekommst du über die Glocke im Launcher, im Konto auf dieser Webseite und im Spiel – ohne E-Mail. Gespeichert werden nur deine Minecraft-UUID und seit wann du draufstehst.</p>
+          <p class="plus-count" id="plus-zahl" hidden></p>
+        </div>
+        <div class="btn-group" id="plus-aktionen">
+          <a class="btn btn--primary" href="/konto#ziel=plus" id="plus-anmelden" hidden>{{icon:user}}Im Konto anmelden</a>
+          <button class="btn btn--primary" type="button" id="plus-eintragen" hidden>{{icon:star}}Auf die Warteliste</button>
+          <button class="btn btn--ghost" type="button" id="plus-austragen" hidden>{{icon:close}}Von der Warteliste nehmen</button>
+          <a class="btn btn--secondary" href="/konto#ziel=welten" id="plus-konto" hidden>{{icon:world}}Zu Meine Welten</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight" aria-labelledby="geplant-titel">
+    <div class="container">
+      <div class="section-head">
+        <span class="eyebrow">{{icon:lightbulb}}Was geplant ist</span>
+        <h2 class="h2" id="geplant-titel">Das soll Heldix+ bringen</h2>
+        <p class="lead">Alles hier ist geplant und kann sich noch ändern – auch, was dazugehört und was es kostet.</p>
+      </div>
+      <div class="plus-grid">
+        <article class="card">
+          <span class="icon-tile icon-tile--online">{{icon:server}}</span>
+          <h3 class="card__title">Dauerhafte Welten <span class="chip chip--soon">geplant</span></h3>
+          <p class="card__text">Deine Welt läuft auf dem Heldix-Server weiter, auch wenn du offline bist – mit fester Adresse, Plugins aus dem Modrinth-Katalog, Konsole und täglichen Sicherungen. Leere Welten schlafen und wachen beim Beitreten auf.</p>
+          <a class="link-arrow" href="/hilfe/dauerhafte-welten">Dauerhafte Welten erklärt{{icon:chevron-right}}</a>
+        </article>
+        <article class="card">
+          <span class="icon-tile">{{icon:cube}}</span>
+          <h3 class="card__title">Mehr Plätze und Speicher <span class="chip chip--soon">geplant</span></h3>
+          <p class="card__text">Mehr Arbeitsspeicher, mehr Speicher und mehr Plugins je Welt – und mehr als eine dauerhafte Welt.</p>
+        </article>
+        <article class="card">
+          <span class="icon-tile icon-tile--voice">{{icon:sprint}}</span>
+          <h3 class="card__title">Vorrang beim Start <span class="chip chip--soon">geplant</span></h3>
+          <p class="card__text">Sind gerade alle Plätze auf dem Server belegt, startet deine Welt zuerst.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section--tight" aria-labelledby="fragen-titel">
+    <div class="container">
+      <h2 class="h3 page-section-title" id="fragen-titel">Fragen</h2>
+      <div class="accordion">
+        <details>
+          <summary>Was kostet Heldix+?</summary>
+          <div class="accordion__body"><p>Das steht noch nicht fest. Heldix+ ist ein geplantes Abo für Extras, die auf unseren Servern Rechenleistung und Speicher brauchen. Bezahlen kannst du noch nichts – und auf der Warteliste kostet nichts etwas.</p></div>
+        </details>
+        <details>
+          <summary>Wie komme ich jetzt schon an dauerhafte Welten?</summary>
+          <div class="accordion__body"><p>Gerade nutzen sie das Team und Beta-Tester. Trag dich auf die Warteliste ein: Wir schalten Beta-Tester nach und nach frei und melden uns über die Glocke im Launcher, im Konto und im Spiel.</p></div>
+        </details>
+        <details>
+          <summary>Ändert die Warteliste etwas an meinem HeldixClient?</summary>
+          <div class="accordion__body"><p>Nein. Launcher, Client, Freunde, Party, Voice Chat, Welt teilen, Entdecken, Cosmetics und Addons funktionieren für dich genauso – ob du auf der Warteliste stehst oder nicht.</p></div>
+        </details>
+        <details>
+          <summary>Was speichert die Warteliste?</summary>
+          <div class="accordion__body"><p>Nur deine Minecraft-UUID und den Zeitpunkt, seit dem du draufstehst – bis du dich austrägst, deine Daten löschst oder Heldix+ startet. Wie viele draufstehen, zeigen wir erst ab 50 Einträgen. Mehr in der <a href="/datenschutz#heldix-plus">Datenschutzerklärung</a>.</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+{{include:icons.html}}
+{{include:footer.html}}
+</body>
+</html>

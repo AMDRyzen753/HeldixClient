@@ -1,4 +1,4 @@
-import type { AccountInfo, DiscordPreview, DiscordStatus, Friend, InstanceInfo, LauncherView, LogLine, NotificationTarget, PlayerBadge, QuickPlayList, QuickPlayTarget, ServerStatus, Settings, SkinInfo, SocialOverview, UpdateState } from '../shared/api';
+import type { AccountInfo, DiscordPreview, DiscordStatus, Friend, HostedState, InstanceInfo, LauncherView, LogLine, NotificationTarget, PlayerBadge, PopularWorlds, QuickPlayList, QuickPlayTarget, ServerStatus, Settings, SkinInfo, SocialOverview, UpdateState } from '../shared/api';
 import {
   $,
   api,
@@ -28,6 +28,7 @@ import { initInstances, launchInstance, openDetail, resetInstancesView, type Det
 import { loadNews } from './news.js';
 import { activateFriends, initFriends, openFriendChat, openInviteSection, openPartySection } from './friends.js';
 import { badgeIcon, badgeLabel } from './badges.js';
+import { shortcut } from './keys.js';
 import { activateProfile, initProfile, reloadCosmetics, showProfileCosmetic } from './profile.js';
 import { initInvites, openPendingInvite } from './invite.js';
 import { activateStore, initStore } from './store.js';
@@ -138,6 +139,10 @@ function openNotificationTarget(target: NotificationTarget): void {
       showView('friends');
       openPartySection();
       break;
+    case 'hosting':
+      // dauerhafte Welten: Webseite, Konto → Meine Welten (angemeldet)
+      void api.openWebAccount('welten').catch((error) => toast(errorMessage(error), 'error'));
+      break;
   }
 }
 // Klick auf eine Benachrichtigung zur Party (Einladung)
@@ -166,7 +171,7 @@ document.addEventListener('keydown', (event) => {
   }
 });
 document.querySelectorAll<HTMLButtonElement>('.nav-item').forEach((button, index) => {
-  button.title = `${button.dataset.label ?? ''} (${api.platform === 'darwin' ? '⌘' : 'Strg+'}${index + 1})`;
+  button.title = `${button.dataset.label ?? ''} (${shortcut(String(index + 1), {}, api.platform)})`;
 });
 
 // ---------- Parallax: das Hintergrundbild folgt leicht der Maus ----------
@@ -510,17 +515,96 @@ function renderHomeWorlds(): void {
       h('span', { text: 'Teilt ein Freund seine Einzelspielerwelt, kannst du hier mit einem Klick beitreten – ganz ohne Server.' })));
     return;
   }
-  sub.textContent = overview.friends.length === 1 ? '1 Welt geöffnet' : `${overview.friends.length} Welten geöffnet`;
+  const persistent = overview.friends.filter((w) => w.hosted).length;
+  const opened = overview.friends.length - persistent;
+  sub.textContent = [opened > 0 ? (opened === 1 ? '1 Welt geöffnet' : `${opened} Welten geöffnet`) : null,
+    persistent > 0 ? (persistent === 1 ? '1 dauerhaft' : `${persistent} dauerhaft`) : null].filter(Boolean).join(' · ');
   for (const world of overview.friends.slice(0, 4)) {
-    const meta = [world.host.name, `${world.players}/${world.maxPlayers} Spieler`, world.version ? `Minecraft ${world.version}` : null].filter(Boolean).join(' · ');
+    const hosted = world.hosted ?? null;
+    // dauerhafte Welten (Dienst 1.13.0): Zustand statt „Live“; schlafende weckt der Beitritt
+    const players = hosted && hosted.state !== 'running' ? hostedStateText(hosted.state) : `${world.players}/${world.maxPlayers} Spieler`;
+    const meta = [world.host.name, players, world.version ? `Minecraft ${world.version}` : null].filter(Boolean).join(' · ');
+    const joinable = !hosted || ['running', 'sleeping', 'starting', 'stopping'].includes(hosted.state);
+    const joinTitle = hosted && hosted.state !== 'running' ? 'Beitreten (weckt sie, etwa 30 Sekunden)' : 'Beitreten';
     const row = rowItem(playerHead(world.host.uuid, world.host.name), world.name, meta, `Welt von ${world.host.name} ansehen`, () => openWorldDialog(world.code),
-      busy ? undefined : { icon: ICONS.play, title: 'Beitreten', run: () => void joinWorldNow(world.code, world.host.name) },
-      h('span', { class: 'row-badge world-live', title: 'Gerade geöffnet', text: 'Live' }));
-    row.querySelector('.row-meta')?.classList.add('online');
+      busy || !joinable ? undefined : { icon: ICONS.play, title: joinTitle, run: () => void joinWorldNow(world.code, world.host.name) },
+      hosted ? hostedBadge(hosted.state) : h('span', { class: 'row-badge world-live', title: 'Gerade geöffnet', text: 'Live' }));
+    if (!hosted || hosted.state === 'running') row.querySelector('.row-meta')?.classList.add('online');
     list.append(row);
   }
   if (overview.friends.length > 4) list.append(h('div', { class: 'row-empty', text: `und ${overview.friends.length - 4} weitere – unter Freunde` }));
 }
+
+/** Kurztext zum Zustand einer dauerhaften Welt */
+function hostedStateText(state: HostedState): string {
+  switch (state) {
+    case 'running':
+      return 'läuft';
+    case 'sleeping':
+    case 'stopping':
+      return 'schläft – Beitreten weckt sie';
+    case 'starting':
+      return 'startet gerade';
+    case 'creating':
+      return 'wird eingerichtet';
+    default:
+      return 'hat gerade ein Problem';
+  }
+}
+
+/** Plakette einer dauerhaften Welt: läuft (grün), schläft, startet, Problem */
+function hostedBadge(state: HostedState): HTMLElement {
+  const label = state === 'running' ? 'Läuft' : state === 'starting' ? 'Startet' : state === 'error' ? 'Problem' : state === 'creating' ? 'Neu' : 'Schläft';
+  return h('span', { class: `row-badge world-hosted state-${state}`, title: `Dauerhafte Welt auf dem Heldix-Server · ${hostedStateText(state)}`, text: label });
+}
+
+// ---------- Startseite: beliebte Welten aus Entdecken (Dienst 1.13.0) ----------
+let popular: PopularWorlds | null = null;
+
+function renderHomePopular(): void {
+  const panel = $('#home-popular-panel');
+  const list = $('#home-popular');
+  const sub = $('#home-popular-sub');
+  list.textContent = '';
+  if (!popular || popular.status === 'off' || popular.status === 'unsupported' || (popular.status === 'error' && popular.worlds.length === 0)) {
+    panel.hidden = true;
+    return;
+  }
+  if (popular.worlds.length === 0) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  sub.textContent = 'Entdecken · öffentliche Welten';
+  const busy = state.game.state === 'preparing' || state.game.state === 'running';
+  for (const world of popular.worlds) {
+    const tags = world.tags.map((t) => DISCOVER_TAG_NAMES[t] ?? t).join(', ');
+    const status = world.state === 'online' ? 'geöffnet' : hostedStateText(world.state);
+    const players = world.state === 'running' || world.state === 'online' ? `${world.players}/${world.maxPlayers} Spieler` : status;
+    const meta = [players, tags || null, `von ${world.host.name}`].filter(Boolean).join(' · ');
+    const waking = world.persistent && world.state !== 'running';
+    const row = rowItem(playerHead(world.host.uuid, world.host.name), world.name, world.description ? `${world.description} · ${meta}` : meta,
+      `„${world.name}“ von ${world.host.name} ansehen`, () => openWorldDialog(world.code),
+      busy ? undefined : { icon: ICONS.play, title: waking ? 'Beitreten (weckt sie, etwa 30 Sekunden)' : 'Beitreten', run: () => void joinWorldNow(world.code, world.host.name) },
+      world.likes > 0 ? h('span', { class: 'row-badge world-likes', title: `${world.likes} Gefällt mir`, text: `★ ${world.likes}` }) : null);
+    if (world.state === 'running' || world.state === 'online') row.querySelector('.row-meta')?.classList.add('online');
+    list.append(row);
+  }
+}
+
+const DISCOVER_TAG_NAMES: Record<string, string> = {
+  survival: 'Survival', kreativ: 'Kreativ', minispiele: 'Minispiele', rollenspiel: 'Rollenspiel', bauen: 'Bauen',
+  parkour: 'Parkour', technik: 'Technik', entspannt: 'Entspannt', hardcore: 'Hardcore',
+};
+
+void api.getPopularWorlds().then((next) => {
+  popular = next;
+  renderHomePopular();
+}).catch(() => undefined);
+api.onPopularWorlds((next) => {
+  popular = next;
+  renderHomePopular();
+});
 onWorldsChange(() => {
   renderHomeWorlds();
   renderHomeFriends();
@@ -736,6 +820,7 @@ function renderHome(): void {
   renderStage();
   renderHomeFriends();
   renderHomeWorlds();
+  renderHomePopular();
 }
 
 // ---------- Avatare ----------
@@ -1220,6 +1305,7 @@ function renderSettings(): void {
   $<HTMLInputElement>('#res-height').value = String(s.resolution?.height ?? 720);
   $<HTMLInputElement>('#hide-toggle').checked = s.hideLauncherOnLaunch;
   $<HTMLInputElement>('#tray-toggle').checked = s.closeToTray;
+  $<HTMLInputElement>('#autostart-toggle').checked = s.startWithSystem;
   $<HTMLInputElement>('#account-switch-toggle').checked = s.gameAccountSwitch;
   $<HTMLInputElement>('#java-path').value = s.javaPath;
   $<HTMLInputElement>('#jvm-args').value = s.jvmArgs;
@@ -1422,10 +1508,11 @@ window.setInterval(() => {
 }, 1000);
 
 // ---------- Updates ----------
-// Windows: beim Start installiert der Launcher neue Versionen selbst (Startfenster, main/core/startup-update.ts). Im
-// laufenden Launcher lädt er sie im Hintergrund; ist eine bereit und läuft kein Spiel, zeigt die Seitenleiste
-// „Update bereit – Jetzt neu starten“ (sonst erst nach dem Spiel), beim Beenden wird sie ohnehin installiert.
-// Einstellung aus: nur „Update verfügbar – Jetzt installieren“. macOS: Download über heldixclient.com.
+// Windows und ab 0.14.0 macOS: beim Start installiert der Launcher neue Versionen selbst (Startfenster,
+// main/core/startup-update.ts). Im laufenden Launcher lädt er sie im Hintergrund; ist eine bereit und läuft kein Spiel,
+// zeigt die Seitenleiste „Update bereit – Jetzt neu starten“ (sonst erst nach dem Spiel), beim Beenden wird sie ohnehin
+// installiert. Einstellung aus: nur „Update verfügbar – Jetzt installieren“. Ersetzt sich die App nicht selbst (Mac aus
+// dem DMG, ohne Schreibrechte, Linux – UpdateState.manual): Download über heldixclient.com mit dem Grund als Hinweis.
 let updateState: UpdateState | null = null;
 /** Version, zu der „Update bereit“ schon als Meldung kam (einmal je Version) */
 let updateToastFor: string | null = null;
@@ -1433,7 +1520,7 @@ let updateToastFor: string | null = null;
 function renderUpdate(u: UpdateState = updateState!): void {
   if (!u) return;
   updateState = u;
-  const mac = api.platform === 'darwin';
+  const manual = !!u.manual;
   const playing = state.game?.state === 'preparing' || state.game?.state === 'running';
   const percent = Math.round((u.progress ?? 0) * 100);
   const texts: Record<UpdateState['phase'], string> = {
@@ -1441,7 +1528,7 @@ function renderUpdate(u: UpdateState = updateState!): void {
     idle: `Version ${u.current} installiert.`,
     checking: 'Suche nach Updates …',
     current: `Version ${u.current} ist aktuell.`,
-    available: mac ? `Version ${u.version} ist da. Auf dem Mac lädst du sie über heldixclient.com.` : `Version ${u.version} ist da. „Jetzt installieren“ lädt sie und startet den Launcher neu.`,
+    available: manual ? `Version ${u.version} ist da. ${u.manual}` :`Version ${u.version} ist da. „Jetzt installieren“ lädt sie und startet den Launcher neu.`,
     downloading: `Lade Version ${u.version} … ${percent} %`,
     ready: playing
       ? `Version ${u.version} ist bereit. Nach dem Spiel kannst du neu starten – beim Beenden wird sie ohnehin installiert.`
@@ -1452,8 +1539,8 @@ function renderUpdate(u: UpdateState = updateState!): void {
   status.dataset.state = u.phase;
   $('#update-status-text').textContent = texts[u.phase];
   $<HTMLButtonElement>('#update-check').disabled = u.phase === 'disabled' || u.phase === 'checking' || u.phase === 'downloading' || u.phase === 'ready' || u.phase === 'available';
-  $('#update-install').hidden = (u.phase !== 'ready' && u.phase !== 'available') || (playing && !mac);
-  $('#update-install').lastChild!.textContent = mac ? 'Herunterladen' : u.phase === 'available' ? 'Jetzt installieren' : 'Jetzt neu starten';
+  $('#update-install').hidden = (u.phase !== 'ready' && u.phase !== 'available') || (playing && !manual);
+  $('#update-install').lastChild!.textContent = manual ? 'Herunterladen' : u.phase === 'available' ? 'Jetzt installieren' : 'Jetzt neu starten';
   const notes = $('#update-notes');
   const lines = u.phase === 'downloading' || u.phase === 'ready' || u.phase === 'available' ? u.notes ?? [] : [];
   notes.replaceChildren(...lines.map((note) => {
@@ -1467,11 +1554,11 @@ function renderUpdate(u: UpdateState = updateState!): void {
   const card = $('#update-card');
   card.hidden = (u.phase !== 'downloading' && u.phase !== 'ready' && u.phase !== 'available') || (u.phase === 'ready' && playing);
   $('#update-card-title').textContent = u.phase === 'ready' ? 'Update bereit' : u.phase === 'available' ? 'Update verfügbar' : `Update ${u.version ?? ''}`;
-  $('#update-card-sub').textContent = u.phase === 'ready' ? `Version ${u.version}` : u.phase === 'available' ? (mac ? `${u.version} auf heldixclient.com` : `Version ${u.version}`) : `wird geladen … ${percent} %`;
+  $('#update-card-sub').textContent = u.phase === 'ready' ? `Version ${u.version}` : u.phase === 'available' ? (manual ? `${u.version} auf heldixclient.com` : `Version ${u.version}`) : `wird geladen … ${percent} %`;
   $('#update-bar').hidden = u.phase !== 'downloading';
   $('#update-bar-fill').style.width = `${percent}%`;
-  $('#update-card-install').hidden = (u.phase !== 'ready' && u.phase !== 'available') || (playing && !mac);
-  $('#update-card-install').textContent = mac ? 'Herunterladen' : u.phase === 'available' ? 'Jetzt installieren' : 'Jetzt neu starten';
+  $('#update-card-install').hidden = (u.phase !== 'ready' && u.phase !== 'available') || (playing && !manual);
+  $('#update-card-install').textContent = manual ? 'Herunterladen' : u.phase === 'available' ? 'Jetzt installieren' : 'Jetzt neu starten';
   card.dataset.label = u.phase === 'ready' ? `Update ${u.version} bereit: Jetzt neu starten` : u.phase === 'available' ? `Update ${u.version} verfügbar` : `Update wird geladen (${percent} %)`;
 
   // einmal je Version melden, sobald sie bereit ist und kein Spiel läuft (sonst nach dem Spiel)
@@ -1482,7 +1569,7 @@ function renderUpdate(u: UpdateState = updateState!): void {
 }
 
 async function installUpdate(): Promise<void> {
-  if (api.platform === 'darwin') {
+  if (updateState?.manual) {
     await api.openUpdateDownload();
     return;
   }
@@ -1494,7 +1581,7 @@ async function installUpdate(): Promise<void> {
   }
 }
 
-/** Hinweis „Update verfügbar“ beim Start (Einstellung „Updates automatisch“ aus bzw. macOS), einmal je Start */
+/** Hinweis „Update verfügbar“ beim Start (Einstellung „Updates automatisch“ aus bzw. kein Selbst-Update), einmal je Start */
 async function showUpdateNotice(): Promise<void> {
   // nicht neben dem Einrichtungs-Assistenten, sondern danach
   if (setupOpen()) {
@@ -1503,7 +1590,8 @@ async function showUpdateNotice(): Promise<void> {
   }
   const notice = await api.takeUpdateNotice().catch(() => null);
   if (!notice?.version || document.getElementById('update-notice')) return;
-  const mac = api.platform === 'darwin';
+  const manual = !!notice.manual;
+  updateState ??= notice;
   const close = () => backdrop.remove();
   const notes = notice.notes ?? [];
   const backdrop = h('div', { class: 'modal-backdrop', onclick: (event: Event) => event.target === backdrop && close() },
@@ -1514,21 +1602,21 @@ async function showUpdateNotice(): Promise<void> {
           h('p', { class: 'modal-sub', text: `HeldixClient ${notice.version}${notice.date ? ` · ${formatDate(notice.date)}` : ''} – du hast ${notice.current}.` })),
         h('button', { class: 'icon-button', type: 'button', title: 'Schließen', 'aria-label': 'Schließen', onclick: close }, uiIcon('close'))),
       notes.length ? h('div', { class: 'news-body whatsnew' }, h('ul', {}, ...notes.map((note) => h('li', { text: note })))) : null,
-      h('p', { class: 'hint', text: mac ? 'Auf dem Mac lädst du die neue Version über heldixclient.com.' : 'Der Launcher lädt die neue Version, installiert sie und startet neu.' }),
+      h('p', { class: 'hint', text: notice.manual ? notice.manual : 'Der Launcher lädt die neue Version, installiert sie und startet neu.' }),
       h('div', { class: 'button-row' },
         h('button', { class: 'ghost', type: 'button', onclick: close }, 'Später'),
         h('button', { class: 'primary', type: 'button', id: 'update-notice-install', onclick: (event: Event) => {
           const button = event.currentTarget as HTMLButtonElement;
           button.disabled = true;
-          button.textContent = mac ? 'Wird geöffnet …' : 'Wird geladen …';
+          button.textContent = manual ? 'Wird geöffnet …' : 'Wird geladen …';
           void installUpdate().finally(() => {
-            if (mac) close();
+            if (manual) close();
             else {
               button.disabled = false;
               button.textContent = 'Jetzt installieren';
             }
           });
-        } }, mac ? 'Herunterladen' : 'Jetzt installieren'))));
+        } }, manual ? 'Herunterladen' : 'Jetzt installieren'))));
   document.body.append(backdrop);
 }
 
@@ -1620,6 +1708,18 @@ for (const id of ['#res-width', '#res-height']) $(id).addEventListener('change',
 
 $('#hide-toggle').addEventListener('change', (e) => save({ hideLauncherOnLaunch: (e.target as HTMLInputElement).checked }));
 $('#tray-toggle').addEventListener('change', (e) => save({ closeToTray: (e.target as HTMLInputElement).checked }));
+$('#autostart-toggle').addEventListener('change', (e) => save({ startWithSystem: (e.target as HTMLInputElement).checked }));
+// macOS: Hintergrund heißt Dock statt Infobereich, Autostart „Bei der Anmeldung“
+if (api.platform === 'darwin') {
+  $('#tray-toggle-sub').textContent = 'Fenster schließen: HeldixClient bleibt im Dock und meldet Nachrichten, Anfragen und Einladungen weiter – während eines Spiels auch oben in der Menüleiste. Beenden mit ⌘Q';
+  $('#autostart-label').firstChild!.textContent = 'Bei der Anmeldung starten';
+  $('#autostart-sub').textContent = 'öffnet HeldixClient beim Anmelden am Mac ohne Fenster im Dock, damit Nachrichten gleich ankommen';
+}
+// macOS: App-Menü „Einstellungen …“ (⌘,)
+api.onViewOpen((view) => {
+  if (setupOpen()) return;
+  if (VIEW_TITLES[view] !== undefined) showView(view);
+});
 $('#account-switch-toggle').addEventListener('change', (e) => save({ gameAccountSwitch: (e.target as HTMLInputElement).checked }));
 $('#java-path').addEventListener('change', (e) => save({ javaPath: (e.target as HTMLInputElement).value.trim() }));
 $('#jvm-args').addEventListener('change', (e) => save({ jvmArgs: (e.target as HTMLInputElement).value.trim() }));

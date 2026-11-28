@@ -109,7 +109,15 @@ final class VoiceTests {
 			mc.player.setXRot(0f);
 		});
 		t.waitSoft(mc -> Social.isHeldix(voiceId), 10);
-		t.waitSoft(mc -> PlayerMenu.targetedPlayer(mc) == remote[0], 5);
+		// Blickrichtung bei jeder Prüfung neu setzen (vorige Tests/Fenstergrößen können sie verstellt haben) und genau auf
+		// den Kopf der Spielerin zielen
+		boolean aimed = t.waitSoft(mc -> {
+			mc.player.setYRot(0f);
+			mc.player.setXRot(0f);
+			return PlayerMenu.targetedPlayer(mc) == remote[0];
+		}, 10);
+		if (!aimed) t.log("Spielermenü: Ziel ist " + t.compute(mc -> mc.hitResult == null ? "nichts" : mc.hitResult.getType() + " " + mc.hitResult.getLocation())
+				+ ", Spielerin bei " + t.compute(mc -> remote[0].position()) + ", eigene Position " + t.compute(mc -> mc.player.position()));
 		t.check("Spielermenü: Fadenkreuz auf „Stimme“", t.compute(mc -> PlayerMenu.targetedPlayer(mc) == remote[0]));
 
 		// Mausrad-Klick öffnet das Kreismenü

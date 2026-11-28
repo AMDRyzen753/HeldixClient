@@ -6,6 +6,8 @@
 <link rel="stylesheet" href="/bereich-bausteine.css">
 <link rel="stylesheet" href="/bereich.css">
 <link rel="stylesheet" href="/konto.css">
+<link rel="stylesheet" href="/welten.css">
+<link rel="stylesheet" href="/moderation.css">
 <script type="module" src="/konto.js"></script>
 </head>
 <body class="bereich bereich--konto" data-seite="konto">
@@ -286,9 +288,12 @@
       </div>
     </div>
 
-    <!-- Meine Welten (konto-welten.js) -->
+    <!-- Meine Welten (konto-welten.js; dauerhafte Welten: konto-hosting.js) -->
     <div class="panel" id="panel-welten" role="tabpanel" aria-labelledby="tab-welten" tabindex="0" hidden>
-      <div id="welten-inhalt"></div>
+      <div id="welten-inhalt" class="welten-inhalt">
+        <div id="welten-dauerhaft" class="welten-inhalt" hidden></div>
+        <div id="welten-geteilt" class="welten-inhalt"></div>
+      </div>
     </div>
 
     <!-- Meine Addons -->
@@ -528,6 +533,8 @@
         <div class="switches" id="einstellungen"></div>
         <p class="tiny text-3">Hier im Browser bist du für deine Freunde nicht online – das zeigt nur HeldixClient selbst. Mitglieder deiner Party sehen untereinander immer, wo ihr gerade spielt.</p>
       </section>
+      <!-- Voice Chat: Zustimmung zu den Voice-Regeln, Voice-Sperre (konto-voice.js, ab Dienst 1.13.0) -->
+      <section class="card voice-account" id="voice-konto" aria-labelledby="voice-konto-titel" hidden></section>
       <div class="panel-grid">
         <section class="card" aria-labelledby="blockiert-titel">
           <div class="card__head"><span class="icon-tile">{{icon:ban}}</span><div><h2 class="card__title" id="blockiert-titel">Blockierte Spieler</h2></div></div>
@@ -628,6 +635,8 @@
             <li>{{icon:user-plus}}<span>Deine Einladungs-Links, wer dich eingeladen hat (bis zur Bestätigung mit deiner Spielzeit-Summe) und freigeschaltete Belohnungen</span></li>
             <li>{{icon:chat}}<span>Nachrichten an Freunde mit Antworten, Beitreten-Karten und Reaktionen, höchstens 30 Tage. Party, Party-Chat und „schreibt …“ nur im Arbeitsspeicher, nie gespeichert</span></li>
             <li>{{icon:world}}<span>Deine geteilten Welten mit Einstellungen und Mitgliedern</span></li>
+            <li>{{icon:server}}<span>Dauerhafte Welten: Weltdaten, Plugins, Konfiguration und Sicherungen bis zum Löschen, das Server-Log (Spielernamen, Chat, Befehle) 7 Tage; Freischaltungen und deinen Eintrag auf der Heldix+-Warteliste</span></li>
+            <li>{{icon:compass}}<span>Entdecken: deine Einträge im Weltenverzeichnis, deine „Gefällt mir“ und deine Meldungen</span></li>
             <li>{{icon:ban}}<span>Spieler, die du blockiert hast, und deine Meldungen (90 Tage)</span></li>
             <li>{{icon:info}}<span>Support-Anfragen mit deinen Nachrichten und den Antworten des Teams</span></li>
             <li>{{icon:addons}}<span>Addon-Einreichungen samt JAR und Screenshots, deine Bewertungen und Addon-Meldungen</span></li>

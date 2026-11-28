@@ -16,7 +16,7 @@ import { applyPendingDisable, compareVersions, contentDir, fitsMinecraft, listCo
 
 export const ADDON_SIGNATURE_PREFIX = 'heldix-addon\n';
 /** Höchste Heldix-API-Stufe, die die mitgelieferte HeldixClient-Mod kann (HeldixApi.API_VERSION, geprüft beim Bauen) */
-export const HELDIX_ADDON_API = 9;
+export const HELDIX_ADDON_API = 10;
 /** Dateien, die das Spiel beim nächsten Start entfernen soll (gesperrte JARs unter Windows), eine pro Zeile */
 export const PENDING_REMOVALS = '.entfernen';
 /** Ersatz für eine im Spiel gesperrte JAR gleichen Namens (legt das Spiel an) */

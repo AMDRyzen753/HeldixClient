@@ -1,6 +1,7 @@
 // Verlauf der Benachrichtigungen (Glocke in der Titelleiste): Freundschaftsanfragen, Nachrichten, angenommene und
 // bestätigte Einladungen, Freischaltungen, geöffnete Welten von Freunden, Einladungen in Welten und Partys, „Folgen“
-// (der Party-Leiter ist woanders), Launcher- und Addon-Updates.
+// (der Party-Leiter ist woanders), Launcher- und Addon-Updates; ab Dienst 1.13.0 dauerhafte Welten (freigeschaltet,
+// Fehler bzw. Absturz der eigenen Welt, Anklopfen ohne laufendes Spiel).
 //
 // Lokal im Datenordner (notifications.json), nie beim Dienst. Höchstens 100 Einträge und 30 Tage; Einträge mit
 // demselben Schlüssel (z. B. weitere Nachrichten desselben Freundes) werden zusammengefasst, solange sie ungelesen
@@ -13,8 +14,10 @@ import { readJson, writeJson } from './fsutil';
 export const NOTIFICATION_FILE = 'notifications.json';
 export const NOTIFICATION_LIMIT = 100;
 export const NOTIFICATION_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
-const KINDS: readonly NotificationKind[] = ['friend-request', 'message', 'invite-accepted', 'invite-confirmed', 'unlock', 'world-open', 'world-invite', 'party-invite', 'party-follow', 'update', 'addons'];
-const VIEWS = ['friends', 'invites', 'cosmetics', 'store', 'updates', 'world', 'party'] as const;
+const KINDS: readonly NotificationKind[] = ['friend-request', 'message', 'invite-accepted', 'invite-confirmed', 'unlock', 'world-open', 'world-invite', 'party-invite', 'party-follow', 'update', 'addons',
+  'hosting-granted', 'hosting-problem', 'hosting-knock'];
+/** hosting = Webseite, Konto → Meine Welten (dauerhafte Welten) */
+const VIEWS = ['friends', 'invites', 'cosmetics', 'store', 'updates', 'world', 'party', 'hosting'] as const;
 
 export interface NewNotification {
   kind: NotificationKind;

@@ -14,8 +14,8 @@ import java.util.function.Consumer;
 
 /**
  * Verbindung zum Musik-Player des Systems, ohne Spotify-Konto und ohne API-Schlüssel. Je System eine Unterklasse:
- * Windows-Mediensteuerung ({@link WindowsPlayer}), Spotify per AppleScript ({@link MacPlayer}) und MPRIS über
- * playerctl ({@link LinuxPlayer}).
+ * Windows-Mediensteuerung ({@link WindowsPlayer}), Spotify und Apple Music per AppleScript ({@link MacPlayer}) und
+ * MPRIS über playerctl ({@link LinuxPlayer}).
  *
  * <p>Ein Hintergrund-Thread hält die Verbindung (Prozess oder Abfrage). Bricht sie ab, wird sie mit wachsender
  * Pause (2 s, 4 s … höchstens 30 s) neu aufgebaut. Befehle blockieren den Haupt-Thread nie.
@@ -59,6 +59,8 @@ abstract class Player {
 	/** Fehlstarts in Folge (0, sobald der Player antwortet) */
 	protected volatile int failures;
 	private volatile boolean running;
+	/** Verbindung soll ohne Pause neu aufgebaut werden (restart), z. B. nach einem Wechsel von „Nur Spotify“ */
+	private volatile boolean restarting;
 	/** Jeder Start bekommt eine neue Nummer; ein Thread aus einem früheren Start beendet sich still */
 	private volatile int generation;
 	private Thread thread;
@@ -198,6 +200,12 @@ abstract class Player {
 	protected void disconnect() {
 	}
 
+	/** Verbindung sofort neu aufbauen (ohne Pause, zählt nicht als Fehler) */
+	protected void restart() {
+		restarting = true;
+		disconnect();
+	}
+
 	protected boolean alive(int gen) {
 		return running && generation == gen;
 	}
@@ -216,6 +224,11 @@ abstract class Player {
 			if (!alive(gen)) break;
 			track = null;
 			connected = false;
+			if (restarting) {
+				restarting = false;
+				failures = 0;
+				continue;
+			}
 			// lief es eine Weile stabil, zählt der Absturz nicht als Folgefehler
 			failures = System.currentTimeMillis() - started > 60_000 ? 1 : failures + 1;
 			try {

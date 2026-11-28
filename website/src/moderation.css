@@ -1,0 +1,272 @@
+/* HeldixClient – Webseite: Voice-Moderation (Dienst 1.13.0) – Team-Bereich „Voice“ (team-voice.js) und die Karte
+   „Voice Chat“ im Konto (konto-voice.js). Nur Besonderheiten; Grundbausteine aus design.css und bereich*.css. */
+
+/* ---------- Team: Zahlen ---------- */
+.voice-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: var(--sp-3);
+}
+.voice-stats:empty {
+  display: none;
+}
+.voice-kpi {
+  min-width: 0;
+}
+.voice-kpi .kpi__value {
+  overflow-wrap: anywhere;
+}
+.voice-kpi .kpi__value--text {
+  font-size: var(--fs-md);
+  line-height: 1.3;
+  overflow-wrap: normal;
+}
+
+/* ---------- Meldungen ---------- */
+/* .bereich .card-head > div ist ein Raster – Chips und Umschalter im Kopf sollen ihre Breite behalten */
+.bereich .card-head > .voice-head-side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.voice-bundle .chips-row {
+  margin-top: 4px;
+}
+.voice-report-row.is-open {
+  background: var(--accent-soft);
+}
+.voice-detail-slot:empty {
+  display: none;
+}
+.voice-report {
+  min-width: 0;
+}
+/* „Voice gesperrt bis …“ darf auf schmalen Bildschirmen umbrechen */
+.voice-player-chips .chip {
+  max-width: 100%;
+  white-space: normal;
+}
+.voice-contexts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: var(--sp-3);
+}
+.voice-context {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--bg-raised);
+  min-width: 0;
+}
+.voice-levels {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.voice-chart-box {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  min-width: 0;
+}
+.voice-chart-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  border-radius: var(--r-md);
+}
+.voice-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: #05070d;
+}
+.voice-chart__grid {
+  stroke: rgba(148, 163, 184, 0.14);
+  stroke-width: 1;
+}
+.voice-chart__soft {
+  stroke: var(--c-amber-400);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+.voice-chart__hard {
+  stroke: var(--c-red-400);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+.voice-chart__rms {
+  fill: rgba(96, 165, 250, 0.35);
+  stroke: var(--c-blue-400);
+  stroke-width: 1;
+}
+.voice-chart__peak {
+  fill: none;
+  stroke: var(--c-pink-400);
+  stroke-width: 1.5;
+}
+.voice-chart__dot {
+  fill: var(--c-pink-400);
+}
+.voice-chart__label {
+  fill: var(--text-3);
+  font-size: 11px;
+  font-family: var(--font);
+}
+.voice-chart__label--soft {
+  fill: var(--c-amber-300);
+}
+.voice-chart__label--hard {
+  fill: var(--c-red-300);
+}
+.voice-legend {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin: 0 4px 0 2px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+.voice-legend--rms {
+  background: rgba(96, 165, 250, 0.6);
+}
+.voice-legend--peak {
+  background: var(--c-pink-400);
+}
+.voice-clip {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  background: var(--voice-soft);
+}
+.voice-clip h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.voice-segments {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 1.2em;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+.voice-audio {
+  width: 100%;
+  max-width: 520px;
+}
+.voice-audio[hidden] {
+  display: none;
+}
+.voice-outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.voice-durations {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* ---------- Regeln ---------- */
+.voice-rules-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.voice-rules-input {
+  width: 100%;
+  min-height: 320px;
+  font: 13px/1.5 var(--mono);
+}
+.voice-rules-preview {
+  max-height: 420px;
+  overflow: auto;
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--bg-raised);
+  font-size: var(--fs-sm);
+}
+.voice-rules-preview h3 {
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-size: var(--fs-base);
+}
+.voice-rules-preview h4 {
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-size: var(--fs-sm);
+}
+.voice-rules-preview .voice-rules-title {
+  margin-top: 0;
+  font-size: var(--fs-md);
+}
+.voice-rules-preview p,
+.voice-rules-preview ul {
+  margin: 0 0 var(--sp-2);
+}
+.voice-rules-preview ul {
+  padding-left: 1.2em;
+}
+.voice-rules-preview--dialog {
+  max-height: 46vh;
+}
+.voice-server-form {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+/* ---------- Konto ---------- */
+.voice-account {
+  display: grid;
+  gap: var(--sp-3);
+}
+.voice-account[hidden] {
+  display: none;
+}
+.voice-account .icon {
+  vertical-align: -3px;
+}
+/* svg ist in design.css ein Block – im Fließtext („✓ Keine Voice-Sperre.“) inline halten */
+.voice-account p.small > .icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  color: var(--online);
+}
+.voice-consent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-3);
+}
+.voice-ban {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: start;
+}
+.voice-history summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+@media (max-width: 900px) {
+  .voice-rules-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 640px) {
+  .voice-chart {
+    min-width: 520px;
+  }
+}

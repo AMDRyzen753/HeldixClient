@@ -616,6 +616,8 @@ public final class Social {
 		}
 		HeldixClient.LOGGER.info("Heldix-Dienst verbunden");
 		sendStatus();
+		// dauerhafte Welten (ab 1.13.0): Stand holen (Zustände der eigenen Welten, Berechtigung)
+		dev.heldixclient.share.Hosting.connected();
 	}
 
 	private static void closeSocket() {
@@ -795,6 +797,10 @@ public final class Social {
 			// ab Dienst 1.12.0: Welt eines Freundes geöffnet bzw. geschlossen (für Heldix-Welten und die Freunde-Leiste)
 			case "world-open" -> dev.heldixclient.share.WorldInvites.onOpen(message, notify);
 			case "world-closed" -> dev.heldixclient.share.WorldInvites.onClosed(message);
+			// ab Dienst 1.13.0: dauerhafte Welten – Zustand (Liste in Heldix-Welten), Anklopfen (Einblendung mit H/N) und Freischaltung
+			case "hosting-state" -> dev.heldixclient.share.Hosting.onState(message);
+			case "hosting-knock" -> dev.heldixclient.share.Hosting.onKnock(message, notify);
+			case "hosting-granted" -> dev.heldixclient.share.Hosting.onGranted(message, notify);
 			case "invite" -> {
 				String name = string(message, "name");
 				if (!notify || name == null || name.isBlank()) return;
@@ -1323,21 +1329,98 @@ public final class Social {
 	// HTTP
 	// ======================================================================================
 
-	/** Fehler mit Text für den Spieler (vom Dienst); status = HTTP-Status der Antwort, 0 = keine Antwort des Dienstes */
+	/**
+	 * Fehler mit Text für den Spieler (vom Dienst); status = HTTP-Status der Antwort, 0 = keine Antwort des Dienstes.
+	 * {@code body} = die Fehlerantwort des Dienstes (ab 1.13.0 teils mit {@code code} und Zusatzfeldern), sonst null.
+	 */
 	public static final class ServiceException extends Exception {
 		private final int status;
+		private final transient JsonObject body;
 
 		public ServiceException(String message) {
 			this(message, 0);
 		}
 
 		public ServiceException(String message, int status) {
+			this(message, status, null);
+		}
+
+		public ServiceException(String message, int status, JsonObject body) {
 			super(message);
 			this.status = status;
+			this.body = body;
 		}
 
 		public int status() {
 			return status;
+		}
+
+		/** Fehlercode des Dienstes (z. B. "beta", "missing-chunks"), sonst null */
+		public String code() {
+			return body != null && body.has("code") && body.get("code").isJsonPrimitive() ? body.get("code").getAsString() : null;
+		}
+
+		/** ganze Fehlerantwort (für Zusatzfelder wie {@code missing}), sonst null */
+		public JsonObject body() {
+			return body;
+		}
+	}
+
+	/**
+	 * Große Übertragungen (dauerhafte Welten: Teile hochladen, Welt herunterladen, Bilder aus Entdecken): Anfrage mit
+	 * eigener Zeitgrenze, ohne den Netzwerk-Thread des Dienstes zu blockieren. Das Ergebnis ist die rohe Antwort (auch bei
+	 * Fehlern, siehe {@link #failure}); Abbrechen über {@code cancel(true)} des Futures. {@code body} = roher Körper
+	 * (application/octet-stream) oder null. Ohne Anmeldung bzw. ohne Dienst: sofort ein Fehler.
+	 */
+	public static CompletableFuture<HttpResponse<java.io.InputStream>> transfer(String method, String path, byte[] body, Duration timeout, boolean auth) {
+		return transfer(method, path, body, "application/octet-stream", timeout, auth);
+	}
+
+	/** wie {@link #transfer(String, String, byte[], Duration, boolean)}, mit eigenem Inhaltstyp (z. B. JSON mit langer Zeitgrenze) */
+	public static CompletableFuture<HttpResponse<java.io.InputStream>> transfer(String method, String path, byte[] body, String contentType, Duration timeout,
+			boolean auth) {
+		if (baseUrl().isEmpty()) return CompletableFuture.failedFuture(new ServiceException("Kein Heldix-Dienst eingetragen"));
+		// nur das Token zählt: ein langer Upload übersteht so eine kurze Unterbrechung der Echtzeit-Verbindung
+		String current = token;
+		if (auth && current == null) return CompletableFuture.failedFuture(new ServiceException("Nicht mit dem Heldix-Dienst verbunden"));
+		HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(baseUrl() + path))
+				.timeout(timeout)
+				.header("Accept", "*/*")
+				.header("User-Agent", HeldixClient.NAME + "/" + HeldixClient.version);
+		if (auth) request.header("Authorization", "Bearer " + current);
+		if (body != null) {
+			request.header("Content-Type", contentType);
+			request.method(method, HttpRequest.BodyPublishers.ofByteArray(body));
+		} else {
+			request.method(method, HttpRequest.BodyPublishers.noBody());
+		}
+		return HTTP.sendAsync(request.build(), HttpResponse.BodyHandlers.ofInputStream()).thenApply(response -> {
+			if (response.statusCode() == 401 && auth) NET.execute(Social::connect);
+			return response;
+		});
+	}
+
+	/** Fehler einer rohen Antwort ({@link #transfer}) mit dem Text des Dienstes (liest höchstens 64 KB und schließt den Strom) */
+	public static ServiceException failure(HttpResponse<java.io.InputStream> response) {
+		String text = "";
+		try (java.io.InputStream in = response.body()) {
+			text = new String(in.readNBytes(64 * 1024), StandardCharsets.UTF_8);
+		} catch (IOException e) {
+			// ohne Text
+		}
+		JsonElement json = parse(text);
+		JsonObject object = json.isJsonObject() ? json.getAsJsonObject() : null;
+		String message = object != null ? string(object, "error") : null;
+		return new ServiceException(message != null ? message : "Fehler beim Dienst (" + response.statusCode() + ")", response.statusCode(), object);
+	}
+
+	/** Antwort einer rohen Anfrage als JSON (Status unter 400), sonst {@link ServiceException} mit dem Text des Dienstes */
+	public static JsonElement json(HttpResponse<java.io.InputStream> response) throws ServiceException {
+		if (response.statusCode() >= 400) throw failure(response);
+		try (java.io.InputStream in = response.body()) {
+			return parse(new String(in.readNBytes(1 << 20), StandardCharsets.UTF_8));
+		} catch (IOException e) {
+			throw new ServiceException("Antwort des Dienstes unvollständig");
 		}
 	}
 
@@ -1395,7 +1478,8 @@ public final class Social {
 		}
 		if (response.statusCode() >= 400) {
 			String message = json.isJsonObject() ? string(json.getAsJsonObject(), "error") : null;
-			throw new ServiceException(message != null ? message : "Fehler beim Dienst (" + response.statusCode() + ")", response.statusCode());
+			throw new ServiceException(message != null ? message : "Fehler beim Dienst (" + response.statusCode() + ")", response.statusCode(),
+					json.isJsonObject() ? json.getAsJsonObject() : null);
 		}
 		return json;
 	}

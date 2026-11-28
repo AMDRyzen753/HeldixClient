@@ -66,5 +66,8 @@ Unter **Deine Welten** löschst du eine Welt beim Heldix-Dienst. Dann sind ihre 
 - **Veraltete Version:** Minecraft meldet einen Versionsfehler, wenn du eine andere Minecraft-Version nutzt als der Gastgeber. Starte eine Instanz mit seiner Version.
 - **„Welt teilen ist auf diesem Heldix-Dienst nicht eingerichtet.“** Dann gibt es die Funktion auf diesem Dienst (noch) nicht.
 
+## Dauerhaft online und Entdecken
+Soll die Welt auch laufen, wenn du offline bist? Mit [dauerhaften Welten](/hilfe/dauerhafte-welten) läuft sie auf dem Heldix-Server (gerade in der Beta, später mit [Heldix+](/plus)). Ist sie für jeden mit der Adresse offen, trägst du sie im [Konto](/konto#reiter=welten) mit **Im Verzeichnis zeigen** auf [Entdecken](/hilfe/entdecken) ein.
+
 ## Datenschutz
 Der Heldix-Dienst leitet die Verbindungen nur weiter. **Als Gastgeber siehst du die IP-Adressen deiner Mitspieler nicht**, und sie sehen deine nicht. Gespeichert werden nur deine Welten (Name, Adresse, Einstellungen) und ihre Mitgliederliste, bis du sie löschst. Mehr in der [Datenschutzerklärung](/datenschutz).

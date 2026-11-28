@@ -30,6 +30,9 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * Sprachkanal; ein zweiter Thread dekodiert die Rahmen der anderen (kleiner Puffer gegen Schwankungen, Lücken überbrückt
  * Opus), mischt sie nach Abstand und Richtung in Stereo (die eigene Gruppe ohne Abstand), mischt Signaltöne dazu und
  * spielt alles ab. Beide laufen nur, solange das Modul an und der Kanal verbunden ist (oder der Test läuft).
+ * Ab 1.3.0: je Sprecher ein Lautstärke-Schutz ({@link VolumeGuard}) nach dem Dekodieren, ein Lautstärke-Verlauf
+ * ({@link LevelHistory}, vor dem Schutz gemessen) und – nur bei aktiven Aufnahmen – ein Ringpuffer der empfangenen Pakete
+ * ({@link ClipBuffer}) für Meldungen. Die eigene Stimme kommt in keinen davon.
  */
 final class VoiceEngine {
 	static final int RATE = 48_000;
@@ -45,8 +48,11 @@ final class VoiceEngine {
 
 	/** Einstellungen (vom Haupt-Thread gesetzt, von den Ton-Threads gelesen) */
 	record Settings(boolean pushToTalk, double thresholdDb, int device, double micGain, double volume, boolean stereo, boolean muted,
-			boolean deafened, boolean test, boolean noiseFilter, boolean tones) {
+			boolean deafened, boolean test, boolean noiseFilter, boolean tones, boolean guard) {
 	}
+
+	/** höchstens so viele Lautstärke-Verläufe (die zuletzt gehörten) */
+	private static final int MAX_LEVEL_SPEAKERS = 64;
 
 	/** Lage eines anderen Spielers von dir aus */
 	record Position(double distance, float direction, String name) {
@@ -94,7 +100,16 @@ final class VoiceEngine {
 	private final ConcurrentLinkedQueue<byte[]> loopback = new ConcurrentLinkedQueue<>();
 	private final ConcurrentLinkedQueue<short[]> cues = new ConcurrentLinkedQueue<>();
 
-	private volatile Settings settings = new Settings(true, -40, 0, 1, 1, true, false, false, false, true, true);
+	private volatile Settings settings = new Settings(true, -40, 0, 1, 1, true, false, false, false, true, true, true);
+	/** empfangene Pakete der anderen für Meldungen (nur bei aktiven Aufnahmen) */
+	private final ClipBuffer clips = new ClipBuffer();
+	/** Lautstärke-Verlauf je Sprecher (zuletzt gehörte zuerst behalten) */
+	private final Map<UUID, LevelHistory> levels = new java.util.LinkedHashMap<>(16, 0.75f, true) {
+		@Override
+		protected boolean removeEldestEntry(Map.Entry<UUID, LevelHistory> eldest) {
+			return size() > MAX_LEVEL_SPEAKERS;
+		}
+	};
 	private volatile Map<UUID, Position> positions = Map.of();
 	private volatile Set<UUID> group = Set.of();
 	private volatile int range = 48;
@@ -147,8 +162,78 @@ final class VoiceEngine {
 		streams.clear();
 		loopback.clear();
 		cues.clear();
+		// getrennt oder Modul aus: gepufferte Pakete weg
+		clips.clear();
 		transmitting = false;
 		level = 0;
+	}
+
+	// ======================================================================================
+	// Für Meldungen: Ringpuffer und Lautstärke-Verlauf
+	// ======================================================================================
+
+	/** Pakete und Verläufe vergessen (Server- oder Weltwechsel, Modul aus) */
+	void clearRecordings() {
+		clips.clear();
+		synchronized (levels) {
+			levels.clear();
+		}
+	}
+
+	/** nur die Pakete vergessen (Aufnahmen aus, getrennt) */
+	void clearClips() {
+		if (!clips.isEmpty()) clips.clear();
+	}
+
+	/** jeden Tick: zu alte Pakete wegwerfen */
+	void expireClips(long now) {
+		clips.expire(now);
+	}
+
+	long bufferedMillis(UUID speaker) {
+		return clips.bufferedMillis(speaker, System.currentTimeMillis());
+	}
+
+	int clipSpeakers() {
+		return clips.speakerCount();
+	}
+
+	/** Anhänge einer Meldung: Lautstärke-Verlauf und (nur mit includeClip) die gepufferten Pakete */
+	dev.heldixclient.api.VoiceChannel.ReportData report(UUID speaker, boolean includeClip) {
+		long now = System.currentTimeMillis();
+		LevelHistory history;
+		synchronized (levels) {
+			history = levels.get(speaker);
+		}
+		LevelHistory.Snapshot snapshot = history == null ? null : history.snapshot(now);
+		List<dev.heldixclient.api.VoiceChannel.ReceivedPacket> packets = includeClip ? clips.snapshot(speaker, now) : List.of();
+		if (snapshot == null && packets.isEmpty()) return null;
+		return new dev.heldixclient.api.VoiceChannel.ReportData(snapshot != null ? snapshot.end() : now, snapshot != null ? snapshot.rms() : null,
+				snapshot != null ? snapshot.peak() : null, packets);
+	}
+
+	/** wann zuletzt zu hören (ms), 0 = nie */
+	long lastHeard(UUID speaker) {
+		LevelHistory history;
+		synchronized (levels) {
+			history = levels.get(speaker);
+		}
+		return history == null ? 0 : history.lastHeard();
+	}
+
+	/** zuletzt gehörte Sprecher (seit {@code since} ms) */
+	List<UUID> heardSince(long since) {
+		List<UUID> list = new ArrayList<>();
+		synchronized (levels) {
+			for (Map.Entry<UUID, LevelHistory> entry : levels.entrySet()) if (entry.getValue().lastHeard() >= since) list.add(entry.getKey());
+		}
+		return list;
+	}
+
+	private LevelHistory levelsOf(UUID speaker) {
+		synchronized (levels) {
+			return levels.computeIfAbsent(speaker, id -> new LevelHistory());
+		}
 	}
 
 	boolean running() {
@@ -207,6 +292,8 @@ final class VoiceEngine {
 		Settings current = settings;
 		if (current.deafened() || addon.isMuted(sender)) return;
 		streams.computeIfAbsent(sender, Stream::new).push(sequence, last, frame);
+		// für Meldungen: nur bei aktiven Aufnahmen, nur im Arbeitsspeicher (die eigene Stimme kommt hier nie an)
+		if (channel.clipsActive()) clips.add(sender, System.currentTimeMillis(), sequence, last, frame);
 	}
 
 	// ======================================================================================
@@ -472,6 +559,9 @@ final class VoiceEngine {
 				}
 				any = true;
 				stream.level = Math.max(peak(pcm), stream.level * 0.82f);
+				// Lautstärke-Verlauf vor dem Schutz, dann der Schutz selbst (ab 1.3.0)
+				levelsOf(stream.uuid).add(pcm, FRAME, now);
+				if (current.guard()) stream.guard.process(pcm, FRAME);
 				float gain = (float) (current.volume() * addon.volumeOf(stream.uuid));
 				float pan = 0;
 				Position position = where.get(stream.uuid);
@@ -623,6 +713,8 @@ final class VoiceEngine {
 	private static final class Stream {
 		private final UUID uuid;
 		private final ArrayDeque<Packet> queue = new ArrayDeque<>();
+		/** Lautstärke-Schutz dieses Sprechers (nur der Wiedergabe-Thread) */
+		private final VolumeGuard guard = new VolumeGuard(RATE);
 		private OpusDecoder decoder;
 		private boolean buffering = true;
 		/** so viele fehlende Rahmen noch mit Opus überbrücken */

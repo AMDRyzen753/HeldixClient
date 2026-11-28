@@ -7,6 +7,8 @@ stichworte: voice chat, voicechat, gruppe, voice-gruppe, party, party-voice, get
 ---
 Mit dem Addon **Voice Chat** sprichst du mit anderen HeldixClient-Spielern, die in deiner Nähe sind – auf jedem Server, ganz ohne Plugin. Je weiter jemand weg ist, desto leiser hörst du ihn, und in Stereo hörst du, aus welcher Richtung er spricht.
 
+> **Hinweis:** Im Voice Chat gelten die [Voice-Regeln](/voice-regeln). Wie du sie annimmst, jemanden meldest, was Gastgeber und Party-Leiter dürfen und was der Lautstärke-Schutz macht, steht unter [Voice Chat: Regeln und Melden](/hilfe/voice-regeln-melden).
+
 ## Einrichten
 1. Installiere **Voice Chat** im Addon-Store (Heldix-Menü → **Heldix → Mods & Addons → Store** oder im Launcher unter **Mods & Addons → Hinzufügen**).
 2. Schalte im Heldix-Menü unter **Module** das Modul **Voice Chat** ein. Ab Werk ist es aus.
@@ -58,7 +60,7 @@ Die Symbole folgen dem Namensschild: Mit [[F1]], bei Unsichtbarkeit oder wenn de
 Das HUD-Element **Voice Chat-Anzeige** zeigt oben dein Mikrofon (an, stumm, Ton aus) mit Pegel, darunter wie viele in Reichweite sind und deine Gruppe, dann die Köpfe der Sprecher mit hüpfenden Balken. Mit offenem Chat erscheinen Knöpfe, mit denen du dein Mikrofon stumm schaltest oder den Ton ausmachst. Im [HUD-Editor](/hilfe/hud-editor) wählst du per Rechtsklick **Liste** oder **Kompakt** (nur Mikrofon und Köpfe), ob Köpfe erscheinen und ob die Anzeige nur sichtbar ist, wenn etwas los ist.
 
 ## Wer dich hört
-Deine Stimme geht über den Heldix-Dienst an HeldixClient-Spieler mit eingeschaltetem Voice Chat, die auf demselben Server und in derselben Welt höchstens 48 Blöcke von dir entfernt sind – und an die Mitglieder deiner Gruppe auf diesem Server. Ob dein Mikrofon stumm oder dein Ton aus ist, sehen dieselben Spieler. Wen du blockiert hast oder wer dich blockiert hat, hört dich nicht. Gäste im Browser hören die Gruppe, in die ihr Link führt – blockieren lassen sie sich nicht, aber jeder Spieler der Gruppe kann sie entfernen. Der Heldix-Dienst speichert keine Sprache und keine Positionen; von der Gruppe bekommt er nur einen Prüfwert, nie Name oder Passwort. Für einen Browser-Link merkt er sich diesen Prüfwert bis zum Ablauf des Links, Gast-Namen nur im Arbeitsspeicher. Mehr dazu in der [Datenschutzerklärung](/datenschutz).
+Deine Stimme geht über den Heldix-Dienst an HeldixClient-Spieler mit eingeschaltetem Voice Chat, die auf demselben Server und in derselben Welt höchstens 48 Blöcke von dir entfernt sind – und an die Mitglieder deiner Gruppe auf diesem Server. Ob dein Mikrofon stumm oder dein Ton aus ist, sehen dieselben Spieler. Wen du blockiert hast oder wer dich blockiert hat, hört dich nicht. Gäste im Browser hören die Gruppe, in die ihr Link führt – blockieren lassen sie sich nicht, aber jeder Spieler der Gruppe kann sie entfernen. Der Heldix-Dienst speichert keine Sprache und keine Positionen – außer der Aufnahme in einer Meldung, wenn Aufnahmen eingeschaltet sind (siehe [Regeln und Melden](/hilfe/voice-regeln-melden#aufnahme-der-letzten-10-minuten)); von der Gruppe bekommt er nur einen Prüfwert, nie Name oder Passwort. Für einen Browser-Link merkt er sich diesen Prüfwert bis zum Ablauf des Links, Gast-Namen nur im Arbeitsspeicher. Mehr dazu in der [Datenschutzerklärung](/datenschutz).
 
 Im Einzelspieler und auf Servern im eigenen Netzwerk (LAN) gibt es keinen Voice Chat – außer du teilst deine Welt mit [Welt teilen](/hilfe/welt-teilen).
 

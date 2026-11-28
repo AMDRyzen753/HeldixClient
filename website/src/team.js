@@ -3,7 +3,8 @@
 // (WebMe.permissions, rollen.js); der Dienst prüft jede Route selbst. Bereiche: Meldungen, Support, Spieler (mit
 // Zeitleiste), Sperren, Neuigkeiten, Updates, Addons (team-addons.js), Cosmetics (team-cosmetics.js), Team & Rollen
 // (Rollen-Verwaltung, Community-Abzeichen, Rechte-Übersicht), Protokoll, Mein Teamprofil. Listen mit Suche, Filtern,
-// Sortierung, Seiten und Sammelaktionen: team-tabelle.js.
+// Sortierung, Seiten und Sammelaktionen: team-tabelle.js. Ab Dienst 1.13.0 dazu „Entdecken“, „Dauerhafte Welten“ und
+// „Heldix+“ (team-welten.js) und in den Spieler-Details die Freischaltungen (Recht hosting:grant).
 // Startseite ist die Übersicht (team-overview.js); dazu Schnellsuche (Strg+K, team-search.js) und Aktivität mit Glocke
 // (team-activity.js). Übersicht und Glocke nutzen dieselben Daten wie das Nachfragen alle 30 Sekunden (live).
 // Zugang: Cookie-Sitzung + Team-Rolle + Zwei-Faktor-Anmeldung (TOTP), in dieser Sitzung bestätigt (12 Stunden).
@@ -60,6 +61,8 @@ import { initTeamSearch } from './team-search.js';
 import { attachmentList, normalizeAttachments } from './support-attachments.js';
 import { COMMUNITY_BADGES, PERMISSIONS, ROLES, ROLE_PERMISSIONS, allows, badgeIcon, badgeLabel, permissionsOf, roleIcon, roleLabel } from './rollen.js';
 import { createListTools } from './team-tabelle.js';
+import { initTeamWorlds } from './team-welten.js';
+import { initTeamVoice } from './team-voice.js';
 
 // Spielerbilder im Team-Bereich: Minecraft-Köpfe über die Cookie-Sitzung (das bestätigte Team darf alle).
 setSkinSource('auth');
@@ -115,6 +118,8 @@ let overview = null;
 let activity = null;
 let quickSearch = null;
 let cosmeticsUi = null;
+let teamWorlds = null;
+let teamVoice = null;
 
 /**
  * Was gerade offen ist – aus dem Nachfragen (Zähler) und den Listen der Bereiche, ohne eigene Anfragen. Nutzen
@@ -409,6 +414,10 @@ function onTab(name, { params = null } = {}) {
       if (addon) focusTeamAddon(addon);
     },
     cosmetics: () => cosmeticsUi.show({ focusId: cosmetic }),
+    entdecken: () => teamWorlds.showDiscover(),
+    voice: () => teamVoice.show(params),
+    hosting: () => teamWorlds.showHosting(),
+    plus: () => teamWorlds.showPlus(),
     team: loadMembers,
     protokoll: loadAudit,
     support: async () => {
@@ -569,7 +578,8 @@ function reportCard(report, select = null) {
       select,
       h('h2', { class: 'report-id', id: `meldung-${report.id}-titel`, text: `Meldung #${report.id}` }),
       chip(done ? 'Erledigt' : 'Offen', done ? 'success' : 'warning'),
-      chip(reasonLabel(report.reason)),
+      report.kind === 'voice' ? chip('Voice', 'accent') : null,
+      chip(report.kind === 'voice' ? report.reasonLabel ?? report.reason : reasonLabel(report.reason)),
       h('span', { class: 'report-time' }, timeEl(report.at, formatDateTime(report.at))),
     ),
     h(
@@ -582,7 +592,9 @@ function reportCard(report, select = null) {
       reported.banned ? h('span', { class: 'chip danger', text: 'gesperrt' }) : null,
     ),
     report.note ? h('blockquote', { class: 'quote' }, h('span', { class: 'quote-label', text: 'Hinweis: ' }), report.note) : h('p', { class: 'muted small', text: 'Kein Hinweis angegeben.' }),
-    messages.length
+    report.kind === 'voice'
+      ? h('p', { class: 'muted small' }, 'Voice-Meldung: Kontext, Lautstärke-Verlauf und Aufnahme stehen im Bereich Voice. ', can('voice:moderate') ? h('button', { type: 'button', class: 'link-button', onClick: () => jump('voice', { meldung: report.id }) }, 'Im Bereich Voice öffnen') : null)
+      : messages.length
       ? h(
           'details',
           { class: 'snapshot' },
@@ -801,6 +813,8 @@ function renderPlayerDetail(player) {
           ),
         )
       : null,
+    can('voice:moderate') ? h('div', { class: 'card-actions' }, h('button', { type: 'button', class: 'button tiny ghost', id: 'spieler-voice', onClick: () => jump('voice', { spieler: player.uuid }) }, icon('mic'), 'Voice: Meldungen und Sperren')) : null,
+    can('hosting:grant') ? teamWorlds.playerGrants(player) : null,
     h('section', { class: 'player-timeline', 'aria-labelledby': 'spieler-zeitleiste-titel' }, h('h3', { id: 'spieler-zeitleiste-titel', text: 'Zeitleiste' }), h('ol', { class: 'timeline', id: 'spieler-zeitleiste' }, h('li', { class: 'timeline__empty', text: 'Wird geladen …' }))),
   );
   loadTimeline(player).catch(() => {});
@@ -1153,31 +1167,59 @@ function manifestDate(value) {
   return Number.isFinite(time) ? formatDate(time) : value;
 }
 
+/** Antwort von GET /v1/team/updates (und DELETE …/files/<Datei>): Windows (current), Mac (mac, ab Dienst 1.13.0), Dateien. */
+function updatesState(data) {
+  return { current: data?.current ?? null, mac: data?.mac ?? null, files: Array.isArray(data?.files) ? data.files : [] };
+}
+
+const MAC_ARCHS = [
+  ['arm64', 'Apple Silicon'],
+  ['x64', 'Intel'],
+];
+
 async function loadUpdates() {
   const box = $('#update-aktuell');
   if (!box.firstChild) box.replaceChildren(loadingState());
   const data = await teamCall('GET', '/v1/team/updates');
-  state.updates = { current: data?.current ?? null, files: Array.isArray(data?.files) ? data.files : [] };
+  state.updates = updatesState(data);
   renderUpdates();
 }
 
 function renderUpdates() {
   const current = manifestFields(state.updates?.current);
-  rerender($('#update-aktuell'), JSON.stringify(current), () => {
-    if (!current) return emptyState('Noch keine Version veröffentlicht.', 'download');
-    const notes = Array.isArray(current.notes) ? current.notes.filter((note) => typeof note === 'string' && note.trim()) : [];
+  const mac = manifestFields(state.updates?.mac);
+  rerender($('#update-aktuell'), JSON.stringify([current, mac]), () => {
+    if (!current && !mac) return emptyState('Noch keine Version veröffentlicht.', 'download');
+    const notesOf = (manifest) => (Array.isArray(manifest?.notes) ? manifest.notes.filter((note) => typeof note === 'string' && note.trim()) : []);
+    const notes = notesOf(current ?? mac);
     return [
-      h('p', { class: 'version-big' }, h('span', { class: 'muted', text: 'Version ' }), h('strong', { text: current.version ?? '?' })),
+      h('p', { class: 'version-big' }, h('span', { class: 'muted', text: 'Version ' }), h('strong', { text: current?.version ?? mac?.version ?? '?' })),
+      h('p', { class: 'muted small', id: 'update-plattformen', text: `Veröffentlicht: Windows ${current?.version ?? '–'} · Mac ${mac?.version ?? '–'}` }),
       h(
         'dl',
         { class: 'facts-list' },
-        h('dt', { text: 'Installer' }),
-        h('dd', null, h('code', { class: 'mono', text: current.file ?? '–' })),
-        h('dt', { text: 'Größe' }),
-        h('dd', { text: formatBytes(current.size) }),
-        h('dt', { text: 'Datum' }),
-        h('dd', { text: manifestDate(current.date) }),
-        current.sha512 ? [h('dt', { text: 'SHA-512' }), h('dd', null, h('code', { class: 'mono hash', title: current.sha512, text: `${current.sha512.slice(0, 24)}…` }))] : null,
+        current
+          ? [
+              h('dt', { text: 'Installer' }),
+              h('dd', null, h('code', { class: 'mono', text: current.file ?? '–' })),
+              h('dt', { text: 'Größe' }),
+              h('dd', { text: formatBytes(current.size) }),
+              h('dt', { text: 'Datum' }),
+              h('dd', { text: manifestDate(current.date) }),
+              current.sha512 ? [h('dt', { text: 'SHA-512' }), h('dd', null, h('code', { class: 'mono hash', title: current.sha512, text: `${current.sha512.slice(0, 24)}…` }))] : null,
+            ]
+          : null,
+        mac
+          ? [
+              h('dt', { text: 'Mac-Update' }),
+              h(
+                'dd',
+                { id: 'update-mac-aktuell' },
+                h('strong', { text: `Version ${mac.version ?? '?'}` }),
+                h('ul', { class: 'plain-list' }, MAC_ARCHS.map(([arch, label]) => (mac.files?.[arch] ? h('li', null, `${label}: `, h('code', { class: 'mono', text: mac.files[arch].file ?? '–' }), ` · ${formatBytes(mac.files[arch].size)}`) : null))),
+              ),
+            ]
+          : null,
         notes.length ? [h('dt', { text: 'Hinweise' }), h('dd', null, h('ul', { class: 'plain-list' }, notes.map((note) => h('li', { text: note }))))] : null,
       ),
     ];
@@ -1192,13 +1234,14 @@ function renderUpdates() {
     if (!best || compareVersions(file.version, best.version) > 0) newestMac.set(key, file);
   }
   const SYSTEM_LABEL = { arm64: 'Mac Apple Silicon', x64: 'Mac Intel' };
-  rerender($('#update-dateien'), JSON.stringify([files, current?.file]), () => {
+  const macPublished = new Set(MAC_ARCHS.map(([arch]) => mac?.files?.[arch]?.file).filter(Boolean));
+  rerender($('#update-dateien'), JSON.stringify([files, current?.file, [...macPublished]]), () => {
     if (!files.length) return emptyState('Noch keine Dateien hochgeladen.', 'file');
     return h(
       'ul',
       { class: 'rows' },
       files.map((file) => {
-        const isCurrent = current?.file === file.file;
+        const isCurrent = current?.file === file.file || macPublished.has(file.file);
         const isMac = file.platform === 'mac';
         const onDownloadPage = isMac && newestMac.get(`${file.arch}:${file.kind}`)?.file === file.file;
         return h(
@@ -1213,7 +1256,7 @@ function renderUpdates() {
               { class: 'row-title' },
               h('code', { class: 'mono', text: file.file }),
               isMac ? chip(SYSTEM_LABEL[file.arch] ?? 'Mac') : chip('Windows'),
-              isCurrent ? chip('veröffentlicht', 'success') : null,
+              isCurrent ? chip(macPublished.has(file.file) ? 'Mac-Update veröffentlicht' : 'veröffentlicht', 'success') : null,
               onDownloadPage ? chip('auf der Download-Seite', 'success') : null,
             ),
             h('div', { class: 'row-sub', text: `${formatBytes(file.size)} · hochgeladen ${formatDateTime(file.uploadedAt)}` }),
@@ -1254,7 +1297,7 @@ async function deleteUpdateFile(file) {
     danger: true,
     onConfirm: async () => {
       const data = await teamCall('DELETE', `/v1/team/updates/files/${encodeURIComponent(file.file)}`);
-      state.updates = { current: data?.current ?? null, files: Array.isArray(data?.files) ? data.files : [] };
+      state.updates = updatesState(data);
     },
   });
   if (!ok) return;
@@ -1400,7 +1443,7 @@ async function onMacChosen(event) {
     }
     fill.style.width = '100%';
     label.textContent = '100 %';
-    setMacMessage('ok', done.length === 1 ? `${done[0]} ist hochgeladen und steht auf der Download-Seite.` : `${done.length} Dateien sind hochgeladen und stehen auf der Download-Seite.`);
+    setMacMessage('ok', `${done.length === 1 ? `${done[0]} ist hochgeladen und steht` : `${done.length} Dateien sind hochgeladen und stehen`} auf der Download-Seite. Für automatische Updates zuletzt die update-mac.json wählen.`);
     toast(done.length === 1 ? `${done[0]} ist hochgeladen.` : `${done.length} Mac-Dateien sind hochgeladen.`, 'success');
   } catch (error) {
     handleAccessError(error);
@@ -1417,101 +1460,145 @@ async function onMacChosen(event) {
   }
 }
 
+/** Bedienelemente der beiden Wege zum Veröffentlichen: update.json (Windows) und update-mac.json (Mac, ab 1.13.0). */
+const MANIFEST_SLOTS = {
+  win: { name: '#upload-json-name', error: '#upload-json-fehler', check: '#manifest-pruefung', actions: '#manifest-aktionen', button: '#manifest-veroeffentlichen' },
+  mac: { name: '#upload-mac-json-name', error: '#upload-mac-json-fehler', check: '#mac-manifest-pruefung', actions: '#mac-manifest-aktionen', button: '#mac-manifest-veroeffentlichen' },
+};
+const MAC_ZIP_RE = /^HeldixClient-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)-mac-(arm64|x64)\.zip$/;
+
+function hideManifestChecks() {
+  for (const slot of Object.values(MANIFEST_SLOTS)) {
+    $(slot.check).hidden = true;
+    $(slot.actions).hidden = true;
+  }
+}
+
 async function onManifestChosen(event) {
   const input = event.currentTarget;
   const file = input.files?.[0];
   input.value = '';
-  const error = $('#upload-json-fehler');
-  error.hidden = true;
+  const slot = MANIFEST_SLOTS[input.id === 'upload-mac-json' ? 'mac' : 'win'];
+  for (const other of Object.values(MANIFEST_SLOTS)) $(other.error).hidden = true;
   state.manifest = null;
-  $('#manifest-pruefung').hidden = true;
-  $('#manifest-aktionen').hidden = true;
+  hideManifestChecks();
   if (!file) return;
-  $('#upload-json-name').textContent = `${file.name} · ${formatBytes(file.size)}`;
+  $(slot.name).textContent = `${file.name} · ${formatBytes(file.size)}`;
+  const error = $(slot.error);
   const fail = (text) => {
     error.textContent = text;
     error.hidden = false;
   };
-  if (file.size > 64 * 1024) return fail('Diese Datei ist zu groß für eine update.json.');
+  if (file.size > 64 * 1024) return fail('Diese Datei ist zu groß für eine update.json bzw. update-mac.json.');
   let outer;
   let inner;
   try {
-    outer = JSON.parse((await file.text()).replace(/^﻿/, ''));
+    outer = JSON.parse((await file.text()).replace(/^\uFEFF/, ''));
   } catch {
-    return fail('Die Datei ist kein gültiges JSON. Bitte die update.json aus launcher/release/update wählen.');
+    return fail('Die Datei ist kein gültiges JSON. Bitte die update.json bzw. update-mac.json aus launcher/release/update wählen.');
   }
   if (!outer || typeof outer !== 'object' || typeof outer.manifest !== 'string' || typeof outer.signature !== 'string' || !outer.signature) {
-    return fail('Das ist keine update.json: Es fehlen „manifest“ oder „signature“. Sie entsteht mit npm run release.');
+    return fail('Das ist keine update.json: Es fehlen „manifest“ oder „signature“. Sie entsteht mit npm run release (Mac: npm run release:mac).');
   }
   try {
     inner = JSON.parse(outer.manifest);
   } catch {
-    return fail('„manifest“ in der update.json ist kein gültiges JSON.');
+    return fail('„manifest“ in der Datei ist kein gültiges JSON.');
   }
+  // Mac (update-mac.json): v 2, platform mac, ZIPs für beide Prozessoren
+  if (inner && inner.v === 2 && inner.platform === 'mac') {
+    const files = inner.files && typeof inner.files === 'object' ? inner.files : null;
+    const ok = typeof inner.version === 'string' && files && MAC_ARCHS.every(([arch]) => typeof files[arch]?.file === 'string' && typeof files[arch]?.size === 'number');
+    if (!ok) return fail('Das Mac-Manifest ist unvollständig (version oder files.arm64/files.x64 mit file und size fehlen).');
+    state.manifest = { outer: { manifest: outer.manifest, signature: outer.signature }, inner, kind: 'mac', slot: input.id === 'upload-mac-json' ? 'mac' : 'win' };
+    renderManifestCheck();
+    return;
+  }
+  if (inner && inner.v === 2) return fail('Das Manifest hat v 2, ist aber kein Mac-Manifest („platform“: „mac“ fehlt).');
   if (!inner || inner.v !== 1 || typeof inner.version !== 'string' || typeof inner.file !== 'string' || typeof inner.size !== 'number') {
     return fail('Das Manifest ist unvollständig (v, version, file oder size fehlen).');
   }
-  state.manifest = { outer: { manifest: outer.manifest, signature: outer.signature }, inner };
+  state.manifest = { outer: { manifest: outer.manifest, signature: outer.signature }, inner, kind: 'win', slot: input.id === 'upload-mac-json' ? 'mac' : 'win' };
   renderManifestCheck();
 }
 
 function renderManifestCheck() {
-  const { inner } = state.manifest;
-  const current = manifestFields(state.updates?.current);
-  const onServer = state.updates?.files?.find((entry) => entry.file === inner.file);
+  const { inner, kind } = state.manifest;
+  const slot = MANIFEST_SLOTS[state.manifest.slot ?? 'win'];
   const checks = [];
-  checks.push([onServer ? 'ok' : 'fail', onServer ? `Installer ${inner.file} liegt auf dem Server` : `Installer ${inner.file} fehlt noch – zuerst hochladen (Schritt 1)`]);
-  if (onServer) checks.push([onServer.size === inner.size ? 'ok' : 'fail', onServer.size === inner.size ? `Größe passt (${formatBytes(inner.size)})` : `Größe passt nicht: Manifest ${formatBytes(inner.size)}, Server ${formatBytes(onServer.size)}`]);
-  if (state.uploaded?.file === inner.file && state.uploaded.sha512 && typeof inner.sha512 === 'string') {
-    const same = state.uploaded.sha512 === inner.sha512;
-    checks.push([same ? 'ok' : 'fail', same ? 'SHA-512 passt zum hochgeladenen Installer' : 'SHA-512 passt nicht zum hochgeladenen Installer – falsche Datei?']);
+  let facts;
+  if (kind === 'mac') {
+    const published = manifestFields(state.updates?.mac);
+    for (const [arch, label] of MAC_ARCHS) {
+      const entry = inner.files[arch];
+      const named = MAC_ZIP_RE.exec(entry.file);
+      if (!named || named[1] !== inner.version || named[2] !== arch) {
+        checks.push(['fail', `${label}: Der Name muss HeldixClient-${inner.version}-mac-${arch}.zip sein (ist ${entry.file})`]);
+        continue;
+      }
+      const onServer = state.updates?.files?.find((item) => item.file === entry.file);
+      if (!onServer) checks.push(['fail', `${label}: ${entry.file} fehlt noch – zuerst die Mac-ZIPs hochladen`]);
+      else checks.push([onServer.size === entry.size ? 'ok' : 'fail', onServer.size === entry.size ? `${label}: ${entry.file} liegt auf dem Server (${formatBytes(entry.size)})` : `${label}: Größe passt nicht – Manifest ${formatBytes(entry.size)}, Server ${formatBytes(onServer.size)}`]);
+    }
+    checks.push(['info', 'SHA-512 beider ZIPs und die Signatur prüft der Dienst beim Veröffentlichen']);
+    if (published?.version) {
+      const newer = compareVersions(inner.version, published.version) > 0;
+      checks.push([newer ? 'ok' : 'fail', newer ? `Version ${inner.version} ist neuer als die Mac-Version ${published.version}` : `Version ${inner.version} ist nicht neuer als die veröffentlichte Mac-Version ${published.version}`]);
+    } else {
+      checks.push(['ok', 'Erste veröffentlichte Mac-Version']);
+    }
+    facts = [
+      h('dt', { text: 'Version' }),
+      h('dd', null, h('strong', { text: inner.version }), ' (Mac)'),
+      MAC_ARCHS.map(([arch, label]) => [h('dt', { text: `ZIP ${label}` }), h('dd', null, h('code', { class: 'mono', text: inner.files[arch].file }), ` · ${formatBytes(inner.files[arch].size)}`)]),
+    ];
   } else {
-    checks.push(['info', 'SHA-512 und Signatur prüft der Dienst beim Veröffentlichen']);
-  }
-  if (current?.version) {
-    const newer = compareVersions(inner.version, current.version) > 0;
-    checks.push([newer ? 'ok' : 'fail', newer ? `Version ${inner.version} ist neuer als ${current.version}` : `Version ${inner.version} ist nicht neuer als die veröffentlichte ${current.version}`]);
-  } else {
-    checks.push(['ok', 'Erste veröffentlichte Version']);
+    const current = manifestFields(state.updates?.current);
+    const onServer = state.updates?.files?.find((entry) => entry.file === inner.file);
+    checks.push([onServer ? 'ok' : 'fail', onServer ? `Installer ${inner.file} liegt auf dem Server` : `Installer ${inner.file} fehlt noch – zuerst hochladen (Schritt 1)`]);
+    if (onServer) checks.push([onServer.size === inner.size ? 'ok' : 'fail', onServer.size === inner.size ? `Größe passt (${formatBytes(inner.size)})` : `Größe passt nicht: Manifest ${formatBytes(inner.size)}, Server ${formatBytes(onServer.size)}`]);
+    if (state.uploaded?.file === inner.file && state.uploaded.sha512 && typeof inner.sha512 === 'string') {
+      const same = state.uploaded.sha512 === inner.sha512;
+      checks.push([same ? 'ok' : 'fail', same ? 'SHA-512 passt zum hochgeladenen Installer' : 'SHA-512 passt nicht zum hochgeladenen Installer – falsche Datei?']);
+    } else {
+      checks.push(['info', 'SHA-512 und Signatur prüft der Dienst beim Veröffentlichen']);
+    }
+    if (current?.version) {
+      const newer = compareVersions(inner.version, current.version) > 0;
+      checks.push([newer ? 'ok' : 'fail', newer ? `Version ${inner.version} ist neuer als ${current.version}` : `Version ${inner.version} ist nicht neuer als die veröffentlichte ${current.version}`]);
+    } else {
+      checks.push(['ok', 'Erste veröffentlichte Version']);
+    }
+    facts = [h('dt', { text: 'Version' }), h('dd', null, h('strong', { text: inner.version })), h('dt', { text: 'Installer' }), h('dd', null, h('code', { class: 'mono', text: inner.file })), h('dt', { text: 'Größe' }), h('dd', { text: formatBytes(inner.size) })];
   }
   const notes = Array.isArray(inner.notes) ? inner.notes.filter((note) => typeof note === 'string' && note.trim()) : [];
-  $('#manifest-pruefung').replaceChildren(
-    h(
-      'dl',
-      { class: 'facts-list' },
-      h('dt', { text: 'Version' }),
-      h('dd', null, h('strong', { text: inner.version })),
-      h('dt', { text: 'Installer' }),
-      h('dd', null, h('code', { class: 'mono', text: inner.file })),
-      h('dt', { text: 'Größe' }),
-      h('dd', { text: formatBytes(inner.size) }),
-      h('dt', { text: 'Datum' }),
-      h('dd', { text: manifestDate(inner.date) }),
-      notes.length ? [h('dt', { text: 'Hinweise' }), h('dd', null, h('ul', { class: 'plain-list' }, notes.map((note) => h('li', { text: note }))))] : null,
-    ),
+  $(slot.check).replaceChildren(
+    h('dl', { class: 'facts-list' }, facts, h('dt', { text: 'Datum' }), h('dd', { text: manifestDate(inner.date) }), notes.length ? [h('dt', { text: 'Hinweise' }), h('dd', null, h('ul', { class: 'plain-list' }, notes.map((note) => h('li', { text: note }))))] : null),
     h(
       'ul',
       { class: 'check-list' },
-      checks.map(([kind, text]) => h('li', { class: kind }, icon(kind === 'ok' ? 'check' : kind === 'fail' ? 'close' : 'info'), h('span', { text }))),
+      checks.map(([result, text]) => h('li', { class: result }, icon(result === 'ok' ? 'check' : result === 'fail' ? 'close' : 'info'), h('span', { text }))),
     ),
   );
-  $('#manifest-pruefung').hidden = false;
-  const blocked = checks.some(([kind]) => kind === 'fail');
-  $('#manifest-aktionen').hidden = false;
-  $('#manifest-veroeffentlichen').disabled = blocked;
-  $('#manifest-veroeffentlichen').title = blocked ? 'Erst die rot markierten Punkte klären.' : '';
+  $(slot.check).hidden = false;
+  const blocked = checks.some(([result]) => result === 'fail');
+  $(slot.actions).hidden = false;
+  $(slot.button).disabled = blocked;
+  $(slot.button).title = blocked ? 'Erst die rot markierten Punkte klären.' : '';
 }
 
 async function publishManifest(event) {
   if (!state.manifest) return;
-  const { inner, outer } = state.manifest;
+  const { inner, outer, kind } = state.manifest;
+  const slot = MANIFEST_SLOTS[state.manifest.slot ?? 'win'];
   const ok = await confirmAction({
-    title: `Version ${inner.version} veröffentlichen?`,
-    text: 'Alle Launcher mit automatischen Updates laden diese Version beim nächsten Start oder spätestens nach sechs Stunden.',
+    title: kind === 'mac' ? `Mac-Version ${inner.version} veröffentlichen?` : `Version ${inner.version} veröffentlichen?`,
+    text: kind === 'mac' ? 'Alle Mac-Launcher mit automatischen Updates laden diese Version beim nächsten Start oder spätestens nach sechs Stunden.' : 'Alle Launcher mit automatischen Updates laden diese Version beim nächsten Start oder spätestens nach sechs Stunden.',
     confirmLabel: 'Veröffentlichen',
     onConfirm: async () => {
       const data = await teamCall('PUT', '/v1/team/updates/manifest', outer);
-      state.updates = { ...(state.updates ?? { files: [] }), current: data?.current ?? null };
+      if (kind === 'mac') state.updates = { ...(state.updates ?? { current: null, files: [] }), mac: data?.mac ?? null };
+      else state.updates = { ...(state.updates ?? { mac: null, files: [] }), current: data?.current ?? null };
     },
   });
   if (!ok) {
@@ -1519,10 +1606,9 @@ async function publishManifest(event) {
     return;
   }
   state.manifest = null;
-  $('#manifest-pruefung').hidden = true;
-  $('#manifest-aktionen').hidden = true;
-  $('#upload-json-name').textContent = 'Keine Datei gewählt';
-  toast(`Version ${inner.version} ist veröffentlicht.`, 'success');
+  hideManifestChecks();
+  $(slot.name).textContent = 'Keine Datei gewählt';
+  toast(kind === 'mac' ? `Mac-Version ${inner.version} ist veröffentlicht.` : `Version ${inner.version} ist veröffentlicht.`, 'success');
   await loadUpdates().catch(showError);
 }
 
@@ -3043,10 +3129,11 @@ function auditTable(entries) {
 async function loadTimeline(player) {
   const box = $('#spieler-zeitleiste');
   if (!box) return;
-  const [reports, tickets, audit] = await Promise.all([
+  const [reports, tickets, audit, voice] = await Promise.all([
     can('moderation') ? teamCall('GET', '/v1/team/reports?status=all').then((data) => data?.reports ?? []).catch(() => []) : [],
     can('support') ? teamCall('GET', '/v1/team/support?status=all').then((data) => data?.tickets ?? []).catch(() => []) : [],
     can('audit') ? teamCall('GET', '/v1/team/audit?limit=500').then((data) => data?.entries ?? []).catch(() => []) : [],
+    can('voice:moderate') ? teamVoice.timelineEvents(player) : [],
   ]);
   if (state.selectedPlayer?.uuid !== player.uuid) return;
   const events = [];
@@ -3059,6 +3146,8 @@ async function loadTimeline(player) {
   for (const ticket of tickets) if (ticket.player?.uuid === player.uuid) events.push({ at: ticket.at, kind: 'support', icon: 'chat', title: `Support #${ticket.id}: ${ticket.subject}`, text: SUPPORT_STATUS[ticket.status]?.[0] ?? ticket.status, ticket: ticket.id });
   for (const entry of audit) if (entry.target === player.name || String(entry.target ?? '').includes(`(${player.name})`)) events.push({ at: entry.at, kind: 'team', icon: 'shield', title: `${actionLabel(entry.action) ?? entry.action} (${entry.actor?.name ?? '?'})`, text: entry.detail ?? '' });
   if (player.communityBadge) events.push({ at: null, kind: 'abzeichen', icon: 'star', title: `Community-Abzeichen: ${badgeLabel(player.communityBadge)}` });
+  // Voice (ab Dienst 1.13.0): Meldungen, Voice-Sperren, Zustimmung zu den Voice-Regeln
+  events.push(...voice);
   events.sort((a, b) => (b.at ?? Infinity) - (a.at ?? Infinity));
   box.replaceChildren(
     ...(events.length
@@ -3070,7 +3159,7 @@ async function loadTimeline(player) {
             h(
               'div',
               null,
-              event.report ? h('button', { type: 'button', class: 'link-button', onClick: () => showReport(event.report) }, event.title) : event.ticket ? h('button', { type: 'button', class: 'link-button', onClick: () => jump('support', { anfrage: event.ticket }) }, event.title) : h('strong', { text: event.title }),
+              event.voice ? h('button', { type: 'button', class: 'link-button', onClick: () => jump('voice', event.voice) }, event.title) : event.report ? h('button', { type: 'button', class: 'link-button', onClick: () => showReport(event.report) }, event.title) : event.ticket ? h('button', { type: 'button', class: 'link-button', onClick: () => jump('support', { anfrage: event.ticket }) }, event.title) : h('strong', { text: event.title }),
               event.text ? h('span', { class: 'timeline__text', text: event.text }) : null,
               event.at ? h('span', null, timeEl(event.at, formatDateTime(event.at))) : null,
             ),
@@ -3157,6 +3246,8 @@ function init() {
   overview = initTeamOverview({ shell, teamCall, can, getMe: () => state.me, getLive: () => live, refreshLive, actionLabel });
   activity = initTeamActivity({ shell });
   cosmeticsUi = initTeamCosmetics({ teamCall, onChange: () => quickSearch?.invalidate() });
+  teamWorlds = initTeamWorlds({ teamCall, can, shell, openPlayer: (uuid) => jump('spieler', { spieler: uuid }) });
+  teamVoice = initTeamVoice({ teamCall, can, shell, openPlayer: (uuid) => jump('spieler', { spieler: uuid }) });
   quickSearch = initTeamSearch({
     shell,
     teamCall,
@@ -3228,6 +3319,8 @@ function init() {
   $('#upload-mac-abbrechen').addEventListener('click', () => state.macUploading?.abort());
   $('#upload-json').addEventListener('change', onManifestChosen);
   $('#manifest-veroeffentlichen').addEventListener('click', publishManifest);
+  $('#upload-mac-json').addEventListener('change', onManifestChosen);
+  $('#mac-manifest-veroeffentlichen').addEventListener('click', publishManifest);
 
   $('#addon-dateien').addEventListener('change', onAddonFilesChosen);
   $('#addon-abbrechen').addEventListener('click', () => state.addonUploading?.abort());

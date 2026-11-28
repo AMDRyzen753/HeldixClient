@@ -128,6 +128,14 @@ function buildItems(stand) {
     if (ticket.unread) items.push({ id: `support:${ticket.id}:${at}`, kind: 'support', section: 'support', title: 'Antwort vom Team', text: clip(ticket.subject), at, icon: 'info', fresh: true, target: { section: 'support', params: { anfrage: ticket.id } } });
     else if (ticket.status === 'answered' && now - (at ?? 0) <= KEEP_DECISIONS) items.push({ id: `support:${ticket.id}:${at}`, kind: 'support', section: 'support', title: 'Anfrage beantwortet', text: clip(ticket.subject), at, icon: 'info', fresh: false, target: { section: 'support', params: { anfrage: ticket.id } } });
   }
+  // Dauerhafte Welten (ab Dienst 1.13.0): Anklopfen und die Freischaltung für die Beta
+  for (const knock of stand.hosting?.knocks ?? []) {
+    items.push({ id: `anklopfen:${knock.world}:${knock.name}:${knock.at}`, kind: 'welt', section: 'welten', title: `${knock.name} klopft an`, text: `möchte in „${clip(knock.worldName)}“`, at: knock.at, icon: 'world', fresh: true, target: { section: 'welten' } });
+  }
+  if (stand.hosting?.granted) {
+    const granted = stand.hosting.granted;
+    items.push({ id: `freigeschaltet:${granted.at}`, kind: 'welt', section: 'welten', title: 'Beta freigeschaltet', text: clip(granted.text), at: granted.at, icon: 'check', fresh: true, target: { section: 'welten' } });
+  }
   for (const sub of stand.submissions ?? []) {
     if (sub.status !== 'approved' && sub.status !== 'rejected') continue;
     const at = sub.reviewedAt ?? sub.submittedAt ?? sub.createdAt;
@@ -396,7 +404,7 @@ export function initOverview({ shell, onStatus, worldDomain = () => null, openCh
         h(
           'ul',
           { class: 'rows' },
-          mine.slice(0, 3).map((world) => h('li', { class: 'row' }, h('span', { class: `icon-tile${world.online ? ' icon-tile--online' : ''}` }, icon('world')), h('div', { class: 'row-main' }, h('div', { class: 'row-title', text: world.name }), h('div', { class: `row-sub${world.online ? ' online' : ''}`, text: `${world.online ? `geöffnet · ${world.players ?? 1} von ${world.maxPlayers}` : 'zu'} · ${ACCESS[world.access] ?? world.access}` })))),
+          mine.slice(0, 3).map((world) => h('li', { class: 'row' }, h('span', { class: `icon-tile${world.online ? ' icon-tile--online' : ''}` }, icon('world')), h('div', { class: 'row-main' }, h('div', { class: 'row-title', text: world.name }), h('div', { class: `row-sub${world.online ? ' online' : ''}`, text: `${world.hosted ? `dauerhaft · ${world.online ? `läuft · ${world.players ?? 0} von ${world.maxPlayers}` : 'schläft'}` : world.online ? `geöffnet · ${world.players ?? 1} von ${world.maxPlayers}` : 'zu'} · ${ACCESS[world.access] ?? world.access}` })))),
         ),
       ];
     });

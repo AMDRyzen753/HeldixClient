@@ -57,13 +57,13 @@ Die Module der Addons findest du im Heldix-Menü unter **Module**, Reiter **Addo
 Die Tasten der Addons änderst du in Minecraft unter **Optionen → Steuerung**, Abschnitt **Heldix-Addons**.
 
 ## Spotify-Addon: gut zu wissen
-- **Steuerung per Taste:** [[Pos1]] für Abspielen/Pause, [[Bild ab]] für den nächsten und [[Bild auf]] für den vorherigen Song. Weitere Tasten (10 Sekunden vor und zurück, Zufallswiedergabe, Wiederholen, Song teilen) belegst du unter **Optionen → Steuerung → Heldix-Addons**.
+- **Steuerung per Taste:** [[Pos1]] für Abspielen/Pause, [[Bild ab]] für den nächsten und [[Bild auf]] für den vorherigen Song (auf MacBook-Tastaturen [[fn]] + [[←]], [[fn]] + [[↓]] und [[fn]] + [[↑]]). Weitere Tasten (10 Sekunden vor und zurück, Zufallswiedergabe, Wiederholen, Song teilen) belegst du unter **Optionen → Steuerung → Heldix-Addons**.
 - **Im Chat:** `.np` zeigt den laufenden Song nur dir, `.np teilen` schickt ihn an alle. Mit `.spotify play`, `pause`, `next` oder `prev` steuerst du die Musik.
 - **Keine Anmeldung nötig:** Ein Spotify-Konto mit Premium oder einen API-Schlüssel brauchst du nicht.
 - **Windows:** Das Addon liest den Song über die Windows-Mediensteuerung. Schaltest du in den Einstellungen **Nur Spotify** aus, steuert es auch andere Player, z. B. den Browser.
-- **macOS:** Das Addon spricht mit der Spotify-App. Beim ersten Mal fragt macOS, ob Minecraft Spotify steuern darf – erlaube das.
+- **macOS:** Das Addon spricht mit der Spotify-App. Schaltest du **Nur Spotify** aus, zeigt und steuert es auch **Apple Music** – es zählt der Player, der gerade spielt. Beim ersten Mal fragt macOS je App, ob Minecraft sie steuern darf – erlaube das (später änderbar unter **Systemeinstellungen → Datenschutz & Sicherheit → Automation**).
 - **Linux:** Das Addon nutzt die Mediensteuerung MPRIS; dafür muss das Programm `playerctl` installiert sein.
-- Daten über dich schickt das Addon nicht ins Internet. Nur unter macOS und Linux lädt es die Cover-Bilder direkt von Spotify.
+- Daten über dich schickt das Addon nicht ins Internet. Nur unter macOS und Linux lädt es die Cover-Bilder direkt von Spotify; Cover aus Apple Music liest es vom Mac selbst.
 - Die Tasten wirken nur im Spiel, nicht in Menüs.
 
 ## Eigenes Addon in den Store bringen

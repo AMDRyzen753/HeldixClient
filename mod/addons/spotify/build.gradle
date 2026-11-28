@@ -4,7 +4,7 @@ plugins {
 	id 'java'
 }
 
-version = '2.2.0'
+version = '2.3.0'
 
 base {
 	archivesName = 'heldix-addon-spotify'
@@ -17,6 +17,30 @@ dependencies {
 tasks.withType(JavaCompile).configureEach {
 	it.options.release = 21
 	it.options.encoding = 'UTF-8'
+}
+
+// Prüfstand ohne Mac (wird nicht ausgeliefert, läuft mit jedem build): liest Zeilen des Abfrage-Skripts wie auf dem
+// Mac (Spotify und Apple Music), prüft Befehle, Hinweise und schreibt die Skripte nach build/spotify-check/ (dort lässt
+// sich das JavaScript z. B. mit „node --check build/spotify-check/poll.js“ auf Syntaxfehler prüfen).
+sourceSets {
+	spotifyCheck {
+		java.srcDir 'src/check/java'
+		compileClasspath += sourceSets.main.output + configurations.compileClasspath
+		runtimeClasspath += sourceSets.main.output + configurations.compileClasspath
+	}
+}
+
+tasks.register('checkSpotify', JavaExec) {
+	group = 'verification'
+	description = 'Prüft den Mac-Teil (Spotify und Apple Music) ohne Mac'
+	classpath = sourceSets.spotifyCheck.runtimeClasspath
+	mainClass = 'dev.heldixclient.addons.spotify.SpotifyCheck'
+	args layout.buildDirectory.dir('spotify-check').get().asFile.path
+	jvmArgs '-Dstdout.encoding=UTF-8'
+}
+
+check {
+	dependsOn('checkSpotify')
 }
 
 processResources {

@@ -7317,7 +7317,8 @@ public class HeldixMenuScreen extends ShellScreen {
 			closeProfile();
 			return true;
 		}
-		if (!typing && openChat == null && !event.hasControlDown() && !event.hasAltDown() && contentKey(event)) return true;
+		// Kürzel (Strg, auf dem Mac auch ⌘) und Alt sind keine Eingabe für die Liste
+		if (!typing && openChat == null && !event.hasControlDown() && !event.hasControlDownWithQuirk() && !event.hasAltDown() && contentKey(event)) return true;
 		return super.keyPressed(event);
 	}
 

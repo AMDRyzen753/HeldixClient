@@ -196,6 +196,15 @@
 .setup-pill.ok { color: #a7f3d0; background: rgba(52, 211, 153, 0.12); }
 
 /* ---------- Fertig ---------- */
+/* Häkchen „Mit Windows starten“ unter der Zusammenfassung (Kästchen unsichtbar, angezeigt wird der Haken links) */
+.setup-option { position: relative; display: flex; align-items: center; width: min(600px, 100%); margin: 10px auto 0; padding: 11px 14px 11px 50px; border-radius: 12px; background: rgba(17, 22, 34, 0.8); border: 1px solid var(--line); cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.setup-option:hover { border-color: var(--line-strong); }
+.setup-option:has(.setup-option-check:checked) { border-color: var(--accent-line); }
+.setup-option:has(.setup-option-check:focus-visible) { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.setup-option-check { position: absolute; top: 0; left: 0; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.setup-option .setup-tick { top: 50%; right: auto; left: 16px; transform: translateY(-50%); }
+.setup-option:has(.setup-option-check:checked) .setup-tick { border-color: var(--accent); background: var(--accent); color: #fff; }
+.setup-option .setup-summary-text span { white-space: normal; }
 .setup-hero.small { margin-bottom: 20px; }
 .setup-done-icon { display: grid; place-items: center; width: 62px; height: 62px; margin-bottom: 8px; border-radius: 50%; color: var(--ok); background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.3); box-shadow: 0 0 0 8px rgba(52, 211, 153, 0.05); animation: splash-pop 0.6s cubic-bezier(.2, .9, .3, 1.2) both; }
 .setup-done-icon svg { width: 28px; height: 28px; stroke-width: 2.6; }

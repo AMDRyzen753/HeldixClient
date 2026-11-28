@@ -29,13 +29,16 @@ import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
- * Cover für macOS und Linux: Die Player melden dort nur eine Adresse (https bzw. file://). Das Bild wird einmal im
- * Hintergrund geladen (höchstens 2 MB, nur https oder lokale Dateien), auf 128×128 mit runden Ecken gebracht und als
+ * Cover für macOS und Linux: Die Player melden dort nur eine Adresse (https bzw. file://; Apple Music: eine vom Addon
+ * geholte Datei, siehe {@link MacPlayer}). Das Bild wird einmal im Hintergrund geladen (höchstens 2 MB aus dem Netz,
+ * 12 MB von der Platte, nur https oder lokale Dateien), auf 128×128 mit runden Ecken gebracht und als
  * PNG im Addon-Ordner abgelegt (höchstens 30 Stück). Bis es da ist, gibt {@link #cover(String)} null zurück.
  */
 final class Covers {
 	private static final int SIZE = 128;
 	private static final int MAX_BYTES = 2 * 1024 * 1024;
+	/** lokale Dateien (Cover aus Apple Music in voller Auflösung) dürfen größer sein */
+	private static final int MAX_LOCAL_BYTES = 12 * 1024 * 1024;
 	private static final int KEEP = 30;
 
 	private final Path directory;
@@ -92,7 +95,7 @@ final class Covers {
 		byte[] bytes;
 		if (address.toLowerCase(java.util.Locale.ROOT).startsWith("file:")) {
 			Path local = Path.of(URI.create(address));
-			if (Files.size(local) > MAX_BYTES) throw new IOException("Bild zu groß");
+			if (Files.size(local) > MAX_LOCAL_BYTES) throw new IOException("Bild zu groß");
 			bytes = Files.readAllBytes(local);
 		} else {
 			bytes = download(address);

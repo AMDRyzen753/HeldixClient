@@ -45,6 +45,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Browser-Link (Einladung mit Gruppe über {@code POST /v1/invites}; den Prüfwert der Gruppe kennt nur der Client).
  * Ab Dienst 1.12.0 Party-Voice: Ohne eigene Gruppe nimmt der Kanal den Gruppen-Prüfwert der Party ({@code party.voice},
  * nur solange ein anderes Mitglied am selben Ort ist); wird er null oder verlässt man die Party, geht ein "join" ohne Gruppe raus.
+ * Ab Dienst 1.13.0 (feature "moderation") Voice-Moderation in {@link VoiceModeration}: Sperren (Close 4013, neu verbinden erst
+ * nach der Sperre), Voice-Regeln (Close 4012, kein Dauer-Neuverbinden; vor dem Verbinden {@code GET /v1/voice/me}), Rechte im
+ * Raum ({@code room}), Stummschalten/Entfernen ({@code mod}, {@code moderated}, {@code peers.silenced}) und Aufnahmen
+ * ({@code ready.clips}, {@code clips}).
  */
 public final class VoiceLink {
 	public enum Status {
@@ -128,8 +132,13 @@ public final class VoiceLink {
 	// ======================================================================================
 
 	public static void setActive(String owner, boolean active) {
-		if (active) ACTIVE.add(owner);
-		else {
+		if (active) {
+			if (ACTIVE.add(owner)) {
+				VoiceModeration.activated(owner);
+				// wieder eingeschaltet, während eine Sperre oder fehlende Zustimmung die Verbindung aufhält: gleich neu nachsehen
+				if (socket == null && VoiceModeration.blockText() != null && VoiceModeration.ban() == null) retryAt = 0;
+			}
+		} else {
 			ACTIVE.remove(owner);
 			FRIENDS_ONLY.remove(owner);
 			if (owner.equals(groupOwner)) setGroup(owner, null, null);
@@ -300,7 +309,24 @@ public final class VoiceLink {
 	public static void forget(String owner) {
 		setActive(owner, false);
 		SINKS.removeIf(sink -> sink.owner().equals(owner));
+		VoiceModeration.forget(owner);
 		if (ACTIVE.isEmpty()) setState(false, false);
+	}
+
+	/** Fähigkeiten des verbundenen Dienstes (leer = nicht verbunden oder Dienst 1.8.0) */
+	public static Set<String> features() {
+		return features;
+	}
+
+	/** Server des zuletzt gemeldeten Raums (für Meldungen), sonst null */
+	public static String joinedServer() {
+		return joinedServer;
+	}
+
+	/** Gleich neu verbinden (nach dem Annehmen der Voice-Regeln; auch für den Autotest) */
+	public static void retryNow() {
+		retryAt = 0;
+		failures = 0;
 	}
 
 	public static Status status() {
@@ -341,6 +367,8 @@ public final class VoiceLink {
 
 	/** jeden Client-Tick */
 	public static void tick(Minecraft mc) {
+		VoiceModeration.tick(System.currentTimeMillis());
+		VoiceDialogs.tick(mc);
 		if (ACTIVE.isEmpty()) {
 			if (socket != null || status != Status.OFF) disconnect(Status.OFF, "Aus");
 			return;
@@ -352,6 +380,11 @@ public final class VoiceLink {
 		}
 		if (socket == null) {
 			if (status != Status.CONNECTING && System.currentTimeMillis() >= retryAt) connect();
+			else if (status == Status.UNAVAILABLE) {
+				// gesperrt oder Regeln offen: das zeigen (statt z. B. eines alten „Nur in einer Welt“)
+				String block = VoiceModeration.blockText();
+				if (block != null) statusText = block;
+			}
 			return;
 		}
 		if (status != Status.CONNECTED) return;
@@ -364,6 +397,11 @@ public final class VoiceLink {
 		// eigene Gruppe hat Vorrang; sonst die Gruppe der Party (Prüfwert vom Dienst, nur mit Mitgliedern am selben Ort)
 		String group = !features.contains("groups") ? null : groupKey != null ? groupKey : dev.heldixclient.social.Party.voiceGroup(serverAddress(mc));
 		partyGroupActive = group != null && groupKey == null;
+		// Entfernen (10 Minuten) abgelaufen: Raum und Gruppe neu betreten
+		if (VoiceModeration.takeExpiredKick(now)) {
+			joinedRoom = null;
+			joinedGroup = null;
+		}
 		if (!room.equals(joinedRoom) || friendsOnly != joinedFriendsOnly || !Objects.equals(group, joinedGroup)) {
 			JsonObject join = new JsonObject();
 			join.addProperty("type", "join");
@@ -460,6 +498,27 @@ public final class VoiceLink {
 		stateSent = false;
 		ready = false;
 		features = Set.of();
+		// ab Dienst 1.13.0: erst nachsehen, ob gesperrt oder die Voice-Regeln offen sind (sonst Verbinden-Schließen-Schleife)
+		VoiceModeration.precheck().whenComplete((verdict, error) -> {
+			if (gen != generation) return;
+			if (verdict == VoiceModeration.Verdict.BANNED || verdict == VoiceModeration.Verdict.RULES) {
+				blocked();
+				return;
+			}
+			open(gen, token);
+		});
+	}
+
+	/** gesperrt bzw. Regeln nicht angenommen: nicht verbinden, Grund anzeigen, erst später wieder versuchen */
+	private static void blocked() {
+		socket = null;
+		status = Status.UNAVAILABLE;
+		String block = VoiceModeration.blockText();
+		statusText = block != null ? block : "Voice Chat gerade nicht möglich";
+		retryAt = VoiceModeration.retryAfterBlock(System.currentTimeMillis());
+	}
+
+	private static void open(int gen, String token) {
 		String url = Social.baseUrl().replaceFirst("^http", "ws") + "/v1/voice";
 		HTTP.newWebSocketBuilder()
 				.header("Authorization", "Bearer " + token)
@@ -523,11 +582,17 @@ public final class VoiceLink {
 		PEER_DEAFENED.clear();
 		guests = Map.of();
 		browser = Set.of();
+		VoiceModeration.clearRoom();
 	}
 
 	// ======================================================================================
 	// Senden: immer nacheinander (WebSocket erlaubt kein gleichzeitiges Senden)
 	// ======================================================================================
+
+	/** Textnachricht an den Dienst (für {@link VoiceModeration}); ohne Verbindung passiert nichts */
+	static void sendJson(JsonObject message) {
+		if (socket != null) sendText(message);
+	}
 
 	private static void sendText(JsonObject message) {
 		QUEUE.add(message.toString());
@@ -614,6 +679,14 @@ public final class VoiceLink {
 				status = Status.UNAVAILABLE;
 				statusText = statusCode == 4002 ? "In einem anderen Spiel oder im Browser verbunden" : "Verbindung getrennt – neuer Versuch gleich";
 				retryAt = System.currentTimeMillis() + (statusCode == 4002 ? 60_000 : 5_000);
+				// ab Dienst 1.13.0: 4012 Voice-Regeln nicht angenommen, 4013 Voice-Sperre – nicht dauernd neu verbinden
+				if (statusCode == 4012) VoiceModeration.rulesClosed();
+				if (statusCode == 4013) VoiceModeration.bannedClosed();
+				if (statusCode == 4012 || statusCode == 4013) {
+					String block = VoiceModeration.blockText();
+					if (block != null) statusText = block;
+					retryAt = VoiceModeration.retryAfterBlock(System.currentTimeMillis());
+				}
 				HeldixClient.LOGGER.info("Voice Chat: Verbindung getrennt ({})", statusCode);
 			}
 			return null;
@@ -641,6 +714,7 @@ public final class VoiceLink {
 				if (json.has("maxFrame")) maxFrame = Math.clamp(json.get("maxFrame").getAsInt(), 16, 4096);
 				if (json.has("maxGroup")) maxGroup = Math.clamp(json.get("maxGroup").getAsInt(), 2, 256);
 				features = Set.copyOf(strings(json, "features"));
+				VoiceModeration.ready(json, features);
 				ready = true;
 			}
 			case "peers" -> {
@@ -656,7 +730,9 @@ public final class VoiceLink {
 				// ab Dienst 1.11.0: Gäste (mit Namen) und wer über die Webseite dabei ist; ältere Dienste schicken beides nicht
 				guests = guestNames(json);
 				browser = Set.copyOf(uuids(json, "browser"));
-				statusText = set.isEmpty() ? "Verbunden – noch niemand hier" : set.size() == 1 ? "Verbunden – 1 Spieler hier" : "Verbunden – " + set.size() + " Spieler hier";
+				// ab Dienst 1.13.0: wer im geltenden Bereich für alle stumm ist
+				VoiceModeration.peers(json);
+				statusText = VoiceModeration.serverOff() ? "Voice ist auf diesem Server aus" : set.isEmpty() ? "Verbunden – noch niemand hier" : set.size() == 1 ? "Verbunden – 1 Spieler hier" : "Verbunden – " + set.size() + " Spieler hier";
 			}
 			case "state" -> {
 				UUID uuid = json.has("uuid") ? Social.uuid(json.get("uuid").getAsString()) : null;
@@ -669,13 +745,21 @@ public final class VoiceLink {
 				else PEER_DEAFENED.remove(uuid);
 			}
 			case "group" -> {
-				if (json.has("status") && "full".equals(json.get("status").getAsString())) {
+				String groupStatus = json.has("status") && json.get("status").isJsonPrimitive() ? json.get("status").getAsString() : "";
+				if ("full".equals(groupStatus)) {
 					groupFull = true;
 					groupMembers = Set.of();
+				} else if ("kicked".equals(groupStatus)) {
+					// ab Dienst 1.13.0: vom Leiter aus der Voice-Gruppe der Party entfernt (danach in keiner Gruppe, wie bei "full")
+					groupMembers = Set.of();
+					VoiceModeration.groupKicked(json);
 				}
 			}
-			default -> {
+			case "room" -> {
+				VoiceModeration.handle(type, json);
+				if (VoiceModeration.serverOff()) statusText = "Voice ist auf diesem Server aus";
 			}
+			default -> VoiceModeration.handle(type, json);
 		}
 	}
 

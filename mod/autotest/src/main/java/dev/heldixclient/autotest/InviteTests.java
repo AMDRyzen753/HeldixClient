@@ -228,8 +228,9 @@ final class InviteTests {
 		}
 		LoadedAddon addon = t.compute(mc -> AddonManager.addons().stream().filter(a -> "voicechat".equals(a.id())).findFirst().orElse(null));
 		Module voice = t.compute(mc -> ModuleManager.all().stream().filter(m -> m.id().equals("voicechat:voicechat")).findFirst().orElse(null));
-		t.check("Voice Chat 1.2.0 aktiv (" + (addon == null ? "fehlt" : addon.version()) + ")", addon != null && addon.isActive() && voice != null
-				&& "1.2.0".equals(addon.version()));
+		// Gast-Funktionen gibt es ab Voice Chat 1.2.0 (neuere Versionen haben sie auch)
+		t.check("Voice Chat ab 1.2.0 aktiv (" + (addon == null ? "fehlt" : addon.version()) + ")", addon != null && addon.isActive() && voice != null
+				&& TestContext.versionAtLeast(addon.version(), "1.2.0"));
 		HeldixApi api = addon.api();
 		Object instance = t.compute(mc -> addon.instance());
 		List<Setting> settings = t.compute(mc -> voice.settings());

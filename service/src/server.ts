@@ -4,6 +4,9 @@ import fs from 'node:fs';
 import { isIP } from 'node:net';
 import path from 'node:path';
 import { createService, DEFAULT_SESSION_SERVER } from './app';
+import { AgentRunner } from './hosting/agent-runner';
+import { ProcessRunner } from './hosting/process-runner';
+import type { HostingRunner } from './hosting/runner';
 import { CALLBACK_PATH, type MicrosoftEndpoints } from './microsoft';
 import { parseCapeList } from './validate';
 import { VOICE_RANGE_DEFAULT, VOICE_RANGE_MAX, VOICE_RANGE_MIN } from './voice';
@@ -128,6 +131,28 @@ function readVoiceRange(raw: string | undefined): number {
   return range;
 }
 
+/**
+ * HELDIX_DIENST_VOICE_CLIPS (ab 1.13.0): `0` schaltet Aufnahmen beim Melden hart ab; `1` (oder leer): möglich, aktiv
+ * erst, wenn ein Admin die Voice-Regeln veröffentlicht.
+ */
+function readVoiceClips(raw: string | undefined): boolean {
+  const value = raw?.trim();
+  if (!value || value === '1') return true;
+  if (value === '0') return false;
+  fail(`Ungültige HELDIX_DIENST_VOICE_CLIPS: "${value}" (erwartet 0 oder 1)`);
+}
+
+/** HELDIX_DIENST_VOICE_CLIP_KEY (ab 1.13.0): Schlüssel für Voice-Clips, 32 Byte als 64 Hex-Zeichen oder Base64. */
+function readVoiceClipKey(raw: string | undefined): Buffer | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  if (/^[0-9a-fA-F]{64}$/.test(value)) return Buffer.from(value, 'hex');
+  const decoded = /^[A-Za-z0-9+/_-]{43}=?$/.test(value) ? Buffer.from(value, 'base64') : null;
+  // Den Wert selbst nie ausgeben.
+  if (decoded === null || decoded.length !== 32) fail('Ungültige HELDIX_DIENST_VOICE_CLIP_KEY (erwartet 32 Byte als 64 Hex-Zeichen oder Base64).');
+  return decoded;
+}
+
 /** HELDIX_DIENST_LIVE_MIN: Live-Zahlen (/v1/public/stats) erst ab so vielen Spielern online (Standard 50, 0 = immer). */
 function readLiveMin(raw: string | undefined): number {
   const value = raw?.trim();
@@ -163,6 +188,42 @@ function readWorldBind(raw: string | undefined): string {
   return value;
 }
 
+/** HELDIX_DIENST_WELTEN_MAX: gleichzeitig laufende dauerhafte Welten (leer: aus dem RAM des Servers). */
+function readHostingMax(raw: string | undefined): number | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  const max = /^\d{1,4}$/.test(value) ? Number(value) : NaN;
+  if (!(max >= 1)) fail(`Ungültige HELDIX_DIENST_WELTEN_MAX: "${value}" (erwartet eine ganze Zahl ab 1)`);
+  return max;
+}
+
+/**
+ * Dauerhafte Welten: HELDIX_DIENST_WELTEN_AGENT (Unix-Socket des Welten-Wächters) für den Betrieb; nur im
+ * Entwicklungsmodus ersatzweise HELDIX_DIENST_WELTEN_JAVA (ProcessRunner: Java-Prozesse ohne Container). Sonst aus.
+ */
+function readHostingRunner(dev: boolean, dataDir: string, userAgent: string): { runner: HostingRunner | null; status: string } {
+  const socket = process.env.HELDIX_DIENST_WELTEN_AGENT?.trim();
+  if (socket) {
+    return { runner: new AgentRunner(socket), status: `an (Welten-Wächter über ${socket})` };
+  }
+  const java = process.env.HELDIX_DIENST_WELTEN_JAVA?.trim();
+  if (java) {
+    if (!dev) {
+      log('WARNUNG: HELDIX_DIENST_WELTEN_JAVA gilt nur im Entwicklungsmodus (HELDIX_DIENST_DEV=1) und wird ignoriert.');
+      return { runner: null, status: 'aus (kein HELDIX_DIENST_WELTEN_AGENT)' };
+    }
+    const runner = new ProcessRunner({
+      root: path.join(dataDir, 'hosting-dev', 'worlds'),
+      java,
+      jarCache: process.env.HELDIX_DIENST_WELTEN_JAR_CACHE?.trim() || path.join(dataDir, 'hosting-dev', 'jars'),
+      userAgent,
+      log,
+    });
+    return { runner, status: `an (NUR ENTWICKLUNG: ProcessRunner mit ${java})` };
+  }
+  return { runner: null, status: 'aus (kein HELDIX_DIENST_WELTEN_AGENT)' };
+}
+
 /**
  * HELDIX_DIENST_UPDATE_KEY: Datei mit dem öffentlichen Update-Schlüssel (PEM). Fehlt sie oder ist sie ungültig, startet
  * der Dienst trotzdem; nur das Veröffentlichen im Team-Bereich geht dann nicht (503).
@@ -196,10 +257,20 @@ const clientSecret = readClientSecret(env.HELDIX_DIENST_MS_CLIENT_SECRET_FILE);
 const microsoftEndpoints = readMicrosoftEndpoints(dev);
 const voice = readVoice(env.HELDIX_DIENST_VOICE);
 const voiceRange = readVoiceRange(env.HELDIX_DIENST_VOICE_RANGE);
+const voiceClips = readVoiceClips(env.HELDIX_DIENST_VOICE_CLIPS);
+const voiceClipKey = readVoiceClipKey(env.HELDIX_DIENST_VOICE_CLIP_KEY);
 const weltDomain = readWorldDomain(env.HELDIX_DIENST_WELT_DOMAIN);
 const weltPort = readWorldPort(env.HELDIX_DIENST_WELT_PORT);
 const weltBind = readWorldBind(env.HELDIX_DIENST_WELT_BIND);
 const liveStatsMinOnline = readLiveMin(env.HELDIX_DIENST_LIVE_MIN);
+const hostingMax = readHostingMax(env.HELDIX_DIENST_WELTEN_MAX);
+let hostingVersion = 'unbekannt';
+try {
+  hostingVersion = (JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')) as { version?: string }).version ?? hostingVersion;
+} catch {
+  // nur für den User-Agent beim Laden von Server-Jars
+}
+const hosting = readHostingRunner(dev, dataDir, `heldix-dienst/${hostingVersion} (${website ? new URL(website).host : 'heldixclient'})`);
 // Anmeldung mit dem Minecraft-Konto: nur mit App-ID, Webseite und API-Adresse (und lesbarem Geheimnis, falls angegeben)
 const microsoft = clientId !== null && clientSecret !== undefined && website !== null && apiUrl !== null ? { clientId, clientSecret } : null;
 function microsoftStatus(): string {
@@ -234,10 +305,14 @@ const service = createService({
   updateKey,
   voice,
   voiceRange,
+  voiceClips,
+  voiceClipKey,
   weltDomain,
   weltPort,
   weltBind,
   liveStatsMinOnline,
+  hostingRunner: hosting.runner,
+  hostingMax,
   log,
 });
 
@@ -249,7 +324,15 @@ service.server.listen(port, host, () => {
   log(`Webseite: ${website ?? 'nicht eingerichtet (keine Anmeldung auf der Webseite)'} · Update-Schlüssel: ${updateKey ? 'eingerichtet' : 'keiner (kein Veröffentlichen von Updates, Addons und Cosmetics im Team-Bereich)'}`);
   log(`Anmeldung mit dem Minecraft-Konto auf der Webseite: ${microsoftStatus()}`);
   log(`Voice Chat (/v1/voice): ${voice ? `an (Reichweite ${voiceRange} Blöcke)` : 'aus (HELDIX_DIENST_VOICE=0)'}`);
+  log(
+    `Voice-Aufnahmen beim Melden: ${
+      voiceClips
+        ? `möglich – aktiv erst, wenn ein Admin die Voice-Regeln veröffentlicht (Schlüssel ${voiceClipKey ? 'aus HELDIX_DIENST_VOICE_CLIP_KEY' : 'aus voice-clips.key im Datenordner'})`
+        : 'aus (HELDIX_DIENST_VOICE_CLIPS=0)'
+    }`,
+  );
   if (weltDomain === null) log('Welt teilen: aus (keine HELDIX_DIENST_WELT_DOMAIN)');
+  log(`Dauerhafte Welten: ${weltDomain === null ? 'aus (braucht Welt teilen)' : hosting.status}`);
 });
 
 let stopping = false;

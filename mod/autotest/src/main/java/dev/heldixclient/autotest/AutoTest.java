@@ -128,6 +128,24 @@ public final class AutoTest implements HeldixModInitializer {
 			AccountTests.end(t);
 			return;
 		}
+		// Nur beim Entwickeln: HELDIX_AUTOTEST_ONLY=hosting führt nur die Prüfungen zu dauerhaften Welten, Entdecken und der
+		// Heldix+-Warteliste in einer Testwelt aus (braucht --service, für den vollen Test --welt-port und eine Freischaltung)
+		if ("hosting".equals(System.getenv("HELDIX_AUTOTEST_ONLY"))) {
+			createFlatWorld(t);
+			HostingTests.run(t);
+			t.run(mc -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));
+			t.waitFor("Welt verlassen", mc -> mc.level == null, 60);
+			return;
+		}
+		// Nur beim Entwickeln: HELDIX_AUTOTEST_ONLY=voice-moderation führt nur die Voice-Moderation in einer Testwelt aus
+		// (braucht --service mit Dienst 1.13.0 im Entwicklungsmodus)
+		if ("voice-moderation".equals(System.getenv("HELDIX_AUTOTEST_ONLY"))) {
+			createFlatWorld(t);
+			VoiceModerationTests.run(t);
+			t.run(mc -> mc.disconnectFromWorld(ClientLevel.DEFAULT_QUIT_MESSAGE));
+			t.waitFor("Welt verlassen", mc -> mc.level == null, 60);
+			return;
+		}
 		// Nur beim Entwickeln: HELDIX_AUTOTEST_ONLY=hud führt nur die HUD-Prüfungen in einer Testwelt aus
 		if ("hud".equals(System.getenv("HELDIX_AUTOTEST_ONLY"))) {
 			createFlatWorld(t);
@@ -391,9 +409,14 @@ public final class AutoTest implements HeldixModInitializer {
 		InviteTests.run(t);
 		// Welt teilen (Dienst 1.12.0): Sicherung, Adresse, Freunde einladen, Relay mit Test-Client (Status, Anklopfen, Erlauben), Heldix-Welten
 		WorldShareTests.run(t);
+		// Dauerhafte Welten, Entdecken, Heldix+-Warteliste (Dienst 1.13.0, mit --service und --welt-port; ohne Hosting übersprungen)
+		HostingTests.run(t);
 		// Freunde 2.0 (Dienst 1.12.0): Favorit, Spitzname, Status, „Nicht stören“, Party (Einladung, Chat, Folgen, Voice), Karten,
 		// Reaktionen, Antworten, Löschen, „schreibt …“, Vorschläge, Profilkarte, zuletzt online
 		FriendsTests.run(t);
+		// Voice-Moderation (Dienst 1.13.0, API 10, Voice Chat 1.3.0): Lautstärke-Schutz, Regeln-Dialog, Melden mit Clip,
+		// Party-Leiter schaltet stumm, Sperre (mit Entwicklungs-Routen /v1/dev/voice/… des Dienstes)
+		VoiceModerationTests.run(t);
 		// Minimap-Addon (API 8): Welt von oben, eigenes Bild im HUD, Wegpunkte, Zoom
 		MinimapTests.run(t);
 		// Emote-Rad (Addon mit Zugriff auf Minecraft, von einem externen Entwickler)

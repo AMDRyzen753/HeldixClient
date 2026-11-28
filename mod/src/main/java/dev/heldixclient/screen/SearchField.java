@@ -1,6 +1,7 @@
 package dev.heldixclient.screen;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import dev.heldixclient.ui.Keys;
 import dev.heldixclient.ui.Ui;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -141,7 +142,10 @@ public class SearchField extends AbstractWidget {
 		int key = event.key();
 		if (key == InputConstants.KEY_BACKSPACE) {
 			if (value.isEmpty()) return true;
-			if (event.hasControlDown()) {
+			// Mac: ⌘⌫ löscht alles, ⌥⌫ das letzte Wort; sonst Strg+Rück das letzte Wort
+			if (Keys.MAC && event.hasControlDownWithQuirk()) {
+				changed("");
+			} else if (event.hasControlDown() || (Keys.MAC && event.hasAltDown())) {
 				String trimmed = value.stripTrailing();
 				int cut = trimmed.lastIndexOf(' ');
 				changed(cut < 0 ? "" : trimmed.substring(0, cut + 1));

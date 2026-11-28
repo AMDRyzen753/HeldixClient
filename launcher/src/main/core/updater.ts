@@ -1,10 +1,14 @@
 // Automatische Updates des Launchers über die Schnittstelle des Heldix-Dienstes.
 //
-// Ablauf: GET <Dienst>/v1/launcher/latest liefert { manifest, signature }. Das Manifest ist mit dem privaten
+// Ablauf (Windows): GET <Dienst>/v1/launcher/latest liefert { manifest, signature }. Das Manifest ist mit dem privaten
 // Update-Schlüssel des Entwicklers signiert (npm run release); die App enthält nur den öffentlichen Schlüssel
 // (update-public-key.ts) und nimmt nur Manifeste mit gültiger Signatur und höherer Version an. Danach lädt sie
 // den Installer von <Dienst>/v1/launcher/download/<Datei>, prüft Größe und SHA-512 und startet ihn auf Wunsch
 // still (/S). Ein übernommener Server kann so keine fremde .exe unterschieben und keine alte Version zurückspielen.
+//
+// macOS (ab 0.14.0, platform: 'mac'): GET <Dienst>/v1/launcher/latest/mac, Manifest Version 2 mit einer ZIP je
+// Prozessor (core/mac-update.ts). Geladen und geprüft wird genauso; installiert wird über options.macInstall
+// (ZIP entpacken, App prüfen, Skript tauscht die App nach dem Ende des Launchers aus).
 //
 // Wann geprüft, geladen und installiert wird (beim Start, alle 30 Minuten, beim Beenden), entscheidet main.ts mit den
 // Funktionen aus core/startup-update.ts.
@@ -17,6 +21,7 @@ import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
+import { macArch, macArchLabel, macRelease, verifyMacManifest, type MacRelease } from './mac-update';
 
 /** Inhalt des signierten Manifests (Version 1) */
 export interface UpdateManifest {
@@ -28,6 +33,9 @@ export interface UpdateManifest {
   date: string;
   notes: string[];
 }
+
+/** Was der Updater zu einer gefundenen Version braucht (Windows: Manifest Version 1, Mac: Datei für diesen Prozessor) */
+export type UpdateRelease = Pick<UpdateManifest, 'version' | 'file' | 'size' | 'sha512' | 'date' | 'notes'>;
 
 export type UpdatePhase = 'disabled' | 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'error';
 
@@ -44,6 +52,8 @@ export interface UpdateState {
   error?: string;
   /** Zeitpunkt der letzten Prüfung (ms) */
   checkedAt?: number;
+  /** gesetzt = dieses System aktualisiert sich nicht selbst (Grund als Text); neue Versionen nur über die Webseite */
+  manual?: string;
 }
 
 export interface UpdaterOptions {
@@ -55,8 +65,16 @@ export interface UpdaterOptions {
   /** öffentlicher Update-Schlüssel (PEM); null = dieser Build nimmt keine Updates an */
   publicKey: string | null;
   log?: (line: string) => void;
-  /** false = neue Version nur melden (Phase "available"), z. B. auf dem Mac, wo der Windows-Installer nicht passt */
+  /** false = neue Version nur melden (Phase "available") */
   downloadInstaller?: boolean;
+  /** win = /v1/launcher/latest mit dem Installer, mac = /v1/launcher/latest/mac mit einer ZIP je Prozessor */
+  platform?: 'win' | 'mac';
+  /** Prozessor für das Mac-Manifest (Standard process.arch) */
+  arch?: string;
+  /** gesetzt = nur melden (wie downloadInstaller false) und den Grund in state.manual zeigen */
+  manualReason?: string | null;
+  /** Mac: geprüfte ZIP installieren (entpacken, App prüfen, Austausch nach dem Ende starten); wirft bei Fehlern */
+  macInstall?: (zip: string, release: UpdateRelease, restart: boolean) => Promise<void>;
 }
 
 const VERSION_RE = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.]+))?$/;
@@ -133,13 +151,18 @@ async function sha512File(file: string): Promise<string> {
 export class Updater {
   state: UpdateState;
   onState: (state: UpdateState) => void = () => {};
-  private manifest: UpdateManifest | null = null;
+  private manifest: UpdateRelease | null = null;
   private running: Promise<UpdateState> | null = null;
   private loading: Promise<UpdateState> | null = null;
   private timer: NodeJS.Timeout | null = null;
 
   constructor(private readonly options: UpdaterOptions) {
-    this.state = { phase: this.enabled() ? 'idle' : 'disabled', current: options.currentVersion };
+    this.state = { phase: this.enabled() ? 'idle' : 'disabled', current: options.currentVersion, ...(options.manualReason ? { manual: options.manualReason } : {}) };
+  }
+
+  /** Lädt und installiert dieser Updater selbst (sonst nur melden, laden über die Webseite)? */
+  selfInstall(): boolean {
+    return this.options.downloadInstaller !== false && !this.options.manualReason;
   }
 
   /** Updates möglich? (Adresse und öffentlicher Schlüssel im Build) */
@@ -189,7 +212,7 @@ export class Updater {
    * Installer im Update-Ordner wird wiederverwendet. Mehrfache Aufrufe teilen sich einen Download.
    */
   download(): Promise<UpdateState> {
-    if (!this.enabled() || this.state.phase === 'ready' || !this.manifest || this.options.downloadInstaller === false) return Promise.resolve(this.state);
+    if (!this.enabled() || this.state.phase === 'ready' || !this.manifest || !this.selfInstall()) return Promise.resolve(this.state);
     this.loading ??= this.fetchInstaller(this.manifest).finally(() => {
       this.loading = null;
     });
@@ -197,7 +220,7 @@ export class Updater {
   }
 
   /** Manifest der gefundenen Version (für die Hinweise „Neu in …“ nach dem Update), sonst null */
-  found(): UpdateManifest | null {
+  found(): UpdateRelease | null {
     return this.manifest;
   }
 
@@ -210,7 +233,7 @@ export class Updater {
     // wenn der Server gerade nicht antwortet
     const known = this.state.phase === 'available' && this.manifest !== null;
     if (!known) this.set({ phase: 'checking', error: undefined });
-    let manifest: UpdateManifest | null;
+    let manifest: UpdateRelease | null;
     try {
       manifest = await this.fetchManifest(options.timeoutMs ?? MANIFEST_TIMEOUT_MS);
     } catch (error) {
@@ -226,21 +249,30 @@ export class Updater {
     if (this.manifest?.version !== manifest.version) this.log(`Neue Version ${manifest.version} gefunden`);
     this.manifest = manifest;
     this.set({ phase: 'available', version: manifest.version, notes: manifest.notes, date: manifest.date, progress: undefined, error: undefined, checkedAt: Date.now() });
-    if (options.download === false || this.options.downloadInstaller === false) return this.state;
+    if (options.download === false || !this.selfInstall()) return this.state;
     return this.download();
   }
 
-  /** GET /v1/launcher/latest mit Zeitgrenze; null = nichts veröffentlicht (404). Wirft bei Fehlern und falscher Signatur. */
-  private async fetchManifest(timeoutMs: number): Promise<UpdateManifest | null> {
-    const response = await fetch(`${this.base()}/v1/launcher/latest`, { signal: AbortSignal.timeout(timeoutMs), cache: 'no-store' });
+  /**
+   * GET /v1/launcher/latest (Windows) bzw. /v1/launcher/latest/mac mit Zeitgrenze; null = nichts veröffentlicht (404)
+   * oder keine Datei für diesen Mac. Wirft bei Fehlern und falscher Signatur.
+   */
+  private async fetchManifest(timeoutMs: number): Promise<UpdateRelease | null> {
+    const mac = this.options.platform === 'mac';
+    const response = await fetch(`${this.base()}/v1/launcher/latest${mac ? '/mac' : ''}`, { signal: AbortSignal.timeout(timeoutMs), cache: 'no-store' });
     if (response.status === 404) return null;
     if (!response.ok) throw new Error(`Update-Server antwortet mit ${response.status}`);
     const body = (await response.json()) as { manifest?: unknown; signature?: unknown };
     if (typeof body.manifest !== 'string' || typeof body.signature !== 'string') throw new Error('Antwort des Update-Servers ist unvollständig.');
-    return verifyManifest(body.manifest, body.signature, this.options.publicKey!);
+    if (!mac) return verifyManifest(body.manifest, body.signature, this.options.publicKey!);
+    const manifest = verifyMacManifest(body.manifest, body.signature, this.options.publicKey!);
+    const arch = macArch(this.options.arch ?? process.arch);
+    const release: MacRelease | null = macRelease(manifest, arch);
+    if (!release) this.log(`Version ${manifest.version} hat keine Datei für ${arch ? macArchLabel(arch) : this.options.arch ?? process.arch}`);
+    return release;
   }
 
-  private async fetchInstaller(manifest: UpdateManifest): Promise<UpdateState> {
+  private async fetchInstaller(manifest: UpdateRelease): Promise<UpdateState> {
     this.set({ phase: 'downloading', version: manifest.version, notes: manifest.notes, date: manifest.date, progress: 0, error: undefined });
     try {
       const reused = await this.downloadFile(manifest);
@@ -265,7 +297,7 @@ export class Updater {
   }
 
   /** Lädt und prüft den Installer; true = lag schon vollständig und geprüft im Update-Ordner (wiederverwendet) */
-  private async downloadFile(manifest: UpdateManifest): Promise<boolean> {
+  private async downloadFile(manifest: UpdateRelease): Promise<boolean> {
     const dir = this.options.dir;
     await mkdir(dir, { recursive: true });
     // alte Installer aufräumen
@@ -321,7 +353,9 @@ export class Updater {
    */
   async install(restart: boolean): Promise<boolean> {
     const installer = this.installerPath();
-    if (!installer || !this.manifest || process.platform !== 'win32') return false;
+    if (!installer || !this.manifest) return false;
+    if (this.options.platform === 'mac') return this.installMac(installer, this.manifest, restart);
+    if (process.platform !== 'win32') return false;
     // unmittelbar vor dem Start noch einmal prüfen (die Datei lag eine Weile im Datenordner)
     if ((await sha512File(installer).catch(() => '')) !== this.manifest.sha512) {
       await rm(installer, { force: true }).catch(() => undefined);
@@ -342,6 +376,22 @@ export class Updater {
     child.unref();
     if (!started) this.set({ phase: 'error', error: 'Der Installer ließ sich nicht starten. Später erneut versuchen.' });
     return started;
+  }
+
+  /** Mac: ZIP entpacken und prüfen, Austausch nach dem Ende starten (options.macInstall); false = nicht möglich */
+  private async installMac(zip: string, release: UpdateRelease, restart: boolean): Promise<boolean> {
+    if (!this.options.macInstall) return false;
+    this.log(`Installiere ${release.file}${restart ? ' mit Neustart' : ''}`);
+    try {
+      await this.options.macInstall(zip, release, restart);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log(`Installation fehlgeschlagen: ${message}`);
+      if (/verändert/.test(message)) await rm(zip, { force: true }).catch(() => undefined);
+      this.set({ phase: 'error', error: message });
+      return false;
+    }
   }
 }
 

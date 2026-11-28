@@ -105,9 +105,16 @@ function renderView(view: WorldJoinView): void {
       h('h3', { class: 'modal-title', id: 'world-title', text: `Welt von ${world.host.name}` }),
       h('p', { class: 'modal-sub', text: `„${world.name}“` })));
 
-  const status = h('span', { class: `world-online${world.online ? ' on' : ''}` },
-    h('span', { class: 'world-online-dot' }),
-    world.online ? `Geöffnet · ${world.players} von ${world.maxPlayers} Spielern` : 'Gerade nicht geöffnet');
+  // dauerhafte Welt (Dienst 1.13.0): läuft auf dem Heldix-Server, schläft, wenn leer – Beitreten weckt sie
+  const hosted = world.hosted ?? null;
+  const statusText = hosted
+    ? hosted.state === 'running' ? `Dauerhaft · läuft · ${world.players} von ${world.maxPlayers} Spielern`
+      : hosted.state === 'starting' ? 'Dauerhaft · startet gerade'
+        : hosted.state === 'creating' ? 'Dauerhaft · wird eingerichtet'
+          : hosted.state === 'error' ? 'Dauerhaft · hat gerade ein Problem'
+            : 'Dauerhaft · schläft – Beitreten weckt sie (etwa 30 Sekunden)'
+    : world.online ? `Geöffnet · ${world.players} von ${world.maxPlayers} Spielern` : 'Gerade nicht geöffnet';
+  const status = h('span', { class: `world-online${world.online ? ' on' : ''}` }, h('span', { class: 'world-online-dot' }), statusText);
   const facts = h('div', { class: 'invite-facts' },
     fact('signal', 'Status', status, { id: 'world-status' }),
     fact('cube', 'Minecraft', world.version ? `Version ${world.version}` : 'Version unbekannt', { id: 'world-version' }),
@@ -118,7 +125,11 @@ function renderView(view: WorldJoinView): void {
       h('button', { class: 'icon-button small', type: 'button', title: 'Adresse kopieren (für Minecraft ohne HeldixClient)', onclick: () => void copyAddress(world.address!) }, uiIcon('copy')))));
   }
   const body: Node[] = [facts];
-  if (world.access === 'closed' && !view.friend && world.online) {
+  if (hosted && hosted.state !== 'running' && hosted.state !== 'error' && hosted.state !== 'creating') {
+    body.push(h('p', { class: 'invite-note info', id: 'world-wake' }, uiIcon('info', 'invite-note-icon'),
+      h('span', { text: 'Die Welt schläft auf dem Heldix-Server. „Beitreten“ weckt sie – HeldixClient tritt nach etwa 30 Sekunden von selbst noch einmal bei.' })));
+  }
+  if (world.access === 'closed' && !view.friend && (world.online || hosted)) {
     body.push(h('p', { class: 'invite-note info', id: 'world-knock' }, uiIcon('info', 'invite-note-icon'),
       h('span', { text: `Nur für Eingeladene und Freunde. Wenn du beitrittst, wird ${world.host.name} gefragt – nach dem Erlauben einfach noch einmal beitreten.` })));
   }
@@ -126,7 +137,7 @@ function renderView(view: WorldJoinView): void {
     body.push(h('div', { class: 'invite-problem', id: 'world-join-problem' },
       uiIcon('info', 'invite-note-icon'),
       h('span', { text: view.joinProblem }),
-      !view.join && world.online ? button('world-instances', 'Zu den Instanzen', 'ghost', () => {
+      !view.join && (world.online || hosted) ? button('world-instances', 'Zu den Instanzen', 'ghost', () => {
         close();
         links?.showView('instances');
       }, 'grid') : null));

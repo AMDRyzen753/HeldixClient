@@ -1,16 +1,18 @@
 // Update beim Start des Launchers – die Entscheidungen als reine Funktionen (getestet in scripts/test-update.ts);
 // Fenster und Ablauf stehen in main.ts, Prüfen, Laden und Installieren in core/updater.ts.
 //
-// Ablauf (fertige App, Windows, Einstellung „Updates automatisch“ an):
+// Ablauf (fertige App, Windows und ab 0.14.0 macOS, Einstellung „Updates automatisch“ an):
 //   1. Startfenster „Suche nach Updates …“, GET /v1/launcher/latest mit kurzer Zeitgrenze (STARTUP_CHECK_TIMEOUT_MS).
 //      Offline, Fehler oder Zeitüberschreitung: normal starten (nur Log und Einstellungen zeigen den Fehler).
 //   2. Neue Version: laden (ein geprüfter Installer im Update-Ordner wird wiederverwendet), prüfen, still installieren
-//      (installerArgs(true) = /S --updated --force-run), der Launcher beendet sich sofort, der Installer startet ihn neu.
+//      (Windows: installerArgs(true) = /S --updated --force-run; Mac: ZIP entpacken, Skript tauscht die App aus,
+//      core/mac-update.ts), der Launcher beendet sich sofort, Installer bzw. Skript startet ihn neu.
 //   3. Nicht installiert wird, wenn noch ein Spiel aus einer früheren Sitzung läuft (game-running.json) oder derselbe
 //      Installationsversuch vor Kurzem schon einmal lief (update-start.json, sonst Schleife bei einem kaputten
 //      Installer) – dann normal starten, später erneut (Hinweis „Jetzt neu starten“ oder beim Beenden).
-// „Updates automatisch“ aus und macOS: kein Startfenster, die Prüfung läuft gleich im Hintergrund, eine neue Version
-// zeigt nur einen Hinweis („Jetzt installieren“ bzw. Download über die Webseite).
+// „Updates automatisch“ aus, unsichtbarer Start (--hidden, Autostart) oder ein System ohne Selbst-Update (Mac aus dem
+// DMG, ohne Schreibrechte, Linux – selfUpdate false): kein Startfenster, die Prüfung läuft gleich im Hintergrund, eine
+// neue Version zeigt nur einen Hinweis („Jetzt installieren“ bzw. Download über die Webseite).
 
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { compareVersions, type UpdatePhase } from './updater';
@@ -33,9 +35,14 @@ export const GAME_MARKER_FILE = 'game-running.json';
 /** off = gar nicht prüfen; splash = vor dem Hauptfenster prüfen und ggf. installieren; background = nur Hinweis */
 export type StartupPlan = 'off' | 'splash' | 'background';
 
-export function startupPlan(input: { enabled: boolean; platform: NodeJS.Platform; autoUpdate: boolean }): StartupPlan {
+/** Ersetzt sich die App selbst? Ohne Angabe: nur Windows (der Mac sagt es ab 0.14.0 ausdrücklich, siehe main.ts) */
+export function selfUpdates(input: { platform: NodeJS.Platform; selfUpdate?: boolean }): boolean {
+  return input.selfUpdate ?? input.platform === 'win32';
+}
+
+export function startupPlan(input: { enabled: boolean; platform: NodeJS.Platform; autoUpdate: boolean; selfUpdate?: boolean; hidden?: boolean }): StartupPlan {
   if (!input.enabled) return 'off';
-  if (input.platform !== 'win32' || !input.autoUpdate) return 'background';
+  if (!selfUpdates(input) || !input.autoUpdate || input.hidden) return 'background';
   return 'splash';
 }
 
@@ -47,13 +54,15 @@ export interface InstallAttempt {
 export type StartupDecision =
   /** normal starten; current = nichts Neues, error = offline/Fehler/Zeitgrenze, game = Spiel läuft, retry-later = Versuch eben fehlgeschlagen */
   | { action: 'start'; reason: 'current' | 'error' | 'game' | 'retry-later' }
-  /** nur Hinweis: install = „Jetzt installieren“ (Einstellung aus), download = Download über die Webseite (macOS) */
+  /** nur Hinweis: install = „Jetzt installieren“ (Einstellung aus), download = Download über die Webseite (kein Selbst-Update) */
   | { action: 'notify'; reason: 'install' | 'download' }
   /** laden (falls nötig), still installieren, neu starten */
   | { action: 'install' };
 
 export interface StartupInput {
   platform: NodeJS.Platform;
+  /** ersetzt sich die App selbst (Standard: nur Windows), siehe selfUpdates */
+  selfUpdate?: boolean;
   autoUpdate: boolean;
   /** Stand nach der Prüfung */
   state: { phase: UpdatePhase; version?: string };
@@ -73,7 +82,7 @@ export function decideStartupUpdate(input: StartupInput): StartupDecision {
   const { phase, version } = input.state;
   if (phase === 'error') return { action: 'start', reason: 'error' };
   if ((phase !== 'available' && phase !== 'downloading' && phase !== 'ready') || !version) return { action: 'start', reason: 'current' };
-  if (input.platform !== 'win32') return { action: 'notify', reason: 'download' };
+  if (!selfUpdates(input)) return { action: 'notify', reason: 'download' };
   if (!input.autoUpdate) return { action: 'notify', reason: 'install' };
   if (input.gameRunning) return { action: 'start', reason: 'game' };
   if (installRecentlyTried(input.attempt, version, input.now)) return { action: 'start', reason: 'retry-later' };

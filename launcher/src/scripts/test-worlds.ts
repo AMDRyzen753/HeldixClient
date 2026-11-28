@@ -24,7 +24,9 @@ import {
   type WorldEvent,
   type WorldInstance,
 } from '../main/core/worlds';
-import type { WorldsOverview } from '../shared/api';
+import type { FriendWorld, WorldsOverview } from '../shared/api';
+import { DiscoverClient, discoverAsFriendWorld, mapDiscoverEntry } from '../main/core/discover';
+import { HostingClient, hostedAsFriendWorld, mapHostedWorld, type HostingEvent } from '../main/core/hosting';
 import { check, delay, finish } from './testkit';
 
 const CODE = 'k7m2xq';
@@ -132,6 +134,8 @@ class FakeService {
   /** Antwort für GET /v1/worlds: Liste oder Status */
   worlds: unknown[] | number = [];
   publicWorlds = new Map<string, unknown>();
+  /** Antwort für GET /v1/public/discover: Einträge oder Status */
+  discover: unknown[] | number = [];
   private server = createServer((req, res) => this.handle(req, res));
 
   private handle(req: IncomingMessage, res: ServerResponse): void {
@@ -144,6 +148,10 @@ class FakeService {
     if (route === 'GET /v1/worlds') {
       if (typeof this.worlds === 'number') return json(this.worlds, { error: this.worlds === 503 ? 'Welt teilen ist auf diesem Heldix-Dienst nicht eingerichtet.' : 'Nicht gefunden.' });
       return json(200, { mine: [], friends: this.worlds });
+    }
+    if (route === 'GET /v1/public/discover?sort=popular&page=1') {
+      if (typeof this.discover === 'number') return json(this.discover, { error: 'Nicht gefunden.' });
+      return json(200, { sort: 'popular', page: 1, pages: 1, total: this.discover.length, entries: this.discover });
     }
     const pub = /^GET \/v1\/public\/worlds\/([a-z0-9]+)$/.exec(route);
     if (pub) {
@@ -237,6 +245,145 @@ async function client(): Promise<void> {
   await fake.stop();
 }
 
+// ---------- Dauerhafte Welten und Entdecken (Dienst 1.13.0) ----------
+
+function hostedWorld(id: string, code: string, state: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { id: id.repeat(32).slice(0, 32), code, address: `${code}.welt.heldixclient.com`, name: 'Insel', state, error: null, version: '26.3', players: 0, maxPlayers: 8,
+    role: 'owner', owner: HOST, ...extra };
+}
+
+function discoverEntry(code: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { code, name: 'Burg', description: 'Bauen mit Freunden', tags: ['bauen', 'kaputt', 'survival'], lang: 'de', version: '26.3', players: 2, maxPlayers: 10,
+    state: 'running', persistent: true, host: { ...HOST, head: `/v1/public/heads/${HOST.uuid}.png` }, icon: null, likes: 4, address: `${code}.welt.heldixclient.com`, ...extra };
+}
+
+function hostedMapping(): void {
+  const info = mapPublicWorld({ name: 'Insel', address: `${CODE}.welt.heldixclient.com`, host: HOST, online: false, players: 0, maxPlayers: 8, version: '26.3',
+    access: 'open', hosted: { state: 'sleeping' } }, CODE);
+  check('Dauerhaft: öffentliche Welt-Info mit hosted.state', info.hosted?.state === 'sleeping' && !info.online);
+  check('Dauerhaft: unbekannter Zustand → „error“', mapPublicWorld({ host: HOST, hosted: { state: 'kaputt' } }, CODE).hosted?.state === 'error');
+  check('Dauerhaft: ohne hosted kein Feld (normal geteilte Welt)', mapPublicWorld({ host: HOST, online: true }, CODE).hosted === undefined);
+
+  const hosted = mapHostedWorld(hostedWorld('1', CODE, 'running', { players: 3, role: 'operator' }));
+  check('HostedWorld: gelesen (Rolle Operator, Spieler)', hosted?.role === 'operator' && hosted.players === 3 && hosted.code === CODE && hosted.owner.name === 'Lena');
+  check('HostedWorld: Kaputtes fällt weg', mapHostedWorld({ id: 'x', address: 'nix' }) === null && mapHostedWorld(null) === null);
+  const asFriend = hostedAsFriendWorld(hosted!);
+  check('HostedWorld → „Offene Welten“ mit Zustand', asFriend.hosted?.state === 'running' && asFriend.host.uuid === HOST.uuid && asFriend.address === `${CODE}.welt.heldixclient.com`);
+
+  const entry = mapDiscoverEntry(discoverEntry('abcdef'));
+  check('Entdecken: Eintrag gelesen, unbekannte Tags fallen weg', entry?.tags.join() === 'bauen,survival' && entry.persistent && entry.likes === 4 && entry.host.name === 'Lena');
+  check('Entdecken: falsche Adresse bzw. Code → weg', mapDiscoverEntry(discoverEntry('abcdef', { address: 'ghjkmn.welt.heldixclient.com' })) === null
+    && mapDiscoverEntry(discoverEntry('ABCDEF')) === null && mapDiscoverEntry({}) === null);
+  check('Entdecken: Steuerzeichen raus, Beschreibung höchstens 160 Zeichen', mapDiscoverEntry(discoverEntry('abcdef', { description: `a\u0007b${'x'.repeat(300)}` }))!.description.length === 160
+    && !mapDiscoverEntry(discoverEntry('abcdef', { description: 'a\u0007b' }))!.description.includes('\u0007'));
+  check('Entdecken → „Offene Welten“: dauerhaft mit Zustand, normal geteilt ohne', discoverAsFriendWorld(entry!).hosted?.state === 'running'
+    && discoverAsFriendWorld(mapDiscoverEntry(discoverEntry('abcdef', { persistent: false, state: 'online' }))!).hosted === null);
+}
+
+function hostedPlans(): void {
+  const instances: Inst[] = [{ id: 'h1', name: 'HeldixClient 26.3', minecraft: '26.3', lastPlayed: 1_000, heldix: true }];
+  const world = { online: false, version: '26.3', host: HOST, address: `${CODE}.welt.heldixclient.com` };
+  const plan = (hosted: { state: 'sleeping' | 'running' | 'creating' | 'error' | 'starting' } | null, self = 'b'.repeat(32)) =>
+    planWorldJoin<Inst>({ world: { ...world, hosted }, instances, preferred: null, hasClient: (i) => i.heldix, gameRunning: false, self });
+  check('Dauerhaft: schlafende Welt → Beitreten geht (weckt sie)', plan({ state: 'sleeping' }).problem === null && plan({ state: 'sleeping' }).instance?.id === 'h1');
+  check('Dauerhaft: startet gerade → Beitreten geht', plan({ state: 'starting' }).problem === null);
+  check('Dauerhaft: eigene dauerhafte Welt → Beitreten geht', plan({ state: 'running' }, HOST.uuid).problem === null);
+  check('Dauerhaft: wird eingerichtet → Hinweis', /eingerichtet/.test(plan({ state: 'creating' }).problem ?? ''));
+  check('Dauerhaft: Fehler → Hinweis', /Problem/.test(plan({ state: 'error' }).problem ?? ''));
+  check('Normal geteilt und zu → weiter „nicht geöffnet“', /nicht geöffnet/.test(plan(null).problem ?? ''));
+}
+
+async function hostingClient(): Promise<void> {
+  let answer: unknown = { allowed: true, reason: null, worlds: [hostedWorld('1', CODE, 'sleeping')], operated: [hostedWorld('2', 'abcdef', 'running', { role: 'operator' })] };
+  let account = 'konto-1';
+  const routes: string[] = [];
+  const auth: WorldAuth = {
+    authed: async <T>(route: string) => {
+      routes.push(route);
+      if (typeof answer === 'number') throw new ServiceError('Nicht gefunden.', answer);
+      return answer as T;
+    },
+    accountId: async () => account,
+    canAuthenticate: async () => true,
+  };
+  const events: HostingEvent[] = [];
+  let changes = 0;
+  const hosting = new HostingClient({ auth, enabled: async () => true, onChange: () => changes++, onEvent: (e) => events.push(e) });
+  await hosting.refresh();
+  check('Hosting: Stand geladen (eigene, betreute, darf)', hosting.allowed && hosting.ownWorlds().length === 1 && hosting.operatedWorlds()[0]?.code === 'abcdef' && changes === 1);
+  answer = { allowed: true, reason: null, worlds: [hostedWorld('1', CODE, 'error', { error: 'Der Server wurde unerwartet beendet.' })], operated: [] };
+  await hosting.refresh();
+  check('Hosting: Absturz seit der letzten Abfrage → Ereignis', events.length === 1 && events[0].kind === 'problem' && events[0].world.code === CODE, events);
+  hosting.handleRealtime({ type: 'hosting-state', world: hostedWorld('1', CODE, 'error', { error: 'Der Server wurde unerwartet beendet.' }) });
+  check('Hosting: derselbe Fehler noch einmal → kein neues Ereignis', events.length === 1);
+  hosting.handleRealtime({ type: 'hosting-state', world: hostedWorld('1', CODE, 'sleeping', { error: 'Startet nicht: Port belegt.' }) });
+  check('Hosting: neue Fehlermeldung (auch schlafend) → Ereignis', events.length === 2 && events[1].kind === 'problem');
+  hosting.handleRealtime({ type: 'hosting-state', world: hostedWorld('3', 'ghjkmn', 'running', { role: 'operator' }) });
+  check('Hosting: Echtzeit ergänzt betreute Welten', hosting.operatedWorlds().some((w) => w.code === 'ghjkmn'));
+  hosting.handleRealtime({ type: 'hosting-state', world: { id: '1'.repeat(32), state: 'deleted' } });
+  check('Hosting: „deleted“ entfernt die Welt', hosting.ownWorlds().length === 0);
+  check('Hosting: Anklopfen → Ereignis', hosting.handleRealtime({ type: 'hosting-knock', world: { id: '2'.repeat(32), name: 'Burg', address: `abcdef.welt.heldixclient.com` }, name: 'Gast_1' })
+    && events.at(-1)?.kind === 'knock');
+  check('Hosting: Anklopfen mit kaputtem Namen → nichts', hosting.handleRealtime({ type: 'hosting-knock', world: { id: '2'.repeat(32) }, name: '../x' }) && events.at(-1)?.kind === 'knock'
+    && events.filter((e) => e.kind === 'knock').length === 1);
+  hosting.handleRealtime({ type: 'hosting-granted', text: 'Du bist freigeschaltet.', pending: true });
+  check('Hosting: Freischaltung → Ereignis', events.at(-1)?.kind === 'granted');
+  check('Hosting: andere Nachrichten gehören nicht dazu', !hosting.handleRealtime({ type: 'world-open' }));
+  account = 'konto-2';
+  answer = { allowed: false, reason: 'beta', worlds: [hostedWorld('1', CODE, 'error', { error: 'Neu' })], operated: [] };
+  const before = events.length;
+  await hosting.refresh();
+  check('Hosting: Kontowechsel → keine Meldung beim ersten Laden', events.length === before && !hosting.allowed);
+  answer = { allowed: false, reason: 'off', limits: null, worlds: [], operated: [] };
+  await hosting.refresh();
+  check('Hosting: Dienst ohne Hosting („off“) → aus', !hosting.supported && hosting.ownWorlds().length === 0);
+  const calls = routes.length;
+  await hosting.refresh();
+  check('Hosting: danach 30 Minuten Ruhe', routes.length === calls);
+}
+
+async function extras(): Promise<void> {
+  const fake = await new FakeService().start();
+  const auth: WorldAuth = {
+    authed: (route) => serviceRequest(fake.url, route, { token: 'test' }),
+    accountId: async () => 'konto',
+    canAuthenticate: async () => true,
+  };
+  let extra: FriendWorld[] = [];
+  const updates: WorldsOverview[] = [];
+  const worlds = new WorldClient({ serviceUrl: fake.url, auth, enabled: async () => true, onUpdate: (o) => updates.push(o), extraWorlds: () => extra });
+  fake.worlds = [friendWorld('1', CODE, 'Insel')];
+  await worlds.refresh();
+  extra = [hostedAsFriendWorld(mapHostedWorld(hostedWorld('2', 'abcdef', 'sleeping', { role: 'operator', owner: { uuid: 'd'.repeat(32), name: 'Max' } }))!),
+    hostedAsFriendWorld(mapHostedWorld(hostedWorld('3', CODE, 'running'))!)];
+  worlds.extrasChanged();
+  const overview = worlds.current;
+  check('Offene Welten + dauerhafte: zusammen, geöffnete gehen bei gleichem Code vor', overview.friends.length === 2
+    && overview.friends.find((w) => w.code === CODE)?.hosted === undefined && overview.friends.find((w) => w.code === 'abcdef')?.hosted?.state === 'sleeping', overview);
+  check('Offene Welten + dauerhafte: Änderung geht an die Oberfläche', updates.at(-1)?.friends.length === 2);
+  worlds.handleRealtime({ type: 'world-closed', world: { id: '1'.repeat(32) } });
+  check('Offene Welten: geschlossene Welt weg, dauerhafte bleiben (nach Gastgeber sortiert)', worlds.current.friends.map((w) => w.code).join() === `${CODE},abcdef`
+    && worlds.current.friends.find((w) => w.code === CODE)?.hosted?.state === 'running', worlds.current.friends);
+
+  // Entdecken: beliebte Welten (höchstens drei), dauerhafte Welten von Freunden
+  fake.discover = [discoverEntry('abcdef'), discoverEntry('ghjkmn', { persistent: false, state: 'online', host: { uuid: 'e'.repeat(32), name: 'Kim' } }),
+    discoverEntry('mnpqrs', { host: { uuid: 'f'.repeat(32), name: 'Ole' } }), discoverEntry('stuvwx'), { kaputt: true }];
+  const popularUpdates: unknown[] = [];
+  const discover = new DiscoverClient({ serviceUrl: fake.url, onUpdate: (p) => popularUpdates.push(p) });
+  const popular = await discover.popular();
+  check('Beliebte Welten: höchstens drei, Kaputtes fällt weg', popular.status === 'ok' && popular.worlds.length === 3 && popular.worlds[0].code === 'abcdef', popular);
+  const asked = fake.requests.filter((r) => r.includes('/public/discover')).length;
+  await discover.popular();
+  check('Beliebte Welten: aus dem Speicher (kein neuer Abruf)', fake.requests.filter((r) => r.includes('/public/discover')).length === asked && popularUpdates.length === 1);
+  check('Entdecken: dauerhafte Welten von Freunden', discover.persistentOf(new Set([HOST.uuid])).map((w) => w.code).join() === 'abcdef,stuvwx'
+    && discover.persistentOf(new Set(['e'.repeat(32)])).length === 0);
+  fake.discover = 404;
+  const older = new DiscoverClient({ serviceUrl: fake.url });
+  check('Entdecken: Dienst ohne Entdecken (404) → „unsupported“', (await older.popular()).status === 'unsupported');
+  check('Entdecken: ohne Dienst → „off“', (await new DiscoverClient({ serviceUrl: '' }).popular()).status === 'off');
+  await fake.stop();
+}
+
 async function main(): Promise<void> {
   links();
   addresses();
@@ -244,6 +391,10 @@ async function main(): Promise<void> {
   mapping();
   plans();
   await client();
+  hostedMapping();
+  hostedPlans();
+  await hostingClient();
+  await extras();
   finish('Welt teilen (Launcher)');
 }
 

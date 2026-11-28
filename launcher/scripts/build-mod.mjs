@@ -84,7 +84,8 @@ if (!modApi || modApi !== storeApi) {
 // Launcher und Spiel prüfen Store-Addons mit demselben öffentlichen Schlüssel (npm run update-key schreibt beide)
 const keySource = await readFile(path.join(launcherDir, 'src', 'main', 'update-public-key.ts'), 'utf8');
 const launcherKey = /UPDATE_PUBLIC_KEY: string \| null = (".*");/.exec(keySource)?.[1];
-const modKey = await readFile(path.join(modDir, 'src', 'main', 'resources', 'heldix-store-key.pem'), 'utf8').catch(() => null);
+// Zeilenenden angleichen: ein Windows-Checkout (GitHub Actions) kann die Datei mit CRLF auschecken
+const modKey = (await readFile(path.join(modDir, 'src', 'main', 'resources', 'heldix-store-key.pem'), 'utf8').catch(() => null))?.replace(/\r\n/g, '\n') ?? null;
 if (launcherKey && JSON.parse(launcherKey) !== modKey) {
   throw new Error('mod/src/main/resources/heldix-store-key.pem passt nicht zu src/main/update-public-key.ts – "npm run update-key" ausführen und neu bauen.');
 }

@@ -86,6 +86,44 @@ const MAX_PENDING_STREAMS = 16;
 
 export type StreamKind = 'status' | 'login';
 
+/** Ab 1.13.0: Zustand einer dauerhaften Welt (läuft auf dem Heldix-Server statt über den Tunnel des Gastgebers). */
+export type HostedRelayState = 'creating' | 'sleeping' | 'starting' | 'running' | 'stopping' | 'error';
+
+/** Was Welt teilen und das Relay über eine dauerhafte Welt wissen müssen. */
+export interface HostedRelayInfo {
+  state: HostedRelayState;
+  /** lokaler Port (127.0.0.1) des laufenden Servers, sonst null */
+  port: number | null;
+  players: number;
+  /** Minecraft-Version des Servers */
+  version: string;
+}
+
+/**
+ * Anbindung der dauerhaften Welten (hosting/hosting.ts) an Welt teilen. Welt teilen fragt darüber, ob eine Welt
+ * dauerhaft ist, und meldet Änderungen an Welten und Mitgliedern.
+ */
+export interface WorldsHosting {
+  /** null: keine dauerhafte Welt (wie bisher über den Tunnel) */
+  relayInfo(world: string): HostedRelayInfo | null;
+  /** Dauerhafte Welten dieser Besitzer (für `friends` in `GET /v1/worlds`). */
+  ownedBy(owners: readonly string[]): { world: string; owner: string }[];
+  /** Anklopfen eines nicht zugelassenen Namens (Besitzer und Operatoren bekommen `hosting-knock`). */
+  knock(world: WorldRow, name: string): void;
+  /** Hat der Besitzer bzw. ein Operator diesen Namen gerade abgelehnt? */
+  isDenied(world: string, name: string): boolean;
+  /** Login für eine dauerhafte Welt, die nicht läuft: Start anstoßen; liefert den Text für den Spieler. */
+  wake(world: WorldRow): string;
+  membersChanged(world: string): void;
+  /** Name oder Höchstzahl der Spieler geändert (Beschreibung, server.properties). */
+  worldChanged(world: string): void;
+  /** Welt gelöscht (mit dem Konto oder DELETE /v1/worlds/<id>): Server anhalten und alles löschen. */
+  worldDeleted(world: string): void;
+}
+
+/** Text, wenn der Besitzer eine dauerhafte Welt zusätzlich per „Welt teilen“ öffnen will. */
+export const TEXT_HOSTED_NO_TUNNEL = 'Diese Welt läuft dauerhaft auf dem Heldix-Server. Tritt ihr über die Adresse bei, statt sie selbst zu teilen.';
+
 export interface WorldsOptions {
   /** Welt-Domain, z. B. `welt.heldixclient.com` (Adressen `<code>.<domain>`). */
   domain: string;
@@ -176,6 +214,8 @@ export interface RelayTarget {
   world: WorldRow;
   ownerName: string;
   session: HostSession | null;
+  /** ab 1.13.0: dauerhafte Welt (dann ohne Tunnel), sonst null */
+  hosted: HostedRelayInfo | null;
 }
 
 /** Eigene Status-Antwort des Relays (Welt geöffnet, aber zu viele Abfragen auf einmal). */
@@ -200,6 +240,8 @@ export interface WorldView {
   online: boolean;
   players: number;
   version: string | null;
+  /** ab 1.13.0, nur bei dauerhaften Welten */
+  hosted?: { state: HostedRelayState };
 }
 
 export interface MemberView {
@@ -209,7 +251,10 @@ export interface MemberView {
   added: number;
 }
 
-/** Geöffnete Welt eines Freundes bzw. mit Mitgliedschaft (`friends` in `GET /v1/worlds`, `world-open`). */
+/**
+ * Geöffnete Welt eines Freundes bzw. mit Mitgliedschaft (`friends` in `GET /v1/worlds`, `world-open`); ab 1.13.0 in
+ * `GET /v1/worlds` auch dauerhafte Welten, auch wenn sie schlafen (dann mit `hosted`).
+ */
 export interface FriendWorldView {
   id: string;
   name: string;
@@ -218,7 +263,10 @@ export interface FriendWorldView {
   players: number;
   maxPlayers: number;
   version: string;
-  online: true;
+  /** geteilte Welt: immer true (geöffnet); dauerhafte Welt: true, solange der Server läuft */
+  online: boolean;
+  /** ab 1.13.0, nur bei dauerhaften Welten */
+  hosted?: { state: HostedRelayState };
 }
 
 /** Neuer Code: gleich verteilt aus dem Alphabet (crypto.randomInt). */
@@ -287,6 +335,8 @@ export class Worlds {
   private closing = false;
   /** false, wenn der Port des Relays nicht geöffnet werden konnte: dann wie ohne Welt-Domain (503). */
   available = true;
+  /** Dauerhafte Welten (ab 1.13.0); app.ts setzt sie nach dem Anlegen. */
+  hosting: WorldsHosting | null = null;
 
   constructor(
     private readonly store: Store,
@@ -333,6 +383,43 @@ export class Worlds {
 
   // ---------- Hilfen ----------
 
+  /** Eigene Welt zur ID oder 404 (ab 1.13.0 auch für dauerhafte Welten und Entdecken). */
+  ownWorld(user: UserRow, id: string | undefined): WorldRow {
+    return this.own(user, id);
+  }
+
+  /** Geöffnete Welt über den Tunnel: Spieler und Version, sonst null (für Entdecken). */
+  tunnelInfo(world: string): { players: number; version: string } | null {
+    const session = this.sessions.get(world);
+    return session ? { players: this.playersOf(session), version: session.version } : null;
+  }
+
+  /** Dauerhaft geworden: eine geöffnete Tunnel-Sitzung derselben Welt schließen (Gastgeber bekommt `error`). */
+  closeTunnel(world: string): void {
+    const session = this.sessions.get(world);
+    if (!session) return;
+    this.sendHost(session.conn, { type: 'error', message: TEXT_HOSTED_NO_TUNNEL, code: 'hosted' });
+    this.closeSession(session);
+  }
+
+  private hostedInfo(world: string): HostedRelayInfo | null {
+    try {
+      return this.hosting?.relayInfo(world) ?? null;
+    } catch (err) {
+      this.options.log(`Fehler bei dauerhaften Welten: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
+  private hostingCall(fn: (hosting: WorldsHosting) => void): void {
+    if (!this.hosting) return;
+    try {
+      fn(this.hosting);
+    } catch (err) {
+      this.options.log(`Fehler bei dauerhaften Welten: ${(err as Error).message}`);
+    }
+  }
+
   /** Eigene Welt zur ID oder 404. */
   private own(user: UserRow, id: string | undefined): WorldRow {
     const world = id !== undefined && WORLD_ID_RE.test(id) ? this.store.getWorld(id) : undefined;
@@ -347,6 +434,24 @@ export class Worlds {
 
   view(world: WorldRow): WorldView {
     const session = this.sessions.get(world.id);
+    const hosted = this.hostedInfo(world.id);
+    if (hosted) {
+      return {
+        id: world.id,
+        code: world.code,
+        address: this.address(world.code),
+        name: world.name,
+        access: world.access,
+        maxPlayers: world.maxPlayers,
+        defaultRole: world.defaultRole,
+        created: world.createdAt,
+        lastOnline: world.lastOnline,
+        online: hosted.state === 'running',
+        players: hosted.players,
+        version: hosted.version,
+        hosted: { state: hosted.state },
+      };
+    }
     return {
       id: world.id,
       code: world.code,
@@ -374,6 +479,26 @@ export class Worlds {
       maxPlayers: world.maxPlayers,
       version: session.version,
       online: true,
+    };
+  }
+
+  /**
+   * Ab 1.13.0: dauerhafte Welt, wie Freunde und Mitglieder sie sehen – auch schlafend (Beitreten weckt sie). Während sie
+   * eingerichtet wird oder einen Fehler hat, ist sie nicht dabei (wie bei Entdecken): null.
+   */
+  private hostedFriendView(world: WorldRow, owner: UserRow): FriendWorldView | null {
+    const hosted = this.hostedInfo(world.id);
+    if (!hosted || hosted.state === 'creating' || hosted.state === 'error') return null;
+    return {
+      id: world.id,
+      name: world.name,
+      address: this.address(world.code),
+      host: { uuid: owner.uuid, name: owner.name },
+      players: hosted.players,
+      maxPlayers: world.maxPlayers,
+      version: hosted.version,
+      online: hosted.state === 'running',
+      hosted: { state: hosted.state },
     };
   }
 
@@ -420,15 +545,23 @@ export class Worlds {
 
   // ---------- Endpunkte (angemeldet) ----------
 
-  /** `GET /v1/worlds`: eigene Welten und gerade geöffnete Welten von Freunden bzw. mit Mitgliedschaft. */
+  /**
+   * `GET /v1/worlds`: eigene Welten und gerade geöffnete Welten von Freunden bzw. mit Mitgliedschaft; ab 1.13.0 dazu
+   * dauerhafte Welten von Freunden bzw. mit Mitgliedschaft, auch wenn sie schlafen.
+   */
   list(user: UserRow) {
     return { mine: this.store.worldsOf(user.uuid).map((world) => this.view(world)), friends: this.friendWorlds(user) };
   }
 
-  /** Geöffnete Welten, die `user` sieht: von Freunden mit Zugang „Freunde“/„offen“ (Präsenz an) und als Mitglied. */
+  /**
+   * Welten, die `user` sieht: von Freunden mit Zugang „Freunde“/„offen“ (Präsenz an) und als Mitglied (auch mit Präsenz
+   * aus), nie die eigenen und nie bei einer Blockierung. Geteilte Welten nur, solange sie geöffnet sind; dauerhafte
+   * (ab 1.13.0) nach denselben Regeln mit ihrem Zustand, auch schlafend.
+   */
   private friendWorlds(user: UserRow): FriendWorldView[] {
     const found = new Map<string, FriendWorldView>();
-    for (const friend of this.store.listFriendIds(user.uuid)) {
+    const friends = this.store.listFriendIds(user.uuid);
+    for (const friend of friends) {
       const session = this.hosts.get(friend.uuid)?.session;
       if (!session) continue;
       const world = this.store.getWorld(session.world);
@@ -437,11 +570,44 @@ export class Worlds {
       found.set(world.id, this.friendView(session, world, owner));
     }
     for (const id of this.store.worldIdsWithMember(user.uuid, user.name)) {
+      if (found.has(id)) continue;
       const session = this.sessions.get(id);
-      if (found.has(id) || !session || session.owner === user.uuid || this.blockedBetween(session.owner, user.uuid)) continue;
+      if (session) {
+        if (session.owner === user.uuid || this.blockedBetween(session.owner, user.uuid)) continue;
+        const world = this.store.getWorld(id);
+        const owner = this.store.getUser(session.owner);
+        if (world && owner) found.set(id, this.friendView(session, world, owner));
+        continue;
+      }
+      if (!this.hosting) continue;
+      // Dauerhafte Welt mit Mitgliedschaft (Zugang egal, Präsenz egal)
       const world = this.store.getWorld(id);
-      const owner = this.store.getUser(session.owner);
-      if (world && owner) found.set(id, this.friendView(session, world, owner));
+      if (!world || world.owner === user.uuid || this.blockedBetween(world.owner, user.uuid)) continue;
+      const owner = this.store.getUser(world.owner);
+      const view = owner ? this.hostedFriendView(world, owner) : null;
+      if (view) found.set(id, view);
+    }
+    // Dauerhafte Welten von Freunden: Zugang „Freunde“ oder „offen“, Präsenz des Besitzers an
+    if (this.hosting && friends.length > 0) {
+      let hostedOfFriends: { world: string; owner: string }[] = [];
+      try {
+        hostedOfFriends = this.hosting.ownedBy(friends.map((friend) => friend.uuid));
+      } catch (err) {
+        this.options.log(`Fehler bei dauerhaften Welten: ${(err as Error).message}`);
+      }
+      const owners = new Map<string, UserRow | null>();
+      for (const { world: id, owner: ownerUuid } of hostedOfFriends) {
+        if (found.has(id) || ownerUuid === user.uuid) continue;
+        if (!owners.has(ownerUuid)) {
+          const owner = this.store.getUser(ownerUuid);
+          owners.set(ownerUuid, owner && owner.presence && !this.blockedBetween(ownerUuid, user.uuid) ? owner : null);
+        }
+        const owner = owners.get(ownerUuid);
+        const world = owner ? this.store.getWorld(id) : undefined;
+        if (!owner || !world || world.owner !== ownerUuid || world.access === 'invited') continue;
+        const view = this.hostedFriendView(world, owner);
+        if (view) found.set(id, view);
+      }
     }
     return [...found.values()].sort((a, b) => a.host.name.localeCompare(b.host.name) || a.name.localeCompare(b.name));
   }
@@ -479,6 +645,7 @@ export class Worlds {
       defaultRole: Object.hasOwn(input, 'defaultRole') ? this.checkRole(input.defaultRole, 'defaultRole') : undefined,
     };
     this.store.updateWorld(world.id, patch);
+    this.hostingCall((hosting) => hosting.worldChanged(world.id));
     const updated = this.store.getWorld(world.id)!;
     const session = this.sessions.get(world.id);
     if (session) {
@@ -497,6 +664,7 @@ export class Worlds {
       this.dropHost(session.conn, CLOSE_WORLD_DELETED, 'Welt gelöscht');
     }
     this.store.deleteWorld(world.id, user.uuid);
+    this.hostingCall((hosting) => hosting.worldDeleted(world.id));
     return { ok: true };
   }
 
@@ -554,8 +722,27 @@ export class Worlds {
     return { invited, members: this.members(world.id) };
   }
 
+  /**
+   * Ab 1.13.0: angeklopften Namen bei einer dauerhaften Welt zulassen (Besitzer oder Operator, geprüft in
+   * hosting.ts). Er wird Mitglied mit der Standardrolle; ein vorhandenes Mitglied bleibt, wie es ist.
+   */
+  admitName(world: WorldRow, name: string): MemberView[] {
+    if (!this.store.getWorldMember(world.id, name)) {
+      if (this.store.countWorldMembers(world.id) >= MAX_WORLD_MEMBERS) throw new HttpError(409, `Eine Welt hat höchstens ${MAX_WORLD_MEMBERS} Mitglieder.`);
+      this.store.addWorldMember(world.id, name, this.uuidFor(name), world.defaultRole, Date.now());
+      this.membersChanged(world.id);
+    }
+    return this.members(world.id);
+  }
+
+  /** Mitglieder einer Welt (ab 1.13.0 für dauerhafte Welten). */
+  memberViews(world: string): MemberView[] {
+    return this.members(world);
+  }
+
   /** Mitglieder geändert: Gastgeber bekommt die neue Liste, Mitglieder sehen die geöffnete Welt (oder nicht mehr). */
   private membersChanged(world: string): void {
+    this.hostingCall((hosting) => hosting.membersChanged(world));
     const session = this.sessions.get(world);
     if (!session) return;
     this.sendHost(session.conn, { type: 'members', members: this.members(world) });
@@ -569,6 +756,20 @@ export class Worlds {
     const world = WORLD_CODE_RE.test(code) ? this.store.getWorldByCode(code) : undefined;
     const owner = world ? this.store.getUser(world.owner) : undefined;
     if (!world || !owner) throw new HttpError(404, 'Diese Welt gibt es nicht.');
+    const hosted = this.hostedInfo(world.id);
+    if (hosted) {
+      return {
+        name: world.name,
+        address: this.address(world.code),
+        host: { uuid: owner.uuid, name: owner.name },
+        online: hosted.state === 'running',
+        players: hosted.players,
+        maxPlayers: world.maxPlayers,
+        version: hosted.version,
+        access: world.access === 'open' ? 'open' : 'closed',
+        hosted: { state: hosted.state },
+      };
+    }
     const session = this.sessions.get(world.id);
     return {
       name: world.name,
@@ -715,6 +916,12 @@ export class Worlds {
   private open(conn: HostConnection, input: Record<string, unknown>): void {
     const world = typeof input.world === 'string' && WORLD_ID_RE.test(input.world) ? this.store.getWorld(input.world) : undefined;
     if (!world || world.owner !== conn.uuid) return this.fail(conn, WORLD_GONE);
+    // Ab 1.13.0: Eine dauerhafte Welt läuft auf dem Heldix-Server; zusätzlich per Tunnel öffnen geht nicht.
+    if (this.hostedInfo(world.id) !== null) {
+      this.sendHost(conn, { type: 'error', message: TEXT_HOSTED_NO_TUNNEL, code: 'hosted' });
+      this.dropHost(conn, CLOSE_WORLD_ERROR, 'Fehler');
+      return;
+    }
     const { version, protocol } = input;
     if (typeof version !== 'string' || !VERSION_RE.test(version)) return this.fail(conn, 'Ungültige Minecraft-Version.');
     if (typeof protocol !== 'number' || !Number.isInteger(protocol) || protocol < 0 || protocol > 0x7fffffff) {
@@ -848,7 +1055,18 @@ export class Worlds {
     const world = this.store.getWorldByCode(code);
     const owner = world ? this.store.getUser(world.owner) : undefined;
     if (!world || !owner) return null;
-    return { world, ownerName: owner.name, session: this.sessions.get(world.id) ?? null };
+    const hosted = this.hostedInfo(world.id);
+    return { world, ownerName: owner.name, session: hosted ? null : (this.sessions.get(world.id) ?? null), hosted };
+  }
+
+  /** Login für eine dauerhafte Welt, die gerade nicht läuft: Start anstoßen; Text für den Spieler. */
+  wake(target: RelayTarget): string {
+    try {
+      return this.hosting?.wake(target.world) ?? TEXT_OFFLINE;
+    } catch (err) {
+      this.options.log(`Fehler bei dauerhaften Welten: ${(err as Error).message}`);
+      return TEXT_NO_ANSWER;
+    }
   }
 
   /** Eigene Status-Antwort für eine geöffnete Welt. */
@@ -880,6 +1098,7 @@ export class Worlds {
    * für die Ablehnung oder null (darf durch). Nicht zugelassen: Der Gastgeber bekommt `knock`.
    */
   admit(target: RelayTarget, name: string): string | null {
+    if (target.hosted) return this.admitHosted(target, target.hosted, name);
     const session = target.session;
     if (!session || this.sessions.get(session.world) !== session) return TEXT_OFFLINE;
     const world = target.world;
@@ -895,6 +1114,23 @@ export class Worlds {
     }
     if (this.playersOf(session) >= world.maxPlayers) return textFull(world.maxPlayers);
     if (this.pendingCount(session) >= MAX_PENDING_STREAMS) return TEXT_BUSY;
+    return null;
+  }
+
+  /**
+   * Ab 1.13.0: Login für eine dauerhafte Welt prüfen, wie bei einer geöffneten Welt (Mitglied, Freund, offen;
+   * Anklopfen geht an Besitzer und Operatoren). Ob sie läuft, entscheidet danach das Relay.
+   */
+  private admitHosted(target: RelayTarget, hosted: HostedRelayInfo, name: string): string | null {
+    const world = target.world;
+    const access = this.accessOf(world, name);
+    if (access === 'blocked') return textNotInvited(target.ownerName);
+    if (access === 'none') {
+      if (this.hosting?.isDenied(world.id, name)) return TEXT_DENIED;
+      this.hostingCall((hosting) => hosting.knock(world, name));
+      return textNotInvited(target.ownerName);
+    }
+    if (hosted.state === 'running' && hosted.players >= world.maxPlayers) return textFull(world.maxPlayers);
     return null;
   }
 

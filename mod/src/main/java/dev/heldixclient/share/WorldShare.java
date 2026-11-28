@@ -144,6 +144,11 @@ public final class WorldShare {
 	private static int tickCounter;
 	/** letzte Sicherung (auch nach dem Beenden, für Anzeige und Autotest) */
 	private static volatile Path lastBackup;
+	/** Frage im Dialog, wenn die Welt schon dauerhaft auf dem Heldix-Server läuft (ab Dienst 1.13.0) */
+	public static final String HOSTED_QUESTION = "Diese Welt läuft dauerhaft auf dem Heldix-Server – dort beitreten?";
+	/** Adresse der dauerhaften Welt, wenn Teilen deshalb nicht ging (bleibt für den Dialog stehen), sonst null */
+	private static volatile String hostedAddress;
+	private static volatile String hostedName;
 
 	private WorldShare() {
 	}
@@ -178,6 +183,24 @@ public final class WorldShare {
 
 	public static void clearError() {
 		error = null;
+		hostedAddress = null;
+		hostedName = null;
+	}
+
+	/** Adresse der dauerhaften Welt, wenn Teilen deshalb nicht geht (Dialog: „dort beitreten?“), sonst null */
+	public static String hostedAddress() {
+		return hostedAddress;
+	}
+
+	public static String hostedName() {
+		return hostedName;
+	}
+
+	/** Die Welt läuft dauerhaft (aus GET /v1/worlds): Teilen sperren, im Dialog „dort beitreten?“ */
+	public static void markHosted(String address, String name) {
+		hostedAddress = address == null ? null : normalizeAddress(address);
+		hostedName = name;
+		if (hostedAddress != null) error = HOSTED_QUESTION;
 	}
 
 	/** Hinweis zur Verbindung (z. B. „neuer Versuch“), sonst null */
@@ -328,11 +351,20 @@ public final class WorldShare {
 		Path world = worldFolder(server);
 		String hostName = mc.getUser().getName();
 		String levelName = server.getWorldData().getLevelName();
+		// schon bekannt als dauerhafte Welt (Heldix-Welten hat den Stand): gar nicht erst anfangen
+		HostingService.Hosted known = Hosting.find(WorldBackups.readId(world));
+		if (known != null && known.owner()) {
+			markHosted(known.address(), known.name());
+			if (done != null) done.accept(HOSTED_QUESTION);
+			return;
+		}
 		Session s = new Session(server, world, hostName, wanted);
 		session = s;
 		state = State.STARTING;
 		step = "Welt wird gespeichert …";
 		error = null;
+		hostedAddress = null;
+		hostedName = null;
 		notice = null;
 		members = List.of();
 		KNOCKS.clear();
@@ -397,6 +429,11 @@ public final class WorldShare {
 				WorldBackups.writeId(world, created.id());
 				return created;
 			}
+			if (existing.persistent()) {
+				// läuft dauerhaft auf dem Heldix-Server (Dienst 1.13.0): dort beitreten statt selbst teilen
+				markHosted(existing.address(), existing.name());
+				throw new IllegalStateException(HOSTED_QUESTION);
+			}
 			if (existing.access() != settings.access() || existing.maxPlayers() != settings.maxPlayers() || existing.defaultRole() != settings.defaultRole()
 					|| !existing.name().equals(WorldService.name(levelName))) {
 				WorldService.World updated = WorldService.update(existing.id(), levelName, settings.access(), settings.maxPlayers(), settings.defaultRole())
@@ -404,6 +441,8 @@ public final class WorldShare {
 				if (updated != null) return updated;
 			}
 			return existing;
+		} catch (IllegalStateException e) {
+			throw e;
 		} catch (java.util.concurrent.ExecutionException e) {
 			throw new IllegalStateException(WorldService.message(e.getCause()), e);
 		} catch (java.io.IOException e) {
@@ -543,12 +582,19 @@ public final class WorldShare {
 		}
 
 		@Override
-		public void rejected(String message) {
+		public void rejected(String message, String code) {
 			mc.execute(() -> {
 				if (session != s) return;
+				boolean hosted = "hosted".equals(code);
+				String address = s.address;
+				close(mc, s, hosted ? "Diese Welt läuft jetzt dauerhaft auf dem Heldix-Server." : "Die Welt ist nicht mehr geteilt.");
 				error = message;
-				close(mc, s, "Die Welt ist nicht mehr geteilt.");
-				toast(mc, "Welt nicht mehr geteilt", message);
+				if (hosted) {
+					// Dienst 1.13.0: die Welt wurde (z. B. auf der Webseite) dauerhaft gemacht – dort beitreten
+					markHosted(address, s.server.getWorldData().getLevelName());
+					Hosting.connected();
+				}
+				toast(mc, "Welt nicht mehr geteilt", hosted ? HOSTED_QUESTION : message);
 			});
 		}
 
@@ -623,12 +669,16 @@ public final class WorldShare {
 		// sie der Einblendung der Party (Einladung annehmen/ablehnen, dem Leiter folgen)
 		while (HeldixClient.knockAllowKey.consumeClick()) {
 			Knock knock = currentKnock();
+			Hosting.Knock hosted = knock == null ? Hosting.currentKnock() : null;
 			if (knock != null) allow(knock.name());
+			else if (hosted != null) Hosting.answer(hosted, true);
 			else dev.heldixclient.social.Party.promptYes(mc);
 		}
 		while (HeldixClient.knockDenyKey.consumeClick()) {
 			Knock knock = currentKnock();
+			Hosting.Knock hosted = knock == null ? Hosting.currentKnock() : null;
 			if (knock != null) deny(knock.name());
+			else if (hosted != null) Hosting.answer(hosted, false);
 			else dev.heldixclient.social.Party.promptNo(mc);
 		}
 		Session s = session;

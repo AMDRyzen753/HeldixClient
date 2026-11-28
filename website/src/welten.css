@@ -1,0 +1,597 @@
+/* HeldixClient – Webseite: dauerhafte Welten, Verzeichnis-Einträge und die Team-Bereiche „Dauerhafte Welten“,
+   „Heldix+“ und „Entdecken“ (ab Dienst 1.13.0). Nur Besonderheiten; Grundbausteine (Karten, Zeilen, Knöpfe, Chips,
+   Reiter, Schalter) kommen aus design.css, bereich-bausteine.css und bereich.css und nutzen deren Tokens. */
+
+/* ---------- Meine Welten: Aufbau ---------- */
+.welten-inhalt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.welten-inhalt[hidden] {
+  display: none;
+}
+.hosting-intro {
+  display: grid;
+  gap: var(--sp-4);
+}
+.hosting-intro__body {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.hosting-intro .card__title .chip {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.hosting-limits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.hosting-limits strong {
+  color: var(--text);
+}
+.hosted-list[hidden] {
+  display: none;
+}
+
+/* Ohne Berechtigung: Beta-Hinweis mit Warteliste */
+.hosting-beta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-4);
+}
+.hosting-beta__text {
+  display: grid;
+  gap: var(--sp-3);
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.hosting-waitlist {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.hosting-waitlist .icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.hosting-waitlist.is-on {
+  color: var(--c-green-300);
+}
+.hosting-waitlist.is-on strong {
+  color: var(--text);
+}
+.hosting-granted {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+.hosting-granted > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.hosting-eula a {
+  color: var(--accent-text);
+}
+.hosting-steps {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding-left: 1.3em;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.hosting-steps strong {
+  color: var(--text);
+}
+.hosting-type {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* ---------- Karte einer dauerhaften Welt ---------- */
+.hosted-card {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.hosted-card__chips,
+.world-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.hosted-state .dot {
+  width: 8px;
+  height: 8px;
+}
+.icon-tile--danger {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+.text-danger {
+  color: var(--danger-text);
+}
+.hosted-notices {
+  display: grid;
+  gap: var(--sp-2);
+}
+.hosted-notices[hidden] {
+  display: none;
+}
+.notice-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.notice-line > .icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.notice-line > span {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.notice-line strong {
+  color: var(--text);
+}
+.notice-line--warn {
+  border-color: rgba(251, 191, 36, 0.32);
+  background: var(--reward-soft);
+}
+.notice-line--warn > .icon {
+  color: var(--reward);
+}
+.notice-line--danger {
+  border-color: rgba(248, 113, 113, 0.32);
+  background: var(--danger-soft);
+}
+.notice-line--danger > .icon {
+  color: var(--danger-text);
+}
+.notice-line--accent {
+  border-color: var(--line-accent);
+  background: var(--accent-soft);
+}
+.notice-line--accent > .icon {
+  color: var(--accent-text);
+}
+.hosted-upload {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px dashed var(--line-accent);
+  background: var(--accent-soft);
+}
+.hosted-upload strong {
+  color: var(--text);
+}
+.hosted-knocks {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  background: var(--voice-soft);
+}
+.hosted-knocks[hidden] {
+  display: none;
+}
+.hosted-knocks__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+}
+.hosted-knocks__title .icon {
+  width: 18px;
+  height: 18px;
+  color: var(--voice);
+}
+.bereich .hosted-knocks .rows {
+  margin: 0;
+}
+
+/* Verwaltung mit Reitern */
+.hosted-detail {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.hosted-detail[hidden] {
+  display: none;
+}
+.bereich .hosted-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  max-width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.bereich .hosted-tabs::-webkit-scrollbar {
+  display: none;
+}
+.bereich .hosted-tabs .subtab {
+  flex: none;
+}
+.hosted-panel {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.hosted-panel[hidden] {
+  display: none;
+}
+.hosted-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.hosted-readonly {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.hosted-readonly .icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+/* Übersicht */
+.hosted-meters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: var(--sp-3);
+}
+.hosted-meter {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+.hosted-meter__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+.hosted-meter__head strong {
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.hosted-meter.is-full .progress__bar {
+  background: linear-gradient(90deg, #f59e0b, var(--c-red-400));
+}
+.hosted-facts dd {
+  overflow-wrap: anywhere;
+}
+
+/* Konsole */
+.hosted-console__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.hosted-console__log {
+  max-width: 100%;
+  height: min(52vh, 380px);
+  margin: 0;
+  padding: var(--sp-3);
+  overflow: auto;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-strong);
+  background: #05070d;
+  color: #cfe3ff;
+  font: 12.5px/1.55 var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.hosted-console__log:focus-visible {
+  outline: 2px solid var(--c-blue-400);
+  outline-offset: 2px;
+}
+.hosted-console__form {
+  display: grid;
+  gap: 6px;
+}
+.hosted-console__form .input-group .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Plugins */
+.plugin-tile {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 10px;
+  background: hsl(var(--hue, 210) 55% 32%);
+  color: #fff;
+  font-weight: 800;
+}
+.hosted-plugin-add {
+  display: grid;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.hosted-plugin-search .input-group .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.hosted-plugin-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* Einstellungen */
+.hosted-settings {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.hosted-settings .field-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+}
+.hosted-switches {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  column-gap: var(--sp-5);
+}
+.hosted-switches > .switch-row:nth-child(-n + 2) {
+  border-top: 0;
+}
+
+/* Dateien */
+.hosted-files {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.6fr);
+  gap: var(--sp-3);
+  align-items: start;
+}
+.hosted-file-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hosted-file-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: 600 var(--fs-xs) / 1.3 var(--mono);
+  text-align: left;
+  cursor: pointer;
+}
+.hosted-file-pick span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.hosted-file-pick .icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.hosted-file-pick:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.hosted-file-pick.is-open {
+  border-color: var(--line-accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.hosted-file {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.hosted-file:empty {
+  display: none;
+}
+.hosted-file__text {
+  width: 100%;
+  min-height: 280px;
+  font: 12.5px/1.5 var(--mono);
+  white-space: pre;
+  overflow: auto;
+  tab-size: 2;
+}
+.hosted-file__size.near {
+  color: var(--reward);
+}
+
+/* Gefahrenzone */
+.hosted-danger-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+}
+.hosted-danger-row > div {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.bereich .hosted-danger-row.danger-zone {
+  margin: 0;
+}
+
+/* ---------- Verzeichnis-Eintrag (Dialog) ---------- */
+.tag-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.tag-picks legend {
+  width: 100%;
+  margin-bottom: 6px;
+}
+.tag-pick {
+  position: relative;
+  display: inline-flex;
+}
+.tag-pick input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+.tag-pick span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--r-full);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.tag-pick input:checked + span {
+  border-color: var(--line-accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.tag-pick input:focus-visible + span {
+  outline: 2px solid var(--c-blue-400);
+  outline-offset: 2px;
+}
+.tag-pick input:disabled + span {
+  opacity: 0.45;
+}
+.listing-access {
+  display: grid;
+  gap: var(--sp-2);
+  justify-items: start;
+}
+.listing-access[hidden] {
+  display: none;
+}
+.world-card__listed .icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* ---------- Team-Bereich: Dauerhafte Welten, Heldix+, Entdecken ---------- */
+.team-hosting-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: var(--sp-3);
+}
+.team-hosting-world .row-sub .chip {
+  margin-right: 4px;
+}
+.team-hosting-world .hosted-meters {
+  flex: 1 1 100%;
+}
+.team-limits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: var(--sp-3);
+}
+.team-grant-form,
+.team-first-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+.team-grant-form .field {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.team-first-form .field {
+  flex: 0 1 140px;
+}
+.discover-report .quote {
+  margin: 0;
+}
+.player-grants {
+  display: grid;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+
+/* ---------- Schmale Bildschirme ---------- */
+@media (max-width: 720px) {
+  .hosted-files {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .hosted-card__chips,
+  .world-card__chips {
+    margin-left: 0;
+  }
+  .hosted-console__log {
+    height: 300px;
+    font-size: 12px;
+  }
+  .hosted-actions .btn {
+    flex: 1 1 auto;
+  }
+}

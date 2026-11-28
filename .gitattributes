@@ -6,6 +6,8 @@
 *.cmd text eol=crlf
 *.sh text eol=lf
 mod/gradlew text eol=lf
+# Schlüssel immer mit LF (build-mod.mjs vergleicht den öffentlichen Store-Schlüssel Zeichen für Zeichen)
+*.pem text eol=lf
 
 # Binärdateien nie verändern
 *.png binary

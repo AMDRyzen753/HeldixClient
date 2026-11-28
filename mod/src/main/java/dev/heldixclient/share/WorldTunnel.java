@@ -46,8 +46,11 @@ final class WorldTunnel {
 	interface Events {
 		void ready(String address, String code);
 
-		/** Dienst lehnt ab (z. B. andere Welt schon offen): kein neuer Versuch */
-		void rejected(String message);
+		/**
+		 * Dienst lehnt ab (z. B. andere Welt schon offen): kein neuer Versuch. {@code code} = Fehlercode des Dienstes
+		 * (ab 1.13.0 „hosted“: die Welt läuft dauerhaft auf dem Heldix-Server), sonst null.
+		 */
+		void rejected(String message, String code);
 
 		/** Verbindung weg; {@code retrying} = es wird neu verbunden */
 		void lost(int code, boolean retrying);
@@ -209,7 +212,7 @@ final class WorldTunnel {
 			// kam nie zustande: aufgeben statt endlos zu warten (LAN macht WorldShare wieder zu)
 			generation.incrementAndGet();
 			events.rejected(code > 0 ? "Der Heldix-Dienst hat die Verbindung für die Welt beendet (" + code + ")."
-					: "Keine Verbindung zum Heldix-Dienst – Teilen abgebrochen.");
+					: "Keine Verbindung zum Heldix-Dienst – Teilen abgebrochen.", null);
 			return;
 		}
 		long delay = Math.min(30, 2L << Math.min(attempt, 4));
@@ -314,7 +317,7 @@ final class WorldTunnel {
 				socket = null;
 				generation.incrementAndGet();
 				webSocket.abort();
-				events.rejected(text != null && !text.isBlank() ? text : "Der Heldix-Dienst hat das Teilen abgelehnt");
+				events.rejected(text != null && !text.isBlank() ? text : "Der Heldix-Dienst hat das Teilen abgelehnt", string(message, "code"));
 			}
 			case "stream" -> {
 				String id = string(message, "id");

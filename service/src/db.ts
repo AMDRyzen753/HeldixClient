@@ -1,7 +1,7 @@
 // Speicher des Dienstes: SQLite über node:sqlite (ohne native Pakete).
 import fs from 'node:fs';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { isCommunityBadge, isTeamRole, TEAM_ROLES, type CommunityBadge, type TeamRole } from './roles';
 
 export type { CommunityBadge, TeamRole } from './roles';
@@ -163,6 +163,8 @@ export interface ReportRow {
   doneAt: number | null;
   /** Name des Team-Mitglieds; null = über die Server-Konsole (heldix-dienst-admin) */
   doneBy: string | null;
+  /** Ab 1.13.0: `chat` (Nachrichten als Beleg) oder `voice` (Kontext, Lautstärke-Verlauf, ggf. Clip; voice-moderation.ts) */
+  kind: string;
 }
 
 export type ReportStatus = 'open' | 'done';
@@ -965,6 +967,216 @@ CREATE TABLE community_badges (
 -- Team-Rollen: admin und moderator bleiben, wie sie sind; Unbekanntes (nie vorgesehen) wird zu moderator
 UPDATE team SET role = 'moderator' WHERE role NOT IN ('admin', 'moderator');
 `,
+  // 12: Dauerhafte Welten (1.13.0) mit Plugins, Freischaltungen dafür, Heldix+-Warteliste und Entdecken (Weltenverzeichnis)
+  `
+-- Dauerhafte Welt: gehört zu einer geteilten Welt (gleiche ID, Besitzer = Besitzer der Welt) und geht mit ihr und dem
+-- Konto. state: creating | sleeping | starting | running | stopping | error (beim Start des Dienstes neu abgeglichen).
+-- jar: Server-Software als JSON (paper/vanilla, Version, Build, Adresse, Prüfsumme); properties: Auswahl aus
+-- server.properties (JSON); icon: Symbol 64×64 (PNG, mit Heldix-Plakette); applied_roles: zuletzt per Konsole gesetzte
+-- Rolle je Name (JSON), damit ein Rollenwechsel beim nächsten Beitreten greift.
+CREATE TABLE hosted_worlds (
+  world TEXT PRIMARY KEY REFERENCES worlds (id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  error TEXT,
+  jar TEXT NOT NULL,
+  memory_mb INTEGER NOT NULL,
+  disk_mb INTEGER NOT NULL,
+  max_plugins INTEGER NOT NULL,
+  sleep_after_min INTEGER NOT NULL,
+  properties TEXT NOT NULL,
+  icon BLOB,
+  prepared INTEGER NOT NULL DEFAULT 0,
+  awaiting_upload INTEGER NOT NULL DEFAULT 0,
+  restart_needed INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  last_started_at INTEGER,
+  last_active_at INTEGER,
+  last_daily_backup_at INTEGER,
+  applied_roles TEXT NOT NULL DEFAULT '{}'
+) STRICT;
+
+-- Plugins einer dauerhaften Welt (nur aus dem Modrinth-Katalog): Projekt, gewählte Version, Datei und Prüfsumme
+CREATE TABLE hosted_plugins (
+  world TEXT NOT NULL REFERENCES hosted_worlds (world) ON DELETE CASCADE,
+  project TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  title TEXT NOT NULL,
+  icon TEXT,
+  version_id TEXT NOT NULL,
+  version_number TEXT NOT NULL,
+  file TEXT NOT NULL,
+  sha512 TEXT NOT NULL,
+  installed_at INTEGER NOT NULL,
+  PRIMARY KEY (world, project)
+) STRICT, WITHOUT ROWID;
+
+-- Gelöschte dauerhafte Welten, deren Daten der Runner noch löschen muss. Der Trigger greift auch, wenn die Zeile über
+-- einen Fremdschlüssel wegfällt (Konto gelöscht oder gesperrt, auch über heldix-dienst-admin). Nur diese Welten löscht
+-- der Dienst beim Runner; Unbekanntes dort meldet er nur (eine falsche Datenbank löscht so nie fremde Welten).
+CREATE TABLE hosted_tombstones (
+  world TEXT PRIMARY KEY,
+  at INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE TRIGGER hosted_worlds_tombstone AFTER DELETE ON hosted_worlds BEGIN
+  INSERT OR REPLACE INTO hosted_tombstones (world, at) VALUES (old.world, CAST(strftime('%s', 'now') AS INTEGER) * 1000);
+END;
+
+-- Plugins zum Zeitpunkt einer Sicherung (JSON wie hosted_plugins), damit Wiederherstellen auch die Liste zurückholt
+CREATE TABLE hosted_backup_plugins (
+  world TEXT NOT NULL REFERENCES hosted_worlds (world) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  plugins TEXT NOT NULL,
+  PRIMARY KEY (world, name)
+) STRICT, WITHOUT ROWID;
+
+-- Freischaltungen für dauerhafte Welten: source 'beta' (Beta: Dauerhafte Welten, vom Team); später 'plus' (Heldix+).
+-- granted_by: Name des Team-Mitglieds ohne Fremdschlüssel (NULL = Server-Konsole); expires_at NULL = unbefristet;
+-- seen_at: wann der Spieler den Hinweis gesehen hat (bis dahin bekommt er ihn bei der nächsten Verbindung).
+CREATE TABLE hosting_grants (
+  uuid TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  source TEXT NOT NULL,
+  granted_at INTEGER NOT NULL,
+  granted_by TEXT,
+  expires_at INTEGER,
+  seen_at INTEGER,
+  PRIMARY KEY (uuid, source)
+) STRICT, WITHOUT ROWID;
+
+-- Heldix+-Warteliste: nur UUID und seit wann, bis zur Entfernung, bis Heldix+ startet oder mit dem Konto
+CREATE TABLE plus_waitlist (
+  uuid TEXT PRIMARY KEY REFERENCES users (uuid) ON DELETE CASCADE,
+  since INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+CREATE INDEX plus_waitlist_since ON plus_waitlist (since);
+
+-- Entdecken: freiwilliger Eintrag einer Welt im öffentlichen Verzeichnis (geht mit der Welt). tags: JSON-Liste.
+-- hidden: vom Team ausgeblendet (hidden_by = Name des Team-Mitglieds).
+CREATE TABLE discover_listings (
+  world TEXT PRIMARY KEY REFERENCES worlds (id) ON DELETE CASCADE,
+  listed INTEGER NOT NULL,
+  description TEXT NOT NULL,
+  tags TEXT NOT NULL,
+  lang TEXT NOT NULL,
+  listed_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  rules_accepted_at INTEGER NOT NULL,
+  hidden INTEGER NOT NULL DEFAULT 0,
+  hidden_at INTEGER,
+  hidden_by TEXT
+) STRICT, WITHOUT ROWID;
+
+-- „Gefällt mir“: eins je Spieler und Welt; öffentlich nur als Zahl
+CREATE TABLE discover_likes (
+  world TEXT NOT NULL REFERENCES worlds (id) ON DELETE CASCADE,
+  uuid TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (world, uuid)
+) STRICT, WITHOUT ROWID;
+CREATE INDEX discover_likes_uuid ON discover_likes (uuid);
+
+-- Meldungen zu Einträgen (wie Spielermeldungen): Stand des Eintrags beim Melden; mit dem Konto des Meldenden gelöscht,
+-- sonst nach 90 Tagen
+CREATE TABLE discover_reports (
+  id INTEGER PRIMARY KEY,
+  world TEXT NOT NULL,
+  code TEXT NOT NULL,
+  world_name TEXT NOT NULL,
+  owner TEXT NOT NULL,
+  owner_name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  reporter TEXT NOT NULL REFERENCES users (uuid) ON DELETE CASCADE,
+  reporter_name TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  note TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  done_at INTEGER,
+  done_by TEXT
+) STRICT;
+CREATE INDEX discover_reports_status ON discover_reports (status, at);
+CREATE INDEX discover_reports_reporter ON discover_reports (reporter, at);
+
+-- Für das Verzeichnis gesperrte Besitzer (bleibt wie eine Sperre, auch nach dem Löschen der Daten)
+CREATE TABLE discover_bans (
+  uuid TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  by_name TEXT
+) STRICT, WITHOUT ROWID;
+`,
+  // 13: Voice-Moderation (1.13.0): Meldungen mit Art (chat/voice), Kontext und Ergebnis; Voice-Sperren, Zustimmung zu den
+  //     Voice-Regeln (versioniert), Einstellungen, Liste „Voice aus“ für Server und verschlüsselte Clips zu Meldungen
+  `
+-- kind: 'chat' (Nachrichten als Beleg) oder 'voice'; context: JSON (Kontext vom Client und vom Dienst, Lautstärke-Verlauf);
+-- outcome: Ergebnis der Prüfung (justified | unjustified | unclear) für die Verlässlichkeit des Meldenden
+ALTER TABLE reports ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat';
+ALTER TABLE reports ADD COLUMN context TEXT;
+ALTER TABLE reports ADD COLUMN outcome TEXT;
+CREATE INDEX reports_kind ON reports (kind, status, id);
+
+-- Voice-Sperren mit Verlauf (ohne Fremdschlüssel: bleiben wie Sperren, auch wenn das Konto gelöscht wird). until NULL =
+-- dauerhaft; reports: JSON-Liste der Meldungen als Begründung; by_name/lifted_by: Name des Team-Mitglieds. Aufgehobene
+-- und abgelaufene Einträge löscht der Dienst nach 365 Tagen.
+CREATE TABLE voice_bans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  uuid TEXT NOT NULL,
+  name TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  reports TEXT NOT NULL DEFAULT '[]',
+  at INTEGER NOT NULL,
+  until INTEGER,
+  by_name TEXT,
+  lifted_at INTEGER,
+  lifted_by TEXT
+) STRICT;
+CREATE INDEX voice_bans_uuid ON voice_bans (uuid, at);
+
+-- Zustimmung zu den Voice-Regeln: Version und Zeitpunkt, mit dem Konto gelöscht (Widerruf löscht die Zeile)
+CREATE TABLE voice_consents (
+  uuid TEXT PRIMARY KEY REFERENCES users (uuid) ON DELETE CASCADE,
+  version INTEGER NOT NULL,
+  at INTEGER NOT NULL
+) STRICT, WITHOUT ROWID;
+
+-- Veröffentlichte Voice-Regeln (es gilt die neueste, solange sie nicht zurückgezogen ist)
+CREATE TABLE voice_rules (
+  version INTEGER PRIMARY KEY,
+  text TEXT NOT NULL,
+  published_at INTEGER NOT NULL,
+  published_by TEXT,
+  withdrawn_at INTEGER,
+  withdrawn_by TEXT
+) STRICT;
+
+-- Schalter des Admins (z. B. clips = '0' | '1')
+CREATE TABLE voice_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+) STRICT, WITHOUT ROWID;
+
+-- Server, auf denen Voice aus ist (Wunsch des Betreibers): Domain, auf Wunsch mit allen Subdomains
+CREATE TABLE voice_servers (
+  domain TEXT PRIMARY KEY,
+  subdomains INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  contact TEXT NOT NULL DEFAULT '',
+  at INTEGER NOT NULL,
+  by_name TEXT
+) STRICT, WITHOUT ROWID;
+
+-- Clip zu einer Voice-Meldung: verschlüsselte Datei im Datenordner (voice-clips/<file>), geht mit der Meldung.
+-- meta: JSON (Beginn, Sätze mit Zeitpunkten)
+CREATE TABLE voice_clips (
+  report INTEGER PRIMARY KEY REFERENCES reports (id) ON DELETE CASCADE,
+  file TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  duration_ms INTEGER NOT NULL,
+  meta TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+) STRICT;
+CREATE INDEX voice_clips_created ON voice_clips (created_at);
+`,
 ];
 
 const SCHEMA_VERSION = MIGRATIONS.length;
@@ -975,7 +1187,7 @@ const USER_COLUMNS = `u.uuid, u.name, u.cape, u.visible, u.presence, u.show_serv
 const MESSAGE_COLUMNS = 'm.id, m.from_uuid, m.to_uuid, m.text, m.at, m.is_read, m.reply_to, m.card';
 /** Rang der Team-Rollen in SQL (wie roleRank): Admin zuerst. */
 const ROLE_ORDER = `CASE t.role ${TEAM_ROLES.map((role, i) => `WHEN '${role}' THEN ${i}`).join(' ')} ELSE ${TEAM_ROLES.length} END`;
-const REPORT_COLUMNS = 'id, reporter, reporter_name, reported, reported_name, reason, note, messages, at, status, done_at, done_by';
+const REPORT_COLUMNS = 'id, reporter, reporter_name, reported, reported_name, reason, note, messages, at, status, done_at, done_by, kind';
 const BAN_COLUMNS = 'uuid, name, reason, at, by_name';
 const SESSION_COLUMNS = 'id, uuid, device, created_at, last_used_at, expires_at, verified_at';
 const TEAM_COLUMNS = 't.uuid, u.name, t.role, t.added_at, t.added_by, t.totp_secret, t.totp_pending, t.totp_last_step, t.public, t.title, t.about';
@@ -1312,6 +1524,7 @@ function toReport(row: Row): ReportRow {
     status: row.status === 'done' ? 'done' : 'open',
     doneAt: nullableNumber(row.done_at),
     doneBy: nullableString(row.done_by),
+    kind: row.kind === 'voice' ? 'voice' : 'chat',
   };
 }
 
@@ -1501,8 +1714,9 @@ function prepareStatements(db: DatabaseSync) {
     insertReport: db.prepare(`
       INSERT INTO reports (reporter, reporter_name, reported, reported_name, reason, note, messages, at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
-    reportsSince: db.prepare('SELECT count(*) AS n, min(at) AS oldest FROM reports WHERE reporter = ? AND at > ?'),
-    pairReportSince: db.prepare('SELECT max(at) AS last FROM reports WHERE reporter = ? AND reported = ? AND at > ?'),
+    // Grenzen für Meldungen aus Freundesliste und Chat; Voice-Meldungen haben eigene (voice-moderation.ts)
+    reportsSince: db.prepare("SELECT count(*) AS n, min(at) AS oldest FROM reports WHERE reporter = ? AND at > ? AND kind = 'chat'"),
+    pairReportSince: db.prepare("SELECT max(at) AS last FROM reports WHERE reporter = ? AND reported = ? AND at > ? AND kind = 'chat'"),
     listReports: db.prepare(`SELECT ${REPORT_COLUMNS} FROM reports WHERE status IN (SELECT value FROM json_each(?)) ORDER BY id`),
     getReport: db.prepare(`SELECT ${REPORT_COLUMNS} FROM reports WHERE id = ?`),
     reportsBy: db.prepare(`SELECT ${REPORT_COLUMNS} FROM reports WHERE reporter = ? ORDER BY id DESC`),
@@ -1888,6 +2102,14 @@ export class Store {
 
   close(): void {
     if (this.db.isOpen) this.db.close();
+  }
+
+  /**
+   * Eigene vorbereitete Abfrage auf derselben Datenbank (ab 1.13.0 für Teil-Speicher wie hosting/store.ts, discover.ts
+   * und plus.ts, damit nicht alles in dieser Datei steht). Nur nach der Migration (also im Konstruktor fertig) benutzen.
+   */
+  prepare(sql: string): StatementSync {
+    return this.db.prepare(sql);
   }
 
   /** Alte Seiten aus dem WAL in die Datenbank übernehmen und das WAL leeren (keine Kopie gelöschter Daten im WAL). */
